@@ -11,6 +11,10 @@ on:
       version:
         description: Tag to release, e.g. v0.1.0
         required: true
+      replace:
+        description: Also replace a published release and its tag of this version
+        type: boolean
+        default: false
 
 env:
   VERSION: ${{ inputs.version || github.ref_name }}
@@ -79,12 +83,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
-      - name: Replace an unpublished draft of the same version
+      - name: Replace an earlier draft (or, with replace, release) of this version
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api repos/${{ github.repository }}/releases --jq '.[] | select(.draft and .tag_name == "'"$VERSION"'") | .id' |
+          if [ "${{ inputs.replace }}" = true ]; then pick='.tag_name == "'"$VERSION"'"'; else pick='.draft and .tag_name == "'"$VERSION"'"'; fi
+          gh api repos/${{ github.repository }}/releases --jq ".[] | select($pick) | .id" |
             while read -r id; do gh api -X DELETE repos/${{ github.repository }}/releases/$id; done
+          if [ "${{ inputs.replace }}" = true ]; then gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/$VERSION || true; fi
       - uses: softprops/action-gh-release@v2
         with:
           draft: true
