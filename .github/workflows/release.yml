@@ -1,0 +1,95 @@
+# Builds mm2-viewer for each platform when a v* tag is pushed (or when run by
+# hand with a version, which makes that tag) and attaches the archives to a
+# DRAFT release, which is only published by hand.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Tag to release, e.g. v0.1.0
+        required: true
+
+env:
+  VERSION: ${{ inputs.version || github.ref_name }}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin, name: macos-arm64 }
+          - { os: macos-latest, target: x86_64-apple-darwin, name: macos-x86_64 }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, name: windows-x86_64 }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, name: linux-x86_64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: cargo build --release --locked -p mm2-viewer -p mm2-launcher -p mm2-tools --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          dir=openmcm2-${VERSION}-${{ matrix.name }}
+          bin=target/${{ matrix.target }}/release
+          mkdir "$dir"
+          cp README.md LICENSE-MIT LICENSE-APACHE crates/mm2-indeo/COPYING.LGPLv2.1 "$dir/"
+          case "$RUNNER_OS" in
+            Windows)
+              cp $bin/mm2-launcher.exe $bin/mm2-viewer.exe $bin/mm2-tools.exe "$dir/"
+              7z a "$dir.zip" "$dir" ;;
+            macOS)
+              # OpenMCM2.app: the launcher, with the viewer beside it.
+              app="$dir/OpenMCM2.app"
+              mkdir -p "$app/Contents/MacOS"
+              cp $bin/mm2-launcher $bin/mm2-viewer "$app/Contents/MacOS/"
+              cp $bin/mm2-tools "$dir/"
+              v=${VERSION#v}
+              sed -e "s/@VERSION@/$v/g" tools/Info.plist.in > "$app/Contents/Info.plist"
+              codesign --force --deep --sign - "$app"
+              ditto -c -k --keepParent "$dir" "$dir.zip" ;;
+            *)
+              cp $bin/mm2-launcher $bin/mm2-viewer $bin/mm2-tools "$dir/"
+              tar czf "$dir.tar.gz" "$dir" ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: openmcm2-*.*
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') || inputs.version != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Replace an unpublished draft of the same version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${{ github.repository }}/releases --jq '.[] | select(.draft and .tag_name == "'"$VERSION"'") | .id' |
+            while read -r id; do gh api -X DELETE repos/${{ github.repository }}/releases/$id; done
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          tag_name: ${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: OpenMCM2 ${{ env.VERSION }}
+          body_path: RELEASE_NOTES.md
+          files: openmcm2-*.*

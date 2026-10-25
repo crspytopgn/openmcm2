@@ -1,0 +1,10 @@
+[package]
+name = "mm2-launcher"
+description = "Sets up OpenMCM2 from your own Motocross Madness 2 and starts it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "wayland"] }

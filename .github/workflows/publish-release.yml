@@ -1,0 +1,27 @@
+# Publishes the release for a version made by release.yml (creating its tag
+# if it is still a draft) and refreshes its notes from RELEASE_NOTES.md.
+# Run by hand with the version.
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release to publish, e.g. v0.1.0
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          id=$(gh api repos/${{ github.repository }}/releases --jq '.[] | select(.tag_name == "'"$VERSION"'") | .id' | head -1)
+          [ -n "$id" ] || { echo "no release $VERSION"; exit 1; }
+          gh api -X PATCH repos/${{ github.repository }}/releases/$id -F draft=false -f make_latest=true -F body=@RELEASE_NOTES.md

@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenMCM2</title>
+<meta name="description" content="OpenMCM2 is an open-source, from-scratch Rust engine for Motocross Madness 2. It runs natively on macOS, Windows and Linux with your own copy of the game.">
+<meta property="og:title" content="OpenMCM2: an open-source engine for Motocross Madness 2">
+<meta property="og:description" content="A from-scratch Rust engine for the 2000 classic. Native on macOS, Windows and Linux. Bring your own copy of the game.">
+<meta property="og:image" content="https://crspytopgn.github.io/openmcm2/img/hero-dusk.jpg">
+<meta name="theme-color" content="#14110e">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="top">
+  <a class="brand" href="#">OpenMCM2</a>
+  <div class="links">
+    <a href="#video">Video</a>
+    <a href="#tour">Tour</a>
+    <a href="#ideas">Ideas</a>
+    <a href="#play">Play</a>
+    <a href="https://github.com/crspytopgn/openmcm2">GitHub</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="hero-text">
+    <p class="eyebrow">Version 0.1 · free and open source · built with AI</p>
+    <h1>An open-source engine for Motocross Madness&nbsp;2</h1>
+    <p class="lede">OpenMCM2 is a fan project that has rewritten the 2000 Rainbow Studios game from the ground up in Rust. It isn't an emulator or a wrapper around the old exe. The whole engine is new code, and it all runs natively on Mac, Windows and Linux. It reads the tracks, bikes and menus from your own copy of the game.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/crspytopgn/openmcm2/releases">Download 0.1</a>
+      <a class="btn" href="https://github.com/crspytopgn/openmcm2">Browse the code</a>
+    </div>
+  </div>
+  <figure class="hero-img"><img src="img/hero-dusk.jpg" alt="Riders on a national track at dusk, running in OpenMCM2"></figure>
+</header>
+
+<main>
+
+<section class="intro">
+  <div class="three">
+    <article>
+      <h3>Written from scratch, by AI</h3>
+      <p>This project is completely vibe coded. One fan directed <a href="https://claude.com/claude-code">Claude Code</a>, an AI coding agent, to study the original game, work out its formats, physics, sound and menus, write it all again in Rust, and test it against the original. Human reviews and contributions are very welcome.</p>
+    </article>
+    <article>
+      <h3>Runs natively everywhere</h3>
+      <p>It draws with <a href="https://wgpu.rs">wgpu</a>: Metal on Mac, Vulkan on Linux, DirectX&nbsp;12 or Vulkan on Windows. It works at any resolution and frame rate, with no compatibility layers.</p>
+    </article>
+    <article>
+      <h3>Your game, shared code</h3>
+      <p>As with <a href="https://openmw.org">OpenMW</a>, the project ships no game files. The code is MIT or Apache-2.0, so you can use it however you like.</p>
+    </article>
+  </div>
+</section>
+
+<section id="video" class="video">
+  <h2>See it in action</h2>
+  <p class="sub">A short tour of OpenMCM2 running on a Mac.</p>
+  <div class="video-frame">
+    <iframe src="https://www.youtube-nocookie.com/embed/rP0TEnWLzNo" title="OpenMCM2 showcase video" loading="lazy" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe>
+  </div>
+  <p class="note">Or watch it <a href="https://youtu.be/rP0TEnWLzNo">on YouTube</a>.</p>
+</section>
+
+<section id="tour" class="feature">
+  <figure><img src="img/sx-air.jpg" alt="A rider in the air over a supercross triple" loading="lazy"></figure>
+  <div class="text">
+    <h2>Supercross</h2>
+    <p>All 17 stadiums, with their whoops, triples, banners and crowds. Your bike runs the game's own physics model: a rigid body with two tyres on shocks, an engine and a gearbox.</p>
+  </div>
+</section>
+
+<section class="feature flip">
+  <figure><img src="img/nat-battle.jpg" alt="Two riders racing on a sandy national track" loading="lazy"></figure>
+  <div class="text">
+    <h2>Nationals, Baja and Enduro</h2>
+    <p>The outdoor tracks are all here, with their hills, trains and planes. The computer riders use the original's AI and racing lines, so they race, crash and pull tricks much as they always did.</p>
+  </div>
+</section>
+
+<section class="feature">
+  <figure><img src="img/sx-crash.jpg" alt="A rider thrown from the bike after a crash" loading="lazy"></figure>
+  <div class="text">
+    <h2>And the crashes</h2>
+    <p>Wrecks, tricks, taunts, the Kahuna, ghost races, replays, the Pro Circuit career, Moto-Tag and network races are all in.</p>
+  </div>
+</section>
+
+<section class="strip">
+  <figure><img src="img/baja-desert.jpg" alt="Desert baja course with cacti" loading="lazy"><figcaption>Baja</figcaption></figure>
+  <figure><img src="img/enduro-snow.jpg" alt="Snowy enduro course by a ski lodge" loading="lazy"><figcaption>Enduro</figcaption></figure>
+  <figure><img src="img/quarry.jpg" alt="Stunt quarry with tall dirt walls" loading="lazy"><figcaption>Stunt Quarry</figcaption></figure>
+  <figure><img src="img/enduro-airfield.jpg" alt="Enduro gate beside a crashed plane" loading="lazy"><figcaption>Enduro gates</figcaption></figure>
+</section>
+
+<section id="looks">
+  <h2>Original look, or a gentle remaster</h2>
+  <p class="sub">By default it looks the way the 2000 game did. Add <code>--enhanced</code> for sun shadows, HDR, soft shading and more detailed ground, and press F3 to switch between the two while you ride. The physics are the same either way. Drag the slider to compare.</p>
+  <div class="compare" id="compare" style="--pos:50%">
+    <img src="img/cmp-enhanced.jpg" alt="Supercross start, enhanced look" loading="lazy">
+    <img class="top-img" src="img/cmp-original.jpg" alt="Supercross start, original look" loading="lazy">
+    <span class="tag left">Original</span><span class="tag right">Enhanced</span>
+    <input type="range" min="0" max="100" value="50" aria-label="Compare original and enhanced">
+    <div class="handle" aria-hidden="true"></div>
+  </div>
+</section>
+
+<section class="menus">
+  <h2>The menus you remember</h2>
+  <p class="sub">The profile screen, Bike &amp; Rider, the garage, options and the Pro Circuit career are all drawn from the game's own menu files and laid out the way the original lays them out.</p>
+  <div class="menu-grid">
+    <figure><img src="img/menu-main.jpg" alt="Main menu" loading="lazy"></figure>
+    <figure><img src="img/menu-bike.jpg" alt="Bike and rider selection" loading="lazy"></figure>
+    <figure><img src="img/menu-career.jpg" alt="Pro Circuit career screen" loading="lazy"></figure>
+    <figure><img src="img/menu-garage.jpg" alt="Garage options with engine curves" loading="lazy"></figure>
+  </div>
+</section>
+
+<section id="ideas" class="ideas">
+  <h2>What a full rewrite makes possible</h2>
+  <p class="sub">Every part of the game is now readable, modern code, so it can be changed in ways a patched exe never could. Here are some ideas we'd love to see, from us or from you:</p>
+  <div class="idea-grid">
+    <article><h3>Custom tracks and bikes</h3><p>Load community tracks such as those from MDX Racing without any installers. Add new bikes and skins, or build a track editor on top of the format readers in <code>mm2-formats</code>.</p></article>
+    <article><h3>Online play that works today</h3><p>The network code is ours, so it could have dedicated servers, a server browser and better netcode for bigger fields.</p></article>
+    <article><h3>Steam Deck, handhelds and the web</h3><p>Rust and wgpu build almost anywhere: Linux handhelds, ARM laptops, and perhaps one day the browser through WebGPU.</p></article>
+    <article><h3>Ultrawide, high refresh, VR</h3><p>The renderer isn't tied to 2000-era limits: think proper ultrawide, 144&nbsp;Hz and beyond, or even a VR camera.</p></article>
+    <article><h3>Ghosts, telemetry and replays</h3><p>Share ghost laps, export a ride's speed and suspension data, or build a replay editor. The physics state is all there to read.</p></article>
+    <article><h3>Controllers and accessibility</h3><p>Steering wheels, adaptive controllers, remappable everything, colour-blind friendly HUDs, adjustable assists.</p></article>
+    <article><h3>Physics and AI experiments</h3><p>Tweak the bike model, train smarter AI riders, or use the documented physics as a reference for your own projects.</p></article>
+    <article><h3>Tools for the game's files</h3><p>The archive, terrain, model and texture readers are a plain Rust library. Use them for converters, viewers, archival projects, or anything else.</p></article>
+  </div>
+</section>
+
+<section class="yours">
+  <h2>Yours to use</h2>
+  <p>OpenMCM2 is licensed MIT or Apache-2.0, so you can fork it, mod it, port it, or take pieces for something else entirely. You don't need to ask. If you build something, we'd love to see it. Issues and pull requests are welcome on <a href="https://github.com/crspytopgn/openmcm2">GitHub</a>.</p>
+  <ul class="crates">
+    <li><code>mm2-formats</code> reads every file format in the game</li>
+    <li><code>mm2-physics</code> holds the bike, tyre, crash and AI models</li>
+    <li><code>mm2-viewer</code> is the game itself: renderer, menus, sound and races</li>
+    <li><code>mm2-launcher</code> handles setup from your own CD or ISO, plus settings</li>
+    <li><code>mm2-tools</code> is a command-line tool to unpack and inspect the game's files</li>
+    <li><code>docs/</code> has notes on how the original's physics and sound work</li>
+  </ul>
+</section>
+
+<section class="gallery">
+  <h2>Gallery</h2>
+  <p class="sub">Every picture is a frame from OpenMCM2, made from the original game's data. Click one to see it full size.</p>
+  <div class="masonry">
+    <a href="img/sx-whoops.jpg"><img src="img/sx-whoops.jpg" alt="Supercross whoops section" loading="lazy"></a>
+    <a href="img/nat-palms.jpg"><img src="img/nat-palms.jpg" alt="National track lined with palm trees" loading="lazy"></a>
+    <a href="img/rain.jpg"><img src="img/rain.jpg" alt="A national track in the rain" loading="lazy"></a>
+    <a href="img/baja-dusk.jpg"><img src="img/baja-dusk.jpg" alt="Baja forest course at dusk" loading="lazy"></a>
+    <a href="img/sx-stadium.jpg"><img src="img/sx-stadium.jpg" alt="Supercross stadium with crowd stands" loading="lazy"></a>
+    <a href="img/nat-butte.jpg"><img src="img/nat-butte.jpg" alt="Three riders on a national track" loading="lazy"></a>
+  </div>
+</section>
+
+<section id="status" class="status">
+  <h2>Where it stands</h2>
+  <p class="sub">0.1 is the first public build. It's playable from start to finish, and we're still fine-tuning how the bikes ride.</p>
+  <ol class="roadmap">
+    <li class="done"><h3>Game data</h3><p>Archives, terrain, scenes, models, animations, textures, collision, menus and the intro movies.</p></li>
+    <li class="done"><h3>Tracks, bikes and riders</h3><p>Every track type, every bike and outfit, plus tricks and taunts.</p></li>
+    <li class="done"><h3>Menus and game modes</h3><p>The original front end, the career, ghosts, replays, Stunt Quarry, Moto-Tag and network races.</p></li>
+    <li class="done"><h3>Sound</h3><p>Engines, crashes, crowd and track sounds, placed in 3D like the original.</p></li>
+    <li class="wip"><h3>Physics</h3><p>The original's own bike model, checked against recordings of the original game. Most runs match, but a few landings and rough patches still feel different.</p></li>
+    <li class="wip"><h3>Enhanced look</h3><p>Optional, and kept close to the original's palette.</p></li>
+  </ol>
+</section>
+
+<section id="play" class="play">
+  <h2>Play it</h2>
+  <ol class="steps">
+    <li><b>1</b><div><h3>Download</h3><p>Get OpenMCM2 for Mac, Windows or Linux from the <a href="https://github.com/crspytopgn/openmcm2/releases">releases page</a> and open it.</p></div></li>
+    <li><b>2</b><div><h3>Add your game</h3><p>Choose your Motocross Madness&nbsp;2 CD image (<code>.iso</code>, <code>.bin</code>/<code>.cue</code>, <code>.img</code>, <code>.mdf</code>, <code>.nrg</code>), the CD itself, or an installed folder.</p></div></li>
+    <li><b>3</b><div><h3>Pick and play</h3><p>Choose the original or enhanced look, full screen or a window, then press Play.</p></div></li>
+  </ol>
+  <p class="sub">The launcher copies the game from your own copy and keeps your settings. It never downloads anything. To build from source you need <a href="https://rustup.rs">Rust</a>:</p>
+<pre><code>git clone https://github.com/crspytopgn/openmcm2
+cd openmcm2
+cargo build --release -p mm2-viewer -p mm2-launcher
+./target/release/mm2-launcher</code></pre>
+  <p class="note">On Linux, install <code>libasound2-dev</code>, <code>libudev-dev</code> and <code>pkg-config</code> first. On a Mac, the app isn't notarised yet, so right-click <code>OpenMCM2.app</code> and choose Open the first time.</p>
+</section>
+
+<section class="credits">
+  <h2>Thanks</h2>
+  <p>To Rainbow Studios, for making a game we still want to play. To the <a href="https://openmw.org">OpenMW</a> project, which showed how an engine can be rebuilt in the open around game data its players own. To <a href="https://ffmpeg.org">FFmpeg</a>, whose Indeo&nbsp;5 decoder we ported for the game's movies. And to <a href="https://ambientcg.com">ambientCG</a> for the CC0 ground materials.</p>
+</section>
+
+</main>
+
+<footer>
+  <p>OpenMCM2 is an independent fan project. It is not affiliated with, endorsed by or sponsored by Microsoft or Rainbow Studios. Motocross Madness is a trademark of Microsoft Corporation, and the game, its data and artwork are © Microsoft. This project contains no game files: you need your own copy of Motocross Madness&nbsp;2. Code licensed MIT or Apache-2.0 (the Indeo decoder LGPL-2.1).</p>
+</footer>
+
+<div class="lightbox" id="lightbox" hidden><img alt=""></div>
+
+<script>
+(function () {
+  var c = document.getElementById('compare');
+  var r = c.querySelector('input');
+  r.addEventListener('input', function () { c.style.setProperty('--pos', r.value + '%'); });
+  var lb = document.getElementById('lightbox'), li = lb.querySelector('img');
+  document.querySelectorAll('.masonry a, .strip img, .feature img, .menu-grid img').forEach(function (el) {
+    el.addEventListener('click', function (e) {
+      e.preventDefault();
+      var img = el.tagName === 'A' ? el.querySelector('img') : el;
+      li.src = el.getAttribute('href') || img.src; li.alt = img.alt;
+      lb.hidden = false;
+    });
+  });
+  lb.addEventListener('click', function () { lb.hidden = true; });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') lb.hidden = true; });
+})();
+</script>
+</body>
+</html>
