@@ -1,6 +1,6 @@
-# OpenMCM2 0.1.01
+# OpenMCM2 0.1.1
 
-## New in 0.1.01
+## New in 0.1.1
 
 * **Controllers:** Xbox and PlayStation pads and flight sticks, working the
   way the original's joystick did (steer, lean, gas, brake, stunts, pad
