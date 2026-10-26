@@ -556,6 +556,28 @@ impl Frontend {
         self.go(go)
     }
 
+    /// Whether the screen up waits for a joystick input to bind.
+    #[cfg_attr(not(feature = "gamepad"), allow(dead_code))]
+    pub fn wants_pad(&self) -> bool {
+        matches!(&self.screen, Screen::Extra(s) if s.wants_pad())
+    }
+
+    /// A joystick button or axis, for the controls page.
+    #[cfg_attr(not(feature = "gamepad"), allow(dead_code))]
+    pub fn pad_input(&mut self, audio: &Audio, input: (i32, i32)) -> Next {
+        let Screen::Extra(s) = &mut self.screen else {
+            return Next::Stay;
+        };
+        let mut cx = Cx {
+            ui: &mut self.ui,
+            audio: Some(audio),
+            user: &mut self.user,
+            now: self.now,
+        };
+        let go = s.pad(&mut cx, input);
+        self.go(go)
+    }
+
     /// Whether the screen up is one of `screens`, or a box is open over
     /// the main menu.
     fn extra_up(&self) -> bool {

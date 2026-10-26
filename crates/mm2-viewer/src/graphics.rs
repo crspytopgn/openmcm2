@@ -55,6 +55,9 @@ pub struct Enhanced {
     pub scenery: bool,
     /// Mud and dust caking the bikes and riders as they ride.
     pub mud: bool,
+    /// Photo materials' grain (wood, metal, concrete, straw) on the
+    /// objects of the trial track (materials::surfaced).
+    pub surfaces: bool,
     /// How dirty the bikes start, 0 to 1.
     pub mud_start: f32,
     /// How strongly the new ground's detail shows, 0 to 1.
@@ -98,6 +101,7 @@ impl Default for Enhanced {
             smooth: true,
             scenery: false,
             mud: true,
+            surfaces: true,
             mud_start: 0.0,
             detail: 0.5,
             weather: Weather::Clear,
@@ -257,9 +261,10 @@ impl Enhanced {
                 "mud" | "splash" => e.mud = on,
                 "smooth" => e.smooth = on,
                 "scenery" | "props" => e.scenery = on,
+                "surfaces" | "materials" => e.surfaces = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/ultra, resolution=1080p, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/ultra, resolution=1080p, weather=rain or time=dusk"
                     ))
                 }
             }

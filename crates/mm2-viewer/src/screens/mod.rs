@@ -155,6 +155,18 @@ pub trait Screen {
         Go::Stay
     }
 
+    /// A joystick button pressed or axis pushed, as `control.ctl` names
+    /// it (kind 2, code), for the controls page.
+    fn pad(&mut self, _cx: &mut Cx, _input: (i32, i32)) -> Go {
+        Go::Stay
+    }
+
+    /// Whether the screen is waiting for a joystick input to bind, so the
+    /// pad's buttons should not work the pointer.
+    fn wants_pad(&self) -> bool {
+        false
+    }
+
     /// Each frame before drawing.
     fn tick(&mut self, _cx: &mut Cx) -> Go {
         Go::Stay

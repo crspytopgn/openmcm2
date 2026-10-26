@@ -43,7 +43,7 @@ pub struct EnhGlobals {
     /// Which of the bigger upgrades show: x the new ground, y grass, z the
     /// real sky, w the bikes' paint.
     pub more: [f32; 4],
-    /// The ground materials' average colours (linear).
+    /// The photo materials' average colours (linear).
     pub material_average: [[f32; 4]; crate::materials::COUNT],
     /// The real sky: x the screen's width over its height, y whether the
     /// bikes get muddy, z cloud drift (ft), w the exposure.
@@ -54,6 +54,8 @@ pub struct EnhGlobals {
     /// The smooth ground's patch: its corner (terrain units), cells a
     /// side, and whether it is drawn.
     pub smooth: [f32; 4],
+    /// x whether the trial track's objects get the photo materials.
+    pub surfaces: [f32; 4],
 }
 
 /// The enhanced drawing's shared parts.

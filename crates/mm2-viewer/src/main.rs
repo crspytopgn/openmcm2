@@ -23,7 +23,7 @@
 //! Riding: W/Up throttle, S/Down brake, A/D or Left/Right to steer; in
 //! the air, throttle and brake tip the bike back and forward (the game's
 //! gas and brake gyro options).
-//! A gamepad works too (triggers, left stick). R restarts the race, P lets
+//! Xbox and PlayStation pads and flight sticks work too (see `pad`). R restarts the race, P lets
 //! the computer ride for you, Tab switches to the free camera. Free camera: hold the right mouse button and move to
 //! look, WASD to fly, Q/E or Space/Ctrl to go down/up, Shift to go faster.
 //! Esc quits.
@@ -54,6 +54,8 @@ mod ground;
 mod hires;
 mod hud;
 mod input;
+#[cfg(feature = "gamepad")]
+mod pad;
 mod morph;
 mod movie;
 mod net;
@@ -1695,7 +1697,7 @@ fn load_track(
                 }
                 _ => (Vec::new(), Vec::new()),
             };
-            let objects = ObjectMesh::build(
+            let mut objects = ObjectMesh::build(
                 &statics,
                 &extras,
                 &movable,
@@ -1705,6 +1707,7 @@ fn load_track(
                 &textures,
                 hires::pack(),
             );
+            objects.surfaced = materials::surfaced(&file_name(path));
             match read_archive(&res.join("COLSEG.RES")) {
                 Ok(bytes) => {
                     let colseg = rs2::Archive::parse(&bytes)?;
@@ -3157,6 +3160,8 @@ struct App {
     frame: f32,
     /// The pointer on the 640×480 screen.
     pointer: (f32, f32),
+    /// The pad's A and B last frame, to click and go back in the menus.
+    pad_click: (bool, bool),
     /// The race going on tape, and a tape playing (with the track it
     /// waits for while that loads).
     recording: Option<replay::Recording>,
@@ -3170,8 +3175,28 @@ struct App {
     net: Option<frontend::NetRace>,
     remote: Vec<replay::Remote>,
     send_wait: f32,
+    /// The profile's JoyDirectionFlipped setting: the stick's Y axis
+    /// the other way round (0x4c6ec0).
+    joy_flipped: bool,
     #[cfg(feature = "gamepad")]
-    pads: Option<gilrs::Gilrs>,
+    pads: Option<pad::Pads>,
+    #[cfg(not(feature = "gamepad"))]
+    pads: Option<()>,
+}
+
+/// The device whose map the race uses when the profile's own is the
+/// keyboard: the joystick's kind, or the first joystick's map.
+#[cfg(feature = "gamepad")]
+fn pad_device(pads: &Option<pad::Pads>) -> usize {
+    match pads {
+        Some(p) if p.pad().is_some() => p.device(),
+        _ => 1,
+    }
+}
+
+#[cfg(not(feature = "gamepad"))]
+fn pad_device(_pads: &Option<()>) -> usize {
+    1
 }
 
 struct State {
@@ -3247,6 +3272,7 @@ impl App {
             frame: 0.0,
             sounds,
             pointer: (0.0, 0.0),
+            pad_click: (false, false),
             recording: None,
             ghost: None,
             replay: None,
@@ -3255,10 +3281,11 @@ impl App {
             net: None,
             remote: Vec::new(),
             send_wait: 0.0,
+            joy_flipped: false,
             #[cfg(feature = "gamepad")]
-            pads: gilrs::Gilrs::new()
-                .map_err(|err| eprintln!("no gamepads: {err}"))
-                .ok(),
+            pads: pad::Pads::new(),
+            #[cfg(not(feature = "gamepad"))]
+            pads: None,
         }
     }
 
@@ -3477,9 +3504,10 @@ impl App {
                             input::KeyMap::factory()
                         };
                         let device = match p.keys.current as usize {
-                            input::KEYBOARD => 1,
+                            input::KEYBOARD => pad_device(&self.pads),
                             d => d,
                         };
+                        self.joy_flipped = f.user().settings.number("JoyDirectionFlipped", 0) != 0;
                         self.pad_map = match p.keys.keys.get(device) {
                             Some(m) if m.iter().any(|&(k, _)| k == 2) => *m,
                             _ => input::factory_pad(),
@@ -3959,42 +3987,53 @@ impl App {
         std::array::from_fn(|a| self.key_map.held(a, &self.keys) || self.pad_held(a))
     }
 
-    /// The first gamepad, as the profile maps the joystick: an action on
-    /// a button is held with it, one on an axis reads that side of it
-    /// (Steer Left the X axis's left, and so on). Analog Axes off, a
-    /// stick works the bars and lean like the keys. The triggers also
-    /// work the gas and brake.
+    /// The joystick in use, as the profile maps it (0x449e20 binds the
+    /// map, 0x52e3e0 reads it): an action on a button is held with it;
+    /// the steering axis has a 0.04 dead centre and is cubed, fine near
+    /// the middle and full lock at the edge; the lean axis has no dead
+    /// centre. Accelerate on the Z axis (a flight stick's throttle
+    /// lever) opens the gas past a third of its travel, the way the
+    /// game's analog throttle does (0.2 floor, 0.33 to count). Analog
+    /// Axes off, a stick works the bars and lean like the keys. A game
+    /// pad's triggers also work the gas and brake, past a third.
     #[cfg(feature = "gamepad")]
     fn gamepad(&mut self, mut c: Controls) -> Controls {
-        let Some(pads) = &mut self.pads else {
-            return c;
-        };
-        while pads.next_event().is_some() {}
-        let Some((_, pad)) = pads.gamepads().next() else {
+        let map = self.pad_map;
+        let flip = if self.joy_flipped { -1.0 } else { 1.0 };
+        let Some(pad) = self.pads.as_ref().and_then(|p| p.pad()) else {
             return c;
         };
         let trigger = |b| pad.button_data(b).map_or(0.0, |d| d.value());
-        c.throttle = c.throttle.max(trigger(gilrs::Button::RightTrigger2));
-        c.brake = c.brake.max(trigger(gilrs::Button::LeftTrigger2));
-        let map = self.pad_map;
-        // An action's pull, 0 to 1; `side` is the axis's half it reads.
-        let pull = |action: usize, side: f32| -> f32 {
-            match map[action] {
-                (2, code) if code >= 0 => {
-                    input::pad_button(code).map_or(0.0, |b| pad.is_pressed(b) as i32 as f32)
+        if trigger(gilrs::Button::RightTrigger2) > pad::THROTTLE_ON {
+            c.throttle = 1.0;
+        }
+        if trigger(gilrs::Button::LeftTrigger2) > pad::THROTTLE_ON {
+            c.brake = 1.0;
+        }
+        if let (2, code) = map[input::ACCELERATE] {
+            if let Some(v) = pad::throttle_axis(&pad, code) {
+                if v > pad::THROTTLE_ON {
+                    c.throttle = 1.0;
                 }
-                (2, code) => input::pad_axis(code).map_or(0.0, |(axis, flip)| {
-                    let v = pad.value(axis) * flip;
-                    let v = if v.abs() < 0.15 { 0.0 } else { v };
-                    (v * side).max(0.0)
-                }),
+            }
+        }
+        // An action's pull, 0 to 1; `side` is the axis's half it reads.
+        let pull = |action: usize, side: f32, dead: f32| -> f32 {
+            match map[action] {
+                (2, code) => match pad::axis(&pad, code) {
+                    Some(v) if code < 0 => {
+                        let v = if code == -5 { v * flip } else { v };
+                        let v = if v.abs() < dead { 0.0 } else { v };
+                        (v * side).max(0.0)
+                    }
+                    _ => 0.0,
+                },
                 _ => 0.0,
             }
         };
-        c.throttle = c.throttle.max(pull(input::ACCELERATE, 1.0));
-        c.brake = c.brake.max(pull(input::BRAKE, 1.0));
-        let steer = pull(input::STEER_RIGHT, 1.0) - pull(input::STEER_LEFT, -1.0);
-        let lean = pull(input::LEAN_FORWARD, -1.0) - pull(input::LEAN_BACK, 1.0);
+        let steer = pull(input::STEER_RIGHT, 1.0, pad::STEER_DEAD)
+            - pull(input::STEER_LEFT, -1.0, pad::STEER_DEAD);
+        let lean = pull(input::LEAN_FORWARD, -1.0, 0.0) - pull(input::LEAN_BACK, 1.0, 0.0);
         if self.analog {
             if steer != 0.0 {
                 c.steer = input::stick_steer(steer);
@@ -4006,26 +4045,93 @@ impl App {
         c
     }
 
-    /// Whether the gamepad holds `action`'s button, or, with Analog Axes
-    /// off, pushes its axis's side over half way, as a key.
+    /// Whether the joystick holds `action`'s button, or, with Analog
+    /// Axes off, pushes its axis's side over half way, as a key (the
+    /// game's game pad reading, 0x4c74e0).
     #[cfg(feature = "gamepad")]
     fn pad_held(&self, action: usize) -> bool {
-        let Some((_, pad)) = self.pads.as_ref().and_then(|p| p.gamepads().next()) else {
+        let Some(pad) = self.pads.as_ref().and_then(|p| p.pad()) else {
             return false;
         };
         match self.pad_map[action] {
-            (2, code) if code >= 0 => input::pad_button(code).is_some_and(|b| pad.is_pressed(b)),
-            (2, code) if !self.analog => input::pad_axis(code).is_some_and(|(axis, flip)| {
+            (2, code) if code >= 0 => pad::button(&pad, code),
+            (2, code) if !self.analog => pad::axis(&pad, code).is_some_and(|v| {
+                let v = if code == -5 && self.joy_flipped { -v } else { v };
                 let side = match action {
                     input::STEER_LEFT | input::LEAN_FORWARD => -1.0,
                     _ => 1.0,
                 };
-                pad.value(axis) * flip * side > 0.5
+                v * side > pad::PUSHED
             }),
             _ => false,
         }
     }
 
+    /// Takes the joysticks' events each frame. In the menus the pad works
+    /// the pointer (the game's menus took only the mouse and keys): the
+    /// left stick or D-pad moves it, A clicks and B goes back. On the
+    /// controls page, while an action waits, a button or stick pressed
+    /// goes to the page to bind instead.
+    #[cfg(feature = "gamepad")]
+    fn poll_pads(&mut self, event_loop: &ActiveEventLoop, dt: f32) {
+        let Some(pads) = &mut self.pads else {
+            return;
+        };
+        let presses = pads.poll();
+        let (stick, a, b) = pads.pointer();
+        let (was_a, was_b) = std::mem::replace(&mut self.pad_click, (a, b));
+        if !self.in_menus() {
+            return;
+        }
+        let now = self.start.elapsed().as_secs_f32();
+        let Some(f) = &mut self.front else { return };
+        if f.wants_pad() {
+            for press in presses {
+                let input = match press {
+                    pad::Press::Button(n) => (2, n),
+                    pad::Press::Axis(code) => (2, code),
+                };
+                let Some(f) = &mut self.front else { return };
+                let next = f.pad_input(&self.audio, input);
+                if !matches!(next, frontend::Next::Stay) {
+                    self.next(next, event_loop);
+                    return;
+                }
+            }
+            return;
+        }
+        // Past a fifth of the stick, up to 500 of the 640×480 screen a second.
+        let speed = |v: f32| if v.abs() < 0.2 { 0.0 } else { v * 500.0 * dt };
+        let (dx, dy) = (speed(stick[0]), speed(stick[1]));
+        if dx != 0.0 || dy != 0.0 {
+            let (x, y) = self.pointer;
+            let (x, y) = ((x + dx).clamp(0.0, 639.0), (y + dy).clamp(0.0, 479.0));
+            self.pointer = (x, y);
+            f.mouse_move(&self.audio, x, y);
+            if let Some(s) = &self.state {
+                let (w, h) = (s.config.width as f32, s.config.height as f32);
+                let scale = (w / sprites::SCREEN.0).min(h / sprites::SCREEN.1);
+                let (ox, oy) = ((w - sprites::SCREEN.0 * scale) / 2.0, (h - sprites::SCREEN.1 * scale) / 2.0);
+                let at = winit::dpi::PhysicalPosition::new((x * scale + ox) as f64, (y * scale + oy) as f64);
+                let _ = s.window.set_cursor_position(at);
+            }
+        }
+        let (x, y) = self.pointer;
+        if a && !was_a {
+            f.mouse_down(x, y);
+        } else if !a && was_a {
+            let next = f.mouse_up(&self.audio, x, y, now);
+            self.next(next, event_loop);
+            return;
+        }
+        if b && !was_b {
+            let next = f.escape(now);
+            self.next(next, event_loop);
+        }
+    }
+
+    #[cfg(not(feature = "gamepad"))]
+    fn poll_pads(&mut self, _event_loop: &ActiveEventLoop, _dt: f32) {}
     #[cfg(not(feature = "gamepad"))]
     fn pad_held(&self, _action: usize) -> bool {
         false
@@ -4615,6 +4721,7 @@ impl ApplicationHandler for App {
                 let dt = (now - self.last).as_secs_f32().min(0.1);
                 self.last = now;
                 self.frame = dt;
+                self.poll_pads(event_loop, dt);
                 self.update(dt);
                 self.redraw();
                 if let Some((since, frames, slowest)) = &mut self.fps {

@@ -19,8 +19,8 @@ struct Enh {
     ruts: vec4<f32>,
     // x the new ground, y grass, z the real sky, w the bikes' paint.
     more: vec4<f32>,
-    // The ground materials' average colours.
-    material_average: array<vec4<f32>, 5>,
+    // The photo materials' average colours (materials.rs).
+    material_average: array<vec4<f32>, 9>,
     // x the screen's width over its height, y the bikes' mud, z cloud
     // drift, w exposure.
     sky: vec4<f32>,
@@ -29,4 +29,6 @@ struct Enh {
     // The smooth ground's patch: its corner (terrain units), cells a side,
     // on.
     fine_ground: vec4<f32>,
+    // x the trial track's objects in photo materials.
+    surfaces: vec4<f32>,
 };

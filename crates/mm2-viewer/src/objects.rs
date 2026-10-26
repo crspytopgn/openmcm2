@@ -47,6 +47,11 @@ pub struct ObjectMesh {
     indices: Vec<u32>,
     /// One draw per texture: its index range and the texture (if found).
     draws: Vec<(std::ops::Range<u32>, Option<Image>)>,
+    /// Each draw's texture name.
+    names: Vec<String>,
+    /// Whether the enhanced drawing lays photo materials over the objects
+    /// (materials::surfaced).
+    pub surfaced: bool,
     /// Each draw's triangles in blocks of the track (crate::cull): each
     /// block's bounds (drawing coordinates) and its indices. The moving
     /// models' triangles are a block that is always drawn.
@@ -430,6 +435,7 @@ impl ObjectMesh {
                     }),
             };
             mesh.draws.push((start..mesh.indices.len() as u32, tex));
+            mesh.names.push(name);
         }
         mesh
     }
@@ -775,6 +781,17 @@ impl ObjectRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // The enhanced drawing's photo material for the texture.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1034,8 +1051,16 @@ impl ObjectRenderer {
         let draws = mesh
             .draws
             .iter()
-            .map(|(range, tex)| {
+            .zip(&mesh.names)
+            .map(|((range, tex), name)| {
                 let tex = upload(device, queue, tex.as_ref().unwrap_or(&white));
+                // Its photo material's layer, or -1 for none.
+                let surface = mesh.surfaced.then(|| crate::materials::surface(name)).flatten();
+                let surface = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("object surface"),
+                    contents: bytemuck::cast_slice(&[surface.map_or(-1.0, |m| m as f32), 0.0, 0.0, 0.0]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
                 let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("object texture"),
                     layout: &layout,
@@ -1049,6 +1074,10 @@ impl ObjectRenderer {
                         wgpu::BindGroupEntry {
                             binding: 1,
                             resource: wgpu::BindingResource::Sampler(&sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: surface.as_entire_binding(),
                         },
                     ],
                 });

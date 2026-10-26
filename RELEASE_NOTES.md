@@ -1,7 +1,19 @@
-# OpenMCM2 0.1.0
+# OpenMCM2 0.1.01
 
-The first public build of OpenMCM2, an open-source Rust engine for
-Motocross Madness 2. **You need your own copy of the game**: nothing from the
+## New in 0.1.01
+
+* **Controllers:** Xbox and PlayStation pads and flight sticks, working the
+  way the original's joystick did (steer, lean, gas, brake, stunts, pad
+  triggers), with every button bindable in Options > Controls and a flight
+  stick's throttle lever for the gas.
+* **Menus with a pad:** the stick or D-pad moves the pointer, A clicks and B
+  goes back.
+* Enhanced look: wood, metal, concrete and straw detail on the Farm
+  track's objects.
+
+## About OpenMCM2
+
+OpenMCM2 is an open-source Rust engine for Motocross Madness 2. **You need your own copy of the game**: nothing from the
 game is included here.
 
 OpenMCM2 is entirely vibe coded: it was written by Claude Code, an AI coding

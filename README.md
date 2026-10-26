@@ -64,7 +64,16 @@ clutch, Backspace back up. In a race Numpad5 (or C) cycles the camera
 views, Home/End zoom, F5 to F10 switch the stats, radar, gauges, sky,
 particles and shadows, [ ] or PgUp/PgDn watch the other riders. In network
 races `/` opens chat. Alt+Enter (Option+Return on a Mac) switches full
-screen. A gamepad works through the profile's gamepad map.
+screen.
+
+**Controllers.** Xbox and PlayStation pads and flight sticks work, as the
+original's DirectInput joystick did: the X axis steers, the Y axis leans,
+buttons 1 and 2 are gas and brake, 3 and 4 the stunts, and on a pad the
+right and left triggers are gas and brake too. Options > Controls binds the
+pad's or stick's buttons to any action, and Accelerate also takes a flight
+stick's throttle lever. The pad also works the menus: the stick or D-pad
+moves the pointer, A clicks and B goes back. With several plugged in, the
+one last touched rides.
 
 **Optional extras**, off unless asked for:
 

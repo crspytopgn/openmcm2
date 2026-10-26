@@ -605,19 +605,42 @@ impl Options {
     /// whichever action held it before. Escape cancels and leaves the
     /// binding alone (`0x4b9c00`).
     fn take_key(&mut self, ui: &Ui, code: u32) {
-        let Some(action) = self.listening.take() else {
+        if code == 0x01 {
+            self.listening = None;
+            self.refill_keys(ui);
+        } else {
+            self.take_input(ui, (0, code as i32));
+        }
+    }
+
+    /// Binds a key or joystick input to the waiting action. The steering
+    /// and lean (the first four actions) take only keys; a joystick's
+    /// button is refused there and the page keeps waiting (`0x4b9b70`).
+    /// The game binds joystick buttons only; here Accelerate also takes
+    /// a stick's throttle lever (the Z axis), which the game's map can
+    /// hold (0x449e20) but its page could not set.
+    fn take_input(&mut self, ui: &Ui, input: (i32, i32)) {
+        let Some(action) = self.listening else {
             return;
         };
-        let device = self.p.controls.device as usize;
-        if code != 0x01 {
-            let input = (0, code as i32);
-            for a in 0..ACTIONS {
-                if a != action && self.p.keys.get(device, a) == input {
-                    self.p.keys.set(device, a, (-1, 0));
-                }
-            }
-            self.p.keys.set(device, action, input);
+        match input {
+            (0, _) => {}
+            (_, code) if action < 4 && code >= 0 => return,
+            (_, code) if code < 0 && !(action == crate::input::ACCELERATE && code == -7) => return,
+            _ => {}
         }
+        self.listening = None;
+        let device = self.p.controls.device as usize;
+        for a in 0..ACTIONS {
+            if a != action && self.p.keys.get(device, a) == input {
+                self.p.keys.set(device, a, (-1, 0));
+            }
+        }
+        self.p.keys.set(device, action, input);
+        self.refill_keys(ui);
+    }
+
+    fn refill_keys(&mut self, ui: &Ui) {
         if let Some((_, d)) = self.page.as_mut() {
             Self::fill_keys(ui, d, &self.p);
             d.mark("MapKeyListBox", None);
@@ -990,6 +1013,17 @@ impl Screen for Options {
     fn key(&mut self, cx: &mut Cx, code: u32) -> Go {
         if self.sub.is_none() && self.listening.is_some() {
             self.take_key(cx.ui, code);
+        }
+        Go::Stay
+    }
+
+    fn wants_pad(&self) -> bool {
+        self.sub.is_none() && self.listening.is_some()
+    }
+
+    fn pad(&mut self, cx: &mut Cx, input: (i32, i32)) -> Go {
+        if self.sub.is_none() && self.listening.is_some() {
+            self.take_input(cx.ui, input);
         }
         Go::Stay
     }

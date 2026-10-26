@@ -43,6 +43,8 @@ struct VertexOut {
     // Where on the model at rest, and how dirty the model is, 0 to 1.
     @location(8) rest: vec3<f32>,
     @location(9) @interpolate(flat) mud: f32,
+    // Which way it faces on the model at rest.
+    @location(10) rest_normal: vec3<f32>,
 };
 
 // How a vertex is lit, from the top bits of its node (objects.rs).
@@ -88,6 +90,7 @@ fn vs_main(
     // The enhanced drawing's dressing hangs on a node too, but is still.
     out.moving = select(0.0, 1.0, (node & 0x3fffffffu) != 0u && m[2][3] < 0.5);
     out.rest = position;
+    out.rest_normal = normal;
     out.mud = m[1][3];
     return out;
 }
@@ -166,8 +169,59 @@ fn fs_depth(in: CasterOut) {
 @group(3) @binding(0) var<uniform> enh: Enh;
 @group(3) @binding(1) var sun_map: texture_depth_2d_array;
 @group(3) @binding(2) var sun_sampler: sampler_comparison;
+// The photo materials (materials.rs), and the one this draw's texture is
+// mostly made of (its layer, or -1 for none).
+@group(3) @binding(3) var material_colour: texture_2d_array<f32>;
+@group(3) @binding(4) var material_normal: texture_2d_array<f32>;
+@group(3) @binding(5) var material_sampler: sampler;
+@group(1) @binding(2) var<uniform> surface: vec4<f32>;
 
 #include "enhanced_fns.wgsl"
+
+// How many ft each object material's texture spans: wood, metal,
+// concrete, straw.
+fn surface_scale(m: i32) -> f32 {
+    switch m {
+        case 5: { return 3.0; }
+        case 6: { return 4.0; }
+        case 7: { return 6.0; }
+        default: { return 2.5; }
+    }
+}
+
+struct Surface {
+    // The material's colour over its average, and its normal on the model
+    // at rest.
+    detail: vec3<f32>,
+    normal: vec3<f32>,
+};
+
+// Material `m` laid over the model at rest from three sides, blended by
+// which way it faces, so it needs no texture coordinates of its own and
+// holds still on a moving model. Each side's normal is turned onto the
+// side it is laid on (Golus 2017, whiteout blend).
+fn surface_at(m: i32, p: vec3<f32>, rest_normal: vec3<f32>) -> Surface {
+    let s = surface_scale(m);
+    let n = normalize(rest_normal);
+    var w = pow(abs(n), vec3<f32>(4.0));
+    w /= w.x + w.y + w.z;
+    let uv_x = p.zy / s;
+    let uv_y = p.xz / s;
+    let uv_z = p.xy / s;
+    let cx = textureSample(material_colour, material_sampler, uv_x, m).rgb;
+    let cy = textureSample(material_colour, material_sampler, uv_y, m).rgb;
+    let cz = textureSample(material_colour, material_sampler, uv_z, m).rgb;
+    let tx = textureSample(material_normal, material_sampler, uv_x, m).xyz * 2.0 - 1.0;
+    let ty = textureSample(material_normal, material_sampler, uv_y, m).xyz * 2.0 - 1.0;
+    let tz = textureSample(material_normal, material_sampler, uv_z, m).xyz * 2.0 - 1.0;
+    let nx = vec3<f32>(tx.xy + n.zy, abs(tx.z) * n.x);
+    let ny = vec3<f32>(ty.xy + n.xz, abs(ty.z) * n.y);
+    let nz = vec3<f32>(tz.xy + n.xy, abs(tz.z) * n.z);
+    var out: Surface;
+    out.detail = (cx * w.x + cy * w.y + cz * w.z) / max(enh.material_average[m].rgb, vec3<f32>(0.02));
+    out.normal = normalize(nx.zyx * w.x + ny.xzy * w.y + nz.xyz * w.z);
+    return out;
+}
 
 fn hash3(p: vec3<f32>) -> f32 {
     let q = fract(p * vec3<f32>(0.1031, 0.1030, 0.0973));
@@ -202,7 +256,29 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     let polished = enh.more.w > 0.5 && in.moving > 0.5;
     // Only a touch of bump from the texture's brightness: more reads as an
     // over-sharpened picture.
-    let bumped = bump(n, in.world, luminance(texel.rgb), select(select(0.2, 0.45, in.mode == PLANT), 0.08, polished));
+    var strength = select(select(0.2, 0.45, in.mode == PLANT), 0.08, polished);
+    // The trial track's objects: the grain of the photo material each is
+    // made of, its colour taken out so the game's paint stays, and its
+    // bumps in place of the texture's brightness (which sparkle on fine
+    // paint).
+    var grain = vec3<f32>(1.0);
+    var bend = vec3<f32>(0.0);
+    let m = i32(surface.x);
+    if (enh.surfaces.x > 0.5 && m >= 0) {
+        let s = surface_at(m, in.rest, in.rest_normal);
+        let dist = length(in.world - globals.camera.xyz);
+        // Gently, and fading out where the texture's own paint suffices.
+        let near = 1.0 - smoothstep(30.0, 120.0, dist);
+        // Only its light and dark, softened.
+        let lum = clamp(luminance(s.detail), 0.6, 1.5);
+        grain = vec3<f32>(mix(1.0, lum, 0.8 * near));
+        // How the bumps turn the normal, on the model at rest; laid on
+        // the drawn normal as is (the still models' rest is where they
+        // stand), on the side the eye sees.
+        bend = (s.normal - normalize(in.rest_normal)) * near;
+        strength *= 1.0 - 0.8 * near;
+    }
+    let bumped = normalize(bump(n, in.world, luminance(texel.rgb), strength) + bend * sign(dot(n, normalize(in.normal))));
     if (edge <= 0.0 || (texel.a < 0.5 && enh.flags.x < 0.5)) {
         discard;
     }
@@ -235,7 +311,7 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     // Mud caked on as it rides: thickest low down, on the wheels, the
     // boots and the underside, in splats that spread as it gets dirtier;
     // dark and glossy when wet, pale and dusty when dry.
-    var albedo = texel.rgb;
+    var albedo = texel.rgb * grain;
     var caked = 0.0;
     if (enh.sky.y > 0.5 && in.mud > 0.0 && in.moving > 0.5) {
         let low = 1.0 - smoothstep(0.3, 3.2, in.rest.y);

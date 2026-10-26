@@ -7,3 +7,11 @@ packed = Ground103
 grass  = Grass004
 rock   = Rock030
 sand   = Ground080
+
+Object materials (laid only as grain over the game's own object textures,
+on the trial track Farm):
+
+wood     = Wood049
+metal    = Metal054B
+concrete = Concrete035
+straw    = ThatchedRoof001A

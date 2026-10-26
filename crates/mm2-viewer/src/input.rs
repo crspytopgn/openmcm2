@@ -208,31 +208,6 @@ pub fn factory_pad() -> [(i32, i32); crate::profile::ACTIONS] {
     ]
 }
 
-/// A joystick button as DirectInput numbers an Xbox-style pad's.
-#[cfg(feature = "gamepad")]
-pub fn pad_button(code: i32) -> Option<gilrs::Button> {
-    use gilrs::Button::*;
-    [South, East, West, North, LeftTrigger, RightTrigger, Select, Start, LeftThumb, RightThumb]
-        .get(usize::try_from(code).ok()?)
-        .copied()
-}
-
-/// A joystick axis code (−3 X, −5 Y, −7 Z, −9 RX, −11 RY, −13 RZ) and the
-/// sign that turns it the DirectInput way round (Y grows downwards).
-#[cfg(feature = "gamepad")]
-pub fn pad_axis(code: i32) -> Option<(gilrs::Axis, f32)> {
-    use gilrs::Axis::*;
-    Some(match code {
-        -3 => (LeftStickX, 1.0),
-        -5 => (LeftStickY, -1.0),
-        -7 => (LeftZ, 1.0),
-        -9 => (RightStickX, 1.0),
-        -11 => (RightStickY, -1.0),
-        -13 => (RightZ, 1.0),
-        _ => return None,
-    })
-}
-
 /// A stick's steering is cubed (0x52e3e0, for joystick devices): fine
 /// near the centre, full lock at the edge.
 pub fn stick_steer(x: f32) -> f32 {

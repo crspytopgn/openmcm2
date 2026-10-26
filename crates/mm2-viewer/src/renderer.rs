@@ -857,6 +857,7 @@ impl TerrainRenderer {
                 zenith: day.as_ref().map_or([0.0; 4], |d| d.zenith.extend(1.0).into()),
                 horizon: day.as_ref().map_or([0.0; 4], |d| d.horizon.extend(1.0).into()),
                 smooth: e.smooth.as_ref().filter(|_| on.smooth).map_or([0.0; 4], |g| g.uniform(camera.position)),
+                surfaces: [flag(on.surfaces), 0.0, 0.0, 0.0],
             };
             queue.write_buffer(&e.shared.buffer, 0, bytemuck::bytes_of(&enh));
         }

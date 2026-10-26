@@ -1,7 +1,8 @@
-//! The enhanced ground's photo materials (`assets/ground`, CC0 from
-//! ambientCG): dirt, packed dirt, grass, rock and sand, each a colour with
-//! its roughness and a normal map with its height, laid over the game's
-//! painted terrain by the shader.
+//! The enhanced drawing's photo materials (`assets/ground`, CC0 from
+//! ambientCG): dirt, packed dirt, grass, rock and sand for the ground, and
+//! wood, metal, concrete and straw for the objects; each a colour with its
+//! roughness and a normal map with its height. The shaders lay only their
+//! detail over the game's own painted colours.
 
 /// Each material's colour (RGB) and roughness (A), and its normal (RGB)
 /// and height (A).
@@ -11,9 +12,43 @@ const MATERIALS: [(&[u8], &[u8]); COUNT] = [
     (include_bytes!("../assets/ground/grass_albedo.png"), include_bytes!("../assets/ground/grass_normal.png")),
     (include_bytes!("../assets/ground/rock_albedo.png"), include_bytes!("../assets/ground/rock_normal.png")),
     (include_bytes!("../assets/ground/sand_albedo.png"), include_bytes!("../assets/ground/sand_normal.png")),
+    (include_bytes!("../assets/ground/wood_albedo.png"), include_bytes!("../assets/ground/wood_normal.png")),
+    (include_bytes!("../assets/ground/metal_albedo.png"), include_bytes!("../assets/ground/metal_normal.png")),
+    (include_bytes!("../assets/ground/concrete_albedo.png"), include_bytes!("../assets/ground/concrete_normal.png")),
+    (include_bytes!("../assets/ground/straw_albedo.png"), include_bytes!("../assets/ground/straw_normal.png")),
 ];
-pub const COUNT: usize = 5;
+pub const COUNT: usize = 9;
 const SIDE: u32 = 512;
+
+/// The objects' materials' layers.
+const WOOD: u32 = 5;
+const METAL: u32 = 6;
+const CONCRETE: u32 = 7;
+const STRAW: u32 = 8;
+
+/// The tracks whose objects get the photo materials: a trial on one track
+/// first, by its file name.
+pub fn surfaced(track_file: &str) -> bool {
+    track_file.eq_ignore_ascii_case("FARM.ENV")
+}
+
+/// The material an object texture of the trial tracks is mostly made of,
+/// picked by eye; None for those left as they are (people, signs, tyres).
+pub fn surface(texture: &str) -> Option<u32> {
+    let stem = texture.to_ascii_lowercase();
+    let stem = stem.split('.').next().unwrap_or_default();
+    Some(match stem {
+        "barn_mapint_08" | "barn_mapwalls_08" | "boxes_06" | "fence_picket_08" | "fh_mapa_08" | "haywagon_08"
+        | "lightpole_08" | "loadingramp_08" | "pumpshack_08" | "rrt_08" | "supports_08" | "tower_08"
+        | "windmill_pump01_08" => WOOD,
+        "barn_maproof01_08" | "barn_mapslide_07" | "blind_08" | "boxcars_08" | "caboose_08" | "cattlecars_08"
+        | "cattleguard_08" | "combine3_08" | "engine02_08" | "fence_08" | "flatbed_08" | "fx_map_08" | "hopper_08"
+        | "silo_map_08" | "tractor_08" | "trc-old_map_08" | "tressel02_08" => METAL,
+        "brickbldg01_08" | "culvert01_08" | "gastation02_08" | "irrigcanal_08" | "ms_map_08" | "support_08" => CONCRETE,
+        "haybail3_08" => STRAW,
+        _ => return None,
+    })
+}
 
 pub struct Materials {
     pub albedo: wgpu::TextureView,
