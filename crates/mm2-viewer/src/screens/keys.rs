@@ -3,7 +3,74 @@
 //! (`0x44a310`: "Keyboard" and Windows' `GetKeyNameText`, the shift,
 //! control and alt keys by strings 5059 to 5064).
 
+use std::sync::Mutex;
 use winit::keyboard::KeyCode;
+
+/// The pad in use, for the controls page to name its buttons the way
+/// the pad itself is labelled (the game only said "Joy Button 1").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PadFamily {
+    Xbox,
+    PlayStation,
+    Nintendo,
+}
+
+/// The pad in use: its family (none for a stick read as it comes), its
+/// name, and the device the controls page files it under.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PadInfo {
+    pub family: Option<PadFamily>,
+    pub name: String,
+    pub device: usize,
+}
+
+static PAD: Mutex<Option<PadInfo>> = Mutex::new(None);
+
+/// Sets (or clears) the pad in use.
+pub fn set_pad(info: Option<PadInfo>) {
+    if let Ok(mut p) = PAD.lock() {
+        *p = info;
+    }
+}
+
+/// The pad in use.
+pub fn pad() -> Option<PadInfo> {
+    PAD.lock().ok().and_then(|p| p.clone())
+}
+
+/// A pad button's own label, by DirectInput's order for an Xbox pad
+/// (the south, east, west and north buttons, the shoulders, the two
+/// middle buttons, the stick clicks).
+fn pad_button(family: PadFamily, code: i32) -> Option<String> {
+    let (brand, names): (&str, [&str; 10]) = match family {
+        PadFamily::Xbox => ("Xbox", ["A", "B", "X", "Y", "LB", "RB", "View", "Menu", "LS", "RS"]),
+        PadFamily::PlayStation => (
+            "PS",
+            ["Cross", "Circle", "Square", "Triangle", "L1", "R1", "Share", "Options", "L3", "R3"],
+        ),
+        PadFamily::Nintendo => ("Switch", ["B", "A", "Y", "X", "L", "R", "Minus", "Plus", "LS", "RS"]),
+    };
+    let name = names.get(usize::try_from(code).ok()?)?;
+    Some(format!("{brand} {name}"))
+}
+
+/// A pad axis's own name: the sticks, and Z as the two triggers.
+fn pad_axis(family: PadFamily, code: i32) -> Option<String> {
+    let brand = match family {
+        PadFamily::Xbox => "Xbox",
+        PadFamily::PlayStation => "PS",
+        PadFamily::Nintendo => "Switch",
+    };
+    let name = match code {
+        -3 => "Left Stick X",
+        -5 => "Left Stick Y",
+        -7 => "Triggers",
+        -9 => "Right Stick X",
+        -11 => "Right Stick Y",
+        _ => return None,
+    };
+    Some(format!("{brand} {name}"))
+}
 
 /// The scan code of a key.
 pub fn scan_code(key: KeyCode) -> Option<u32> {
@@ -256,7 +323,24 @@ pub fn input_name(kind: i32, code: i32, lang: impl Fn(u32) -> String) -> String 
             c if c >= 0 => format!("{} {}", lang(4067), c + 1),
             _ => String::new(),
         },
-        2 => match code {
+        2 if pad().and_then(|p| p.family).is_some() => {
+            let family = pad().and_then(|p| p.family).unwrap_or(PadFamily::Xbox);
+            let own = if code >= 0 {
+                pad_button(family, code)
+            } else {
+                pad_axis(family, code)
+            };
+            own.unwrap_or_else(|| input_name_joy(code, &lang))
+        }
+        2 => input_name_joy(code, &lang),
+        _ => String::new(),
+    }
+}
+
+/// A joystick input's name as the game gives it.
+fn input_name_joy(code: i32, lang: &impl Fn(u32) -> String) -> String {
+    {
+        match code {
             -3 => lang(4068),
             -5 => lang(4069),
             -7 => lang(4070),
@@ -265,8 +349,7 @@ pub fn input_name(kind: i32, code: i32, lang: impl Fn(u32) -> String) -> String 
             -13 => lang(4073),
             c if c >= 0 => format!("{} {}", lang(4074), c + 1),
             _ => String::new(),
-        },
-        _ => String::new(),
+        }
     }
 }
 
@@ -289,5 +372,14 @@ mod tests {
         assert_eq!(input_name(0, 0xc8, lang), "Keyboard Up");
         assert_eq!(input_name(2, -3, lang), "Joy X Axis");
         assert_eq!(input_name(2, 1, lang), "Joy Button 2");
+        set_pad(Some(PadInfo {
+            family: Some(PadFamily::PlayStation),
+            name: "DualShock 4".into(),
+            device: 3,
+        }));
+        assert_eq!(input_name(2, 1, lang), "PS Circle");
+        assert_eq!(input_name(2, -9, lang), "PS Right Stick X");
+        assert_eq!(input_name(2, 12, lang), "Joy Button 13");
+        set_pad(None);
     }
 }

@@ -383,7 +383,14 @@ impl Options {
                 }
                 let actions = (0..ACTIONS as u32).map(|i| cx.ui.lang(402 + i)).collect();
                 d.set_items("ActionListBox", actions, 0);
-                let devices = (0..8).map(|i| cx.ui.lang(460 + i)).collect();
+                // The pad plugged in by its own name in place of its kind.
+                let pad = keys::pad();
+                let devices = (0..8)
+                    .map(|i| match &pad {
+                        Some(p) if p.device == i && !p.name.is_empty() => p.name.clone(),
+                        _ => cx.ui.lang(460 + i as u32),
+                    })
+                    .collect();
                 d.set_items("InputDeviceDDL", devices, p.controls.device as usize);
                 d.set_selectable("ActionListBox", true);
                 d.set_selectable("MapKeyListBox", true);
@@ -613,24 +620,43 @@ impl Options {
         }
     }
 
-    /// Binds a key or joystick input to the waiting action. The steering
-    /// and lean (the first four actions) take only keys; a joystick's
-    /// button is refused there and the page keeps waiting (`0x4b9b70`).
-    /// The game binds joystick buttons only; here Accelerate also takes
-    /// a stick's throttle lever (the Z axis), which the game's map can
-    /// hold (0x449e20) but its page could not set.
+    /// Binds a key or joystick input to the waiting action. The game's
+    /// page took only keys for the steering and lean (`0x4b9b70`) and only
+    /// buttons from a joystick; here a stick pushed binds its axis to the
+    /// steering or lean (both sides at once, as the factory map has
+    /// them), and Accelerate also takes a stick's throttle lever (the Z
+    /// axis), which the game's map can hold (0x449e20).
     fn take_input(&mut self, ui: &Ui, input: (i32, i32)) {
         let Some(action) = self.listening else {
             return;
         };
+        let pair = match action {
+            0 | 1 => Some([0, 1]),
+            2 | 3 => Some([2, 3]),
+            _ => None,
+        };
         match input {
-            (0, _) => {}
-            (_, code) if action < 4 && code >= 0 => return,
-            (_, code) if code < 0 && !(action == crate::input::ACCELERATE && code == -7) => return,
+            (2, code) if code < 0 && pair.is_none() && !(action == crate::input::ACCELERATE && code == -7) => {
+                return
+            }
             _ => {}
         }
         self.listening = None;
         let device = self.p.controls.device as usize;
+        if let (Some(pair), (2, code)) = (pair, input) {
+            if code < 0 {
+                for a in 0..ACTIONS {
+                    if !pair.contains(&a) && self.p.keys.get(device, a) == input {
+                        self.p.keys.set(device, a, (-1, 0));
+                    }
+                }
+                for a in pair {
+                    self.p.keys.set(device, a, input);
+                }
+                self.refill_keys(ui);
+                return;
+            }
+        }
         for a in 0..ACTIONS {
             if a != action && self.p.keys.get(device, a) == input {
                 self.p.keys.set(device, a, (-1, 0));

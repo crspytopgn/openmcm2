@@ -11,6 +11,9 @@
 //! the shoulders, Back, Start, the stick clicks); any other stick gives
 //! its own buttons and axes in their HID order, as DirectInput would.
 //!
+//! Every pad and stick plugged in is read together; the one last touched
+//! names the buttons on the controls page.
+//!
 //! Axis values here are DirectInput's way round, −1 to 1 with Y growing
 //! towards the rider (stick pulled back).
 
@@ -98,19 +101,19 @@ impl Pads {
                 _ => {}
             }
         }
-        let Some((held, pushed)) = self.pad().map(|pad| {
-            let held = (0..32).filter(|&n| button(&pad, n)).fold(0u32, |m, n| m | 1 << n);
-            let mut pushed = [false; 7];
-            for (i, &code) in AXES.iter().enumerate() {
-                // Z only as a throttle lever (below): a game pad's Z is
-                // its triggers, which rest half way.
-                pushed[i] = i != 2 && axis(&pad, code).is_some_and(|v| v.abs() > PUSHED);
-            }
-            pushed[6] = throttle(&pad).is_some_and(|v| v > PUSHED);
-            (held, pushed)
-        }) else {
+        // Every pad and stick plugged in counts together, so a stick and
+        // a separate throttle (or a wheel and its pedals) work as one.
+        if self.gilrs.gamepads().next().is_none() {
             return Vec::new();
-        };
+        }
+        let held = (0..32).filter(|&n| self.button(n)).fold(0u32, |m, n| m | 1 << n);
+        let mut pushed = [false; 7];
+        for (i, &code) in AXES.iter().enumerate() {
+            // Z only as a throttle lever (below): a game pad's Z is
+            // its triggers, which rest half way.
+            pushed[i] = i != 2 && self.axis(code).is_some_and(|v| v.abs() > PUSHED);
+        }
+        pushed[6] = self.gilrs.gamepads().any(|(_, p)| throttle(&p).is_some_and(|v| v > PUSHED));
         let fresh = held & !self.held;
         self.held = held;
         let mut out = Vec::new();
@@ -121,6 +124,10 @@ impl Pads {
         }
         self.pushed = pushed;
         out.extend((0..32).filter(|n| fresh & 1 << n != 0).map(Press::Button));
+        let info = self.info();
+        if crate::screens::keys::pad() != info {
+            crate::screens::keys::set_pad(info);
+        }
         out
     }
 
@@ -142,6 +149,54 @@ impl Pads {
             }
         }
         (v, button(&pad, 0), button(&pad, 1))
+    }
+
+    /// Whether DirectInput's button `n` is down on any pad or stick.
+    pub fn button(&self, n: i32) -> bool {
+        self.gilrs.gamepads().any(|(_, p)| button(&p, n))
+    }
+
+    /// An axis (−3 X to −13 RZ) over every pad and stick: the one pushed
+    /// furthest.
+    pub fn axis(&self, code: i32) -> Option<f32> {
+        self.gilrs
+            .gamepads()
+            .filter_map(|(_, p)| axis(&p, code))
+            .reduce(|a, b| if b.abs() > a.abs() { b } else { a })
+    }
+
+    /// Accelerate on the Z axis: a stick's throttle lever (a separate
+    /// throttle counts), else a pad's Z, as `throttle_axis`.
+    pub fn throttle_axis(&self, code: i32) -> Option<f32> {
+        let lever = self.gilrs.gamepads().find(|(_, p)| throttle(p).is_some());
+        match lever {
+            Some((_, p)) => throttle_axis(&p, code),
+            None => self.pad().and_then(|p| throttle_axis(&p, code)),
+        }
+    }
+
+    /// A pad's trigger, the furthest pulled over every pad, 0 to 1.
+    pub fn trigger(&self, b: Button) -> f32 {
+        self.gilrs
+            .gamepads()
+            .map(|(_, p)| p.button_data(b).map_or(0.0, |d| d.value()))
+            .fold(0.0, f32::max)
+    }
+
+    /// The pad in use as the controls page names it.
+    pub fn info(&self) -> Option<crate::screens::keys::PadInfo> {
+        use crate::screens::keys::{PadFamily, PadInfo};
+        let pad = self.pad()?;
+        let family = known(&pad).then(|| match pad.vendor_id() {
+            Some(0x054c) => PadFamily::PlayStation,
+            Some(0x057e) => PadFamily::Nintendo,
+            _ => PadFamily::Xbox,
+        });
+        Some(PadInfo {
+            family,
+            name: pad.name().to_string(),
+            device: self.device(),
+        })
     }
 
     fn take(&mut self, id: GamepadId) {

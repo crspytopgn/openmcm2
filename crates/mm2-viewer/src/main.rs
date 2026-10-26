@@ -4000,10 +4000,10 @@ impl App {
     fn gamepad(&mut self, mut c: Controls) -> Controls {
         let map = self.pad_map;
         let flip = if self.joy_flipped { -1.0 } else { 1.0 };
-        let Some(pad) = self.pads.as_ref().and_then(|p| p.pad()) else {
+        let Some(pad) = self.pads.as_ref() else {
             return c;
         };
-        let trigger = |b| pad.button_data(b).map_or(0.0, |d| d.value());
+        let trigger = |b| pad.trigger(b);
         if trigger(gilrs::Button::RightTrigger2) > pad::THROTTLE_ON {
             c.throttle = 1.0;
         }
@@ -4011,7 +4011,7 @@ impl App {
             c.brake = 1.0;
         }
         if let (2, code) = map[input::ACCELERATE] {
-            if let Some(v) = pad::throttle_axis(&pad, code) {
+            if let Some(v) = pad.throttle_axis(code) {
                 if v > pad::THROTTLE_ON {
                     c.throttle = 1.0;
                 }
@@ -4020,7 +4020,7 @@ impl App {
         // An action's pull, 0 to 1; `side` is the axis's half it reads.
         let pull = |action: usize, side: f32, dead: f32| -> f32 {
             match map[action] {
-                (2, code) => match pad::axis(&pad, code) {
+                (2, code) => match pad.axis(code) {
                     Some(v) if code < 0 => {
                         let v = if code == -5 { v * flip } else { v };
                         let v = if v.abs() < dead { 0.0 } else { v };
@@ -4050,12 +4050,12 @@ impl App {
     /// game's game pad reading, 0x4c74e0).
     #[cfg(feature = "gamepad")]
     fn pad_held(&self, action: usize) -> bool {
-        let Some(pad) = self.pads.as_ref().and_then(|p| p.pad()) else {
+        let Some(pad) = self.pads.as_ref() else {
             return false;
         };
         match self.pad_map[action] {
-            (2, code) if code >= 0 => pad::button(&pad, code),
-            (2, code) if !self.analog => pad::axis(&pad, code).is_some_and(|v| {
+            (2, code) if code >= 0 => pad.button(code),
+            (2, code) if !self.analog => pad.axis(code).is_some_and(|v| {
                 let v = if code == -5 && self.joy_flipped { -v } else { v };
                 let side = match action {
                     input::STEER_LEFT | input::LEAN_FORWARD => -1.0,

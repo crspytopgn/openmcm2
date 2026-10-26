@@ -8,6 +8,11 @@
   stick's throttle lever for the gas.
 * **Menus with a pad:** the stick or D-pad moves the pointer, A clicks and B
   goes back.
+* **Your controller on screen:** Options > Controls names the pad in use and
+  shows its own buttons (A/B/LB/RT on Xbox, Cross/Circle/L1/R2 on
+  PlayStation). The stick can be bound to steer or lean.
+* **Several controllers at once:** they're read together, and the one last
+  touched rides.
 * Enhanced look: wood, metal, concrete and straw detail on the Farm
   track's objects.
 
