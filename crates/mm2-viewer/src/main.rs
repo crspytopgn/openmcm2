@@ -3700,6 +3700,23 @@ impl App {
         }
     }
 
+    /// Whether a race played from the menus is over by itself (0x45feb0,
+    /// run each frame): a lap or gate race the frame after the player
+    /// crosses the line for the last time, once 0x497740 has said the
+    /// place; a Stunt Quarry or tag session when its minutes are up.
+    /// Practice and ghost races never end, and a network race is left to
+    /// Esc here.
+    fn race_done(&self) -> bool {
+        let Some(r) = &self.race else { return false };
+        if self.front.is_none() || self.replay.is_some() || self.net.is_some() || r.practice || r.podium.is_some() {
+            return false;
+        }
+        match r.time_left() {
+            Some(left) => left <= 0.0,
+            None => r.racers[r.player].finished.is_some(),
+        }
+    }
+
     /// Ends the race: with the podium first when the player made the top
     /// three of a finished race and the Podiums option is on (0x45f610,
     /// 0x45e490); Esc again leaves it.
@@ -4259,6 +4276,10 @@ impl App {
         let podium_over = |r: &Race| r.podium.is_some_and(|(_, at)| r.time + dt - at >= podium::LENGTH);
         if self.race.as_ref().is_some_and(podium_over) {
             self.back_to_menu();
+            return;
+        }
+        if self.race_done() {
+            self.end_race();
             return;
         }
         let controls = if self.follow {

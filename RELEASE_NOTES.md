@@ -1,4 +1,13 @@
-# OpenMCM2 0.1.4
+# OpenMCM2 0.1.5
+
+## New in 0.1.5
+
+* **Races end at the finish** like the original: you go to the podium after
+  a top-three finish with Podiums on, otherwise to the results. The Stunt
+  Quarry ends when time is up. This is new and hasn't been played through
+  by hand yet, so reports are welcome.
+* **No console window on Windows:** the launcher no longer opens one behind
+  the game.
 
 ## New in 0.1.4
 
