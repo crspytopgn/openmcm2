@@ -72,14 +72,77 @@ pub enum PixelFormat {
     Rgb555,
     /// 4 bits each of alpha, red, green and blue.
     Argb4444,
+    /// 5 bits of red, 6 of green, 5 of blue.
+    Rgb565,
+    /// 1 bit of alpha, then 5 bits each of red, green and blue.
+    Argb1555,
 }
 
 impl PixelFormat {
+    /// The shipped files' mip-chain codes.
     pub fn from_code(code: u32) -> Option<Self> {
-        match code {
-            22 => Some(PixelFormat::Rgb555),
-            26 => Some(PixelFormat::Argb4444),
-            _ => None,
+        Stored::from_code(code).filter(|s| s.mipped && s.bytes == 2).map(|s| s.format)
+    }
+}
+
+/// What one of the game's texture format codes says about the stored
+/// pixels (0x516e20 bytes, 0x516ee0 packed, 0x516f30 mip chain, 0x516f80
+/// the pixel layout). The shipped tracks use 22 (RGB555 mip chain); track
+/// makers' tools also wrote others, such as 3 (one raw RGB565 level).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stored {
+    /// The 16-bit layout the pixels are kept in once read.
+    pub format: PixelFormat,
+    /// Bytes per stored pixel: 1 (grey), 2, 3 (BGR) or 4 (BGRA).
+    pub bytes: usize,
+    /// Whether the file holds a mip chain, or one level.
+    pub mipped: bool,
+    /// Whether a level may be LZW packed.
+    pub packed: bool,
+}
+
+impl Stored {
+    pub fn from_code(code: u32) -> Option<Self> {
+        let (format, bytes) = match code {
+            1 | 9 | 0x10 | 0x18 => (PixelFormat::Rgb565, 3),
+            2 | 5 | 7 | 0x11 | 0x14 | 0x16 => (PixelFormat::Rgb555, 2),
+            3 | 8 | 0x12 | 0x17 => (PixelFormat::Rgb565, 2),
+            4 | 6 | 0x13 | 0x15 => (PixelFormat::Rgb565, 1),
+            10 | 0xd | 0x19 | 0x1c | 0x1f | 0x21 => (PixelFormat::Argb1555, 2),
+            0xb | 0xe | 0x1a | 0x1d => (PixelFormat::Argb4444, 2),
+            0xc | 0xf | 0x1b | 0x1e | 0x20 | 0x22 => (PixelFormat::Argb4444, 4),
+            _ => return None,
+        };
+        Some(Stored {
+            format,
+            bytes,
+            mipped: matches!(code, 0x10..=0x1e | 0x21 | 0x22),
+            packed: matches!(code, 5..=0xc | 0x14..=0x1b | 0x1f..=0x22),
+        })
+    }
+
+    /// Turns stored pixels into 16-bit ones; the 1-, 3- and 4-byte
+    /// layouts lose their low bits.
+    fn pixels(&self, data: &[u8]) -> Vec<u16> {
+        match self.bytes {
+            1 => data
+                .iter()
+                .map(|&c| u16::from(c >> 3) << 11 | u16::from(c >> 2) << 5 | u16::from(c >> 3))
+                .collect(),
+            3 => data
+                .chunks_exact(3)
+                .map(|p| u16::from(p[2] >> 3) << 11 | u16::from(p[1] >> 2) << 5 | u16::from(p[0] >> 3))
+                .collect(),
+            4 => data
+                .chunks_exact(4)
+                .map(|p| {
+                    u16::from(p[3] >> 4) << 12 | u16::from(p[2] >> 4) << 8 | u16::from(p[1] >> 4) << 4 | u16::from(p[0] >> 4)
+                })
+                .collect(),
+            _ => data
+                .chunks_exact(2)
+                .map(|b| u16::from_le_bytes([b[0], b[1]]))
+                .collect(),
         }
     }
 }
@@ -111,13 +174,29 @@ impl Texture {
                     let c = |shift: u16| (p >> shift & 15) as u8 * 17;
                     [c(8), c(4), c(0), c(12)]
                 }
+                PixelFormat::Rgb565 => {
+                    let five = |v: u16| (v as u8) << 3 | (v as u8) >> 2;
+                    let g = (p >> 5 & 63) as u8;
+                    [five(p >> 11 & 31), g << 2 | g >> 4, five(p & 31), 255]
+                }
+                PixelFormat::Argb1555 => {
+                    let c = |shift: u16| {
+                        let v = (p >> shift & 31) as u8;
+                        v << 3 | v >> 2
+                    };
+                    [c(10), c(5), c(0), if p & 0x8000 != 0 { 255 } else { 0 }]
+                }
             })
             .collect()
     }
 
     /// Whether any pixel is less than fully opaque.
     pub fn has_alpha(&self) -> bool {
-        self.format == PixelFormat::Argb4444 && self.levels[0].iter().any(|&p| p >> 12 != 15)
+        match self.format {
+            PixelFormat::Argb4444 => self.levels[0].iter().any(|&p| p >> 12 != 15),
+            PixelFormat::Argb1555 => self.levels[0].iter().any(|&p| p & 0x8000 == 0),
+            _ => false,
+        }
     }
 }
 
@@ -280,20 +359,90 @@ fn skip_palette(r: &mut Reader) -> Result<()> {
 fn read_texture(r: &mut Reader) -> Result<Texture> {
     let size = r.u32("texture width")?;
     let height = r.u32("texture height")?;
-    let format = r.u32("texture format")?;
+    let code = r.u32("texture format")?;
     if size != height {
         return Err(Error::Corrupt("texture is not square"));
     }
-    if format != 22 {
-        return Err(Error::Corrupt("unknown terrain texture format"));
+    let stored = Stored::from_code(code).ok_or(Error::Corrupt("unknown terrain texture format"))?;
+    read_image(r, size, stored)
+}
+
+/// Reads a texture as its format code says (0x4ca7d0): a mip chain, or
+/// one level with the smaller ones made from it.
+pub(crate) fn read_image(r: &mut Reader, size: u32, stored: Stored) -> Result<Texture> {
+    if stored.mipped {
+        return read_stored_mips(r, size, stored);
     }
-    read_mips(r, size, PixelFormat::Rgb555)
+    if !size.is_power_of_two() || size > 1024 {
+        return Err(Error::Corrupt("texture size is not a power of two"));
+    }
+    let len = (size * size) as usize * stored.bytes;
+    let data = if stored.packed {
+        // The packed stream starts with its own length.
+        let start = r.pos;
+        let packed = r.u32("packed level size")? as usize;
+        r.seek(start, "packed level")?;
+        lzw::decompress(r.take(packed.max(4), "packed level")?, len)?
+    } else {
+        r.take(len, "texture level")?.to_vec()
+    };
+    let mut levels = vec![stored.pixels(&data)];
+    while levels.len() <= size.trailing_zeros() as usize {
+        let side = (size >> levels.len()) as usize;
+        levels.push(halve(levels.last().unwrap(), side, stored.format));
+    }
+    Ok(Texture {
+        size,
+        format: stored.format,
+        levels,
+    })
+}
+
+/// A level half the size of `level`, each pixel the mean of four.
+fn halve(level: &[u16], side: usize, format: PixelFormat) -> Vec<u16> {
+    // Each layout's fields: shift and bit count.
+    let fields: &[(u16, u16)] = match format {
+        PixelFormat::Rgb555 => &[(10, 5), (5, 5), (0, 5)],
+        PixelFormat::Argb4444 => &[(12, 4), (8, 4), (4, 4), (0, 4)],
+        PixelFormat::Rgb565 => &[(11, 5), (5, 6), (0, 5)],
+        PixelFormat::Argb1555 => &[(15, 1), (10, 5), (5, 5), (0, 5)],
+    };
+    let wide = side * 2;
+    let mut out = Vec::with_capacity(side * side);
+    for y in 0..side {
+        for x in 0..side {
+            let four = [
+                level[2 * y * wide + 2 * x],
+                level[2 * y * wide + 2 * x + 1],
+                level[(2 * y + 1) * wide + 2 * x],
+                level[(2 * y + 1) * wide + 2 * x + 1],
+            ];
+            let mut p = 0u16;
+            for &(shift, bits) in fields {
+                let mask = (1u16 << bits) - 1;
+                let sum: u16 = four.iter().map(|q| q >> shift & mask).sum();
+                p |= ((sum + 2) / 4).min(mask) << shift;
+            }
+            out.push(p);
+        }
+    }
+    out
 }
 
 /// Reads a mip chain: one offset per level from 1×1 up to size×size, plus
 /// the end, each relative to where it is stored. A level is LZW packed
 /// unless its length is exactly the raw size.
 pub(crate) fn read_mips(r: &mut Reader, size: u32, format: PixelFormat) -> Result<Texture> {
+    let stored = Stored {
+        format,
+        bytes: 2,
+        mipped: true,
+        packed: true,
+    };
+    read_stored_mips(r, size, stored)
+}
+
+fn read_stored_mips(r: &mut Reader, size: u32, stored: Stored) -> Result<Texture> {
     if !size.is_power_of_two() || size > 1024 {
         return Err(Error::Corrupt("texture size is not a power of two"));
     }
@@ -306,24 +455,22 @@ pub(crate) fn read_mips(r: &mut Reader, size: u32, format: PixelFormat) -> Resul
     let mut levels = Vec::with_capacity(level_count);
     for (i, w) in bounds.windows(2).enumerate() {
         let side = 1usize << i;
-        let len = side * side * 2;
+        let len = side * side * stored.bytes;
         r.seek(w[0], "mip level")?;
         let src = r.take(w[1].saturating_sub(w[0]), "mip level")?;
-        let data = if src.len() == len {
-            src.to_vec()
+        let data = if src.len() == len || !stored.packed {
+            let mut raw = src.to_vec();
+            raw.resize(len, 0);
+            raw
         } else {
             lzw::decompress(src, len)?
         };
-        levels.push(
-            data.chunks_exact(2)
-                .map(|b| u16::from_le_bytes([b[0], b[1]]))
-                .collect(),
-        );
+        levels.push(stored.pixels(&data));
     }
     levels.reverse();
     Ok(Texture {
         size,
-        format,
+        format: stored.format,
         levels,
     })
 }

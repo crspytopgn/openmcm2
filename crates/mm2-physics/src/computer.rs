@@ -50,6 +50,9 @@ const CRASH_STUCK: f32 = 0.5;
 const CRASH_DROP: f32 = 1000.0;
 const SHORTEST_STEP: f32 = 0.02;
 
+/// The tyres' radii, front and rear, ft (as the full model's).
+const WHEEL_RADII: [f32; 2] = [1.177, 1.143];
+
 /// The computer riders' speed-loss tolerance (0x492950) by level 1–3: in
 /// Supercross 4, 3.25, 2.5; elsewhere 3.75, 3.25, 2.5. The harder riders
 /// take more.
@@ -631,6 +634,14 @@ impl Rider {
     /// Forward speed along the bike (+0x434).
     pub fn forward_speed(&self) -> f32 {
         self.velocity.dot(self.look)
+    }
+
+    /// How fast each drawn wheel turns, front then rear, rad/s. 0x414000
+    /// turns both by +0x434 over the radius times the frame, and the tyre
+    /// (0x518c40) divides by its radius again. None for a tyre in the air.
+    pub fn wheel_rates(&self) -> [Option<f32>; 2] {
+        let speed = self.forward_speed();
+        [0, 1].map(|i| self.down[i].then(|| speed / (WHEEL_RADII[i] * WHEEL_RADII[i])))
     }
 }
 

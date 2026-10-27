@@ -5,14 +5,17 @@
 //! u32 name_len, name   // palette for 8-bit cards, e.g. "RGBMaps.pal8"
 //! mip chain            // as in terrain textures
 //! ```
+//!
+//! Track makers' tools also wrote the game's other format codes (see
+//! [`Stored`]), some as one level without mips.
 
 use crate::reader::Reader;
-use crate::trn::{read_mips, PixelFormat, Texture};
+use crate::trn::{read_image, PixelFormat, Stored, Texture};
 use crate::{Error, Result};
 
 pub fn parse(bytes: &[u8]) -> Result<Texture> {
     let mut r = Reader::new(bytes, 0);
-    let format = PixelFormat::from_code(r.u32("texture format")?)
+    let stored = Stored::from_code(r.u32("texture format")?)
         .ok_or(Error::Corrupt("unknown texture format"))?;
     r.u32("texture version")?;
     let width = r.u32("texture width")?;
@@ -22,7 +25,7 @@ pub fn parse(bytes: &[u8]) -> Result<Texture> {
     }
     let name_len = r.u32("palette name length")? as usize;
     r.take(name_len, "palette name")?;
-    read_mips(&mut r, width, format)
+    read_image(&mut r, width, stored)
 }
 
 /// The overlay pictures in `RES/GLOBAL.RES` (the speedometer, the race

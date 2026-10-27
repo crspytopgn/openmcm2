@@ -665,6 +665,14 @@ impl TerrainRenderer {
         }
     }
 
+    /// Turns animated object `index`'s frame `name` by `angle` about its
+    /// own x axis: a bike's wheel.
+    pub fn set_spin(&mut self, index: usize, name: &str, angle: f32) {
+        if let Some(o) = &mut self.objects {
+            o.set_spin(index, name, angle);
+        }
+    }
+
     /// Mixes motions on animated object `index`, each at a phase and weight.
     pub fn set_blend(&mut self, index: usize, mix: &[(&str, f32, f32, u8)]) {
         if let Some(o) = &mut self.objects {

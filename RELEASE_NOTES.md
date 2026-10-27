@@ -1,4 +1,17 @@
-# OpenMCM2 0.1.1
+# OpenMCM2 0.1.2
+
+## New in 0.1.2
+
+Fixes from playtesting:
+
+* **Custom tracks load:** community tracks (such as MDX Racing's) with other
+  texture formats, short compressed terrain cells, or models packed inside
+  the track or named with folder paths now open.
+* **Tyres turn** with the bike's speed, as in the original.
+* **No more falls in corners:** the over-the-bars check no longer throws
+  riders who are leaned over in a turn.
+* **Off-track arrow** only shows when you really leave the course, and a
+  reset rider is put back facing the right way.
 
 ## New in 0.1.1
 

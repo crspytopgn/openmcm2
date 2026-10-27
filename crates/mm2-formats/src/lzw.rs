@@ -7,6 +7,8 @@
 //! * `0x100` – end of data
 //! * `0x101` – widen codes by one bit
 //! * `0x102` – clear the dictionary (the next code is a literal)
+//!
+//! A stream that ends before `out_len` bytes is padded with zeros.
 
 use crate::{Error, Result};
 
@@ -86,10 +88,10 @@ pub fn decompress(src: &[u8], out_len: usize) -> Result<Vec<u8>> {
             }
         }
     }
-    if out.len() < out_len {
-        return Err(Error::Corrupt("LZW stream is shorter than expected"));
-    }
-    out.truncate(out_len);
+    // The game (0x4a1940) decodes up to the end code and leaves the rest
+    // of its buffer as it was. Some track makers' tools end the stream a
+    // byte early (Angel Delight II's cells), so the rest is zeros.
+    out.resize(out_len, 0);
     Ok(out)
 }
 
@@ -155,8 +157,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_short_streams() {
+    fn pads_short_streams_with_zeros() {
         let src = pack(&[(b'a' as u32, 9), (END, 9)]);
-        assert!(decompress(&src, 2).is_err());
+        assert_eq!(decompress(&src, 3).unwrap(), b"a\0\0");
     }
 }

@@ -103,6 +103,9 @@ pub struct AnimatedModel {
     /// The rider's morphs, the first of its vertices in the mesh and those
     /// vertices at rest.
     morph: Option<(Arc<Morphs>, u32, Arc<Vec<Vertex>>)>,
+    /// Frames turned about their own x axis on top of the motion, rad: a
+    /// bike's wheels (0x518c40).
+    spins: Vec<(usize, f32)>,
 }
 
 impl AnimatedModel {
@@ -174,6 +177,11 @@ impl AnimatedModel {
                 if let Some(m) = local.get_mut(key.frame) {
                     *m = orientation(key.look, key.up, Vec3::ONE, key.position);
                 }
+            }
+        }
+        for &(f, angle) in &self.spins {
+            if let Some(m) = local.get_mut(f) {
+                *m *= Mat4::from_rotation_x(angle);
             }
         }
         local
@@ -250,6 +258,10 @@ impl ObjectMesh {
         };
         let mut cache: HashMap<String, Option<slb::Model>> = HashMap::new();
         let mut load = |name: &str| {
+            // Track makers' scenes may name a model with the folder it
+            // was made in (`SLTFiles\ramp_TD_001.slt`); the packs hold
+            // bare names.
+            let name = bare(name);
             let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
             // One scene has a tab before the extension.
             let key = format!("{}.slb", stem.trim()).to_ascii_lowercase();
@@ -298,7 +310,7 @@ impl ObjectMesh {
             }
         }
 
-        let find = |name: &str| textures.iter().find_map(|(_, t)| t.get(name));
+        let find = |name: &str| textures.iter().find_map(|(_, t)| t.get(bare(name)));
         let mut morphs: Option<Arc<Morphs>> = None;
         for (i, a) in animations.iter().enumerate() {
             let Some(mcf) = find(&a.model).and_then(|b| Mcf::parse(b).ok()) else {
@@ -372,6 +384,7 @@ impl ObjectMesh {
                 ghost: false,
                 mud: 0.0,
                 morph,
+                spins: Vec::new(),
             });
             mesh.placed += 1;
         }
@@ -409,6 +422,7 @@ impl ObjectMesh {
                 ghost: false,
                 mud: 0.0,
                 morph: None,
+                spins: Vec::new(),
             });
             mesh.placed += 1;
         }
@@ -426,7 +440,7 @@ impl ObjectMesh {
                     .map(|digits| Image::from_texture(&plate(&digits, n.parse().unwrap_or(0)))),
                 None => textures
                     .iter()
-                    .find_map(|(archive, t)| Some((*archive, t.get(&name)?)))
+                    .find_map(|(archive, t)| Some((*archive, t.get(bare(&name))?)))
                     .and_then(|(archive, e)| {
                         let tex = texture::parse(e)
                             .map_err(|err| eprintln!("{name}: {err}"))
@@ -1207,6 +1221,17 @@ impl ObjectRenderer {
         frames.iter().map(|&f| world.get(f).copied()).collect()
     }
 
+    /// Turns animated model `index`'s frame `name` by `angle` about its own
+    /// x axis, on top of its motion: a bike's wheel.
+    pub fn set_spin(&mut self, index: usize, name: &str, angle: f32) {
+        let Some(a) = self.animated.get_mut(index) else { return };
+        let Some(frame) = a.frame_named(name) else { return };
+        match a.spins.iter_mut().find(|s| s.0 == frame) {
+            Some(s) => s.1 = angle,
+            None => a.spins.push((frame, angle)),
+        }
+    }
+
     /// Holds animated model `index` on its first frame until `time`.
     pub fn set_motion_start(&mut self, index: usize, time: f32) {
         if let Some(a) = self.animated.get_mut(index) {
@@ -1483,4 +1508,9 @@ fn upload(device: &wgpu::Device, queue: &wgpu::Queue, tex: &Image) -> wgpu::Text
         wgpu::util::TextureDataOrder::LayerMajor,
         &data,
     )
+}
+
+/// A file name without the folders before it.
+fn bare(name: &str) -> &str {
+    name.rsplit(['\\', '/']).next().unwrap_or(name)
 }

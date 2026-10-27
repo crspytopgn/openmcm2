@@ -1127,6 +1127,10 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
             r.bike.place() * Mat4::from_quat(r.bike.drawn_turn())
         };
         renderer.set_object_place(r.object, place);
+        // The wheels turn with the bike's speed (0x518c40).
+        for (frame, (angle, _)) in ["TireFront", "TireRear"].into_iter().zip(r.wheels) {
+            renderer.set_spin(r.object, frame, angle);
+        }
         // In a crash the rider is thrown off and plays the fall.
         let wreck = r.bike.wreck();
         let (rider, motion) = wreck.unwrap_or((place, RIDING));
@@ -1411,8 +1415,8 @@ fn load_track(
 ) -> Result<Track, BoxError> {
     let ride = rides.get(me).cloned().flatten();
     load_step();
-    let archive = read_archive(path)?;
-    let archive = rs2::Archive::parse(&archive)?;
+    let track_bytes = read_archive(path)?;
+    let archive = rs2::Archive::parse(&track_bytes)?;
     let find = |ext: &str| {
         archive
             .entries()
@@ -1504,11 +1508,13 @@ fn load_track(
     let mut spectators = Vec::new();
     let objects = match (scene, res.clone()) {
         (Some(scene), Some(res)) => {
-            let mut model_files = vec![read_archive(&res.join("MODELS.RES"))?];
-            let mut texture_files = vec![(
-                "OBJECTS.RES".to_string(),
-                read_archive(&res.join("OBJECTS.RES"))?,
-            )];
+            // Track makers pack their own models, textures and motions
+            // into the track's file; they are found there first.
+            let mut model_files = vec![read_archive(&res.join("MODELS.RES"))?, track_bytes.clone()];
+            let mut texture_files = vec![
+                (file_name(path).to_ascii_uppercase(), track_bytes.clone()),
+                ("OBJECTS.RES".to_string(), read_archive(&res.join("OBJECTS.RES"))?),
+            ];
             load_step();
             // Bikes and riders keep their models, motions and skins together.
             let mut animations = scene.animations.clone();

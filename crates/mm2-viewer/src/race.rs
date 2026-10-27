@@ -59,6 +59,8 @@ pub struct Course {
     points: Vec<Vec3>,
     /// Half the course's width at each point, ft.
     widths: Vec<f32>,
+    /// Each point's cross-section ends.
+    edges: Vec<[Vec3; 2]>,
     /// The point after each one; the last of a node leads to the node it
     /// links to.
     next: Vec<usize>,
@@ -75,8 +77,10 @@ impl Course {
         let mut first = Vec::new();
         let mut points = Vec::new();
         let mut widths = Vec::new();
+        let mut edges = Vec::new();
         for node in &def.nodes {
             first.push(points.len());
+            edges.extend(node.sections.iter().map(|s| s.edges.map(Vec3::from)));
             points.extend(node.sections.iter().map(|s| Vec3::from(s.center)));
             widths.extend(
                 node.sections
@@ -126,6 +130,7 @@ impl Course {
         let mut course = Course {
             points,
             widths,
+            edges,
             next,
             lap,
             finish,
@@ -279,28 +284,38 @@ impl Course {
         None
     }
 
-    /// The places whose stretch of course `at` stands on, within the
-    /// course's sides (0x51c9c0, 0x51c570).
+    /// The places whose stretch of course `at` stands on (0x51c9c0): each
+    /// pair of cross-sections in a row bounds a stretch, its sides from
+    /// edge to edge and its ends the sections' lines through their centres
+    /// (0x51c570), so the outside of a bend has no gaps between stretches.
+    /// The place is along the centre line, clamped to the stretch.
     fn places(&self, at: Vec3) -> Vec<Place> {
+        let p = flat(at);
         let mut found = Vec::new();
         for leg in 0..self.points.len() {
             let to = self.next[leg];
-            let (a, b) = (flat(self.points[leg]), flat(self.points[to]));
-            let d = b - a;
+            if to == leg {
+                continue;
+            }
+            let (a, b) = (self.points[leg], self.points[to]);
+            let ([a0, a1], [b0, b1]) = (self.edges[leg], self.edges[to]);
+            if !inside(p, &[a0, b0, b, b1, a1, a]) {
+                continue;
+            }
+            let d = flat(b - a);
             let l2 = d.length_squared();
-            if l2 == 0.0 {
-                continue;
-            }
-            let t = (flat(at) - a).dot(d) / l2;
-            if !(0.0..=1.0).contains(&t) {
-                continue;
-            }
-            let half = self.widths[leg] + (self.widths[to] - self.widths[leg]) * t;
-            if (flat(at) - (a + d * t)).length() <= half {
-                found.push(Place { leg, t });
-            }
+            let t = if l2 == 0.0 { 0.0 } else { ((p - flat(a)).dot(d) / l2).clamp(0.0, 1.0) };
+            found.push(Place { leg, t });
         }
         found
+    }
+
+    /// The place under `probe` where the course runs most the way of
+    /// `heading`.
+    fn facing(&self, probe: Vec3, heading: Vec3) -> Option<Place> {
+        self.places(probe)
+            .into_iter()
+            .max_by(|a, b| self.way(*a).dot(heading).total_cmp(&self.way(*b).dot(heading)))
     }
 
     /// The race tracker's step for one rider (0x4eb170, 0x51c9c0 with
@@ -322,10 +337,7 @@ impl Course {
         let Some(c) = *confirmed else {
             // No start line on the course: where the course runs the way
             // the bike faces.
-            let first = found
-                .iter()
-                .copied()
-                .max_by(|a, b| self.way(*a).dot(heading).total_cmp(&self.way(*b).dot(heading)));
+            let first = self.facing(probe, heading);
             *confirmed = first;
             return first;
         };
@@ -350,6 +362,22 @@ impl Course {
 
 fn flat(v: Vec3) -> Vec3 {
     Vec3::new(v.x, 0.0, v.z)
+}
+
+/// Whether `p` is inside the polygon `corners` on the ground (x, z), by
+/// counting the sides a line from it crosses (0x51c570).
+fn inside(p: Vec3, corners: &[Vec3]) -> bool {
+    let mut odd = false;
+    for (i, a) in corners.iter().enumerate() {
+        let b = corners[(i + 1) % corners.len()];
+        if (a.z <= p.z) != (b.z <= p.z) {
+            let x = a.x + (p.z - a.z) * (b.x - a.x) / (b.z - a.z);
+            if p.x < x {
+                odd = !odd;
+            }
+        }
+    }
+    odd
 }
 
 /// A bike: the player's rides the game's full model, the computer riders'
@@ -397,6 +425,20 @@ impl Bike {
                 None => b.rider.forward_speed(),
             },
             Bike::Taped(b) => b.velocity.dot(b.forward()),
+        }
+    }
+
+    /// How fast each drawn wheel turns, front then rear, rad/s; None for
+    /// a wheel off the ground, as a crashed bike's are.
+    pub fn wheel_rates(&self) -> [Option<f32>; 2] {
+        match self {
+            _ if self.crashed() => [None; 2],
+            Bike::Player(b) => b.wheel_rates(),
+            Bike::Computer(b) => b.rider.wheel_rates(),
+            Bike::Taped(b) => {
+                let rate = b.velocity.dot(b.forward()) / 1.16;
+                [(!b.airborne).then_some(rate); 2]
+            }
         }
     }
 
@@ -821,6 +863,9 @@ pub struct Racer {
     /// The riding pose, and the rider's and the bike's motions it mixes.
     pub pose: crate::riding::Pose,
     pub mixes: (Vec<crate::riding::Mix>, Vec<crate::riding::Mix>),
+    /// How far each drawn wheel has turned, front and rear, rad, and how
+    /// fast it turns, rad/s (tyre +0x278 over the step).
+    pub wheels: [(f32, f32); 2],
 }
 
 impl Racer {
@@ -882,6 +927,7 @@ impl Racer {
             last: position,
             trick_wait: 0.0,
             stood: None,
+            wheels: [(0.0, 0.0); 2],
             stunt: Stunt::default(),
             trick_clock: 0.0,
             ai_hold: 0.0,
@@ -1803,6 +1849,7 @@ impl Race {
                     r.repair += repair;
                     r.medical += medical;
                 }
+                let got_up = r.was_crashed && !crashed;
                 r.was_crashed = crashed;
                 if racing {
                     r.timing.tick(step, true);
@@ -1817,6 +1864,12 @@ impl Race {
                     if let Bike::Player(b) = &r.bike {
                         let look = b.forward();
                         let probe = r.bike.position() + look * 3.5;
+                        if got_up {
+                            // Put back after a crash, maybe well behind
+                            // where the wreck slid to: the place starts
+                            // afresh where the bike now stands.
+                            r.place = course.facing(probe, look).or(r.place);
+                        }
                         r.on_course = course.follow(probe, look, &mut r.place).is_some();
                         r.off_course = if r.on_course { 0.0 } else { r.off_course + step };
                     }
@@ -1897,9 +1950,16 @@ impl Race {
         self.chase = self.chase.restart(b.position(), b.forward());
     }
 
-    /// Picks each rider's riding motions for a frame of `dt` seconds.
+    /// Picks each rider's riding motions for a frame of `dt` seconds, and
+    /// turns the wheels.
     fn pose_riders(&mut self, dt: f32) {
         for r in &mut self.racers {
+            for ((angle, rate), now) in r.wheels.iter_mut().zip(r.bike.wheel_rates()) {
+                // A wheel off the ground keeps turning as it was (0x519ab0
+                // turns it by its last step's angle again).
+                *rate = now.unwrap_or(*rate);
+                *angle = (*angle + *rate * dt).rem_euclid(std::f32::consts::TAU);
+            }
             let inputs = r.bike.rider_inputs();
             r.mixes = r.pose.update(&inputs, dt);
             if let Some((_, phase)) = r.taunt {

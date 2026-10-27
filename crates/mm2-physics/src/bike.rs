@@ -766,6 +766,28 @@ impl Bike {
         self.tyres.map(|t| t.down.then_some((t.contact, t.on_object)))
     }
 
+    /// How fast each drawn wheel turns, front then rear, rad/s, while its
+    /// tyre is on the ground (0x519ab0, 0x518c40): the tyre's speed along
+    /// itself over its radius, the rear's with its wheelspin (+0x290) on
+    /// top. With both tyres down, a wheel below 0.1 ft/s stands still.
+    /// None for a tyre in the air, where the wheel keeps turning as it was.
+    pub fn wheel_rates(&self) -> [Option<f32>; 2] {
+        let both = self.tyres.iter().all(|t| t.down);
+        let spin = self.roost().2;
+        [0, 1].map(|i| {
+            let t = &self.tyres[i];
+            if !t.down || self.crash.is_some() {
+                return None;
+            }
+            let speed = self.velocity.dot(t.forward);
+            if both && speed <= 0.1 {
+                return Some(0.0);
+            }
+            let spin = if i == 1 { spin } else { 0.0 };
+            Some((speed + spin) / TYRE_RADII[i])
+        })
+    }
+
     /// The rear tyre's traction (+0x2b8) and spin (+0x2bc, one less the
     /// traction), and how hard it throws: +0x290 over the step (0x519ab0),
     /// the spin times the drive over the mass.
@@ -1614,14 +1636,7 @@ impl Bike {
         }
         self.turn_rate = yaw / h;
         let corner = yaw;
-        // The roll against the touching tyres' ground (0x52dcf0, f_4ac),
-        // not the world's: on a side slope an upright bike reads as leaned.
-        let ground_lean = if f.down || r.down {
-            let m = self.orientation;
-            (-m.x_axis.dot(n)).atan2(m.y_axis.dot(n))
-        } else {
-            self.lean
-        };
+        let ground_lean = self.ground_lean();
 
         // A power slide while the rear spins up leaned over, or else the
         // bike swings round to where it is going (0x40ce00), both only
@@ -1986,6 +2001,20 @@ impl Bike {
         true
     }
 
+    /// The roll against the touching tyres' ground (0x52dcf0, f_4ac),
+    /// not the world's: on a side slope an upright bike reads as leaned.
+    /// The world lean when neither tyre touches.
+    fn ground_lean(&self) -> f32 {
+        let [f, r] = self.tyres;
+        if !(f.down || r.down) {
+            return self.lean;
+        }
+        let n =
+            (f.normal * f.down as u8 as f32 + r.normal * r.down as u8 as f32).normalize_or(Vec3::Y);
+        let m = self.orientation;
+        (-m.x_axis.dot(n)).atan2(m.y_axis.dot(n))
+    }
+
     fn check_crash(&self, ground: &dyn Ground, speed_before: f32) -> Option<Crash> {
         let h = self.h;
         let up = self.up();
@@ -1995,13 +2024,19 @@ impl Bike {
             return Some(Crash::Hit);
         }
         let [f, r] = self.tyres;
-        if f.down && !r.down && look.dot(f.normal) < 0.0 && look.dot(f.forward) < CRASH_ENDO {
+        // Over the bars: only the front down, the nose dropping (f_d8 > 0)
+        // and the body more than 40° off the rear tyre's line (f_4b4), with
+        // the air pose off unless airborne (f_6fc).
+        let tipping = self.spin.x > 0.0 && look.dot(r.forward).abs() < CRASH_ENDO;
+        if f.down && !r.down && tipping && (self.airborne || !self.air_pose) {
             return Some(Crash::Endo);
         }
         if look.y.abs() > CRASH_VERTICAL || self.lean.abs() > CRASH_ROLL {
             return Some(Crash::Flipped);
         }
-        if r.down && r.slip > CRASH_LOWSIDE && self.lean.cos() < CRASH_LOWSIDE {
+        // Leaned over against the ground (f_4b0), not the world: hard over
+        // on a banked turn the bike sits upright to the berm and rides on.
+        if r.down && r.slip > CRASH_LOWSIDE && self.ground_lean().cos() < CRASH_LOWSIDE {
             return Some(Crash::Lowside);
         }
         // The limit scales with the step, which the game took to be 0.02 s
