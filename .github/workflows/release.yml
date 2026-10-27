@@ -18,6 +18,8 @@ on:
 
 env:
   VERSION: ${{ inputs.version || github.ref_name }}
+  # Read by the launcher at build time, for its update check.
+  OPENMCM2_VERSION: ${{ inputs.version || github.ref_name }}
 
 permissions:
   contents: write
@@ -83,6 +85,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+      - name: Checksums
+        run: sha256sum openmcm2-*.zip openmcm2-*.tar.gz > SHA256SUMS && cat SHA256SUMS
       - name: Drop unpublished drafts (and, with replace, this version's release)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -98,4 +102,6 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: OpenMCM2 ${{ env.VERSION }}
           body_path: RELEASE_NOTES.md
-          files: openmcm2-*.*
+          files: |
+            openmcm2-*.*
+            SHA256SUMS
