@@ -1516,18 +1516,18 @@ dependencies = [
 
 [[package]]
 name = "mm2-formats"
-version = "0.1.6"
+version = "0.1.7"
 
 [[package]]
 name = "mm2-indeo"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "mm2-formats",
 ]
 
 [[package]]
 name = "mm2-launcher"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "eframe",
  "flate2",
@@ -1541,7 +1541,7 @@ dependencies = [
 
 [[package]]
 name = "mm2-physics"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "glam",
  "mm2-formats",
@@ -1549,7 +1549,7 @@ dependencies = [
 
 [[package]]
 name = "mm2-tools"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "mm2-formats",
  "png",
@@ -1557,7 +1557,7 @@ dependencies = [
 
 [[package]]
 name = "mm2-viewer"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "ab_glyph",
  "bytemuck",

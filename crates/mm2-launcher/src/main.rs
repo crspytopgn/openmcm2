@@ -151,7 +151,7 @@ impl Launcher {
         }
     }
 
-    fn play(&mut self) {
+    fn play(&mut self, ctx: &egui::Context) {
         let Some(viewer) = settings::viewer() else {
             self.note = Some(("Can't find mm2-viewer next to the launcher.".into(), true));
             return;
@@ -175,6 +175,9 @@ impl Launcher {
             Ok(child) => {
                 self.running = Some(child);
                 self.note = None;
+                // Out of the way while the game runs, so it can't show
+                // through behind a full-screen game; back when it ends.
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             }
             Err(e) => self.note = Some((format!("Couldn't start the game: {e}"), true)),
         }
@@ -260,6 +263,8 @@ impl Launcher {
                         self.note = Some((format!("The game stopped with an error: {last}\n(full log: {})", log.display()), true));
                     }
                     self.running = None;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
                 Ok(None) => ctx.request_repaint_after(Duration::from_millis(500)),
                 Err(_) => self.running = None,
@@ -279,9 +284,13 @@ fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
 }
 
 impl eframe::App for Launcher {
+    // Runs while minimized too, so the launcher sees the game end.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll(ctx);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        self.poll(&ctx);
         let busy = self.import.is_some();
         egui::Panel::bottom("play").show(ui, |ui| {
             ui.add_space(8.0);
@@ -298,7 +307,7 @@ impl eframe::App for Launcher {
             if clicked {
                 let _ = self.settings.save();
                 self.saved = self.settings.clone();
-                self.play();
+                self.play(&ctx);
             }
             ui.add_space(8.0);
         });

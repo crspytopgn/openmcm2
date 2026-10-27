@@ -28,6 +28,10 @@
 //! look, WASD to fly, Q/E or Space/Ctrl to go down/up, Shift to go faster.
 //! Esc quits.
 
+// No console window on Windows (it showed behind the game); the launcher
+// keeps stderr in last-run.log.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod eco;
 mod enhance;
 mod grass;

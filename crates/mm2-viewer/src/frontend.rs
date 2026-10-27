@@ -955,6 +955,7 @@ impl Frontend {
         if self.typing {
             self.commit_plate();
         }
+        self.keep_ride();
         self.fill_bike_page();
     }
 
@@ -1012,6 +1013,45 @@ impl Frontend {
             n += 100;
         }
         self.plate = n.clamp(101, 999).to_string();
+        self.keep_ride();
+    }
+
+    /// The profile's bike, outfit and plate on the Bike & Rider page, by
+    /// name (`0x44fe50`); a name no longer listed keeps the current pick.
+    fn load_ride(&mut self) {
+        let p = &self.user.profile;
+        if let Some(i) = self.roster.bikes.iter().position(|b| b.name == p.bike) {
+            self.bike = i;
+            self.bike_picked = true;
+        }
+        if let Some(i) = self.roster.outfits.iter().position(|o| o.name == p.outfit) {
+            self.outfit = i;
+        }
+        if (101..=999).contains(&p.plate) {
+            self.plate = p.plate.to_string();
+        }
+    }
+
+    /// The page's picks into the profile, saved (`0x4513f0`), so the next
+    /// time the player signs in they ride the same.
+    fn keep_ride(&mut self) {
+        let bike = self.roster.bikes.get(self.bike).filter(|_| self.bike_picked).map(|b| b.name.clone());
+        let outfit = self.roster.outfits.get(self.outfit).map(|o| o.name.clone());
+        let plate = self.plate.parse().ok().filter(|n| (101..=999).contains(n));
+        let p = &mut self.user.profile;
+        let before = (p.bike.clone(), p.outfit.clone(), p.plate);
+        if let Some(b) = bike {
+            p.bike = b;
+        }
+        if let Some(o) = outfit {
+            p.outfit = o;
+        }
+        if let Some(n) = plate {
+            p.plate = n;
+        }
+        if (p.bike.clone(), p.outfit.clone(), p.plate) != before {
+            self.user.save();
+        }
     }
 
     /// The Race Info page (`0x4521b0`): for a race, each rider's name,
@@ -1047,6 +1087,7 @@ impl Frontend {
     }
 
     fn open_single(&mut self) {
+        self.load_ride();
         let Some(mut base) = Dlg::open(&mut self.ui, "SPBASE", (0.0, 0.0)) else {
             return;
         };
@@ -1118,9 +1159,13 @@ impl Frontend {
             "ddlbikes" => {
                 self.bike = line;
                 self.bike_picked = true;
+                self.keep_ride();
                 self.fill_bike_page();
             }
-            "ddlriders" => self.outfit = line,
+            "ddlriders" => {
+                self.outfit = line;
+                self.keep_ride();
+            }
             "eventtypedropdown" => {
                 let event = EventKind::LIST[line.min(EventKind::LIST.len() - 1)].0;
                 if event != self.event {

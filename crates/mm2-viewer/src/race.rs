@@ -73,6 +73,11 @@ pub struct Course {
 }
 
 impl Course {
+    /// Each stretch of the course line, from a point to the next.
+    pub fn segments(&self) -> impl Iterator<Item = (Vec3, Vec3)> + '_ {
+        self.next.iter().enumerate().map(|(i, &n)| (self.points[i], self.points[n]))
+    }
+
     pub fn new(def: &TrackDef) -> Option<Self> {
         let mut first = Vec::new();
         let mut points = Vec::new();

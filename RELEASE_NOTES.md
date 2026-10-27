@@ -1,4 +1,14 @@
-# OpenMCM2 0.1.6
+# OpenMCM2 0.1.7
+
+## New in 0.1.7
+
+* **Windows:** the game no longer has a console window (it could flash a
+  black box over the game), and the launcher minimises while you play.
+* **Radar** shows the track line in Nationals and Supercross and the next
+  gates in Baja and Enduro, like the original.
+* **Your bike, rider and plate** are remembered in your profile.
+
+If you're on 0.1.6, the launcher will offer this update itself.
 
 ## New in 0.1.6
 

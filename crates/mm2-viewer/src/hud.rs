@@ -36,6 +36,31 @@ const RADAR_CENTRE: (f32, f32) = (572.0, 65.0);
 const RADAR_RIM: f32 = 55.0;
 /// The rim is 180 ft × zoom away; the game starts at 2.
 const RADAR_FEET: f32 = 180.0;
+/// The course line on the radar (0xedea5e) and the gate to make next
+/// (0xffff5e).
+const RADAR_COURSE: [f32; 4] = [0xed as f32 / 255.0, 0xea as f32 / 255.0, 0x5e as f32 / 255.0, 1.0];
+const RADAR_GATE: [f32; 4] = [1.0, 1.0, 0x5e as f32 / 255.0, 1.0];
+
+/// The part of the stretch `a`–`b` (radar pixels from the centre) inside
+/// the rim (0x521b40), if any: both ends outside draws nothing.
+fn clip_to_rim(a: [f32; 2], b: [f32; 2]) -> Option<([f32; 2], [f32; 2])> {
+    let inside = |p: [f32; 2]| p[0] * p[0] + p[1] * p[1] < RADAR_RIM * RADAR_RIM;
+    let (ia, ib) = (inside(a), inside(b));
+    if ia && ib {
+        return Some((a, b));
+    }
+    if !ia && !ib {
+        return None;
+    }
+    let (from, to) = if ia { (a, b) } else { (b, a) };
+    // from + t (to − from) on the rim, t in 0..1.
+    let d = [to[0] - from[0], to[1] - from[1]];
+    let (qa, qb) = (d[0] * d[0] + d[1] * d[1], 2.0 * (from[0] * d[0] + from[1] * d[1]));
+    let qc = from[0] * from[0] + from[1] * from[1] - RADAR_RIM * RADAR_RIM;
+    let t = (-qb + (qb * qb - 4.0 * qa * qc).max(0.0).sqrt()) / (2.0 * qa);
+    let edge = [from[0] + d[0] * t, from[1] + d[1] * t];
+    Some(if ia { (from, edge) } else { (edge, from) })
+}
 
 /// The text queue at the bottom left (`0x520970`, `0x520aa0`): its box,
 /// text height, and how long each message stays (`0x497740`).
@@ -545,6 +570,36 @@ impl Hud {
             // A 3 pixel dash, two rows high.
             let (cx, cy) = (RADAR_CENTRE.0 + x, RADAR_CENTRE.1 + y);
             ui.fill(gfx, [cx - 1.5, cy - 1.0, 3.0, 2.0], colour);
+        }
+        // Whole pixels from the centre (0x5219b0).
+        let spot = |p: Vec3| {
+            let rel = p - at;
+            [(rel.dot(right) * scale).trunc(), (-rel.dot(forward) * scale).trunc()]
+        };
+        let line = |ui: &mut Ui, gfx: &mut Gfx, a: [f32; 2], b: [f32; 2], colour: [f32; 4]| {
+            if let Some((a, b)) = clip_to_rim(a, b) {
+                let at = |p: [f32; 2]| [RADAR_CENTRE.0 + p[0], RADAR_CENTRE.1 + p[1]];
+                ui.line(gfx, at(a), at(b), 1.0, colour);
+            }
+        };
+        if !race.gates.is_empty() {
+            // Baja and Enduro (0x522170): the gate the player heads for in
+            // yellow and the one after it in white, each post to post, when
+            // its first post is on the radar.
+            let next = race.racers[race.player].timing.gate;
+            for (k, colour) in [(0, RADAR_GATE), (1, [1.0; 4])] {
+                let g = &race.gates[(next + k) % race.gates.len()];
+                let (a, b) = (spot(g.centre - g.half_width), spot(g.centre + g.half_width));
+                if (a[0] * a[0] + a[1] * a[1]).sqrt() < RADAR_RIM {
+                    line(ui, gfx, a, b, colour);
+                }
+            }
+        } else if let (Some(course), false) = (&race.course, race.stunt_event || race.tag.is_some()) {
+            // Nationals and Supercross (0x521d70): the course line, cut at
+            // the rim.
+            for (a, b) in course.segments() {
+                line(ui, gfx, spot(a), spot(b), RADAR_COURSE);
+            }
         }
     }
 }
