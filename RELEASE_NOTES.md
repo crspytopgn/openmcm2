@@ -1,4 +1,11 @@
-# OpenMCM2 0.1.5
+# OpenMCM2 0.1.6
+
+## New in 0.1.6
+
+* **The launcher can now update OpenMCM2 itself** (Updates section; can be
+  turned off). Downloads are checked against the release's SHA-256
+  checksums, and only OpenMCM2 itself is ever fetched, never game data.
+  Settings and game data are kept.
 
 ## New in 0.1.5
 

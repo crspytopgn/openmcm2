@@ -1,12 +1,14 @@
 //! The OpenMCM2 launcher: sets up the game data from the player's own
 //! copy of Motocross Madness 2, picks the settings, and starts
-//! `mm2-viewer` with them.
+//! `mm2-viewer` with them. It can also update OpenMCM2 itself from its
+//! GitHub releases (see [`update`]).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod game;
 mod iso;
 mod settings;
+mod update;
 
 use eframe::egui;
 use game::Source;
@@ -14,7 +16,7 @@ use settings::{Quality, Settings, UPGRADES};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const SIZES: [(u32, u32); 7] =
@@ -81,6 +83,24 @@ struct Launcher {
     running: Option<Child>,
     /// The last thing to tell the player, and whether it's bad news.
     note: Option<(String, bool)>,
+    /// Where this copy of OpenMCM2 is installed, if it can update itself.
+    install: Result<update::Install, String>,
+    update: Update,
+}
+
+/// What a check for updates found, once it's done.
+type Checked = Arc<Mutex<Option<Result<Option<update::Release>, String>>>>;
+
+/// Where the self-update has got to.
+enum Update {
+    Idle,
+    Checking(Checked),
+    UpToDate,
+    Found(update::Release),
+    /// A newer release the player said "not now" to.
+    Dismissed(update::Release),
+    Installing(update::Release, Arc<update::Progress>),
+    Failed(String),
 }
 
 impl Launcher {
@@ -92,7 +112,25 @@ impl Launcher {
         style.spacing.item_spacing = egui::vec2(8.0, 6.0);
         cc.egui_ctx.set_global_style(style);
         let settings = Settings::load();
-        let mut l = Launcher { saved: settings.clone(), settings, import: None, running: None, note: None };
+        let install = match update::current() {
+            Some(_) => update::Install::here(),
+            None => Err("this copy was built from source, so it doesn't update itself".into()),
+        };
+        if let Ok(i) = &install {
+            i.tidy();
+        }
+        let mut l = Launcher {
+            saved: settings.clone(),
+            settings,
+            import: None,
+            running: None,
+            note: None,
+            install,
+            update: Update::Idle,
+        };
+        if l.settings.check_updates && l.install.is_ok() {
+            l.check_updates();
+        }
         // A game copied before but since moved or deleted.
         if let Some(g) = l.settings.game.clone() {
             if !game::missing(&g).is_empty() {
@@ -142,7 +180,56 @@ impl Launcher {
         }
     }
 
+    fn check_updates(&mut self) {
+        let slot = Arc::new(Mutex::new(None));
+        let s = slot.clone();
+        std::thread::spawn(move || *s.lock().unwrap() = Some(update::check()));
+        self.update = Update::Checking(slot);
+    }
+
+    fn install_update(&mut self, release: update::Release) {
+        if let Ok(install) = self.install.clone() {
+            self.update = Update::Installing(release.clone(), update::start(release, install));
+        }
+    }
+
+    fn poll_update(&mut self, ctx: &egui::Context) {
+        let checked = match &self.update {
+            Update::Checking(slot) => slot.lock().unwrap().take(),
+            _ => None,
+        };
+        let installed = match &self.update {
+            Update::Installing(_, p) => p.result.lock().unwrap().take(),
+            _ => None,
+        };
+        let waiting = matches!(self.update, Update::Checking(_) | Update::Installing(..));
+        if let Some(r) = checked {
+            self.update = match r {
+                Ok(Some(r)) => Update::Found(r),
+                Ok(None) => Update::UpToDate,
+                Err(e) => Update::Failed(e),
+            };
+        } else if let Some(r) = installed {
+            match r {
+                Ok(_) => {
+                    let _ = self.settings.save();
+                    let restarted = self.install.as_ref().map_err(|e| e.clone()).and_then(|i| update::restart(i).map_err(|e| e.to_string()));
+                    match restarted {
+                        Ok(()) => std::process::exit(0),
+                        Err(e) => {
+                            self.update = Update::Failed(format!("updated, but couldn't restart ({e}); open OpenMCM2 again"))
+                        }
+                    }
+                }
+                Err(e) => self.update = Update::Failed(format!("{e}. Nothing was changed.")),
+            }
+        } else if waiting {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
+    }
+
     fn poll(&mut self, ctx: &egui::Context) {
+        self.poll_update(ctx);
         if let Some(p) = self.import.clone() {
             let r = p.result.lock().unwrap().take();
             if let Some(r) = r {
@@ -221,9 +308,11 @@ impl eframe::App for Launcher {
                 ui.heading(egui::RichText::new("OpenMCM2").size(28.0).strong());
                 ui.label("Motocross Madness 2, rebuilt to run natively.");
                 ui.add_space(10.0);
+                self.update_banner(ui, busy);
                 self.game_ui(ui, busy);
                 self.display_ui(ui);
                 self.graphics_ui(ui);
+                self.updates_ui(ui);
                 ui.collapsing("Command line", |ui| {
                     let line = std::iter::once("mm2-viewer".to_string())
                         .chain(self.settings.args().into_iter().map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a }))
@@ -371,6 +460,107 @@ impl Launcher {
                 });
             });
         });
+    }
+}
+
+impl Launcher {
+    /// The notice at the top when a newer release is out, and the
+    /// download's progress once the player says yes.
+    fn update_banner(&mut self, ui: &mut egui::Ui, busy: bool) {
+        let mut act = None;
+        match &self.update {
+            Update::Found(r) => {
+                section(ui, "Update available", |ui| {
+                    ui.label(format!(
+                        "OpenMCM2 {} is out. You have {}. Updating replaces only the program; your game data and settings stay as they are.",
+                        r.tag,
+                        update::current().unwrap_or("?")
+                    ));
+                    ui.horizontal(|ui| {
+                        let can = !busy && self.running.is_none();
+                        if ui.add_enabled(can, egui::Button::new("Update and restart")).clicked() {
+                            act = Some(true);
+                        }
+                        ui.hyperlink_to("What's new", &r.page);
+                        if ui.button("Not now").clicked() {
+                            act = Some(false);
+                        }
+                    });
+                    if self.running.is_some() {
+                        ui.label(egui::RichText::new("Close the game first.").weak());
+                    }
+                });
+            }
+            Update::Installing(r, p) => {
+                section(ui, &format!("Updating to {}", r.tag), |ui| {
+                    let total = p.total.load(Ordering::Relaxed).max(1);
+                    let done = p.done.load(Ordering::Relaxed);
+                    ui.horizontal(|ui| {
+                        ui.add(egui::ProgressBar::new(done as f32 / total as f32).show_percentage().desired_width(ui.available_width() - 80.0));
+                        if ui.button("Cancel").clicked() {
+                            p.cancel.store(true, Ordering::Relaxed);
+                        }
+                    });
+                    ui.label(p.stage.lock().unwrap().clone());
+                });
+            }
+            _ => {}
+        }
+        match (act, &self.update) {
+            (Some(true), Update::Found(r)) => self.install_update(r.clone()),
+            (Some(false), Update::Found(r)) => self.update = Update::Dismissed(r.clone()),
+            _ => {}
+        }
+    }
+
+    fn updates_ui(&mut self, ui: &mut egui::Ui) {
+        let mut check = false;
+        let mut install = None;
+        section(ui, "Updates", |ui| {
+            match update::current() {
+                Some(v) => ui.label(format!("This is OpenMCM2 {v}.")),
+                None => ui.label("This copy of OpenMCM2 was built from source."),
+            };
+            if let Err(e) = &self.install {
+                ui.label(egui::RichText::new(format!("It can't update itself: {e}.")).weak());
+                return;
+            }
+            ui.checkbox(&mut self.settings.check_updates, "Check for updates when the launcher opens");
+            ui.horizontal(|ui| {
+                let idle = !matches!(self.update, Update::Checking(_) | Update::Installing(..));
+                if ui.add_enabled(idle, egui::Button::new("Check now")).clicked() {
+                    check = true;
+                }
+                match &self.update {
+                    Update::Checking(_) => {
+                        ui.spinner();
+                        ui.label("Checking…");
+                    }
+                    Update::UpToDate => {
+                        ui.label(egui::RichText::new("You have the latest version.").color(egui::Color32::from_rgb(120, 200, 120)));
+                    }
+                    Update::Found(r) => {
+                        ui.label(format!("{} is out.", r.tag));
+                    }
+                    Update::Dismissed(r) => {
+                        ui.label(format!("{} is out.", r.tag));
+                        if ui.button("Update and restart").clicked() {
+                            install = Some(r.clone());
+                        }
+                    }
+                    Update::Failed(e) => {
+                        ui.add(egui::Label::new(egui::RichText::new(format!("Update: {e}")).color(egui::Color32::from_rgb(240, 90, 80))).wrap());
+                    }
+                    _ => {}
+                }
+            });
+        });
+        if check {
+            self.check_updates();
+        }
+        if let Some(r) = install {
+            self.update = Update::Found(r);
+        }
     }
 }
 

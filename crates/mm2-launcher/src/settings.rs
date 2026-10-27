@@ -92,6 +92,8 @@ pub struct Settings {
     pub window: (u32, u32),
     pub vsync: bool,
     pub show_fps: bool,
+    /// Look for a newer OpenMCM2 when the launcher opens.
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
@@ -110,6 +112,7 @@ impl Default for Settings {
             window: (1024, 768),
             vsync: true,
             show_fps: false,
+            check_updates: true,
         }
     }
 }
@@ -154,6 +157,7 @@ impl Settings {
                 }
                 "vsync" => s.vsync = yes(v),
                 "show_fps" => s.show_fps = yes(v),
+                "check_updates" => s.check_updates = yes(v),
                 k => {
                     if let Some(i) = UPGRADES.iter().position(|u| k == format!("upgrade.{}", u.0)) {
                         s.upgrades[i] = yes(v);
@@ -168,7 +172,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "game={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\nshow_fps={}\n",
+            "game={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\nshow_fps={}\ncheck_updates={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -182,6 +186,7 @@ impl Settings {
             self.window.1,
             b(self.vsync),
             b(self.show_fps),
+            b(self.check_updates),
         );
         for (u, on) in UPGRADES.iter().zip(&self.upgrades) {
             t += &format!("upgrade.{}={}\n", u.0, b(*on));
@@ -258,6 +263,7 @@ mod tests {
         s.upgrades[13] = true;
         s.time = "dusk".into();
         s.window = (1920, 1080);
+        s.check_updates = false;
         assert_eq!(Settings::parse(&s.text()), s);
         assert_eq!(
             s.args(),
