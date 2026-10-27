@@ -1,4 +1,13 @@
-# OpenMCM2 0.1.3
+# OpenMCM2 0.1.4
+
+## New in 0.1.4
+
+* **Bike packs draw properly:** bikes installed from MDX Racing bike packs
+  (such as YZ125 skins), with Targa paint and text models, now show their
+  paint instead of drawing white.
+* **Replays keep the computer riders' paint** on their bikes.
+* A missing model texture is now named in the log, to help track down
+  bikes or objects that draw white.
 
 ## New in 0.1.3
 

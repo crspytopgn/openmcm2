@@ -15,8 +15,9 @@ use crate::{Error, Result};
 
 pub fn parse(bytes: &[u8]) -> Result<Texture> {
     let mut r = Reader::new(bytes, 0);
-    let stored = Stored::from_code(r.u32("texture format")?)
-        .ok_or(Error::Corrupt("unknown texture format"))?;
+    let Some(stored) = Stored::from_code(r.u32("texture format")?) else {
+        return from_targa(bytes);
+    };
     r.u32("texture version")?;
     let width = r.u32("texture width")?;
     let height = r.u32("texture height")?;
@@ -26,6 +27,26 @@ pub fn parse(bytes: &[u8]) -> Result<Texture> {
     let name_len = r.u32("palette name length")? as usize;
     r.take(name_len, "palette name")?;
     read_image(&mut r, width, stored)
+}
+
+/// A real Targa file under a texture's name: bike makers' installers put
+/// their paint into `BIKE.RES` this way. Kept with its alpha when it has
+/// any, else opaque.
+fn from_targa(bytes: &[u8]) -> Result<Texture> {
+    let unknown = Error::Corrupt("unknown texture format");
+    let image = crate::tga::parse(bytes).map_err(|_| unknown)?;
+    let size = image.width;
+    if image.height != size || !size.is_power_of_two() || size > 1024 {
+        return Err(Error::Corrupt("texture is not square"));
+    }
+    let alpha = image.rgba.chunks_exact(4).any(|p| p[3] < 255);
+    let (code, data): (u32, Vec<u8>) = if alpha {
+        (0xc, image.rgba.chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect())
+    } else {
+        (1, image.rgba.chunks_exact(4).flat_map(|p| [p[2], p[1], p[0]]).collect())
+    };
+    let stored = Stored { packed: false, ..Stored::from_code(code).expect("a known code") };
+    read_image(&mut Reader::new(&data, 0), size, stored)
 }
 
 /// The overlay pictures in `RES/GLOBAL.RES` (the speedometer, the race

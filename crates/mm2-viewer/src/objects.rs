@@ -275,15 +275,18 @@ impl ObjectMesh {
             cache
                 .entry(key.clone())
                 .or_insert_with(|| {
-                    if let Some(data) = models.iter().find_map(|m| m.get(&key)) {
-                        return slb::parse(data)
+                    // The eco-system's models only come as text, and so do
+                    // the bikes players install over the stock ones (a
+                    // `yamaha.slt` added beside the built `yamaha.slb`):
+                    // the text one wins.
+                    let text = format!("{}.slt", stem.trim()).to_ascii_lowercase();
+                    if let Some(data) = models.iter().find_map(|m| m.get(&text)) {
+                        return mm2_formats::slt::parse(data)
                             .map_err(|err| eprintln!("{name}: {err}"))
                             .ok();
                     }
-                    // The eco-system's models only come as text.
-                    let text = format!("{}.slt", stem.trim()).to_ascii_lowercase();
-                    let data = models.iter().find_map(|m| m.get(&text))?;
-                    mm2_formats::slt::parse(data)
+                    let data = models.iter().find_map(|m| m.get(&key))?;
+                    slb::parse(data)
                         .map_err(|err| eprintln!("{name}: {err}"))
                         .ok()
                 })
@@ -448,6 +451,13 @@ impl ObjectMesh {
                 None => textures
                     .iter()
                     .find_map(|(archive, t)| Some((*archive, t.get(bare(&name))?)))
+                    .or_else(|| {
+                        // Drawn white; say so, so a player's log shows it.
+                        if !name.is_empty() {
+                            eprintln!("{name}: texture not found");
+                        }
+                        None
+                    })
                     .and_then(|(archive, e)| {
                         let tex = texture::parse(e)
                             .map_err(|err| eprintln!("{name}: {err}"))

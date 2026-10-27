@@ -117,7 +117,7 @@ const IDENTITY: [f32; 16] = [
 ];
 
 /// Row-major `a * b`.
-fn mul(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
+pub(crate) fn mul(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
     let mut m = [0.0; 16];
     for r in 0..4 {
         for c in 0..4 {

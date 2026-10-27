@@ -10,11 +10,15 @@
 //! [LOD l - Surface s]      NumberOfVertices, NumberOfFaces, Material#k
 //! [... - Vertices]         x, y, z, nx, ny, nz, u, v, w, f32[3], r, g, b
 //! [... - Faces]            a, b, c
-//! [... - Object Pointer List]  frame, vertex count
+//! [... - Object Pointer List]  first vertex, vertex count (a line a frame)
 //! ```
 
 use crate::slb::{Frame, Lod, Material, Model, Surface};
 use crate::{Error, Result};
+
+const IDENTITY: [f32; 16] = [
+    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+];
 
 pub fn parse(bytes: &[u8]) -> Result<Model> {
     let text = String::from_utf8_lossy(bytes);
@@ -69,8 +73,10 @@ pub fn parse(bytes: &[u8]) -> Result<Model> {
         };
         if section.starts_with("Material - ") {
             if let Some(t) = line.strip_prefix("TextureMap=") {
+                // As in `.slb`: the bike's number plate is PROCEDURAL.
+                let t = t.trim();
                 materials.push(Material {
-                    texture: t.trim().to_string(),
+                    texture: if t.eq_ignore_ascii_case("PROCEDURAL") { String::new() } else { t.to_string() },
                 });
             }
         } else if section == "Object Hierarchy" {
@@ -115,9 +121,11 @@ pub fn parse(bytes: &[u8]) -> Result<Model> {
                 }
             } else if section.ends_with("- Object Pointer List") {
                 let g = numbers(line);
-                // A frame and how many vertices follow on it.
+                // One line a frame, in the hierarchy's order: its first
+                // vertex and how many there are.
                 if g.len() >= 2 {
-                    target.groups.push((g[0] as u32, g[1] as u32));
+                    let frame = target.groups.len() as u32;
+                    target.groups.push((frame, g[0] as u32));
                 }
             } else if let Some(k) = line.strip_prefix("Material#") {
                 if let Some((_, m)) = k.split_once('=') {
@@ -134,17 +142,41 @@ pub fn parse(bytes: &[u8]) -> Result<Model> {
             f
         })
         .collect();
-    // Counts to first vertices, as `.slb` keeps them.
+    let frames: Vec<Frame> = frames;
+    // Text vertices sit in their own frame; `.slb` keeps them in the model's
+    // space. Children of the root are moved out to it (a bike's bars and
+    // wheels); the root's own place stays the placement's business.
+    let relative: Vec<[f32; 16]> = (0..frames.len())
+        .map(|i| {
+            let mut m = IDENTITY;
+            let mut at = Some(i);
+            for _ in 0..frames.len() {
+                let Some(f) = at.and_then(|f| frames.get(f)) else { break };
+                if f.parent.is_none() {
+                    break;
+                }
+                m = crate::slb::mul(&m, &f.matrix);
+                at = f.parent;
+            }
+            m
+        })
+        .collect();
     for lod in &mut lods {
         for s in &mut lod.surfaces {
-            let mut first = 0;
-            for g in &mut s.groups {
-                let count = g.1;
-                g.1 = first;
-                first += count;
-            }
             if s.groups.is_empty() {
                 s.groups.push((0, 0));
+            }
+            for v in 0..s.positions.len() {
+                let Some(m) = relative.get(s.frame_of(v)).filter(|m| **m != IDENTITY) else {
+                    continue;
+                };
+                let apply = |p: [f32; 3], w: f32| {
+                    std::array::from_fn(|c| p[0] * m[c] + p[1] * m[4 + c] + p[2] * m[8 + c] + w * m[12 + c])
+                };
+                s.positions[v] = apply(s.positions[v], 1.0);
+                if let Some(n) = s.normals.get_mut(v) {
+                    *n = apply(*n, 0.0);
+                }
             }
         }
     }

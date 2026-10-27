@@ -2225,7 +2225,13 @@ fn start_grid(
         if let Some(Some(r)) = rides.get(i) {
             bike = r.bike.model.clone();
             outfit = r.outfit.clone();
-            skin = Some(format!("{}{}:{}", objects::PLATE, r.plate, r.bike.texture));
+            // No paint (a replay of a computer rider on the default grid)
+            // keeps the model's own; an empty one would put the number
+            // plate's texture on the whole bike.
+            skin = Some(match r.bike.texture.as_str() {
+                "" => format!("{}{}", objects::PLATE, r.plate),
+                paint => format!("{}{}:{paint}", objects::PLATE, r.plate),
+            });
         }
         // A ghost race's ghost rides its own models (0x41a770).
         let ghostly = ghost == Some(i);
