@@ -151,6 +151,11 @@ MM2_DATA="/path/to/Motocross Madness 2" cargo test
 * Ground materials for `--enhanced` are from [ambientCG](https://ambientcg.com),
   CC0.
 
+## Supporting the project
+
+OpenMCM2 is free and always will be. If you enjoy it and want to chip in,
+you can [sponsor it on GitHub](https://github.com/sponsors/crspytopgn).
+
 ## Legal
 
 OpenMCM2 is an independent fan project. It is not affiliated with, endorsed by
