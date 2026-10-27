@@ -166,16 +166,23 @@ impl AnimatedModel {
                 }
             }
         } else if let Some((_, motion, fps, looping)) = motion.map(|m| &self.motions[m]) {
+            // Between the two keys either side of the time (the motion
+            // player 0x4a8720 finds both with 0x4a6db0 and mixes them).
             let count = motion.frames.len();
-            let frame = ((time - motion_start) * fps).max(0.0) as usize;
-            let frame = if *looping {
-                frame % count
+            let at = ((time - motion_start) * fps).max(0.0);
+            let (frame, t) = (at as usize, at.fract());
+            let (a, b) = if *looping {
+                (frame % count, (frame + 1) % count)
+            } else if frame + 1 < count {
+                (frame, frame + 1)
             } else {
-                frame.min(count - 1)
+                (count - 1, count - 1)
             };
-            for key in &motion.frames[frame] {
-                if let Some(m) = local.get_mut(key.frame) {
-                    *m = orientation(key.look, key.up, Vec3::ONE, key.position);
+            for (ka, kb) in motion.frames[a].iter().zip(&motion.frames[b]) {
+                let kb = if kb.frame == ka.frame { kb } else { ka };
+                let mix = |p: [f32; 3], q: [f32; 3]| Vec3::from(p).lerp(Vec3::from(q), t).into();
+                if let Some(m) = local.get_mut(ka.frame) {
+                    *m = orientation(mix(ka.look, kb.look), mix(ka.up, kb.up), Vec3::ONE, mix(ka.position, kb.position));
                 }
             }
         }
@@ -1201,6 +1208,11 @@ impl ObjectRenderer {
                 !looping && (time - a.motion_start) * fps >= motion.frames.len() as f32
             })
         })
+    }
+
+    /// Animated model `index`'s frame called `name`.
+    pub fn frame_index(&self, index: usize, name: &str) -> Option<usize> {
+        self.animated.get(index)?.frame_named(name)
     }
 
     /// Where animated model `index`'s frame `name` is at `time`, in game

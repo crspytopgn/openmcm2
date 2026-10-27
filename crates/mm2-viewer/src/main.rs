@@ -91,7 +91,7 @@ use race::Race;
 use renderer::TerrainRenderer;
 use ride::Controls;
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tdf::TrackDef;
@@ -347,6 +347,17 @@ fn main() -> Result<(), BoxError> {
                 .and_then(|p| std::fs::read_to_string(p).ok())
                 .map(|s| s.split_whitespace().filter_map(|x| x.parse::<f32>().ok()).map(|t| t + shift).collect())
                 .unwrap_or_default();
+            let mut film = match flag("--film") {
+                dir if dir.is_some() || std::env::var("MM2_WRECK_LOG").is_ok() => {
+                    let size = flag("--size")
+                        .and_then(|s| s.split_once('x'))
+                        .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
+                        .unwrap_or((640, 360));
+                    let from = flag("--film-from").and_then(|t| t.parse().ok()).unwrap_or(0.0);
+                    Some(Film::new(&track, dir.map(PathBuf::from), from, size)?)
+                }
+                _ => None,
+            };
             let mut next = 0;
             let mut elapsed = 0.0;
             let mut k = 0usize;
@@ -420,6 +431,10 @@ fn main() -> Result<(), BoxError> {
                 }
                 track.run_traffic(frame);
                 chase = r.update(&track.ground(), c, frame);
+                if let Some(f) = &mut film {
+                    let clock = r.time - script_at;
+                    f.frame(&mut r, &track, chase, clock)?;
+                }
                 if let Some((audio, sounds, out, owed)) = &mut engine_wav {
                     let bike = &r.racers[r.player].bike;
                     let listener = sound::Listener {
@@ -1084,26 +1099,33 @@ fn throw_dirt(race: &Race, ground: &TrackGround, dirt: &mut particles::Particles
 /// from 0x535830): each part's frame in Rider.mcf and its corners there.
 static RIDER_COL: std::sync::OnceLock<Vec<(usize, Vec<Vec3>)>> = std::sync::OnceLock::new();
 
-/// Hands each thrown rider's collision shapes, as the fall motion poses
-/// them, to the wreck physics for its ground contacts.
+/// Hands each thrown rider's pelvis and collision shapes, as the crash
+/// motion poses them, to the wreck physics: the body is the pelvis, and
+/// the shapes are its ground contacts.
 fn feel_wrecks(race: &mut Race, renderer: &TerrainRenderer) {
     let Some(parts) = RIDER_COL.get() else {
         return;
     };
-    let frames: Vec<usize> = parts.iter().map(|p| p.0).collect();
     for r in &mut race.racers {
         let Some((place, _)) = r.bike.wreck() else {
             continue;
         };
-        let to_model = place.inverse();
+        let Some(pelvis) = renderer.object_frame_index(r.object + 1, "Pelvis") else {
+            continue;
+        };
+        let frames: Vec<usize> = parts.iter().map(|p| p.0).chain([pelvis]).collect();
         let posed = renderer.object_frames(r.object + 1, &frames, race.time);
+        let Some(Some(at)) = posed.last().copied() else {
+            continue;
+        };
+        let to_body = at.inverse();
         let points: Vec<Vec3> = posed
             .iter()
             .zip(parts)
-            .filter_map(|(m, (_, corners))| m.map(|m| (to_model * m, corners)))
+            .filter_map(|(m, (_, corners))| m.map(|m| (to_body * m, corners)))
             .flat_map(|(m, corners)| corners.iter().map(move |c| m.transform_point3(*c)))
             .collect();
-        r.bike.set_wreck_points(points);
+        r.bike.set_wreck_pose(place.inverse() * at, points);
     }
 }
 
@@ -2756,32 +2778,7 @@ async fn screenshot(
     let (adapter, device, queue) = gpu(None).await?;
     eprintln!("rendering on {}", adapter.get_info().name);
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
-    let mut renderer = TerrainRenderer::new(
-        &device,
-        &queue,
-        &track.terrain,
-        &track.terrain_textures,
-        &track.objects,
-        format,
-    );
-    if let Some((cube, images)) = &track.sky {
-        renderer.set_sky(&device, &queue, cube, images, format);
-    }
-    renderer.set_lights(track.lights);
-    renderer.set_desert(track.desert);
-    renderer.set_crowd(&device, &track.spectators);
-    if let Some(detail) = &track.detail {
-        renderer.set_detail(&device, &queue, detail);
-    }
-    if let Some(fog) = track.fog {
-        renderer.set_fog(fog);
-    }
-    if let Some((visibility, haziness)) = track.haze {
-        renderer.set_visibility(profile::GraphicsOptions::default().terrain, visibility, haziness);
-    }
-    if let Some(sheet) = &track.particle_sheet {
-        renderer.set_dirt(&device, &queue, &sheet, format);
-    }
+    let mut renderer = track_renderer(track, &device, &queue, format);
     if let Some((d, tyres)) = dirt {
         renderer.particles.adopt(d);
         for (frame, dt) in &tyres {
@@ -2853,6 +2850,110 @@ async fn screenshot(
     }
     queue.submit([draw]);
     save_png(&device, &queue, encoder.finish(), &target, out)
+}
+
+/// A renderer for `track` with its sky, lights, detail, fog and dirt.
+fn track_renderer(track: &Track, device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> TerrainRenderer {
+    let mut renderer = TerrainRenderer::new(
+        device,
+        queue,
+        &track.terrain,
+        &track.terrain_textures,
+        &track.objects,
+        format,
+    );
+    if let Some((cube, images)) = &track.sky {
+        renderer.set_sky(device, queue, cube, images, format);
+    }
+    renderer.set_lights(track.lights);
+    renderer.set_desert(track.desert);
+    renderer.set_crowd(device, &track.spectators);
+    if let Some(detail) = &track.detail {
+        renderer.set_detail(device, queue, detail);
+    }
+    if let Some(fog) = track.fog {
+        renderer.set_fog(fog);
+    }
+    if let Some((visibility, haziness)) = track.haze {
+        renderer.set_visibility(profile::GraphicsOptions::default().terrain, visibility, haziness);
+    }
+    if let Some(sheet) = &track.particle_sheet {
+        renderer.set_dirt(device, queue, sheet, format);
+    }
+    renderer
+}
+
+/// A scripted ride filmed (`--film DIR`): the models posed each frame as
+/// live play poses them, so a thrown rider feels its motion, and from
+/// `--film-from` s on the chase view saved 15 times a second as
+/// DIR/NNNN.png (`--size`). `MM2_WRECK_LOG=FILE` also writes the player's
+/// thrown rider each frame: t, stage, motion, the pelvis (x y z, then its
+/// x, y and z axes).
+struct Film {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    renderer: TerrainRenderer,
+    dir: Option<PathBuf>,
+    from: f32,
+    size: (u32, u32),
+    next: f32,
+    shot: usize,
+    log: Option<(PathBuf, String)>,
+}
+
+impl Film {
+    fn new(track: &Track, dir: Option<PathBuf>, from: f32, size: (u32, u32)) -> Result<Self, BoxError> {
+        let (_, device, queue) = pollster::block_on(gpu(None))?;
+        let renderer = track_renderer(track, &device, &queue, wgpu::TextureFormat::Rgba8UnormSrgb);
+        let log = std::env::var("MM2_WRECK_LOG")
+            .ok()
+            .map(|f| (PathBuf::from(f), String::from("t,stage,motion,x,y,z,xx,xy,xz,yx,yy,yz,zx,zy,zz\n")));
+        Ok(Film { device, queue, renderer, dir, from, size, next: from, shot: 0, log })
+    }
+
+    /// Poses the race at `clock` s into the ride, and films it.
+    fn frame(&mut self, race: &mut Race, track: &Track, chase: (Vec3, Vec3), clock: f32) -> Result<(), BoxError> {
+        let eye = renderer::from_game(chase.0);
+        show(race, track, &mut self.renderer, eye, None);
+        feel_wrecks(race, &self.renderer);
+        if let (Some((_, text)), race::Bike::Player(b)) = (&mut self.log, &race.racers[race.player].bike) {
+            if let Some(w) = &b.wreck {
+                use std::fmt::Write as _;
+                let m = w.body();
+                let _ = writeln!(
+                    text,
+                    "{clock:.4},{:?},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3}",
+                    w.stage, w.motion, m.w_axis.x, m.w_axis.y, m.w_axis.z,
+                    m.x_axis.x, m.x_axis.y, m.x_axis.z, m.y_axis.x, m.y_axis.y, m.y_axis.z, m.z_axis.x, m.z_axis.y, m.z_axis.z
+                );
+            }
+        }
+        let Some(dir) = &self.dir else { return Ok(()) };
+        if clock + 1e-4 < self.next {
+            return Ok(());
+        }
+        self.next += 1.0 / 15.0;
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let (w, h) = self.size;
+        let target = offscreen(&self.device, format, w, h);
+        let view = target.create_view(&Default::default());
+        let mut camera = Camera::looking_at(eye, renderer::from_game(chase.1));
+        camera.fov = race.fov();
+        let draw = self.renderer.render(&self.device, &self.queue, &view, (w, h), &camera, race.time);
+        let encoder = self.device.create_command_encoder(&Default::default());
+        self.queue.submit([draw]);
+        let out = dir.join(format!("{:04}.png", self.shot));
+        self.shot += 1;
+        save_png(&self.device, &self.queue, encoder.finish(), &target, &out)
+    }
+}
+
+impl Drop for Film {
+    fn drop(&mut self) {
+        if let Some((path, text)) = &self.log {
+            let _ = std::fs::write(path, text);
+        }
+    }
 }
 
 /// The menus as they look after clicking at each `x,y` of `clicks`

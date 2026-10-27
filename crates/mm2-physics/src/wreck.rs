@@ -7,13 +7,24 @@
 //! * A crash on the ground starts a **bail** (0x537890): a motion chosen by
 //!   the kind of crash (Endo, Kahuna, BackOver, LeftOver, RightOver, list
 //!   +0x48) plays with the rider still on the bike, and once it is half
-//!   done the rider is let go with the speed and spin the motion had.
+//!   done (0x535d50, state 1) the rider is let go (0x537b00) with the
+//!   speed and spin the motion gave the pelvis over the last frame
+//!   (0x537bf0), and one of Fall01 to Fall04 fades in over 0.5 s.
 //! * A crash in the air **tumbles** at once (0x537980): one of Fall01 to
 //!   Fall04 at random (list +0x50), blended in over 0.5 s, the body thrown
 //!   with the bike's speed and spin.
-//! * When the body first lands it plays one of LeftHit, RightHit,
-//!   FeetHitL, FeetHitR or HeadHit at random (list +0x58) and slides to a
-//!   stop; then the rider is put back on the bike.
+//! * When the body first lands it picks one of LeftHit, RightHit,
+//!   FeetHitL, FeetHitR or HeadHit at random (list +0x58, kept in +0xd4)
+//!   and fades it in over 0.5 s once the fall's own fade is done (the
+//!   motion player's +0x34), then slides to a stop; then the rider is put
+//!   back on the bike.
+//!
+//! The body is the rider's pelvis (the Wrecker's +0xb8, the first frame
+//! under the model's root, whose world placement +0x6c the 2026-10-24
+//! recordings follow). The motion poses the rest of the rider round it,
+//! so a motion change or fade moves the limbs but never jumps the body
+//! (0x535d50 re-roots the model at the end of each fade to keep the
+//! pelvis where it was).
 //!
 //! The body touches with Rider.col's six part shapes (loaded in
 //! 0x535830), which move with the motion playing; the viewer hands their
@@ -40,8 +51,13 @@ const RADIUS: f32 = 0.9;
 const GRAVITY: f32 = 32.2;
 const BOUNCE: f32 = 0.3;
 const FRICTION: f32 = 0.8;
-/// How long a bail holds the rider on the bike, s (half its motion).
+/// How long a bail holds the rider on the bike, s: half its motion
+/// (Rider.mcf: frames at 15 a second), or this for a motion not listed.
 const BAIL_TIME: f32 = 0.5;
+const BAILS: [(&str, f32); 5] = [("Endo", 12.0), ("LeftOver", 10.0), ("RightOver", 10.0), ("BackOver", 13.0), ("Kahuna", 25.0)];
+const BAIL_FPS: f32 = 15.0;
+/// How long a fall or a landing motion fades in, s (0x4aa1e0's span).
+pub const FADE: f32 = 0.5;
 /// The rider is at rest below this speed, ft/s, for this long, s.
 const REST_SPEED: f32 = 2.0;
 const REST_TIME: f32 = 0.75;
@@ -83,7 +99,7 @@ pub struct Wreck {
     /// The Rider.mcf motion to play now.
     pub motion: &'static str,
     pub stage: Stage,
-    /// The rider body's centre and its velocity.
+    /// The rider body's centre (the pelvis) and its velocity.
     pub position: Vec3,
     pub velocity: Vec3,
     orientation: Mat3,
@@ -96,9 +112,23 @@ pub struct Wreck {
     /// +0xb0, from its collision model's +0x58), which the race sounds
     /// read for the rider's grunts.
     pub touching: bool,
-    /// Rider.col's corners where the motion has them now, in the model
-    /// space [`Wreck::place`] puts on the track; empty for one sphere.
-    pub points: Vec<Vec3>,
+    /// Rider.col's corners where the motion has them now, in the
+    /// pelvis's own space; empty for one sphere.
+    points: Vec<Vec3>,
+    /// The pelvis in model space as the motion has it now; the model is
+    /// drawn round it.
+    pelvis: Mat4,
+    /// Whether the viewer has said where the motion puts the pelvis.
+    posed: bool,
+    /// When the bail lets the rider go, s.
+    bail_time: f32,
+    /// When the motion fading in now is fully in, s.
+    faded: f32,
+    /// The landing motion waiting for that (+0xd4).
+    queued: Option<&'static str>,
+    /// The body at the last pose, while the bail plays: when, where and
+    /// turned how, for the speed and spin it lets go with.
+    last: Option<(f32, Vec3, Mat3)>,
 }
 
 impl Wreck {
@@ -124,15 +154,46 @@ impl Wreck {
             seed,
             touching: false,
             points: Vec::new(),
+            pelvis: Mat4::from_translation(RIDER_CENTRE),
+            posed: false,
+            bail_time: BAILS
+                .iter()
+                .find(|b| b.0 == motion)
+                .map_or(BAIL_TIME, |b| b.1 / BAIL_FPS / 2.0),
+            faded: if bail { 0.0 } else { FADE },
+            queued: None,
+            last: None,
         }
+    }
+
+    /// The body: the pelvis on the track.
+    pub fn body(&self) -> Mat4 {
+        let mut m = Mat4::from_mat3(self.orientation);
+        m.w_axis = self.position.extend(1.0);
+        m
     }
 
     /// Where to draw the rider: the model origin and axes it shares with
     /// the bike.
     pub fn place(&self) -> Mat4 {
-        let mut m = Mat4::from_mat3(self.orientation);
-        m.w_axis = (self.position - self.orientation * RIDER_CENTRE).extend(1.0);
-        m
+        self.body() * self.pelvis.inverse()
+    }
+
+    /// Where the motion playing puts the pelvis (`pelvis`, model space)
+    /// and Rider.col's corners (`points`, the pelvis's space), as the
+    /// viewer poses them each frame. The first pose keeps the rider where
+    /// they were drawn.
+    pub fn set_pose(&mut self, pelvis: Mat4, points: Vec<Vec3>) {
+        if !self.posed {
+            let at = self.place() * pelvis;
+            self.position = at.w_axis.truncate();
+            self.orientation = orthonormal(Mat3::from_mat4(at));
+            self.posed = true;
+        } else if self.stage == Stage::Bail {
+            self.last = Some((self.time, self.position, self.orientation));
+        }
+        self.pelvis = pelvis;
+        self.points = points;
     }
 
     fn pick<const N: usize>(&mut self, from: [&'static str; N]) -> &'static str {
@@ -147,12 +208,22 @@ impl Wreck {
     pub fn step(&mut self, ground: &dyn Ground, h: f32, bike: Mat4, bike_velocity: Vec3) -> bool {
         self.time += h;
         if self.stage == Stage::Bail {
-            let at = bike.transform_point3(RIDER_CENTRE);
+            let at = bike * self.pelvis;
             self.velocity = bike_velocity;
-            self.position = at;
-            self.orientation = Mat3::from_mat4(bike);
-            if self.time >= BAIL_TIME {
+            self.position = at.w_axis.truncate();
+            self.orientation = orthonormal(Mat3::from_mat4(at));
+            if self.time >= self.bail_time {
+                // Let go with the pelvis's own speed and spin since the
+                // last pose, and fall.
+                if let Some((t, p, o)) = self.last.filter(|l| self.time - l.0 > 1e-3) {
+                    let dt = self.time - t;
+                    self.velocity = (self.position - p) / dt;
+                    let (axis, angle) = Quat::from_mat3(&(self.orientation * o.transpose())).to_axis_angle();
+                    self.spin = axis * (angle / dt);
+                }
                 self.stage = Stage::Tumble;
+                self.motion = self.pick(FALLS);
+                self.faded = self.time + FADE;
             }
             return false;
         }
@@ -171,6 +242,12 @@ impl Wreck {
             self.touch_sphere(ground, h);
         }
         self.orientation = orthonormal(self.orientation);
+        if self.time >= self.faded {
+            if let Some(m) = self.queued.take() {
+                self.motion = m;
+                self.faded = self.time + FADE;
+            }
+        }
         // At rest by how far it moves: held on the ground, the body keeps
         // some speed into it.
         if self.stage == Stage::Down && (self.position - was).length() < REST_SPEED * h {
@@ -188,7 +265,7 @@ impl Wreck {
     /// falls by about e each second down, the 0.99 per second of a single
     /// contact).
     fn touch_parts(&mut self, ground: &dyn Ground, h: f32) {
-        let place = self.place();
+        let place = self.body();
         let mut deepest: Option<(f32, Vec3)> = None;
         for p in &self.points {
             let at = place.transform_point3(*p);
@@ -219,7 +296,7 @@ impl Wreck {
         self.spin *= keep;
         if self.stage == Stage::Tumble {
             self.stage = Stage::Down;
-            self.motion = self.pick(HITS);
+            self.queued = Some(self.pick(HITS));
         }
     }
 
@@ -247,7 +324,7 @@ impl Wreck {
             self.spin *= 0.9;
             if self.stage == Stage::Tumble {
                 self.stage = Stage::Down;
-                self.motion = self.pick(HITS);
+                self.queued = Some(self.pick(HITS));
             }
         }
     }
@@ -291,6 +368,11 @@ fn orthonormal(m: Mat3) -> Mat3 {
 mod tests {
     use super::*;
 
+    /// Corners given in model space, in the pelvis's space at rest.
+    fn model_points(points: &[Vec3]) -> Vec<Vec3> {
+        points.iter().map(|p| *p - RIDER_CENTRE).collect()
+    }
+
     #[test]
     fn pushes_the_rider_off_the_bike() {
         let bike = Mat4::from_translation(Vec3::new(10.0, 0.0, 0.0));
@@ -304,7 +386,7 @@ mod tests {
     fn corners_stop_on_the_ground_without_bouncing() {
         let start = Mat4::from_translation(Vec3::new(0.0, 1.0, 0.0));
         let mut w = Wreck::new(start, Vec3::new(20.0, -10.0, 0.0), Vec3::ZERO, "Fall01", false, 1);
-        w.points = vec![Vec3::new(0.5, 0.5, 0.0), Vec3::new(-0.5, 0.5, 0.0)];
+        w.set_pose(Mat4::from_translation(RIDER_CENTRE), model_points(&[Vec3::new(0.5, 0.5, 0.0), Vec3::new(-0.5, 0.5, 0.0)]));
         let mut rose = false;
         for _ in 0..300 {
             let was = w.velocity.y;
@@ -312,12 +394,54 @@ mod tests {
                 break;
             }
             rose |= w.touching && w.velocity.y > 0.0 && was <= 0.0;
-            let low = w.points.iter().map(|p| w.place().transform_point3(*p).y).fold(f32::MAX, f32::min);
+            let low = w.points.iter().map(|p| w.body().transform_point3(*p).y).fold(f32::MAX, f32::min);
             assert!(low > -1e-3, "{low}");
         }
         assert!(!rose, "bounced");
         assert_eq!(w.spin, Vec3::ZERO);
         assert!(w.velocity.x.abs() < 2.0, "{}", w.velocity);
+    }
+
+    #[test]
+    fn a_bail_lets_go_at_half_its_motion_with_the_pelvis_speed() {
+        // LeftOver is 10 frames at 15 a second: let go at 1/3 s. The
+        // motion moves the pelvis forward 0.5 ft a frame, 30 ft/s.
+        let bike = Mat4::IDENTITY;
+        let mut w = Wreck::new(bike, Vec3::ZERO, Vec3::ZERO, "LeftOver", true, 7);
+        let h = 1.0 / 60.0;
+        for k in 0..30 {
+            w.set_pose(Mat4::from_translation(RIDER_CENTRE + Vec3::Z * (0.5 * k as f32)), Vec::new());
+            w.step(&crate::Flat, h, bike, Vec3::ZERO);
+            let t = (k + 1) as f32 * h;
+            if t < 0.33 {
+                assert_eq!(w.stage, Stage::Bail, "{t}");
+            } else {
+                assert_ne!(w.stage, Stage::Bail, "{t}");
+                assert!(FALLS.contains(&w.motion), "{}", w.motion);
+                break;
+            }
+        }
+        assert!((w.velocity - Vec3::Z * 30.0).length() < 0.5, "{}", w.velocity);
+    }
+
+    #[test]
+    fn the_landing_waits_for_the_fall_to_fade_in() {
+        // Thrown in the air just above the ground: down at once, but the
+        // landing motion only starts once the fall's 0.5 s fade is done.
+        let start = Mat4::from_translation(Vec3::new(0.0, -2.0, 0.0));
+        let mut w = Wreck::new(start, Vec3::new(10.0, 0.0, 0.0), Vec3::ZERO, "Fall02", false, 3);
+        w.set_pose(Mat4::from_translation(RIDER_CENTRE), model_points(&[Vec3::new(0.0, 2.5, 0.0)]));
+        let h = 1.0 / 60.0;
+        let mut t = 0.0;
+        while t < 0.7 {
+            w.step(&crate::Flat, h, start, Vec3::ZERO);
+            t += h;
+            if t < FADE - h {
+                assert_eq!(w.motion, "Fall02", "{t}");
+            }
+        }
+        assert_eq!(w.stage, Stage::Down);
+        assert!(HITS.contains(&w.motion), "{}", w.motion);
     }
 
     #[test]
@@ -327,7 +451,7 @@ mod tests {
         // Thrown along the ground, the body's centre 0.5 ft up.
         let start = Mat4::from_translation(Vec3::new(0.0, -2.5, 0.0));
         let mut w = Wreck::new(start, Vec3::new(33.0, 0.0, 0.0), Vec3::ZERO, "Fall01", false, 1);
-        w.points = vec![Vec3::new(0.0, 2.6, -2.0), Vec3::new(0.0, 2.6, 1.0)];
+        w.set_pose(Mat4::from_translation(RIDER_CENTRE), model_points(&[Vec3::new(0.0, 2.6, -2.0), Vec3::new(0.0, 2.6, 1.0)]));
         for _ in 0..(2.6f32 / 0.02) as usize {
             w.step(&crate::Flat, 0.02, start, Vec3::ZERO);
         }

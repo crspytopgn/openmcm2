@@ -915,6 +915,21 @@ bail 0x537890 with the crash record's motion. The motion lists, filled in 0x4922
   2026-10-24, Wrecker+0x6c every 8 ms): once down, the speed falls by about e each second (0.99/s of a
   single contact), and slides from 30–37 ft/s cover 23–27 ft before the reset 2.3–3 s after the crash;
   the crate's test `slides_as_far_as_the_original` holds the port to that.
+* The motions and the hand-over **[solid for the order, likely for the re-rooting]**. +0xb8 is the
+  first frame under the rider model's root (Pelvis), and +0x6c its world placement, kept each update.
+  0x537bf0 takes the pelvis's speed (position change / dt into +0xbc) and spin (from the change of its
+  axes, into +0xc8). In state 1 the bike and rider bodies are not stepped; once the bail motion is half
+  played the update calls 0x537b00: state 2, a random fall into +0xd4, faded in over 0.5 s (0x4aa1e0)
+  unless a fade is already running (the player's +0x34), and the rider body gets the pelvis's speed and
+  spin of that frame. The recordings show it: let go 291 and 342 ms after the crash (LeftOver and
+  RightOver are 10 frames at 15/s), at 16.6 ft/s mostly downward against a bike stopped by the wall, with
+  4.6 rad/s of spin. A landing (state 2 to 3) also only picks its motion into +0xd4; the update starts
+  it once no fade runs, so it waits for the fall's fade (recorded: picked 38 ms after the let-go, started
+  496 ms after it). +0x530/+0x538 then ask, at the end of the fade, for +0xb4: the model's root (+0x1a0)
+  is moved so the pelvis stays where it was before the frame's motion step. The crate's `wreck` uses the
+  pelvis as the body and draws the model round it, which keeps the pelvis just as continuous. The motion
+  player's step (0x4a8720, vtable 0x55a350 slot 7) finds the keys either side of the time (0x4a6db0)
+  and mixes them, so crash motions keyed at 15/s move smoothly at any frame rate.
 * After a crash the bike runs the full rigid body until the reset (option ChkWreckResetOnTrack).
   Every impulse on it bounces 0.1: 0x52bb10 (vtable +0xc, which the frame, tyre-bottom and object
   contacts all reach) takes 0.1 in place of f_14c once f_444 is set, with no scaling of the impulse.

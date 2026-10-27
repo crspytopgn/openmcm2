@@ -2381,9 +2381,11 @@ mod tests {
         bike.update_angles();
         ride(&mut bike, &Flat, Controls::default(), 0.5);
         assert!(bike.crash.is_some());
-        // A bail (0x48e9b0 falls only mid-trick or crash 9).
+        // A bail (0x48e9b0 falls only mid-trick or crash 9), or the fall
+        // after a short one has let go.
         let w = bike.wreck.as_ref().expect("no wreck");
-        assert!(["LeftOver", "RightOver", "BackOver", "Endo"].contains(&w.motion));
+        let bailed = ["LeftOver", "RightOver", "BackOver", "Endo"].contains(&w.motion);
+        assert!(bailed || (crate::wreck::FALLS.contains(&w.motion) && w.stage != crate::wreck::Stage::Bail), "{}", w.motion);
         ride(&mut bike, &Flat, Controls::default(), 6.5);
         assert!(bike.wreck.is_none());
         assert!(bike.crash.is_none());

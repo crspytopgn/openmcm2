@@ -634,6 +634,11 @@ impl TerrainRenderer {
         self.objects.as_ref()?.frame_at(index, name, time)
     }
 
+    /// Animated object `index`'s frame called `name`.
+    pub fn object_frame_index(&self, index: usize, name: &str) -> Option<usize> {
+        self.objects.as_ref()?.frame_index(index, name)
+    }
+
     /// Where animated object `index`'s frames are at `time`, game
     /// coordinates.
     pub fn object_frames(&self, index: usize, frames: &[usize], time: f32) -> Vec<Option<glam::Mat4>> {

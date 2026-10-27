@@ -1,4 +1,12 @@
-# OpenMCM2 0.1.2
+# OpenMCM2 0.1.3
+
+## New in 0.1.3
+
+* **Smoother crashes:** falling off now blends between the rider's motion
+  poses instead of snapping, the rider lets go of the bike partway through
+  the bail and falls from there, and the body follows the pelvis as it
+  tumbles, closer to how the original plays it. This is new and not yet
+  well play-tested, so reports of odd-looking falls are very welcome.
 
 ## New in 0.1.2
 

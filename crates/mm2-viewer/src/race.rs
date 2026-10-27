@@ -499,15 +499,16 @@ impl Bike {
         }
     }
 
-    /// Where the thrown rider's body parts are posed now, model space.
-    pub fn set_wreck_points(&mut self, points: Vec<glam::Vec3>) {
+    /// Where the thrown rider's motion puts the pelvis (model space) and
+    /// the body parts' corners (the pelvis's space) now.
+    pub fn set_wreck_pose(&mut self, pelvis: Mat4, points: Vec<glam::Vec3>) {
         let w = match self {
             Bike::Player(b) => b.wreck.as_mut(),
             Bike::Computer(b) => b.wreck.as_mut().and_then(|w| w.wreck.as_mut()),
             Bike::Taped(_) => None,
         };
         if let Some(w) = w {
-            w.points = points;
+            w.set_pose(pelvis, points);
         }
     }
 
