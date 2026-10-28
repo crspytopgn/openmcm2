@@ -614,7 +614,13 @@ impl Replay {
             "butcamera" => return Ask::Camera,
             "butprevrider" => self.follow = (self.follow + riders - 1) % riders,
             "butnextrider" => self.follow = (self.follow + 1) % riders,
-            "butsave" => return Ask::Save,
+            "butsave" => {
+                // Kept: the button greys out, so it shows it was done.
+                if let Some(p) = &mut self.panel {
+                    p.enable("ButSave", false);
+                }
+                return Ask::Save;
+            }
             "butexit" => return Ask::Exit,
             _ => {}
         }
@@ -641,11 +647,42 @@ pub fn record_dir(user_dir: &Path) -> PathBuf {
 }
 
 /// Keeps the race just run as a replay (`0x421a40` copies the tape to
-/// `Record\<name>.vcr`): the next free "Replay N".
-pub fn save(tape: &Path, user_dir: &Path) -> std::io::Result<PathBuf> {
-    let path = free_name(user_dir, "Replay", "vcr")?;
-    std::fs::copy(tape, &path)?;
+/// `Record\<name>.vcr`). The game names it track, rider, day and minute
+/// (`Week15-Milwaukee_Mike_20261024_1502.vcr`), the minute the race was
+/// recorded, so saving the same race again keeps one file.
+pub fn save(tape: &Path, user_dir: &Path, track: &str) -> std::io::Result<PathBuf> {
+    let dir = record_dir(user_dir);
+    std::fs::create_dir_all(&dir)?;
+    let path = match Tape::parse(&std::fs::read(tape)?).ok().and_then(|t| file_name(&t, track)) {
+        Some(name) => dir.join(name),
+        None => free_name(user_dir, "Replay", "vcr")?,
+    };
+    // A saved replay played again is already kept.
+    let same = |a: &Path, b: &Path| a.canonicalize().ok().zip(b.canonicalize().ok()).is_some_and(|(a, b)| a == b);
+    if !same(tape, &path) {
+        std::fs::copy(tape, &path)?;
+    }
     Ok(path)
+}
+
+/// `TRACK_RIDER_YYYYMMDD_HHMM.vcr` from the tape's first rider and the
+/// date in its description ("10/28/2026 11:58 AM"), with only letters,
+/// digits and `-` kept from the names.
+fn file_name(tape: &Tape, track: &str) -> Option<String> {
+    let keep = |s: &str| -> String { s.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect() };
+    let (date, time) = tape.description.trim().split_once(' ')?;
+    let mut d = date.split('/').map(|n| n.parse::<u32>().ok());
+    let (month, day, year) = (d.next()??, d.next()??, d.next()??);
+    let (clock, half) = time.trim().split_once(' ').unwrap_or((time.trim(), ""));
+    let (h, m) = clock.split_once(':')?;
+    let (mut h, m): (u32, u32) = (h.parse().ok()?, m.parse().ok()?);
+    match half.to_ascii_lowercase().as_str() {
+        "pm" if h < 12 => h += 12,
+        "am" if h == 12 => h = 0,
+        _ => {}
+    }
+    let rider = tape.riders.first().map(|r| keep(&r.name)).unwrap_or_default();
+    Some(format!("{}_{}_{year:04}{month:02}{day:02}_{h:02}{m:02}.vcr", keep(track), rider))
 }
 
 /// Keeps a ghost race's best lap as the next free "Ghost N.gho".
@@ -673,6 +710,18 @@ fn free_name(user_dir: &Path, stem: &str, ext: &str) -> std::io::Result<PathBuf>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_saved_replay_is_named_as_the_game_names_it() {
+        let mut t = Tape::new(vec![0; vcr::SETTINGS_LEN], Vec::new());
+        t.riders.push(vcr::Rider { name: "Mike".into(), ..Default::default() });
+        t.description = "10/28/2026 11:58 AM".into();
+        assert_eq!(file_name(&t, "Morenci Mine").as_deref(), Some("MorenciMine_Mike_20261028_1158.vcr"));
+        t.description = "10/24/2026 3:02 PM".into();
+        assert_eq!(file_name(&t, "Week15-Milwaukee").as_deref(), Some("Week15-Milwaukee_Mike_20261024_1502.vcr"));
+        t.description = "my best run".into();
+        assert_eq!(file_name(&t, "Morenci Mine"), None);
+    }
 
     #[test]
     fn angles_go_both_ways() {

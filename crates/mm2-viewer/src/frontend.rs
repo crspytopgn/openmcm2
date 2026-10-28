@@ -226,6 +226,9 @@ pub struct Frontend {
     /// The screen a race was started from (the Pro Circuit), to go back
     /// to with its results.
     parked: Option<Box<dyn screens::Screen>>,
+    /// The single player screen while its Options or Joystick button's
+    /// options are up, to go back to.
+    beneath: Option<Screen>,
     /// The main menu's little screen of event clips (`UI/EVENTS.AVI`),
     /// and how long the menu has waited with no pull-down open.
     events: Option<Movie>,
@@ -279,6 +282,7 @@ impl Frontend {
             boxes: profiles::Profiles::default(),
             ghost_ask: None,
             parked: None,
+            beneath: None,
             events: None,
             events_wait: 0.0,
             now: 0.0,
@@ -373,6 +377,7 @@ impl Frontend {
     /// Back to the main menu (after a race), or to the screen the race
     /// was started from.
     pub fn main_menu(&mut self) {
+        self.beneath = None;
         if self.unpark(None) {
             return;
         }
@@ -438,7 +443,10 @@ impl Frontend {
             Go::Stay => Next::Stay,
             Go::Quit => Next::Quit,
             Go::Back => {
-                self.main_menu();
+                match self.beneath.take() {
+                    Some(s) => self.screen = s,
+                    None => self.main_menu(),
+                }
                 Next::Stay
             }
             Go::Open(s) => {
@@ -796,6 +804,21 @@ impl Frontend {
                     }
                 }
                 "eventtab" | "bikeridertab" | "raceinfotab" => self.show_tab(&name),
+                // The options, at the controls page for Joystick, and back
+                // here after.
+                "options" | "joystick" => {
+                    let at = if name == "joystick" { 3 } else { 0 };
+                    let mut cx = Cx {
+                        ui: &mut self.ui,
+                        audio: Some(audio),
+                        user: &mut self.user,
+                        now,
+                    };
+                    if let Some(o) = screens::options::Options::open(&mut cx, at) {
+                        let single = std::mem::replace(&mut self.screen, Screen::Extra(Box::new(o)));
+                        self.beneath = Some(single);
+                    }
+                }
                 _ => self.page_clicked(&name),
             },
             Screen::Loading(_) | Screen::Extra(_) => {}

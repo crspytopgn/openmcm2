@@ -181,6 +181,28 @@ impl Course {
         self.next.iter().position(|&n| n == i).unwrap_or(i)
     }
 
+    /// The place on the course's centre line nearest `at`, on the level
+    /// (0x51c320).
+    fn nearest_place(&self, at: Vec3) -> Option<Place> {
+        let p = flat(at);
+        let mut best: Option<(Place, f32)> = None;
+        for leg in 0..self.points.len() {
+            let to = self.next[leg];
+            if to == leg {
+                continue;
+            }
+            let (a, b) = (flat(self.points[leg]), flat(self.points[to]));
+            let d = b - a;
+            let l2 = d.length_squared();
+            let t = if l2 == 0.0 { 0.0 } else { ((p - a).dot(d) / l2).clamp(0.0, 1.0) };
+            let gap = (a + d * t - p).length_squared();
+            if best.is_none_or(|(_, g)| gap < g) {
+                best = Some((Place { leg, t }, gap));
+            }
+        }
+        best.map(|(p, _)| p)
+    }
+
     /// The point nearest `at` among the first lap's points.
     fn nearest(&self, at: Vec3) -> usize {
         (0..self.points.len())
@@ -831,6 +853,9 @@ pub struct Racer {
     /// tracker found the bike on the course this frame (+0x78c), and how
     /// long it has been off it (+0x76c).
     place: Option<Place>,
+    /// A computer rider's place on a Baja or Enduro course's line, which
+    /// it follows toward the next gate (+0x44 in 0x415170).
+    line_place: Option<Place>,
     on_course: bool,
     off_course: f32,
     /// Where a computer rider with no course is heading (the quarries).
@@ -930,6 +955,7 @@ impl Racer {
             lane: ((object as f32 * 0.618).fract() - 0.5) * 4.0,
             wander: mm2_physics::ai::Wander::new(),
             place: None,
+            line_place: None,
             on_course: true,
             off_course: 0.0,
             timing: Timing::new(false),
@@ -1317,7 +1343,39 @@ impl Racer {
         let mut limit = 1000.0;
         let raise = |p: Vec3| Vec3::new(p.x, at.y + 2.0, p.z);
         let mut widen = false;
-        let points: Vec<Vec3> = if let Some(gate) = gates.get(self.timing.gate) {
+        let points: Vec<Vec3> = if let (Some(gate), Some(course)) = (gates.get(self.timing.gate), course) {
+            // A Baja or Enduro course with its line: along the line from
+            // the confirmed place toward the next gate's, ten seconds'
+            // riding laid out a tenth at a time, while the place under the
+            // bike is nearer the gate than that (and it becomes the
+            // confirmed place); otherwise straight at the gate.
+            let g = gate.centre;
+            let far = |from: Place, to: Place| course.along(from, to, f32::MAX).unwrap_or(0.0);
+            let target = course.nearest_place(g);
+            let here = course.nearest_place(at);
+            let mut kept = self.line_place.or(here);
+            let (before, now) = match (kept, here, target) {
+                (Some(k), Some(h), Some(t)) => (far(k, t), far(h, t)),
+                _ => (0.0, 0.0),
+            };
+            if now > 0.0 && before > 0.0 && now < before {
+                kept = here;
+            }
+            self.line_place = kept;
+            let off = flat(g - at).length();
+            if off < speed {
+                let to = (g - at).normalize_or_zero();
+                if to.dot(r.velocity.normalize_or_zero()) < 0.707_55 {
+                    limit = 40.0;
+                }
+            }
+            match kept {
+                Some(k) if before > now => (0..100)
+                    .map(|i| raise(course.point(course.walk(k, i as f32 * 0.1 * speed))))
+                    .collect(),
+                _ => vec![g],
+            }
+        } else if let Some(gate) = gates.get(self.timing.gate) {
             let g = gate.centre;
             let look = gate.forward;
             let off = flat(g - at).length();
@@ -1394,7 +1452,8 @@ impl Racer {
         if let (Some(course), Bike::Computer(_)) = (course, &self.bike) {
             let (at, look) = (self.bike.position(), self.bike.forward());
             self.on_course = course.follow(at + look * 3.5, look, &mut self.place).is_some();
-            self.off_course = if self.on_course { 0.0 } else { self.off_course + frame };
+            // Only the lap races' tracker counts the time off the course.
+            self.off_course = if self.on_course || !gates.is_empty() { 0.0 } else { self.off_course + frame };
         }
         let reset_to = match (course, self.place) {
             (Some(course), Some(p)) => Some((course.point(p), course.way(p))),
@@ -1736,9 +1795,17 @@ impl Race {
     /// the chase camera's eye and target in game coordinates.
     pub fn update(&mut self, ground: &TrackGround, controls: Controls, dt: f32) -> (Vec3, Vec3) {
         // The computer riders' frame, when one is due.
+        // A frame takes `ai_frame` and the rest is kept for the next, so
+        // the frames come evenly and the drawing between them (by the time
+        // since the last) moves the bikes on evenly: taking the whole of
+        // the clock made the bikes jump on and stall in turn at 60 fps.
+        // Under half the frame rate, one frame takes the lot.
         self.ai_clock += dt;
-        let ai_dt = if self.ai_clock >= self.ai_frame * 0.999 {
+        let ai_dt = if self.ai_frame <= 0.0 || self.ai_clock >= self.ai_frame * 2.0 {
             std::mem::take(&mut self.ai_clock)
+        } else if self.ai_clock >= self.ai_frame * 0.999 {
+            self.ai_clock = (self.ai_clock - self.ai_frame).max(0.0);
+            self.ai_frame
         } else {
             0.0
         };

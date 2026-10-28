@@ -68,7 +68,7 @@ pub const UPGRADES: [(&str, &str, bool); 16] = [
     ("mud", "Mud and spray", true),
     ("bikes", "Glossier bikes", true),
     ("shafts", "Light shafts", true),
-    ("cinematic", "Replay blur and depth of field", true),
+    ("cinematic", "Replay blur and depth of field", false),
     ("ruts", "Lasting tyre ruts", false),
     ("scenery", "Trackside props and crowd", false),
     ("grade", "Colour grade", false),
@@ -158,6 +158,9 @@ impl Settings {
                 "vsync" => s.vsync = yes(v),
                 "show_fps" => s.show_fps = yes(v),
                 "check_updates" => s.check_updates = yes(v),
+                // Files from before version 2 kept the replay blur on by
+                // default; it starts off now, so their setting is dropped.
+                "upgrade.cinematic" if !text.lines().any(|l| l.trim() == "version=2") => {}
                 k => {
                     if let Some(i) = UPGRADES.iter().position(|u| k == format!("upgrade.{}", u.0)) {
                         s.upgrades[i] = yes(v);
@@ -172,7 +175,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "game={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\nshow_fps={}\ncheck_updates={}\n",
+            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\nshow_fps={}\ncheck_updates={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),

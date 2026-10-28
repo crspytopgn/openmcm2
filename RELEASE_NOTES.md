@@ -1,4 +1,32 @@
-# OpenMCM2 0.1.8
+# OpenMCM2 0.2
+
+## New in 0.2
+
+Riding and racing:
+
+* **Wheels ride up steep faces:** a wheel now climbs onto a steep face,
+  such as a railway crossing, instead of catching on it.
+* **No more roll-overs on side slopes:** a tyre that is off the ground no
+  longer counts as bottomed out, which could flip the bike on a sideways
+  slope.
+* **Baja and Enduro computer riders** follow the course line to the next
+  gate, so they no longer stall on climbs like Morenci's.
+* **Computer riders are drawn smoothly** between their physics steps.
+
+More tracks:
+
+* **Get tracks in the launcher:** a new More tracks section lists and
+  searches the player-made tracks on MDX Racing (mdxracing.com) and
+  downloads a track only when you ask for it. Tracks only offered as
+  `.rar` link to the site instead. Remove takes a track out again.
+
+Menus and replays:
+
+* **Replay Save works**, and saving the same race twice keeps one file.
+* The **Options and Joystick buttons** on the race screens work.
+* Replay blur is now **off by default** in the enhanced look.
+
+If you're on 0.1.6 or later, the launcher will offer this update itself.
 
 ## New in 0.1.8
 

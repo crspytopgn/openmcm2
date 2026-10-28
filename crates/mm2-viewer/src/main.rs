@@ -4603,7 +4603,9 @@ impl ApplicationHandler for App {
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(s) = &self.state {
                     let size = (s.config.width, s.config.height);
-                    self.pointer = sprites::Sprites::to_screen(size, position.x, position.y);
+                    // The replay player is drawn stretched over the window.
+                    let stretch = self.replay.is_some() && !self.in_menus();
+                    self.pointer = sprites::Sprites::to_screen_as(size, position.x, position.y, stretch);
                 }
                 if self.in_menus() {
                     let (x, y) = self.pointer;
@@ -4852,8 +4854,9 @@ impl ApplicationHandler for App {
                     replay::Ask::Exit => self.back_to_menu(),
                     replay::Ask::Save => {
                         let dir = self.front.as_ref().map(|f| f.user().store.dir.clone());
+                        let track = self.track.as_ref().map_or("", |t| t.name.as_str());
                         if let Some(dir) = dir {
-                            match replay::save(&rp.path, &dir) {
+                            match replay::save(&rp.path, &dir, track) {
                                 Ok(p) => eprintln!("saved the replay as {}", p.display()),
                                 Err(e) => eprintln!("saving the replay: {e}"),
                             }

@@ -901,7 +901,12 @@ impl Bike {
             0.0
         };
         for i in 0..2 {
+            // Only a touching tyre bottoms: 0x52ffb0 sets +0x5a0 from the
+            // touching shocks and clears it when neither touches, so a
+            // shock still squeezed from the last landing kicks nothing in
+            // the air.
             if !self.tyres[i].down {
+                self.tyres[i].bottomed = 0.0;
                 continue;
             }
             let push = self.shock(i, shock_h, rider, crashed);
@@ -1927,12 +1932,28 @@ impl Bike {
         let mut normals: Vec<Vec3> = Vec::new();
         let mut moving = Vec3::ZERO;
         // A wheel the probe has put on an object rides it on its tyre.
+        // The probe is taken again where the step has moved the bike to
+        // (0x519c30 runs ahead of the 0x52fc60 sweep): a tyre that has
+        // just reached a steep face, like the railway's bank, rides onto
+        // it instead of its rim points striking the face side-on and
+        // rolling the bike over.
+        let on_object = if self.crash.is_none() {
+            let kept = self.tyres;
+            for i in 0..2 {
+                self.contact(ground, i);
+            }
+            let on = self.tyres.map(|t| t.on_object);
+            self.tyres = kept;
+            on
+        } else {
+            self.tyres.map(|t| t.on_object)
+        };
         let none = Vec::new();
         let wheels = [0, 1].map(|i| {
             let t = &self.tyres[i];
             (
                 axle(i, t.squeeze),
-                if t.on_object { &none } else { &hull.wheels[i] },
+                if on_object[i] { &none } else { &hull.wheels[i] },
             )
         });
         for (offset, points) in [(Vec3::ZERO, &hull.body)].into_iter().chain(wheels) {

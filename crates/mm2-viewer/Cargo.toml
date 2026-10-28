@@ -11,9 +11,9 @@ cpal = { version = "0.16.0", optional = true }
 ab_glyph = "0.2.29"
 gilrs = { version = "0.11", optional = true }
 glam = "0.30"
-mm2-formats = { version = "0.1.0", path = "../mm2-formats" }
-mm2-indeo = { version = "0.1.0", path = "../mm2-indeo" }
-mm2-physics = { version = "0.1.0", path = "../mm2-physics" }
+mm2-formats = { version = "0.2.0", path = "../mm2-formats" }
+mm2-indeo = { version = "0.2.0", path = "../mm2-indeo" }
+mm2-physics = { version = "0.2.0", path = "../mm2-physics" }
 png = "0.18.1"
 pollster = "1.0.1"
 wgpu = "30.0.1"

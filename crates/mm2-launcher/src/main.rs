@@ -1,13 +1,15 @@
 //! The OpenMCM2 launcher: sets up the game data from the player's own
 //! copy of Motocross Madness 2, picks the settings, and starts
 //! `mm2-viewer` with them. It can also update OpenMCM2 itself from its
-//! GitHub releases (see [`update`]).
+//! GitHub releases (see [`update`]), and add tracks players have made
+//! (see [`tracks`]).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod game;
 mod iso;
 mod settings;
+mod tracks;
 mod update;
 
 use eframe::egui;
@@ -86,6 +88,82 @@ struct Launcher {
     /// Where this copy of OpenMCM2 is installed, if it can update itself.
     install: Result<update::Install, String>,
     update: Update,
+    tracks: Tracks,
+}
+
+/// A listing page being fetched, until it arrives.
+type Fetch = Arc<Mutex<Option<Result<tracks::Listing, String>>>>;
+
+/// The "Get tracks" window.
+#[derive(Default)]
+struct Tracks {
+    open: bool,
+    site: usize,
+    /// The category shown, or `None` while showing a search.
+    kind: Option<usize>,
+    search: String,
+    page: u32,
+    listing: Option<tracks::Listing>,
+    fetching: Option<Fetch>,
+    error: Option<String>,
+    added: tracks::Added,
+    /// Downloads by address, and how the finished ones went.
+    jobs: std::collections::HashMap<String, Arc<tracks::Job>>,
+    failed: std::collections::HashMap<String, String>,
+}
+
+impl Tracks {
+    fn fetch(&mut self, page: u32) {
+        let site = &tracks::SITES[self.site];
+        let query = match self.kind {
+            Some(k) => site.kinds[k].category.to_string(),
+            None => self.search.trim().to_string(),
+        };
+        let slot = Arc::new(Mutex::new(None));
+        let s = slot.clone();
+        std::thread::spawn(move || *s.lock().unwrap() = Some(tracks::list(site, &query, page)));
+        self.page = page;
+        self.error = None;
+        self.fetching = Some(slot);
+    }
+
+    fn poll(&mut self, ctx: &egui::Context) {
+        if let Some(f) = &self.fetching {
+            let got = f.lock().unwrap().take();
+            match got {
+                Some(Ok(l)) => {
+                    self.listing = Some(l);
+                    self.fetching = None;
+                }
+                Some(Err(e)) => {
+                    self.error = Some(e);
+                    self.fetching = None;
+                }
+                None => ctx.request_repaint_after(Duration::from_millis(100)),
+            }
+        }
+        let mut done = Vec::new();
+        for (url, job) in &self.jobs {
+            if let Some(r) = job.result.lock().unwrap().take() {
+                done.push((url.clone(), r));
+            }
+        }
+        for (url, r) in done {
+            self.jobs.remove(&url);
+            match r {
+                Ok(_) => {
+                    self.failed.remove(&url);
+                }
+                Err(e) => {
+                    self.failed.insert(url, e);
+                }
+            }
+            self.added = tracks::Added::load();
+        }
+        if !self.jobs.is_empty() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
+    }
 }
 
 /// What a check for updates found, once it's done.
@@ -127,6 +205,7 @@ impl Launcher {
             note: None,
             install,
             update: Update::Idle,
+            tracks: Tracks { added: tracks::Added::load(), ..Default::default() },
         };
         if l.settings.check_updates && l.install.is_ok() {
             l.check_updates();
@@ -233,6 +312,7 @@ impl Launcher {
 
     fn poll(&mut self, ctx: &egui::Context) {
         self.poll_update(ctx);
+        self.tracks.poll(ctx);
         if let Some(p) = self.import.clone() {
             let r = p.result.lock().unwrap().take();
             if let Some(r) = r {
@@ -319,6 +399,7 @@ impl eframe::App for Launcher {
                 ui.add_space(10.0);
                 self.update_banner(ui, busy);
                 self.game_ui(ui, busy);
+                self.more_tracks_ui(ui, busy);
                 self.display_ui(ui);
                 self.graphics_ui(ui);
                 self.updates_ui(ui);
@@ -331,6 +412,7 @@ impl eframe::App for Launcher {
                 });
             });
         });
+        self.tracks_window(&ctx);
         if self.settings != self.saved && !busy {
             let _ = self.settings.save();
             self.saved = self.settings.clone();
@@ -569,6 +651,158 @@ impl Launcher {
         }
         if let Some(r) = install {
             self.update = Update::Found(r);
+        }
+    }
+}
+
+impl Launcher {
+    fn more_tracks_ui(&mut self, ui: &mut egui::Ui, busy: bool) {
+        let site = &tracks::SITES[self.tracks.site];
+        section(ui, "More tracks", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.label("Thousands of tracks made by players are on ");
+                ui.hyperlink_to(site.name, site.home);
+                ui.label(". Each one is downloaded from there only when you pick it, and belongs to the player who made it.");
+            });
+            ui.horizontal(|ui| {
+                let ready = self.settings.game.is_some() && !busy;
+                if ui.add_enabled(ready, egui::Button::new("Get tracks…")).clicked() {
+                    self.tracks.open = true;
+                    if self.tracks.listing.is_none() && self.tracks.fetching.is_none() {
+                        self.tracks.kind = Some(0);
+                        self.tracks.fetch(1);
+                    }
+                }
+                match &self.settings.game {
+                    None => {
+                        ui.label(egui::RichText::new("Set up the game data first.").weak());
+                    }
+                    Some(g) => {
+                        let n = self.tracks.added.count(g);
+                        if n > 0 {
+                            ui.label(format!("{n} added"));
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    fn tracks_window(&mut self, ctx: &egui::Context) {
+        let Some(game) = self.settings.game.clone() else { return };
+        let mut open = self.tracks.open;
+        let t = &mut self.tracks;
+        let site = &tracks::SITES[t.site];
+        let mut fetch = None;
+        let mut add = None;
+        let mut remove = None;
+        egui::Window::new(format!("Get tracks from {}", site.name))
+            .open(&mut open)
+            .default_size([520.0, 560.0])
+            .collapsible(false)
+            .show(ctx, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for (i, k) in site.kinds.iter().enumerate() {
+                        if ui.selectable_label(t.kind == Some(i), k.label).clicked() {
+                            t.kind = Some(i);
+                            fetch = Some(1);
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let edit = ui.add(egui::TextEdit::singleline(&mut t.search).hint_text("Search by name").desired_width(ui.available_width() - 80.0));
+                    let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if (ui.button("Search").clicked() || enter) && !t.search.trim().is_empty() {
+                        t.kind = None;
+                        fetch = Some(1);
+                    }
+                });
+                ui.separator();
+                let pages = t.listing.as_ref().map_or(1, |l| l.pages.max(1));
+                egui::Panel::bottom("pages").show(ui, |ui| {
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(t.page > 1 && t.fetching.is_none(), egui::Button::new("Previous")).clicked() {
+                            fetch = Some(t.page - 1);
+                        }
+                        ui.label(format!("Page {} of {pages}", t.page.max(1)));
+                        if ui.add_enabled(t.page < pages && t.fetching.is_none(), egui::Button::new("Next")).clicked() {
+                            fetch = Some(t.page + 1);
+                        }
+                    });
+                    ui.label(egui::RichText::new("Added tracks show up in the game's track list for their event.").weak());
+                });
+                if t.fetching.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(format!("Asking {}…", site.name));
+                    });
+                }
+                if let Some(e) = &t.error {
+                    ui.label(egui::RichText::new(e).color(egui::Color32::from_rgb(240, 90, 80)));
+                }
+                let Some(listing) = &t.listing else { return };
+                if listing.tracks.is_empty() && t.fetching.is_none() {
+                    ui.label("No tracks found.");
+                }
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    for track in &listing.tracks {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(&track.name).strong());
+                                ui.horizontal(|ui| {
+                                    let kind = site.kinds.iter().find(|k| k.folder == track.folder).map_or("", |k| k.label);
+                                    let by = if track.author.is_empty() { kind.to_string() } else { format!("{kind} · by {}", track.author) };
+                                    ui.label(egui::RichText::new(by).weak());
+                                    if let Some(p) = &track.picture {
+                                        ui.hyperlink_to("picture", p);
+                                    }
+                                });
+                            });
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if let Some(job) = t.jobs.get(&track.url) {
+                                    if ui.button("Cancel").clicked() {
+                                        job.cancel.store(true, Ordering::Relaxed);
+                                    }
+                                    let total = job.total.load(Ordering::Relaxed).max(1);
+                                    let done = job.done.load(Ordering::Relaxed);
+                                    ui.add(egui::ProgressBar::new(done as f32 / total as f32).desired_width(100.0));
+                                } else if t.added.has(&game, &track.url) {
+                                    if ui.button("Remove").clicked() {
+                                        remove = Some(track.url.clone());
+                                    }
+                                    ui.label(egui::RichText::new("Added").color(egui::Color32::from_rgb(120, 200, 120)));
+                                } else if track.can_add() {
+                                    if ui.button("Get").clicked() {
+                                        add = Some(track.clone());
+                                    }
+                                } else {
+                                    ui.hyperlink_to("Download page", site.home)
+                                        .on_hover_text("This one is a .rar archive, which the launcher can't unpack.");
+                                }
+                            });
+                        });
+                        if let Some(e) = t.failed.get(&track.url) {
+                            ui.label(egui::RichText::new(format!("Couldn't add it: {e}")).color(egui::Color32::from_rgb(240, 90, 80)));
+                        }
+                        ui.separator();
+                    }
+                });
+            });
+        let t = &mut self.tracks;
+        t.open = open;
+        if let Some(page) = fetch {
+            t.fetch(page);
+        }
+        if let Some(track) = add {
+            t.failed.remove(&track.url);
+            t.jobs.insert(track.url.clone(), tracks::add(track, game.clone()));
+        }
+        if let Some(url) = remove {
+            if let Err(e) = t.added.remove(&game, &url) {
+                t.failed.insert(url, e);
+            }
         }
     }
 }

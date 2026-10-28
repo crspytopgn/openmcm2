@@ -97,7 +97,7 @@ impl Default for Enhanced {
             dust: true,
             bikes: true,
             shafts: true,
-            cinematic: true,
+            cinematic: false,
             smooth: true,
             scenery: false,
             mud: true,

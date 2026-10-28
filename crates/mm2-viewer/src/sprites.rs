@@ -406,6 +406,18 @@ impl Sprites {
 
     /// Where a window position falls on the 640×480 screen.
     pub fn to_screen((width, height): (u32, u32), x: f64, y: f64) -> (f32, f32) {
+        Self::to_screen_as((width, height), x, y, false)
+    }
+
+    /// The same, for sprites drawn with [`stretch`](Self::stretch) on (the
+    /// race's HUD and the replay player), which fill the window.
+    pub fn to_screen_as((width, height): (u32, u32), x: f64, y: f64, stretch: bool) -> (f32, f32) {
+        if stretch {
+            return (
+                x as f32 * SCREEN.0 / width.max(1) as f32,
+                y as f32 * SCREEN.1 / height.max(1) as f32,
+            );
+        }
         let scale = (width as f32 / SCREEN.0).min(height as f32 / SCREEN.1);
         let (sw, sh) = (SCREEN.0 * scale, SCREEN.1 * scale);
         let (ox, oy) = ((width as f32 - sw) / 2.0, (height as f32 - sh) / 2.0);

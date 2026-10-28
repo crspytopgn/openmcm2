@@ -10,4 +10,4 @@ license = "LGPL-2.1-or-later"
 [dependencies]
 
 [dev-dependencies]
-mm2-formats = { version = "0.1.0", path = "../mm2-formats" }
+mm2-formats = { version = "0.2.0", path = "../mm2-formats" }

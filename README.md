@@ -29,8 +29,15 @@ copy of Motocross Madness 2: a CD image (`.iso`, `.bin`/`.cue`, `.img`,
 the game's `GAME` folder into the port's user folder
 (`~/Library/Application Support/MM2/GAME` on a Mac, `%APPDATA%\MM2\GAME` on
 Windows, `~/.local/share/mm2/GAME` on Linux). Then pick the look, effects,
-full screen, window size and vsync, and press Play. Nothing is ever
-downloaded: OpenMCM2 ships without any game data.
+full screen, window size and vsync, and press Play. The game itself is
+never downloaded: OpenMCM2 ships without any game data.
+
+**More tracks.** The launcher's Get tracks section lists the player-made
+tracks on [MDX Racing](https://mdxracing.com) and, only for the ones you
+pick, downloads the zip from there and adds its track to the game
+(`tracks.ini` in the user folder records them, so Remove takes them out;
+a track never replaces a file it didn't add). Tracks only offered as
+`.rar` link to the site instead.
 
 The game can also be started directly with its folder, from a terminal:
 

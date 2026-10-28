@@ -7,4 +7,4 @@ license.workspace = true
 
 [dependencies]
 glam = "0.30"
-mm2-formats = { version = "0.1.0", path = "../mm2-formats" }
+mm2-formats = { version = "0.2.0", path = "../mm2-formats" }
