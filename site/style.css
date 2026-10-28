@@ -28,7 +28,8 @@ h1, h2, h3 { font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; }
 
 /* nav */
 .top { max-width: 1120px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; }
-.brand { font-weight: 700; font-size: 20px; color: var(--fg); text-decoration: none; }
+.brand { display: flex; color: var(--fg); text-decoration: none; }
+.brand img { display: block; height: 30px; width: auto; }
 .links { display: flex; gap: 20px; }
 .links a { color: var(--muted); text-decoration: none; font-weight: 500; font-size: 15px; }
 .links a:hover { color: var(--fg); }
