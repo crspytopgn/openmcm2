@@ -6,6 +6,7 @@
   <key>CFBundleDisplayName</key><string>OpenMCM2</string>
   <key>CFBundleIdentifier</key><string>io.github.crspytopgn.openmcm2</string>
   <key>CFBundleExecutable</key><string>mm2-launcher</string>
+  <key>CFBundleIconFile</key><string>openmcm2</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>@VERSION@</string>
   <key>CFBundleShortVersionString</key><string>@VERSION@</string>

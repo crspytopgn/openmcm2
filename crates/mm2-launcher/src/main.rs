@@ -27,6 +27,9 @@ const TIMES: [(&str, &str); 6] =
     [("", "Track's own"), ("dawn", "Dawn"), ("morning", "Morning"), ("noon", "Noon"), ("afternoon", "Afternoon"), ("dusk", "Dusk")];
 const WEATHERS: [(&str, &str); 3] = [("clear", "Clear"), ("overcast", "Overcast"), ("rain", "Rain")];
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(232, 120, 32);
+/// The window icon and the logo at the top (drawn from `assets/icon/*.svg`).
+const ICON_PNG: &[u8] = include_bytes!("../../../assets/icon/icon-256.png");
+const LOGO_PNG: &[u8] = include_bytes!("../../../assets/icon/logo-dark.png");
 
 fn main() -> eframe::Result {
     // `--import PATH [DEST]`: sets up the game data without the window.
@@ -38,7 +41,8 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("OpenMCM2")
             .with_inner_size([560.0, 760.0])
-            .with_min_inner_size([480.0, 480.0]),
+            .with_min_inner_size([480.0, 480.0])
+            .with_icon(eframe::icon_data::from_png_bytes(ICON_PNG).expect("built-in icon")),
         ..Default::default()
     };
     eframe::run_native("OpenMCM2", options, Box::new(|cc| Ok(Box::new(Launcher::new(cc)))))
@@ -89,6 +93,7 @@ struct Launcher {
     install: Result<update::Install, String>,
     update: Update,
     tracks: Tracks,
+    logo: egui::TextureHandle,
 }
 
 /// A listing page being fetched, until it arrives.
@@ -206,6 +211,11 @@ impl Launcher {
             install,
             update: Update::Idle,
             tracks: Tracks { added: tracks::Added::load(), ..Default::default() },
+            logo: {
+                let png = eframe::icon_data::from_png_bytes(LOGO_PNG).expect("built-in logo");
+                let image = egui::ColorImage::from_rgba_unmultiplied([png.width as usize, png.height as usize], &png.rgba);
+                cc.egui_ctx.load_texture("logo", image, egui::TextureOptions::LINEAR)
+            },
         };
         if l.settings.check_updates && l.install.is_ok() {
             l.check_updates();
@@ -394,7 +404,9 @@ impl eframe::App for Launcher {
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.add_space(4.0);
-                ui.heading(egui::RichText::new("OpenMCM2").size(28.0).strong());
+                // Drawn at half its pixel size, so it stays sharp on Retina screens.
+                ui.add(egui::Image::new(&self.logo).fit_to_exact_size(self.logo.size_vec2() * 0.5))
+                    .on_hover_text("OpenMCM2");
                 ui.label("Motocross Madness 2, rebuilt to run natively.");
                 ui.add_space(10.0);
                 self.update_banner(ui, busy);

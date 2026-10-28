@@ -60,8 +60,9 @@ jobs:
             macOS)
               # OpenMCM2.app: the launcher, with the viewer beside it.
               app="$dir/OpenMCM2.app"
-              mkdir -p "$app/Contents/MacOS"
+              mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
               cp $bin/mm2-launcher $bin/mm2-viewer "$app/Contents/MacOS/"
+              cp assets/icon/openmcm2.icns "$app/Contents/Resources/"
               cp $bin/mm2-tools "$dir/"
               v=${VERSION#v}
               sed -e "s/@VERSION@/$v/g" tools/Info.plist.in > "$app/Contents/Info.plist"

@@ -6,8 +6,9 @@ set -e
 cargo build --release -p mm2-viewer -p mm2-launcher
 app=target/release/OpenMCM2.app
 rm -rf "$app"
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp target/release/mm2-launcher target/release/mm2-viewer "$app/Contents/MacOS/"
+cp assets/icon/openmcm2.icns "$app/Contents/Resources/"
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -17,6 +18,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>OpenMCM2</string>
   <key>CFBundleIdentifier</key><string>io.github.crspytopgn.openmcm2</string>
   <key>CFBundleExecutable</key><string>mm2-launcher</string>
+  <key>CFBundleIconFile</key><string>openmcm2</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>0.1.0</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>

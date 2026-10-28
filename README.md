@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/icon/openmcm2-dark.svg">
+  <img src="assets/icon/openmcm2.svg" alt="OpenMCM2" width="360">
+</picture>
+
 # OpenMCM2
 
 An open-source engine for Motocross Madness 2 (Rainbow Studios, 2000),

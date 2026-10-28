@@ -28,3 +28,6 @@ default = ["gamepad", "audio"]
 gamepad = ["dep:gilrs"]
 # Sound. On Linux it needs ALSA (libasound2-dev).
 audio = ["dep:cpal"]
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "=0.1.31"

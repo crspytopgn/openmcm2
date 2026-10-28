@@ -3422,7 +3422,8 @@ impl App {
     fn init(&mut self, event_loop: &ActiveEventLoop) -> Result<State, BoxError> {
         let attrs = Window::default_attributes()
             .with_title("Motocross Madness 2")
-            .with_inner_size(window_size());
+            .with_inner_size(window_size())
+            .with_window_icon(window_icon());
         // `--fullscreen`: the whole screen, as Alt+Enter gives.
         let attrs = if std::env::args().any(|a| a == "--fullscreen") {
             attrs.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)))
@@ -4929,4 +4930,15 @@ impl ApplicationHandler for App {
                 .look(delta.0 as f32 * 0.003, delta.1 as f32 * 0.003);
         }
     }
+}
+
+/// The OpenMCM2 tyre for the title bar and taskbar (`assets/icon`).
+fn window_icon() -> Option<winit::window::Icon> {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(&include_bytes!("../../../assets/icon/icon-256.png")[..]));
+    decoder.set_transformations(png::Transformations::normalize_to_color8() | png::Transformations::ALPHA);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buf).ok()?;
+    buf.truncate(info.buffer_size());
+    winit::window::Icon::from_rgba(buf, info.width, info.height).ok()
 }
