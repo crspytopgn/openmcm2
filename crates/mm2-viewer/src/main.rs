@@ -82,6 +82,8 @@ mod sprites;
 mod tag;
 mod traffic;
 mod ui;
+#[cfg(windows)]
+mod winwatch;
 
 use camera::Camera;
 use glam::{Mat4, Vec3, Vec4};
@@ -2834,6 +2836,7 @@ async fn screenshot(
     if let (Some(race), Some((mut ui, mut hud))) = (race, track.hud()) {
         let mut sprites = sprites::Sprites::new(&device, format);
         sprites.stretch = true;
+        sprites.scale = (width as f32 / 640.0).min(height as f32 / 480.0);
         sprites.widescreen = graphics::showing().is_some() && replay.is_none();
         let mut gfx = ui::Gfx {
             sprites: &mut sprites,
@@ -3154,6 +3157,16 @@ fn offscreen(
     })
 }
 
+/// A frame not drawn, in the log at most once a second.
+fn skipped(why: &str) {
+    static LAST: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap();
+    if last.is_none_or(|t| t.elapsed().as_secs_f32() > 1.0) {
+        eprintln!("frame skipped: {why}");
+        *last = Some(Instant::now());
+    }
+}
+
 /// Runs `draw` and saves `target` as a PNG.
 fn save_png(
     device: &wgpu::Device,
@@ -3417,6 +3430,13 @@ impl App {
             attrs
         };
         let window = Arc::new(event_loop.create_window(attrs)?);
+        #[cfg(windows)]
+        {
+            use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(RawWindowHandle::Win32(h)) = window.window_handle().map(|h| h.as_raw()) {
+                winwatch::start(h.hwnd.get());
+            }
+        }
         let display = Box::new(event_loop.owned_display_handle());
         let instance = wgpu::Instance::new(
             wgpu::InstanceDescriptor::new_with_display_handle_from_env(display),
@@ -4428,10 +4448,14 @@ impl App {
                 frame
             }
             wgpu::CurrentSurfaceTexture::Outdated => {
+                skipped("the window's surface is out of date");
                 s.surface.configure(&s.device, &s.config);
                 return;
             }
-            _ => return,
+            other => {
+                skipped(&format!("{other:?}"));
+                return;
+            }
         };
         let view = frame.texture.create_view(&Default::default());
         let size = (s.config.width, s.config.height);
@@ -4563,6 +4587,12 @@ impl ApplicationHandler for App {
         let now = self.start.elapsed().as_secs_f32();
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::Focused(on) => {
+                eprintln!("{now:.2}s: the game {} focus", if on { "has" } else { "lost" });
+            }
+            WindowEvent::Occluded(hidden) => {
+                eprintln!("{now:.2}s: the game is {}", if hidden { "covered" } else { "uncovered" });
+            }
             WindowEvent::Resized(size) => {
                 if let Some(s) = &mut self.state {
                     s.config.width = size.width.max(1);

@@ -19,6 +19,9 @@ pollster = "1.0.1"
 wgpu = "30.0.1"
 winit = "0.30"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+
 [features]
 default = ["gamepad", "audio"]
 # Gamepad support. On Linux it needs libudev (libudev-dev).

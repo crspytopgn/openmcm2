@@ -576,10 +576,12 @@ impl Hud {
             let rel = p - at;
             [(rel.dot(right) * scale).trunc(), (-rel.dot(forward) * scale).trunc()]
         };
+        // The original's lines are one screen pixel wide at any size.
+        let width = 1.0 / gfx.sprites.scale.max(1.0);
         let line = |ui: &mut Ui, gfx: &mut Gfx, a: [f32; 2], b: [f32; 2], colour: [f32; 4]| {
             if let Some((a, b)) = clip_to_rim(a, b) {
                 let at = |p: [f32; 2]| [RADAR_CENTRE.0 + p[0], RADAR_CENTRE.1 + p[1]];
-                ui.line(gfx, at(a), at(b), 1.0, colour);
+                ui.line(gfx, at(a), at(b), width, colour);
             }
         };
         if !race.gates.is_empty() {
@@ -595,9 +597,9 @@ impl Hud {
                 }
             }
         } else if let (Some(course), false) = (&race.course, race.stunt_event || race.tag.is_some()) {
-            // Nationals and Supercross (0x521d70): the course line, cut at
-            // the rim.
-            for (a, b) in course.segments() {
+            // Nationals and Supercross (0x521d70): both sides of the
+            // course, cut at the rim.
+            for (a, b) in course.side_segments() {
                 line(ui, gfx, spot(a), spot(b), RADAR_COURSE);
             }
         }

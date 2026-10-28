@@ -1,4 +1,15 @@
-# OpenMCM2 0.1.7
+# OpenMCM2 0.1.8
+
+## New in 0.1.8
+
+* **Radar** now draws both edges of the track, as the original does.
+* **No more black box** flashing on screen with the enhanced look. It came
+  from the dirt particles under anti-aliasing, and the glow effect now
+  ignores any broken pixel.
+* **Windows:** any window that pops up over the game is noted in
+  `last-run.log`.
+
+If you're on 0.1.6 or later, the launcher will offer this update itself.
 
 ## New in 0.1.7
 

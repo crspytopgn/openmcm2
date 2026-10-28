@@ -114,11 +114,21 @@ fn fs_ao_blur(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(ao, ao, ao, 1.0);
 }
 
+// `c` with any channel that is not a number, or is infinite, as 0, and
+// the rest held to what a half float keeps. One such pixel in the scene
+// (a bright glint past a half float's range, say) would otherwise spread
+// through every step of the bloom and black out a block of the screen
+// round it.
+fn finite(c: vec3<f32>) -> vec3<f32> {
+    let bad = (bitcast<vec3<u32>>(c) & vec3<u32>(0x7f800000u)) == vec3<u32>(0x7f800000u);
+    return select(clamp(c, vec3<f32>(0.0), vec3<f32>(60000.0)), vec3<f32>(0.0), bad);
+}
+
 // Bloom's first step: half size, keeping only what is brighter than
 // white, softly.
 @fragment
 fn fs_bloom_first(in: Out) -> @location(0) vec4<f32> {
-    let c = textureSampleLevel(hdr_tex, smooth_sampler, in.uv, 0.0).rgb;
+    let c = finite(textureSampleLevel(hdr_tex, smooth_sampler, in.uv, 0.0).rgb);
     let bright = max(max(c.r, c.g), c.b);
     let knee = 0.35;
     let soft = clamp(bright - 1.0 + knee, 0.0, 2.0 * knee);
@@ -267,6 +277,7 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
     if (post.cinematic.w > 0.5) {
         c = cinematic(in.uv, p);
     }
+    c = finite(c);
     if (post.flags.x > 0.5) {
         c *= textureSampleLevel(ao_tex, smooth_sampler, in.uv, 0.0).r;
     }

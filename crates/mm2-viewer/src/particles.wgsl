@@ -12,8 +12,11 @@ struct Globals {
 
 struct Out {
     @builtin(position) position: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-    @location(1) colour: vec4<f32>,
+    // At the sample's centre, not the pixel's: with anti-aliasing an edge
+    // pixel is shaded where the square may not reach, and the colour run
+    // on past a dark corner goes below 0 there.
+    @location(0) @interpolate(perspective, centroid) uv: vec2<f32>,
+    @location(1) @interpolate(perspective, centroid) colour: vec4<f32>,
     @location(2) world: vec3<f32>,
 };
 
@@ -35,7 +38,8 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
         discard;
     }
     // The vertex colour is the game's 0..255 value: modulate in its space.
-    let rgb = c.rgb * pow(in.colour.rgb, vec3<f32>(2.2));
+    // Never below 0, or the power is not a number.
+    let rgb = c.rgb * pow(max(in.colour.rgb, vec3<f32>(0.0)), vec3<f32>(2.2));
     let dist = length(in.world - globals.camera.xyz);
     let range = max(globals.fog_range.y - globals.fog_range.x, 1.0);
     let fog = clamp((dist - globals.fog_range.x) / range, 0.0, 1.0);

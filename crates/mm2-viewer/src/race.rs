@@ -73,9 +73,12 @@ pub struct Course {
 }
 
 impl Course {
-    /// Each stretch of the course line, from a point to the next.
-    pub fn segments(&self) -> impl Iterator<Item = (Vec3, Vec3)> + '_ {
-        self.next.iter().enumerate().map(|(i, &n)| (self.points[i], self.points[n]))
+    /// Each stretch of the course's two sides, as the radar draws them.
+    pub fn side_segments(&self) -> impl Iterator<Item = (Vec3, Vec3)> + '_ {
+        self.next
+            .iter()
+            .enumerate()
+            .flat_map(move |(i, &n)| (0..2).map(move |k| (self.edges[i][k], self.edges[n][k])))
     }
 
     pub fn new(def: &TrackDef) -> Option<Self> {
