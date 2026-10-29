@@ -1331,7 +1331,9 @@ rider has an entry in a list (+0x50 next, +4 the bike); computer and human rider
 vector (+0x18) and a height (+0x28). A rider's move from last frame's probe to this frame's crosses it when
 the level paths meet within both segments, the crossing point is no more than the height above the
 centre, and (for one-way lines) the move goes along the normal. The probe is the bike's position plus
-3.5 × its look vector.
+3.5 × its look vector. The test is `move · normal ≥ 0`, so a line whose normal is zero counts either way:
+custom tracks with a "hidden" start gate store their finish line (`.tdf` tag 16) with no direction, and
+their finish arch, flag girl and her box, turned to face along it (0x500bb0), collapse to nothing.
 
 **Lap race, per rider per frame (0x4eb170):**
 

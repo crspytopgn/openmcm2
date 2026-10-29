@@ -1596,10 +1596,14 @@ fn load_track(
             // An outdoor track's trees and bushes, from `ECO.RES`.
             let mut statics = scene.models.clone();
             load_step();
-            // A lap race's finish arch and flag girl (0x418cd0).
+            // A lap race's finish arch and flag girl (0x418cd0). Custom
+            // tracks hide them with a finish line that has no direction:
+            // the game turns them to face along it (0x500bb0), and with
+            // nothing to face along they shrink to nothing.
             let finish_line = course
                 .as_ref()
                 .and_then(|c| c.finish)
+                .filter(|l| l.direction[0] != 0.0 || l.direction[2] != 0.0)
                 .filter(|_| gate_list.is_empty());
             let arch_width = rs2::Archive::parse(&model_files[0])
                 .ok()
@@ -3641,14 +3645,14 @@ impl App {
                         } else {
                             input::KeyMap::factory()
                         };
-                        let device = match p.keys.current as usize {
-                            input::KEYBOARD => pad_device(&self.pads),
-                            d => d,
-                        };
+                        // The joystick's map: the one the controls page
+                        // shows if a joystick's, else the pad plugged in.
+                        let joy = |d: usize| p.keys.keys.get(d).filter(|m| m.iter().any(|&(k, _)| k == 2));
+                        let shown = p.controls.device as usize;
                         self.joy_flipped = f.user().settings.number("JoyDirectionFlipped", 0) != 0;
-                        self.pad_map = match p.keys.keys.get(device) {
-                            Some(m) if m.iter().any(|&(k, _)| k == 2) => *m,
-                            _ => input::factory_pad(),
+                        self.pad_map = match (shown < input::KEYBOARD).then(|| joy(shown)).flatten() {
+                            Some(m) => *m,
+                            None => joy(pad_device(&self.pads)).copied().unwrap_or_else(input::factory_pad),
                         };
                         self.analog = p.controls.analog_axes;
                         if let race::Bike::Player(b) = &mut r.racers[r.player].bike {

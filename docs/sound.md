@@ -8,8 +8,10 @@ port does. The engine note itself is in `physics.md` section 15. Code: `crates/m
 * Every race sound except the crowd and the chimes is a **DirectSound 3D buffer**. The listener is the camera
   (camera +0x170 position, +0x17c orientation), and its velocity is the followed bike's (0x4e84a0).
 * Listener: distance factor **0.3048** (the game works in feet), rolloff **1**, Doppler factor **1**.
-  So each sound is full volume inside its minimum distance, min/d out to its maximum distance and no quieter
-  beyond it, and Doppler-shifted at 343 m/s = 1125 ft/s.
+  So each sound is full volume inside its minimum distance, min/d out to its maximum distance, and
+  Doppler-shifted at 343 m/s = 1125 ft/s. Every 3D buffer is made with `DSBCAPS_MUTE3DATMAXDISTANCE`
+  (flags `| 0x20010` in 0x4c1c90), so beyond its maximum distance it is silent: a computer rider crashing
+  more than 500 ft from the camera is not heard.
 * Minimum / maximum distances: engines 50 / 500 ft, wrecks and falls 50 / 500, the hard landing 10 / 500.
 * Engine buffers get the bike's place and velocity every frame. Wrecks and falls are placed where the bike was
   when they started. The hard landing follows the followed bike.

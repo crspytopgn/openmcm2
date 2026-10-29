@@ -456,6 +456,7 @@ impl Options {
                     *v = d.get(name).is_some_and(|c| c.on);
                 }
                 p.controls.device = d.selected("InputDeviceDDL") as u32;
+                p.keys.current = p.controls.device;
             }
             4 => {
                 for i in 0..10 {
@@ -642,6 +643,15 @@ impl Options {
             _ => {}
         }
         self.listening = None;
+        // A joystick's input binds on the joystick's own map: shown the
+        // keyboard or mouse, the page turns to the pad (as the race reads it).
+        if input.0 == 2 && self.p.controls.device as usize >= crate::input::KEYBOARD {
+            let pad = keys::pad().map_or(3, |p| p.device);
+            self.p.controls.device = pad as u32;
+            if let Some(d) = self.dlg() {
+                d.select("InputDeviceDDL", pad);
+            }
+        }
         let device = self.p.controls.device as usize;
         if let (Some(pair), (2, code)) = (pair, input) {
             if code < 0 {

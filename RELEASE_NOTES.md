@@ -1,6 +1,22 @@
-# OpenMCM2 0.2
+# OpenMCM2 0.2.1
 
-## New in 0.2
+## New in 0.2.1
+
+* **A logo:** OpenMCM2 now has its own tyre logo, in the launcher and as
+  the window, program and Mac app icon.
+* **Controllers:** pads whose triggers or axes rest at one end (not the
+  middle) no longer hold gas, brake or steer on their own, and buttons
+  remapped in Options > Controls now work in the race.
+* **Tracks with a hidden start gate** (some player-made tracks) count laps
+  properly and no longer show the start arch.
+* **3D sounds** fall silent past their range (500 ft), as in the original.
+* **Mac:** the launcher's self-update now works when macOS runs the app
+  from a temporary copy (as it does for apps opened straight from
+  Downloads).
+
+If you're on 0.1.6 or later, the launcher will offer this update itself.
+
+## New in 0.2.0
 
 Riding and racing:
 

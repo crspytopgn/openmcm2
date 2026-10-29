@@ -13,7 +13,8 @@
 //!
 //! Every engine, landing, wreck and fall is a DirectSound 3D buffer: the
 //! listener is the camera, moving with the followed bike, and each sound
-//! falls off as min/distance between its minimum and maximum distance and
+//! falls off as min/distance between its minimum and maximum distance, is
+//! silent beyond the maximum (`DSBCAPS_MUTE3DATMAXDISTANCE`, 0x4c1c90) and
 //! is Doppler-shifted (0x4e81a0: distance factor 0.3048 m/ft, rolloff and
 //! Doppler factor 1). Crashes, landings, the crowd and its reactions come
 //! from `RES/AUDIO.RES`.
@@ -140,14 +141,20 @@ pub struct Listener {
 impl Listener {
     /// How a 3D buffer at `at`, moving at `velocity`, with minimum and
     /// maximum distances `range`, is heard: its volume, pan and Doppler
-    /// pitch. The volume is min/distance between the two (rolloff 1). The
+    /// pitch. The volume is min/distance between the two (rolloff 1), and
+    /// nothing beyond the maximum: every 3D buffer is made with
+    /// `DSBCAPS_MUTE3DATMAXDISTANCE` (0x4c1c90's flags `| 0x20010`). The
     /// pan follows the side the sound is on **[likely]**: DirectSound's
     /// software 3D pans by the sound's direction, and how hard is not in
     /// the game.
     pub fn hear(&self, at: Vec3, velocity: Vec3, range: (f32, f32)) -> (f32, f32, f32) {
         let to = at - self.eye;
         let distance = to.length();
-        let volume = range.0 / distance.clamp(range.0.max(1e-3), range.1.max(range.0));
+        let volume = if distance > range.1.max(range.0) {
+            0.0
+        } else {
+            range.0 / distance.max(range.0.max(1e-3))
+        };
         let toward = to.normalize_or_zero();
         let pan = toward.dot(self.right);
         // Both closing speeds along the line between them.
@@ -1005,7 +1012,7 @@ mod tests {
             velocity: Vec3::ZERO,
         };
         // Full inside the minimum distance, min/d out to the maximum, and
-        // no quieter beyond it.
+        // silent beyond it.
         assert_eq!(
             l.hear(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO, ENGINE_RANGE)
                 .0,
@@ -1019,11 +1026,16 @@ mod tests {
                 < 1e-6
         );
         assert!(
-            (l.hear(Vec3::new(0.0, 0.0, 900.0), Vec3::ZERO, ENGINE_RANGE)
+            (l.hear(Vec3::new(0.0, 0.0, 500.0), Vec3::ZERO, ENGINE_RANGE)
                 .0
                 - 0.1)
                 .abs()
                 < 1e-6
+        );
+        assert_eq!(
+            l.hear(Vec3::new(0.0, 0.0, 900.0), Vec3::ZERO, ENGINE_RANGE)
+                .0,
+            0.0
         );
         // On the right, panned right.
         assert!(

@@ -214,6 +214,18 @@ impl Course {
             .unwrap_or(0)
     }
 
+    /// The finish line as the game tests it (0x47c5b0): no height limit,
+    /// as the port has no line height to go by.
+    fn finish_line(&self) -> race::Line {
+        let f = &self.finish;
+        race::Line {
+            centre: Vec3::from(f.position),
+            forward: Vec3::from(f.direction),
+            half_width: Vec3::from(f.across),
+            height: f32::INFINITY,
+        }
+    }
+
     /// How far the finish line is ahead of `at` along the course, and how
     /// far `at` is past it (0x51d420 both ways), ft.
     fn to_finish(&self, at: Vec3) -> (f32, f32) {
@@ -841,8 +853,9 @@ pub struct Racer {
     /// follows the gas).
     pub controls: Controls,
     lap_start: f32,
-    /// Which side of the finish line the bike was on.
-    side: f32,
+    /// Where the finish line probe was last step (race entry +0x28),
+    /// none yet at the origin.
+    probe: Vec3,
     /// How hard a computer rider pushes, around 1.
     skill: f32,
     /// The line a computer rider follows (the game's BikeAI path), and how
@@ -948,7 +961,7 @@ impl Racer {
             lap_times: Vec::new(),
             controls: Controls::default(),
             lap_start: 0.0,
-            side: 0.0,
+            probe: Vec3::ZERO,
             skill,
             line: None,
             // Riders spread across the track by their start positions.
@@ -1553,12 +1566,12 @@ impl Racer {
         if gates {
             return;
         }
-        let f = course.finish;
-        let rel = p - flat(Vec3::from(f.position));
-        let side = rel.dot(flat(Vec3::from(f.direction)));
-        let across = rel.length_squared() - side * side;
-        let crossed = self.side < 0.0 && side >= 0.0 && across.sqrt() <= f.width / 2.0 + 5.0;
-        self.side = side;
+        // The game's probe, 3.5 ft ahead of the bike, crossing the finish
+        // line one way (0x4eb170, 0x47c5b0). A line with no direction, as
+        // custom tracks that hide the arch have, counts either way.
+        let probe = self.bike.position() + self.bike.forward() * 3.5;
+        let crossed = course.finish_line().crossed(self.probe, probe, true);
+        self.probe = probe;
         // A lap counts once most of the course has gone by.
         if crossed && self.passed * 10 >= course.lap * 6 && self.finished.is_none() {
             self.laps += 1;
@@ -1771,9 +1784,7 @@ impl Race {
             r.timing = Timing::new(!self.gates.is_empty());
             if let Some(c) = &self.course {
                 r.target = c.nearest(r.bike.position());
-                let f = c.finish;
-                r.side = (flat(r.bike.position()) - flat(Vec3::from(f.position)))
-                    .dot(flat(Vec3::from(f.direction)));
+                r.probe = Vec3::ZERO;
             }
         }
         self.time = 0.0;
@@ -2399,6 +2410,23 @@ mod tests {
 
     /// A trick held to its end scores on landing; one still going when
     /// the bike comes down throws the rider.
+    #[test]
+    fn finish_line_with_no_direction_counts_either_way() {
+        let mut d = def();
+        d.finish = d.finish.map(|l| Line {
+            direction: [0.0; 3],
+            ..l
+        });
+        let line = Course::new(&d).unwrap().finish_line();
+        let (south, north) = (Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 15.0));
+        assert!(line.crossed(south, north, true));
+        assert!(line.crossed(north, south, true));
+        // A real direction still only counts one way.
+        let line = Course::new(&def()).unwrap().finish_line();
+        assert!(line.crossed(south, north, true));
+        assert!(!line.crossed(north, south, true));
+    }
+
     #[test]
     fn tricks_score_on_landing() {
         let terrain = mm2_formats::trn::Terrain {

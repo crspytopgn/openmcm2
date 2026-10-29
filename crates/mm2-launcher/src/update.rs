@@ -92,7 +92,8 @@ impl Install {
             let app = dir.parent().and_then(Path::parent).filter(|a| {
                 a.extension().is_some_and(|e| e == "app") && dir.ends_with("Contents/MacOS")
             });
-            return app.map(|a| Install::MacApp(a.to_path_buf())).ok_or_else(|| "the launcher isn't inside OpenMCM2.app".into());
+            let app = app.ok_or("the launcher isn't inside OpenMCM2.app")?;
+            return untranslocated(app).map(Install::MacApp);
         }
         let viewer = format!("mm2-viewer{}", std::env::consts::EXE_SUFFIX);
         if !dir.join(viewer).is_file() {
@@ -441,6 +442,81 @@ fn swap(install: &Install, top: &Path, old: &Path) -> Result<(), String> {
     }
 }
 
+/// The app where the player keeps it. macOS runs a downloaded app that
+/// hasn't been moved in Finder from a read-only copy under
+/// `AppTranslocation`, which can't be updated, so the update goes to the
+/// original instead.
+fn untranslocated(app: &Path) -> Result<PathBuf, String> {
+    if !app.to_string_lossy().contains("/AppTranslocation/") {
+        return Ok(app.to_path_buf());
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(orig) = mac::original_path(app).filter(|o| o.join("Contents/MacOS").is_dir()) {
+        return Ok(orig);
+    }
+    Err("macOS is running it from a temporary read-only copy. In Finder, drag OpenMCM2 into Applications, open it from there and update again".into())
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    //! Security.framework's translocation lookup, found at run time as
+    //! Sparkle does, since it isn't in every SDK's headers.
+    use std::ffi::{c_char, c_void, CStr, CString};
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+
+    type CFTypeRef = *const c_void;
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFURLCreateFromFileSystemRepresentation(a: CFTypeRef, buf: *const u8, len: isize, dir: u8) -> CFTypeRef;
+        fn CFURLGetFileSystemRepresentation(url: CFTypeRef, resolve: u8, buf: *mut u8, len: isize) -> u8;
+        fn CFRelease(cf: CFTypeRef);
+    }
+    extern "C" {
+        fn dlopen(path: *const c_char, mode: i32) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
+    }
+    const RTLD_LAZY: i32 = 1;
+
+    /// Where the translocated app `app` really is.
+    pub fn original_path(app: &Path) -> Option<PathBuf> {
+        unsafe {
+            let lib = CString::new("/System/Library/Frameworks/Security.framework/Security").ok()?;
+            let h = dlopen(lib.as_ptr(), RTLD_LAZY);
+            if h.is_null() {
+                return None;
+            }
+            let f = dlsym(h, c"SecTranslocateCreateOriginalPathForURL".as_ptr());
+            if f.is_null() {
+                return None;
+            }
+            let f: extern "C" fn(CFTypeRef, *mut CFTypeRef) -> CFTypeRef = std::mem::transmute(f);
+            let bytes = app.as_os_str().as_bytes();
+            let url = CFURLCreateFromFileSystemRepresentation(std::ptr::null(), bytes.as_ptr(), bytes.len() as isize, 1);
+            if url.is_null() {
+                return None;
+            }
+            let mut err: CFTypeRef = std::ptr::null();
+            let orig = f(url, &mut err);
+            CFRelease(url);
+            if !err.is_null() {
+                CFRelease(err);
+            }
+            if orig.is_null() {
+                return None;
+            }
+            let mut buf = vec![0u8; 4096];
+            let ok = CFURLGetFileSystemRepresentation(orig, 1, buf.as_mut_ptr(), buf.len() as isize);
+            CFRelease(orig);
+            if ok == 0 {
+                return None;
+            }
+            let s = CStr::from_ptr(buf.as_ptr() as *const c_char);
+            Some(PathBuf::from(std::ffi::OsStr::from_bytes(s.to_bytes())))
+        }
+    }
+}
+
 /// Readies a downloaded Mac app to open: no quarantine flag (the launcher's
 /// own download doesn't set one, but a copied-in zip may have), and a
 /// valid ad-hoc signature so Apple silicon will run it.
@@ -511,6 +587,14 @@ mod tests {
         assert_eq!(find_sum(&text, "openmcm2-v1-linux-x86_64.tar.gz"), Some(h));
         assert_eq!(find_sum(&text, "other.zip"), Some("b".repeat(64)));
         assert_eq!(find_sum(&text, "missing.zip"), None);
+    }
+
+    #[test]
+    fn translocated_without_lookup() {
+        assert_eq!(untranslocated(Path::new("/Applications/OpenMCM2.app")).unwrap(), Path::new("/Applications/OpenMCM2.app"));
+        if !cfg!(target_os = "macos") {
+            assert!(untranslocated(Path::new("/private/var/folders/x/T/AppTranslocation/ABC/d/OpenMCM2.app")).is_err());
+        }
     }
 
     #[test]

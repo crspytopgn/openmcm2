@@ -14,10 +14,31 @@
 //! Every pad and stick plugged in is read together; the one last touched
 //! names the buttons on the controls page.
 //!
+//! An axis that rests at one end rather than in the middle (a trigger, a
+//! pedal, or a device that only looks like a stick) would hold the bike
+//! leaned or steered for good, so the first moment a pad is seen its
+//! axes are taken at rest: one resting past nine tenths reads from its
+//! rest instead, 0 there and 1 at its other end. DirectInput's
+//! calibration does as much for the game.
+//!
 //! Axis values here are DirectInput's way round, −1 to 1 with Y growing
 //! towards the rider (stick pulled back).
 
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
+
 use gilrs::{Axis, Button, Gamepad, GamepadId, Gilrs, MappingSource};
+
+/// The axes found resting at an end: each one's rest, −1 or 1, by pad
+/// and native axis code.
+type Rest = HashMap<(GamepadId, u32), f32>;
+
+/// How long after a pad is first seen its axes count as at rest.
+const SETTLE: Duration = Duration::from_millis(1500);
+
+/// The share of a stick's travel the pad in use must be pushed for the
+/// others to be passed over (stick drift is less).
+const IN_USE: f32 = 0.15;
 
 /// A known pad's buttons in DirectInput's order for an Xbox pad.
 const PAD_BUTTONS: [Button; 10] = [
@@ -67,6 +88,12 @@ pub struct Pads {
     pushed: [bool; 7],
     /// The buttons down last frame, a bit each.
     held: u32,
+    /// When each pad was first seen, to take its axes at rest.
+    first: HashMap<GamepadId, Instant>,
+    /// The axes resting at an end, and those seen in the middle while
+    /// the pad settles.
+    rest: Rest,
+    centred: HashSet<(GamepadId, u32)>,
 }
 
 impl Pads {
@@ -82,6 +109,9 @@ impl Pads {
             active: None,
             pushed: [false; 7],
             held: 0,
+            first: HashMap::new(),
+            rest: HashMap::new(),
+            centred: HashSet::new(),
         })
     }
 
@@ -92,15 +122,27 @@ impl Pads {
         while let Some(ev) = self.gilrs.next_event() {
             match ev.event {
                 ButtonPressed(..) => self.take(ev.id),
-                AxisChanged(_, v, _) if v.abs() > PUSHED => self.take(ev.id),
+                AxisChanged(_, v, code)
+                    if v.abs() > PUSHED && !self.rest.contains_key(&(ev.id, code.into_u32())) =>
+                {
+                    self.take(ev.id)
+                }
                 Connected => {
                     let pad = self.gilrs.gamepad(ev.id);
                     eprintln!("joystick: {} ({})", pad.name(), kind_name(&pad));
                 }
-                Disconnected if self.active == Some(ev.id) => self.active = None,
+                Disconnected => {
+                    if self.active == Some(ev.id) {
+                        self.active = None;
+                    }
+                    self.first.remove(&ev.id);
+                    self.rest.retain(|&(id, _), _| id != ev.id);
+                    self.centred.retain(|&(id, _)| id != ev.id);
+                }
                 _ => {}
             }
         }
+        self.settle();
         // Every pad and stick plugged in counts together, so a stick and
         // a separate throttle (or a wheel and its pedals) work as one.
         if self.gilrs.gamepads().next().is_none() {
@@ -137,7 +179,10 @@ impl Pads {
         let Some(pad) = self.pad() else {
             return ([0.0; 2], false, false);
         };
-        let mut v = [axis(&pad, -3).unwrap_or(0.0), axis(&pad, -5).unwrap_or(0.0)];
+        let mut v = [
+            axis(&pad, -3, &self.rest).unwrap_or(0.0),
+            axis(&pad, -5, &self.rest).unwrap_or(0.0),
+        ];
         for (b, i, s) in [
             (Button::DPadLeft, 0, -1.0),
             (Button::DPadRight, 0, 1.0),
@@ -156,12 +201,17 @@ impl Pads {
         self.gilrs.gamepads().any(|(_, p)| button(&p, n))
     }
 
-    /// An axis (−3 X to −13 RZ) over every pad and stick: the one pushed
-    /// furthest.
+    /// An axis (−3 X to −13 RZ): the pad in use's, unless it sits in
+    /// the middle, when the one pushed furthest over every pad and stick
+    /// (a stick and a separate throttle, say, work as one).
     pub fn axis(&self, code: i32) -> Option<f32> {
+        let own = self.pad().and_then(|p| axis(&p, code, &self.rest));
+        if own.is_some_and(|v| v.abs() >= IN_USE) {
+            return own;
+        }
         self.gilrs
             .gamepads()
-            .filter_map(|(_, p)| axis(&p, code))
+            .filter_map(|(_, p)| axis(&p, code, &self.rest))
             .reduce(|a, b| if b.abs() > a.abs() { b } else { a })
     }
 
@@ -170,8 +220,8 @@ impl Pads {
     pub fn throttle_axis(&self, code: i32) -> Option<f32> {
         let lever = self.gilrs.gamepads().find(|(_, p)| throttle(p).is_some());
         match lever {
-            Some((_, p)) => throttle_axis(&p, code),
-            None => self.pad().and_then(|p| throttle_axis(&p, code)),
+            Some((_, p)) => throttle_axis(&p, code, &self.rest),
+            None => self.pad().and_then(|p| throttle_axis(&p, code, &self.rest)),
         }
     }
 
@@ -197,6 +247,29 @@ impl Pads {
             name: pad.name().to_string(),
             device: self.device(),
         })
+    }
+
+    /// Takes each pad's axes at rest in its first moments: one past nine
+    /// tenths and not seen in the middle rests at that end.
+    fn settle(&mut self) {
+        let now = Instant::now();
+        for (id, pad) in self.gilrs.gamepads() {
+            let since = *self.first.entry(id).or_insert(now);
+            if now.duration_since(since) > SETTLE {
+                continue;
+            }
+            for (code, data) in pad.state().axes() {
+                let key = (id, code.into_u32());
+                let v = data.value();
+                if v.abs() < PUSHED {
+                    self.centred.insert(key);
+                    self.rest.remove(&key);
+                } else if v.abs() > 0.9 && !self.centred.contains(&key) && !self.rest.contains_key(&key) {
+                    eprintln!("joystick: {} axis {:#x} rests at {v:+.2}", pad.name(), key.1);
+                    self.rest.insert(key, v.signum());
+                }
+            }
+        }
     }
 
     fn take(&mut self, id: GamepadId) {
@@ -258,7 +331,7 @@ pub fn button(pad: &Gamepad, n: i32) -> bool {
 
 /// An axis (−3 X to −13 RZ), DirectInput's way round; `None` when the
 /// stick has no such axis.
-pub fn axis(pad: &Gamepad, code: i32) -> Option<f32> {
+pub fn axis(pad: &Gamepad, code: i32, rest: &Rest) -> Option<f32> {
     let i = AXES.iter().position(|&c| c == code)?;
     if known(pad) {
         // DirectInput gives an Xbox pad's triggers as one Z axis, the
@@ -275,9 +348,20 @@ pub fn axis(pad: &Gamepad, code: i32) -> Option<f32> {
             (Axis::RightStickY, -1.0),
             (Axis::RightZ, 1.0),
         ][i];
-        return pad.axis_data(a).map(|d| d.value() * sign);
+        let code = pad.axis_code(a)?;
+        let v = pad.state().axis_data(code)?.value();
+        return Some(from_rest(pad, code.into_u32(), v, rest) * sign);
     }
-    raw_axis(pad, i)
+    raw_axis(pad, i, Some(rest))
+}
+
+/// An axis's value from its rest: as it is if it rests in the middle,
+/// else 0 at rest to ±1 at its other end.
+fn from_rest(pad: &Gamepad, code: u32, v: f32, rest: &Rest) -> f32 {
+    match rest.get(&(pad.id(), code)) {
+        Some(r) => (v - r) * 0.5,
+        None => v,
+    }
 }
 
 /// A stick's throttle lever, 0 pulled back to 1 pushed forward: its Z
@@ -288,7 +372,7 @@ pub fn throttle(pad: &Gamepad) -> Option<f32> {
     if known(pad) {
         return None;
     }
-    let z = raw_axis(pad, 2).or_else(|| raw_axis(pad, 6))?;
+    let z = raw_axis(pad, 2, None).or_else(|| raw_axis(pad, 6, None))?;
     Some((1.0 - z) * 0.5)
 }
 
@@ -296,18 +380,19 @@ pub fn throttle(pad: &Gamepad) -> Option<f32> {
 /// open, 0 to 1. The game makes this axis 0 to 1 over Z's range
 /// (0x449e20), Z read as range − Z, with nothing below 0.2. (Bound to RZ
 /// the game's axis is stuck at 1; here RZ reads like Z.)
-pub fn throttle_axis(pad: &Gamepad, code: i32) -> Option<f32> {
+pub fn throttle_axis(pad: &Gamepad, code: i32, rest: &Rest) -> Option<f32> {
     let v = match code {
-        -7 | -6 => throttle(pad).or_else(|| axis(pad, -7).map(|z| (1.0 - z) * 0.5))?,
-        -13 | -12 => (1.0 - axis(pad, -13)?) * 0.5,
+        -7 | -6 => throttle(pad).or_else(|| axis(pad, -7, rest).map(|z| (1.0 - z) * 0.5))?,
+        -13 | -12 => (1.0 - axis(pad, -13, rest)?) * 0.5,
         _ => return None,
     };
     Some(if v <= THROTTLE_FLOOR { 0.0 } else { v })
 }
 
 /// A stick's own axis by DirectInput's place (0 X to 5 RZ, 6 the
-/// slider), the way round DirectInput gives it.
-fn raw_axis(pad: &Gamepad, i: usize) -> Option<f32> {
+/// slider), the way round DirectInput gives it; read from its rest when
+/// given the rests (not for a throttle lever, which rests at an end).
+fn raw_axis(pad: &Gamepad, i: usize, rest: Option<&Rest>) -> Option<f32> {
     let (code, data) = pad
         .state()
         .axes()
@@ -317,7 +402,11 @@ fn raw_axis(pad: &Gamepad, i: usize) -> Option<f32> {
     let flipped = [Axis::LeftStickY, Axis::RightStickY]
         .into_iter()
         .any(|a| pad.axis_code(a) == Some(code));
-    Some(if flipped { -data.value() } else { data.value() })
+    let v = match rest {
+        Some(rest) => from_rest(pad, code.into_u32(), data.value(), rest),
+        None => data.value(),
+    };
+    Some(if flipped { -v } else { v })
 }
 
 /// The DirectInput button number of a stick's native button code.

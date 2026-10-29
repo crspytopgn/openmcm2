@@ -629,6 +629,7 @@ impl Launcher {
                 return;
             }
             ui.checkbox(&mut self.settings.check_updates, "Check for updates when the launcher opens");
+            let can = self.import.is_none() && self.running.is_none();
             ui.horizontal(|ui| {
                 let idle = !matches!(self.update, Update::Checking(_) | Update::Installing(..));
                 if ui.add_enabled(idle, egui::Button::new("Check now")).clicked() {
@@ -642,12 +643,9 @@ impl Launcher {
                     Update::UpToDate => {
                         ui.label(egui::RichText::new("You have the latest version.").color(egui::Color32::from_rgb(120, 200, 120)));
                     }
-                    Update::Found(r) => {
+                    Update::Found(r) | Update::Dismissed(r) => {
                         ui.label(format!("{} is out.", r.tag));
-                    }
-                    Update::Dismissed(r) => {
-                        ui.label(format!("{} is out.", r.tag));
-                        if ui.button("Update and restart").clicked() {
+                        if ui.add_enabled(can, egui::Button::new("Update and restart")).clicked() {
                             install = Some(r.clone());
                         }
                     }
@@ -662,7 +660,7 @@ impl Launcher {
             self.check_updates();
         }
         if let Some(r) = install {
-            self.update = Update::Found(r);
+            self.install_update(r);
         }
     }
 }
