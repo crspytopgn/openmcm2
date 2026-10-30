@@ -72,7 +72,7 @@ impl Cues {
         let up = forward.cross(right);
         // The game's view is 4:3; a wider window keeps its height, so the
         // arrow keeps its place across the window as the race panel does.
-        let half = (eye.fov.to_radians() / 2.0).tan() * 0.75;
+        let half = crate::camera::half_height(eye.fov, eye.aspect);
         let x = 2.0 * (ACROSS - 0.5) * half * eye.aspect * DEPTH;
         let y = 2.0 * (0.5 - DOWN) * half * DEPTH;
         let at = eye.at + right * x + up * y + forward * DEPTH;

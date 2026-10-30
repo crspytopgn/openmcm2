@@ -21,8 +21,31 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const SIZES: [(u32, u32); 7] =
-    [(800, 600), (1024, 768), (1280, 720), (1280, 960), (1600, 900), (1920, 1080), (2560, 1440)];
+/// The screen shapes the game fits: the shape, what it suits, and its
+/// window sizes with their everyday names.
+const SHAPES: [(&str, &str, &[(u32, u32, &str)]); 3] = [
+    (
+        "4:3 Classic",
+        "The original game's shape, for older square monitors.",
+        &[(800, 600, "SVGA"), (1024, 768, "XGA"), (1280, 960, ""), (1600, 1200, "UXGA")],
+    ),
+    (
+        "16:9 Widescreen",
+        "Most monitors, laptops and TVs.",
+        &[
+            (1280, 720, "HD 720p"),
+            (1600, 900, "HD+"),
+            (1920, 1080, "Full HD 1080p"),
+            (2560, 1440, "QHD 1440p"),
+            (3840, 2160, "4K UHD"),
+        ],
+    ),
+    (
+        "21:9 Ultrawide",
+        "Ultrawide monitors: the race shows more to the sides.",
+        &[(2560, 1080, "UW-FHD"), (3440, 1440, "UW-QHD"), (3840, 1600, "UW-QHD+")],
+    ),
+];
 const TIMES: [(&str, &str); 6] =
     [("", "Track's own"), ("dawn", "Dawn"), ("morning", "Morning"), ("noon", "Noon"), ("afternoon", "Afternoon"), ("dusk", "Dusk")];
 const WEATHERS: [(&str, &str); 3] = [("clear", "Clear"), ("overcast", "Overcast"), ("rain", "Rain")];
@@ -478,22 +501,77 @@ impl Launcher {
     }
 
     fn display_ui(&mut self, ui: &mut egui::Ui) {
+        // The monitor the launcher is on, in pixels.
+        let monitor = ui.ctx().input(|i| {
+            let v = i.viewport();
+            v.monitor_size.map(|m| m * v.native_pixels_per_point.unwrap_or(1.0))
+        });
+        let monitor = monitor.map(|m| (m.x.round() as u32, m.y.round() as u32));
         let s = &mut self.settings;
         section(ui, "Display", |ui| {
-            ui.checkbox(&mut s.fullscreen, "Full screen (Alt+Enter switches in game)");
-            ui.add_enabled_ui(!s.fullscreen, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Window size");
-                    egui::ComboBox::from_id_salt("size")
-                        .selected_text(format!("{} × {}", s.window.0, s.window.1))
-                        .show_ui(ui, |ui| {
-                            for size in SIZES {
-                                ui.selectable_value(&mut s.window, size, format!("{} × {}", size.0, size.1));
+            ui.radio_value(&mut s.fullscreen, true, "Full screen (recommended)");
+            if s.fullscreen {
+                let text = match monitor {
+                    // The game draws the race no wider than 21:9 (12:5).
+                    Some(m) if m.0 * 5 > m.1 * 12 => format!(
+                        "At your screen's {}, Super ultrawide. The race is drawn 21:9 in the middle, with black bars at the sides.",
+                        size_text(m)
+                    ),
+                    Some(m) => format!("At your screen's {}, {}. {}", size_text(m), SHAPES[shape_of(m)].0, SHAPES[shape_of(m)].1),
+                    None => "At your screen's own size.".into(),
+                };
+                ui.indent("full", |ui| ui.label(egui::RichText::new(text).weak()));
+            }
+            if ui.radio(!s.fullscreen, "In a window").clicked() {
+                s.fullscreen = false;
+            }
+            if !s.fullscreen {
+                // A window as big as the screen is full screen done worse:
+                // a size that doesn't fit gives way to the biggest that does.
+                if !fits(s.window, monitor) {
+                    s.window = fitting(SHAPES[shape_of(s.window)].2, monitor)
+                        .or_else(|| SHAPES.iter().rev().find_map(|z| fitting(z.2, monitor)))
+                        .unwrap_or((1024, 768));
+                }
+                ui.indent("window", |ui| {
+                    let shape = shape_of(s.window);
+                    egui::Grid::new("window").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                        ui.label("Shape");
+                        ui.horizontal(|ui| {
+                            for (k, (name, _, sizes)) in SHAPES.iter().enumerate() {
+                                let size = fitting(sizes, monitor);
+                                let r = ui
+                                    .add_enabled(size.is_some(), egui::RadioButton::new(k == shape, *name))
+                                    .on_disabled_hover_text("Too big for a window on your screen: use Full screen.");
+                                if let (true, Some(size)) = (r.clicked() && k != shape, size) {
+                                    s.window = size;
+                                }
                             }
                         });
+                        ui.end_row();
+                        ui.label("Size");
+                        egui::ComboBox::from_id_salt("size").selected_text(size_text(s.window)).show_ui(ui, |ui| {
+                            for &(w, h, _) in SHAPES[shape].2.iter().filter(|z| fits((z.0, z.1), monitor)) {
+                                ui.selectable_value(&mut s.window, (w, h), size_text((w, h)));
+                            }
+                        });
+                        ui.end_row();
+                    });
+                    let note = SHAPES[shape].1;
+                    ui.label(egui::RichText::new(format!("{note} Alt+Enter switches to full screen while playing.")).weak());
                 });
-            });
-            ui.checkbox(&mut s.vsync, "VSync");
+            }
+            ui.add_space(4.0);
+            // Only asked where it makes a difference: wider than 16:9.
+            let wide = match s.fullscreen {
+                true => monitor.is_none_or(|m| m.0 * 9 > m.1 * 16),
+                false => s.window.0 * 9 > s.window.1 * 16,
+            };
+            if wide {
+                ui.checkbox(&mut s.centred_display, "Race display nearer the middle")
+                    .on_hover_text("Puts the speedometer, map and race info where they sit on a 16:9 screen, instead of out at the edges.");
+            }
+            ui.checkbox(&mut s.vsync, "VSync (smooth picture, no tearing)");
             ui.checkbox(&mut s.show_fps, "Show frame rate");
         });
     }
@@ -815,6 +893,40 @@ impl Launcher {
             }
         }
     }
+}
+
+/// Which of [`SHAPES`] a `width × height` is nearest.
+fn shape_of((w, h): (u32, u32)) -> usize {
+    match w as f32 / h.max(1) as f32 {
+        r if r < 1.55 => 0,
+        r if r < 2.1 => 1,
+        _ => 2,
+    }
+}
+
+/// "1920 × 1080 (Full HD 1080p)", or just the size when it has no name.
+fn size_text((w, h): (u32, u32)) -> String {
+    let name = SHAPES.iter().flat_map(|s| s.2).find(|z| (z.0, z.1) == (w, h)).map_or("", |z| z.2);
+    match name {
+        "" => format!("{w} × {h}"),
+        _ => format!("{w} × {h} ({name})"),
+    }
+}
+
+/// Whether a window `size` fits on `monitor` with room to spare: narrower,
+/// and short enough to leave the title bar and taskbar showing.
+fn fits((w, h): (u32, u32), monitor: Option<(u32, u32)>) -> bool {
+    monitor.is_none_or(|m| w < m.0 && h <= m.1 - m.1 / 12)
+}
+
+/// The biggest of `sizes` that fits on `monitor`, or the second smallest
+/// when it isn't known; none when none fit.
+fn fitting(sizes: &[(u32, u32, &str)], monitor: Option<(u32, u32)>) -> Option<(u32, u32)> {
+    let best = match monitor {
+        Some(_) => sizes.iter().filter(|z| fits((z.0, z.1), monitor)).last(),
+        None => sizes.get(1),
+    };
+    best.map(|z| (z.0, z.1))
 }
 
 fn title(s: &str) -> String {

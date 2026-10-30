@@ -89,10 +89,19 @@ the stick can be bound to steer or lean. The pad also works the menus: the
 stick or D-pad moves the pointer, A clicks and B goes back. With several plugged in, the
 one last touched rides.
 
+**Widescreen and ultrawide.** A window wider than 4:3 keeps the game's
+view up the screen and sees more to the sides, up to 21:9; on a wider one
+(32:9) the race is drawn 21:9 in the middle, with black bars at the
+sides. The race display
+keeps its shape, each piece moved to the nearest edge (replays keep the
+original layout, since their buttons are clicked), and the menus stay 4:3
+in the middle. On an ultrawide screen the launcher's "Race display nearer
+the middle" (`--centred-display`) puts it where it sits on 16:9 instead.
+
 **Optional extras**, off unless asked for:
 
 * `--enhanced` draws a gently remastered look (sun shadows, HDR, ambient
-  occlusion, detailed ground, dust, widescreen race display). F3 switches
+  occlusion, detailed ground, dust). F3 switches
   between it and the original look while racing; the riding is the same
   either way. See [docs/enhanced-graphics.md](docs/enhanced-graphics.md).
 * `--hires <pack>` uses a high-resolution texture pack that you make
