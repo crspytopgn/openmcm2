@@ -1242,7 +1242,10 @@ impl Racer {
     }
 
     /// Passes the next gate when the bike goes through it (0x4ea750);
-    /// past the last one a lap is done.
+    /// past the last one a lap is done. A human rider's pass comes from
+    /// the gate's box trigger (`f_735`, WaypointBox `f_7c0`), which counts
+    /// a rider going through either way; the computer riders take the
+    /// one-way line (0x47c5b0).
     fn pass_gates(&mut self, gates: &[race::Line], clock: f32, laps: u32, computer: bool) {
         let at = self.bike.position();
         let from = std::mem::replace(&mut self.last, at);
@@ -1260,7 +1263,7 @@ impl Racer {
         } else {
             gate
         };
-        if !gate.crossed(from, at, true) {
+        if !gate.crossed(from, at, computer) {
             return;
         }
         let before = self.timing.crossings;
@@ -2425,6 +2428,43 @@ mod tests {
         let line = Course::new(&def()).unwrap().finish_line();
         assert!(line.crossed(south, north, true));
         assert!(!line.crossed(north, south, true));
+    }
+
+    #[test]
+    fn a_rider_passes_a_gate_either_way() {
+        let terrain = mm2_formats::trn::Terrain {
+            size: 9,
+            heights: vec![0.0; 81],
+            normals: vec![[0, 127, 0]; 81],
+            surfaces: vec![0; 81],
+            scale: 30.0,
+            textures: Vec::new(),
+            tiles: Vec::new(),
+        };
+        let world = mm2_physics::collision::World::default();
+        let zones = Default::default();
+        let ground = TrackGround {
+            terrain: &terrain,
+            world: &world,
+            zones: &zones,
+            edge: true,
+        };
+        // A gate across x = 100 at z = 105, facing +z; the rider comes
+        // back through it from z = 110 to its place at z = 100.
+        let gate = race::Line {
+            centre: Vec3::new(100.0, 0.0, 105.0),
+            forward: Vec3::Z,
+            half_width: Vec3::X * 18.0,
+            height: 15.0,
+        };
+        let backwards = |computer: bool| {
+            let mut r = Racer::new(&ground, 0, (Vec3::new(100.0, 0.0, 100.0), Vec3::Z), 1.0, None);
+            r.last = Vec3::new(r.bike.position().x, r.bike.position().y, 110.0);
+            r.pass_gates(&[gate, gate], 0.0, 3, computer);
+            r.timing.gates
+        };
+        assert_eq!(backwards(false), 1, "a human rider passes it backwards");
+        assert_eq!(backwards(true), 0, "a computer rider must go its way");
     }
 
     #[test]
