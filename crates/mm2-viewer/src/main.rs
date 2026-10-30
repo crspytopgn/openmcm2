@@ -3304,6 +3304,9 @@ struct App {
     tape: Option<replay::Replay>,
     /// The race's event, for its podium.
     event: Option<frontend::EventKind>,
+    /// Where the race's result goes in the track records, unless it is
+    /// practice, a ghost race, a replay or over the network.
+    records: Option<screens::records::Entry>,
     /// A network race: whose bikes are whose, the other machines' bikes
     /// as they arrive, and the wait to send ours again.
     net: Option<frontend::NetRace>,
@@ -3412,6 +3415,7 @@ impl App {
             replay: None,
             tape: None,
             event: None,
+            records: None,
             net: None,
             remote: Vec::new(),
             send_wait: 0.0,
@@ -3579,6 +3583,14 @@ impl App {
                 };
                 self.net = setup.net;
                 self.event = Some(setup.event);
+                let counts = !practice && setup.net.is_none() && self.tape.is_none();
+                self.records = counts.then(|| screens::records::Entry {
+                    event: setup.event as u32,
+                    track: setup.track.clone(),
+                    course: setup.course,
+                    title: setup.name.clone(),
+                    length: setup.laps,
+                });
                 self.race = make_race_as(&track, laps, setup.net.map_or(PLAYER, |n| n.me));
                 self.replay = self.tape.take();
                 self.remote.clear();
@@ -3775,6 +3787,26 @@ impl App {
     fn back_to_menu(&mut self) {
         self.net = None;
         self.remote.clear();
+        // The player's best lap (stunt) and whole race go in the track's
+        // records.
+        if let (Some(entry), Some(race), Some((ui, _)), Some(f)) = (self.records.take(), &self.race, &self.hud, &self.front) {
+            let me = &race.racers[race.player];
+            let result = if race.stunt_event {
+                screens::records::Outcome {
+                    best: Some(me.best_stunt),
+                    whole: race.time_left().is_some_and(|t| t <= 0.0).then_some(me.stunt_points),
+                }
+            } else {
+                screens::records::Outcome {
+                    best: Some(me.timing.best_lap),
+                    whole: me.timing.finished.then_some(me.timing.race_time),
+                }
+            };
+            let name = rider_name(race, ui, race.player);
+            if let Err(e) = screens::records::enter(&f.user().store.dir, &entry, &name, result) {
+                eprintln!("the track records: {e}");
+            }
+        }
         let mut results = match (&self.race, &self.hud) {
             (Some(race), Some((ui, _))) => Some(results(race, ui)),
             _ => None,
