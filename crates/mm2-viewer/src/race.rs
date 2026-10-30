@@ -66,6 +66,9 @@ pub struct Course {
     next: Vec<usize>,
     /// Points in one lap.
     lap: usize,
+    /// How far past its sides the course still counts as ridden on, ft:
+    /// none in the game; [`SLACK`] with Easier riding.
+    slack: f32,
     finish: Line,
     /// Where every rider's confirmed place starts: the start line's
     /// place, 0.1 on (0x4eb170).
@@ -141,6 +144,7 @@ impl Course {
             edges,
             next,
             lap,
+            slack: 0.0,
             finish,
             start: None,
         };
@@ -340,7 +344,9 @@ impl Course {
                 continue;
             }
             let (a, b) = (self.points[leg], self.points[to]);
-            let ([a0, a1], [b0, b1]) = (self.edges[leg], self.edges[to]);
+            // Each side pushed out by the slack, away from the middle.
+            let out = |e: Vec3, middle: Vec3| e + flat(e - middle).normalize_or_zero() * self.slack;
+            let ([a0, a1], [b0, b1]) = (self.edges[leg].map(|e| out(e, a)), self.edges[to].map(|e| out(e, b)));
             if !inside(p, &[a0, b0, b, b1, a1, a]) {
                 continue;
             }
@@ -842,6 +848,11 @@ fn easier() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::args().any(|a| a == "--easier"))
 }
+
+/// How far past its sides the course still counts as ridden on with
+/// Easier riding, ft: the off-course clock (and the halved drive off it)
+/// waits until a rider is this much further out.
+pub const SLACK: f32 = 20.0;
 
 /// The player's crash tolerance by level 0 to 2: the game's 1.15, 1.05
 /// and 1.0 by difficulty (0x492950's K, +0x60c); Easier riding's Easy 1.4.
@@ -1750,7 +1761,10 @@ impl Race {
         if grid.is_empty() {
             return None;
         }
-        let course = def.and_then(Course::new);
+        let course = def.and_then(Course::new).map(|mut c| {
+            c.slack = if easier() { SLACK } else { 0.0 };
+            c
+        });
         let player = player.min(grid.len() - 1);
         let racers: Vec<Racer> = grid
             .iter()
@@ -2459,6 +2473,23 @@ mod tests {
         let line = Course::new(&def()).unwrap().finish_line();
         assert!(line.crossed(south, north, true));
         assert!(!line.crossed(north, south, true));
+    }
+
+    #[test]
+    fn slack_widens_the_course() {
+        let mut c = Course::new(&def()).unwrap();
+        // Find how far out the edge is beside the first stretch, then
+        // stand 10 ft past it.
+        let (a, b) = (c.points[0], c.points[c.next[0]]);
+        let mid = (a + b) * 0.5;
+        let out = flat(c.edges[0][0] - a).normalize();
+        let edge = flat(c.edges[0][0] - a).length();
+        let beside = mid + out * (edge + 10.0);
+        assert!(c.places(mid).len() > 0);
+        assert!(c.places(beside).is_empty(), "10 ft out is off the course");
+        c.slack = SLACK;
+        assert!(c.places(beside).len() > 0, "with the slack it is on");
+        assert!(c.places(mid + out * (edge + SLACK + 5.0)).is_empty());
     }
 
     #[test]
