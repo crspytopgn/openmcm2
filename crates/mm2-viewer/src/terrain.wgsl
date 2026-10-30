@@ -383,9 +383,12 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
 @fragment
 fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     // Under the smooth ground round the eye (smooth.rs), the game's own
-    // mesh gives way to it.
+    // mesh gives way to it, but only SMOOTH_OVERLAP in from the patch's
+    // edge: meshes meeting edge to edge leave pixels neither covers, and
+    // the haze showed through as a bright line.
     let p = in.terrain_xz - enh.fine_ground.xy;
-    if (enh.fine_ground.w > 0.5 && all(p > vec2<f32>(0.0)) && all(p < vec2<f32>(enh.fine_ground.z))) {
+    let inside = vec2<f32>(SMOOTH_OVERLAP);
+    if (enh.fine_ground.w > 0.5 && all(p > inside) && all(p < vec2<f32>(enh.fine_ground.z) - inside)) {
         discard;
     }
     return enhanced_ground(in);
@@ -431,6 +434,9 @@ fn enhanced_ground(in: VertexOut) -> vec4<f32> {
 const SMOOTH_MOST: f32 = 0.35;
 // Cells over which the smoothing fades in from the patch's edge.
 const SMOOTH_FADE: f32 = 6.0;
+// Cells the game's mesh carries on under the patch's edge (fs_enhanced);
+// the smoothing there is a hundredth of a foot at most.
+const SMOOTH_OVERLAP: f32 = 0.5;
 // Each cell is cut into this many a side (smooth.rs SPLIT).
 const SMOOTH_SPLIT: u32 = 4u;
 
