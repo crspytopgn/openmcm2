@@ -147,6 +147,51 @@ pub fn add(
     Ok(Some(at))
 }
 
+/// The race a result goes in the records for: its event (as the game
+/// numbers them), track and course, the name the lists show, and the laps
+/// it ran (minutes, for the Stunt Quarry).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Entry {
+    pub event: u32,
+    pub track: PathBuf,
+    pub course: usize,
+    pub title: String,
+    pub length: u32,
+}
+
+/// The player's result: their best lap (best single stunt), and the whole
+/// race's time (session's score) if they ran it to the end.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Outcome {
+    pub best: Option<f32>,
+    pub whole: Option<f32>,
+}
+
+/// Enters `name`'s result for the race `entry`: the best lap (or stunt)
+/// in the first table, and the whole race in the second or third when it
+/// ran five or ten laps (minutes). Each table's place from 0, where it
+/// made the top ten.
+pub fn enter(user: &Path, entry: &Entry, name: &str, result: Outcome) -> std::io::Result<[Option<usize>; 3]> {
+    let mut places = [None; 3];
+    let whole_table = match entry.length {
+        5 => Some(1),
+        10 => Some(2),
+        _ => None,
+    };
+    let results = [(Some(0), result.best), (whole_table, result.whole)];
+    for (table, value) in results {
+        let (Some(table), Some(value)) = (table, value.filter(|v| *v > 0.0)) else {
+            continue;
+        };
+        let record = Record {
+            name: name.to_string(),
+            value,
+        };
+        places[table] = add(user, entry.event, &entry.track, entry.course, &entry.title, table, record)?;
+    }
+    Ok(places)
+}
+
 /// A time as the records show it: minutes and hundredths
 /// (`0x51dd10`, "%2d:%05.2f").
 pub fn time(t: f32) -> String {
@@ -277,6 +322,39 @@ impl Screen for HighScores {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_race_goes_in_its_tables() {
+        let dir = std::env::temp_dir().join(format!("mm2-records-enter-{}", std::process::id()));
+        let entry = |length| Entry {
+            event: 2,
+            track: PathBuf::from("TERAFORM/NATIONAL/CHANOS.ENV"),
+            course: 0,
+            title: "Chanos".into(),
+            length,
+        };
+        let done = Outcome {
+            best: Some(52.5),
+            whole: Some(270.0),
+        };
+        // Five laps: the best lap and the race.
+        assert_eq!(enter(&dir, &entry(5), "Daniel", done).unwrap(), [Some(0), Some(0), None]);
+        // Three laps: only the best lap has a table.
+        assert_eq!(enter(&dir, &entry(3), "Daniel", done).unwrap(), [Some(1), None, None]);
+        // Not finished: only the best lap.
+        let crashed = Outcome { best: Some(50.0), whole: None };
+        assert_eq!(enter(&dir, &entry(10), "Daniel", crashed).unwrap(), [Some(0), None, None]);
+        // No lap done: nothing.
+        assert_eq!(enter(&dir, &entry(10), "Daniel", Outcome::default()).unwrap(), [None; 3]);
+        let saved = tracks(&dir, 2);
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].title, "Chanos");
+        let times = |t: usize| saved[0].tables[t].iter().map(|r| r.value).collect::<Vec<_>>();
+        assert_eq!(times(0), [50.0, 52.5, 52.5]);
+        assert_eq!(times(1), [270.0]);
+        assert!(times(2).is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn tables() {
