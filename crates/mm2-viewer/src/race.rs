@@ -835,6 +835,35 @@ impl Computer {
     }
 }
 
+/// The launcher's Easier riding (`--easier`, not the game's): forgiving
+/// landings, and on Easy slower computer riders and a player who comes
+/// off less.
+fn easier() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::args().any(|a| a == "--easier"))
+}
+
+/// The player's crash tolerance by level 0 to 2: the game's 1.15, 1.05
+/// and 1.0 by difficulty (0x492950's K, +0x60c); Easier riding's Easy 1.4.
+pub fn player_tolerance(level: usize, easier: bool) -> f32 {
+    match level.min(2) {
+        0 if easier => 1.4,
+        l => [1.15, 1.05, 1.0][l],
+    }
+}
+
+/// The fastest the computer riders aim to go, ft/s, by level 0 to 2: no
+/// limit but the course's (and a jump's); Easier riding's Easy 50, about 34
+/// mph, which leaves them 13–22% behind over a race start (Chanos, Farm,
+/// SX01). A cut in their engine power hardly slows them: they have far
+/// more than they use.
+pub fn computer_top_speed(level: usize, easier: bool) -> f32 {
+    match level.min(2) {
+        0 if easier => 50.0,
+        _ => f32::INFINITY,
+    }
+}
+
 /// One bike in the race.
 #[derive(Debug, Clone)]
 pub struct Racer {
@@ -936,8 +965,7 @@ impl Racer {
                 bike.racing = false;
                 bike.hull = HULL.get().cloned();
                 bike.cross_up = CROSS_UP.get().cloned();
-                // The launcher's Forgiving landings (not the game's).
-                bike.forgiving_landings = std::env::args().any(|a| a == "--forgiving-landings");
+                bike.forgiving_landings = easier();
                 Bike::Player(Box::new(bike))
             } else {
                 // A lane of ±7 ft from the line (±3 in the Baja and
@@ -1358,7 +1386,7 @@ impl Racer {
         let r = &c.rider;
         let (at, speed) = (r.position, r.speed);
         let mut power = mm2_physics::computer::POWER[level.min(2)];
-        let mut limit = 1000.0;
+        let mut limit: f32 = 1000.0;
         let raise = |p: Vec3| Vec3::new(p.x, at.y + 2.0, p.z);
         let mut widen = false;
         let points: Vec<Vec3> = if let (Some(gate), Some(course)) = (gates.get(self.timing.gate), course) {
@@ -1441,7 +1469,7 @@ impl Racer {
             vec![target]
         };
         let mut path = mm2_physics::ai::Path::new(points, speed * 0.25);
-        path.limit = limit;
+        path.limit = limit.min(computer_top_speed(level, easier()));
         path.power = power;
         path.widen = widen;
         self.line = Some(path);
@@ -1895,6 +1923,7 @@ impl Race {
                 if let Bike::Player(b) = &mut r.bike {
                     // The game holds the player's bike itself, engine running.
                     b.racing = racing;
+                    b.crash_tolerance = player_tolerance(self.level, easier());
                 } else if !racing {
                     c = Controls::default();
                 }
@@ -2430,6 +2459,21 @@ mod tests {
         let line = Course::new(&def()).unwrap().finish_line();
         assert!(line.crossed(south, north, true));
         assert!(!line.crossed(north, south, true));
+    }
+
+    #[test]
+    fn easy_is_easier() {
+        // The game's own levels: the player takes more on Easy.
+        assert_eq!(player_tolerance(0, false), 1.15);
+        assert_eq!(player_tolerance(1, false), 1.05);
+        assert_eq!(player_tolerance(2, false), 1.0);
+        // Easier riding changes only Easy.
+        assert!(player_tolerance(0, true) > player_tolerance(0, false));
+        assert!(computer_top_speed(0, true) < computer_top_speed(0, false));
+        for level in 1..3 {
+            assert_eq!(player_tolerance(level, true), player_tolerance(level, false));
+            assert_eq!(computer_top_speed(level, true), computer_top_speed(level, false));
+        }
     }
 
     #[test]

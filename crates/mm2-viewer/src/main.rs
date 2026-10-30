@@ -15,7 +15,7 @@
 //! mm2-viewer ... --fullscreen [--no-vsync]  // or Alt+Enter while playing
 //! mm2-viewer ... --show-fps                // or F2: the frame rate in the title and terminal
 //! mm2-viewer ... --centred-display         // ultrawide: the race display in a 16:9 middle
-//! mm2-viewer ... --forgiving-landings      // hard landings level on both wheels don't crash
+//! mm2-viewer ... --easier                  // forgiving landings; on Easy, slower riders and fewer falls
 //! ```
 //!
 //! Four bikes and riders from `RES/BIKE.RES` race from the start line in

@@ -580,10 +580,10 @@ impl Launcher {
     fn gameplay_ui(&mut self, ui: &mut egui::Ui) {
         let s = &mut self.settings;
         section(ui, "Gameplay", |ui| {
-            ui.checkbox(&mut s.forgiving_landings, "Forgiving landings");
+            ui.checkbox(&mut s.easier, "Easier riding");
             ui.label(
                 egui::RichText::new(
-                    "Land a jump roughly level on both wheels and the bike takes a much harder landing without throwing you off. Nose-first landings and flips still crash. Off is the original game.",
+                    "Land a jump roughly level on both wheels and the bike takes a much harder landing without throwing you off (nose-first landings and flips still crash). And when you pick Easy for a race, the computer riders are slower and you come off less. Off is the original game.",
                 )
                 .weak(),
             );
