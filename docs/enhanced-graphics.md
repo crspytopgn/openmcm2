@@ -64,7 +64,6 @@ ground's photo detail laid on gently.
 | Mud | `no-mud`, `mud=0.5` (how dirty the bikes start, 0 to 1) | Dirt cakes onto each bike and rider as it rides, by distance and speed: slowly in the dry, fast in the rain. Clumpy splats on the model itself (they stay put as it moves), thickest on the wheels, boots and underside, specks higher up; pale and dusty when dry, dark and shiny when wet. Mud dulls the paint's gloss. |
 | Light shafts | `no-shafts` | Outdoors, marching toward the sun on the screen through the open sky, so hills, trees and riders in front of a low sun cut shafts into its glow. Weaker under cloud. |
 | Replay lens | off; `cinematic` turns it on | In replays only: depth of field focused on the rider the camera follows, and motion blur from how the camera swings between frames. Racing is never blurred. |
-| Widescreen HUD | (with `--enhanced`) | On a window wider than 4:3 the race display keeps its shape: each piece moves to the nearest edge instead of being stretched. Riders' name labels stay over their riders. Replays keep the original layout, since their buttons are clicked. |
 | Texture filtering | (with `--enhanced`) | 16× anisotropic filtering instead of 8×. |
 
 High refresh needs nothing: the bike already steps once a frame, by the

@@ -91,6 +91,9 @@ pub struct Settings {
     pub fullscreen: bool,
     pub window: (u32, u32),
     pub vsync: bool,
+    /// On a screen wider than 16:9, the race display in a 16:9 middle
+    /// (`--centred-display`).
+    pub centred_display: bool,
     pub show_fps: bool,
     /// Look for a newer OpenMCM2 when the launcher opens.
     pub check_updates: bool,
@@ -111,6 +114,7 @@ impl Default for Settings {
             fullscreen: false,
             window: (1024, 768),
             vsync: true,
+            centred_display: false,
             show_fps: false,
             check_updates: true,
         }
@@ -156,6 +160,7 @@ impl Settings {
                     }
                 }
                 "vsync" => s.vsync = yes(v),
+                "centred_display" => s.centred_display = yes(v),
                 "show_fps" => s.show_fps = yes(v),
                 "check_updates" => s.check_updates = yes(v),
                 // Files from before version 2 kept the replay blur on by
@@ -175,7 +180,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\nshow_fps={}\ncheck_updates={}\n",
+            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ncheck_updates={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -188,6 +193,7 @@ impl Settings {
             self.window.0,
             self.window.1,
             b(self.vsync),
+            b(self.centred_display),
             b(self.show_fps),
             b(self.check_updates),
         );
@@ -235,6 +241,9 @@ impl Settings {
         if !self.vsync {
             a.push("--no-vsync".into());
         }
+        if self.centred_display {
+            a.push("--centred-display".into());
+        }
         if self.show_fps {
             a.push("--show-fps".into());
         }
@@ -266,6 +275,7 @@ mod tests {
         s.upgrades[13] = true;
         s.time = "dusk".into();
         s.window = (1920, 1080);
+        s.centred_display = true;
         s.check_updates = false;
         assert_eq!(Settings::parse(&s.text()), s);
         assert_eq!(
@@ -274,7 +284,8 @@ mod tests {
                 "/x/GAME",
                 "--enhanced=quality=high,no-shadows,ruts,time=dusk",
                 "--window",
-                "1920x1080"
+                "1920x1080",
+                "--centred-display"
             ]
         );
     }

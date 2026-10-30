@@ -14,6 +14,7 @@
 //! mm2-viewer ... --enhanced[=no-bloom,no-ao,...]  // modern graphics (F3 compares)
 //! mm2-viewer ... --fullscreen [--no-vsync]  // or Alt+Enter while playing
 //! mm2-viewer ... --show-fps                // or F2: the frame rate in the title and terminal
+//! mm2-viewer ... --centred-display         // ultrawide: the race display in a 16:9 middle
 //! ```
 //!
 //! Four bikes and riders from `RES/BIKE.RES` race from the start line in
@@ -32,6 +33,7 @@
 // keeps stderr in last-run.log.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bars;
 mod eco;
 mod enhance;
 mod grass;
@@ -2816,17 +2818,24 @@ async fn screenshot(
         .filter(|_| replay.is_some())
         .map(|r| renderer::from_game(r.racers[r.player].bike.position()).distance(camera.position));
     let target = offscreen(&device, format, width, height);
-    let view = target.create_view(&Default::default());
+    let window_view = target.create_view(&Default::default());
+    // Wider than 21:9, the race goes between black bars as on screen.
+    let mut bars = bars::Bars::default();
+    let between_bars = race.and_then(|_| bars.target(&device, format, (width, height)));
+    let (view, (width, height)) = match &between_bars {
+        Some((view, size)) => (view, *size),
+        None => (&window_view, (width, height)),
+    };
     // MM2_BENCH=N: draws the frame N times more first, and says how long
     // a frame takes to record and to finish.
     if let Some(n) = std::env::var("MM2_BENCH").ok().and_then(|n| n.parse::<u32>().ok()) {
-        let draw = renderer.render(&device, &queue, &view, (width, height), camera, time);
+        let draw = renderer.render(&device, &queue, view, (width, height), camera, time);
         queue.submit([draw]);
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
         let (mut record, start) = (0.0, std::time::Instant::now());
         for _ in 0..n {
             let t = std::time::Instant::now();
-            let draw = renderer.render(&device, &queue, &view, (width, height), camera, time);
+            let draw = renderer.render(&device, &queue, view, (width, height), camera, time);
             record += t.elapsed().as_secs_f64();
             queue.submit([draw]);
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
@@ -2834,14 +2843,14 @@ async fn screenshot(
         let n = n.max(1) as f64;
         eprintln!("bench: {:.2} ms a frame ({:.3} ms recording)", start.elapsed().as_secs_f64() * 1000.0 / n, record * 1000.0 / n);
     }
-    let draw = renderer.render(&device, &queue, &view, (width, height), camera, time);
+    let draw = renderer.render(&device, &queue, view, (width, height), camera, time);
     // The in-race display over the race.
     let mut encoder = device.create_command_encoder(&Default::default());
     if let (Some(race), Some((mut ui, mut hud))) = (race, track.hud()) {
         let mut sprites = sprites::Sprites::new(&device, format);
         sprites.stretch = true;
         sprites.scale = (width as f32 / 640.0).min(height as f32 / 480.0);
-        sprites.widescreen = graphics::showing().is_some() && replay.is_none();
+        sprites.widescreen = replay.is_none();
         let mut gfx = ui::Gfx {
             sprites: &mut sprites,
             device: &device,
@@ -2857,13 +2866,16 @@ async fn screenshot(
             None => {
                 let aspect = width as f32 / height.max(1) as f32;
                 hud.view_proj =
-                    Mat4::perspective_rh(camera.fovy(), aspect, 1.0, 20_000.0) * camera.view();
+                    Mat4::perspective_rh(camera.fovy(aspect), aspect, 1.0, 20_000.0) * camera.view();
                 hud.heads = race.racers.iter().map(|r| renderer.object_frame(r.object + 1, "Head", time)).collect();
                 hud.look(&track.terrain, renderer::from_game(camera.position));
                 hud.draw(&mut ui, &mut gfx, race, 1.0 / 60.0)
             }
         }
-        sprites.render(&device, &mut encoder, &view, (width, height), false);
+        sprites.render(&device, &mut encoder, view, (width, height), false);
+    }
+    if between_bars.is_some() {
+        bars.finish(&mut encoder, &target);
     }
     queue.submit([draw]);
     save_png(&device, &queue, encoder.finish(), &target, out)
@@ -3156,7 +3168,7 @@ fn offscreen(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     })
 }
@@ -3342,6 +3354,8 @@ struct State {
     /// The track's renderer, while racing.
     renderer: Option<TerrainRenderer>,
     sprites: sprites::Sprites,
+    /// The race between black bars on a window wider than 21:9.
+    bars: bars::Bars,
     camera: Camera,
     /// The Bike & Rider page's turning models, and `RES/BIKE.RES` for them.
     preview: Option<preview::Preview>,
@@ -3465,6 +3479,10 @@ impl App {
         if std::env::args().any(|a| a == "--no-vsync") {
             config.present_mode = wgpu::PresentMode::AutoNoVsync;
         }
+        // The race is copied in between black bars on a window wider than 21:9.
+        if caps.usages.contains(wgpu::TextureUsages::COPY_DST) {
+            config.usage |= wgpu::TextureUsages::COPY_DST;
+        }
         surface.configure(&device, &config);
         let sprites = sprites::Sprites::new(&device, config.format);
         let mut state = State {
@@ -3475,6 +3493,7 @@ impl App {
             config,
             renderer: None,
             sprites,
+            bars: bars::Bars::default(),
             camera: Camera::looking_at(Vec3::ZERO, Vec3::Z),
             preview: None,
             bike_res: None,
@@ -4462,12 +4481,20 @@ impl App {
                 return;
             }
         };
-        let view = frame.texture.create_view(&Default::default());
-        let size = (s.config.width, s.config.height);
-        // Text is drawn at the window's own resolution, Retina included.
-        s.sprites.scale = (size.0 as f32 / 640.0).min(size.1 as f32 / 480.0);
+        let window_view = frame.texture.create_view(&Default::default());
+        let window_size = (s.config.width, s.config.height);
         let mut commands = Vec::new();
         let racing = self.track.is_some() && self.loading.is_none();
+        // Wider than 21:9, the race is drawn 21:9 and goes between black bars.
+        let between_bars = (racing && s.config.usage.contains(wgpu::TextureUsages::COPY_DST))
+            .then(|| s.bars.target(&s.device, s.config.format, window_size))
+            .flatten();
+        let (view, size) = match &between_bars {
+            Some((view, size)) => (view, *size),
+            None => (&window_view, window_size),
+        };
+        // Text is drawn at the window's own resolution, Retina included.
+        s.sprites.scale = (size.0 as f32 / 640.0).min(size.1 as f32 / 480.0);
         if let (true, Some(renderer)) = (racing, &mut s.renderer) {
             // Animations run on the race's clock, so a restart replays the gate.
             let time = match &self.race {
@@ -4479,7 +4506,7 @@ impl App {
                 renderer.shadows_on = hud.show.shadows;
                 renderer.particles_on = hud.show.particles;
                 let aspect = size.0 as f32 / size.1.max(1) as f32;
-                hud.view_proj = Mat4::perspective_rh(s.camera.fovy(), aspect, 1.0, 20_000.0)
+                hud.view_proj = Mat4::perspective_rh(s.camera.fovy(aspect), aspect, 1.0, 20_000.0)
                     * s.camera.view();
             }
             if let (Some((_, hud)), Some(race), Some(track)) = (&mut self.hud, &self.race, &self.track) {
@@ -4491,7 +4518,7 @@ impl App {
                 .as_ref()
                 .filter(|_| self.replay.is_some())
                 .map(|r| renderer::from_game(r.racers[r.player].bike.position()).distance(s.camera.position));
-            commands.push(renderer.render(&s.device, &s.queue, &view, size, &s.camera, time));
+            commands.push(renderer.render(&s.device, &s.queue, view, size, &s.camera, time));
             if let (Some((ui, hud)), Some(race)) = (&mut self.hud, &self.race) {
                 let mut gfx = ui::Gfx {
                     sprites: &mut s.sprites,
@@ -4506,11 +4533,16 @@ impl App {
                 }
                 let mut encoder = s.device.create_command_encoder(&Default::default());
                 s.sprites.stretch = true;
-                s.sprites.widescreen = graphics::showing().is_some() && self.replay.is_none();
+                s.sprites.widescreen = self.replay.is_none();
                 s.sprites
-                    .render(&s.device, &mut encoder, &view, size, false);
+                    .render(&s.device, &mut encoder, view, size, false);
                 s.sprites.stretch = false;
                 s.sprites.widescreen = false;
+                commands.push(encoder.finish());
+            }
+            if between_bars.is_some() {
+                let mut encoder = s.device.create_command_encoder(&Default::default());
+                s.bars.finish(&mut encoder, &frame.texture);
                 commands.push(encoder.finish());
             }
         } else if let Some(front) = &mut self.front {
@@ -4521,7 +4553,7 @@ impl App {
             };
             front.draw(&mut gfx, now, progress);
             let mut encoder = s.device.create_command_encoder(&Default::default());
-            s.sprites.render(&s.device, &mut encoder, &view, size, true);
+            s.sprites.render(&s.device, &mut encoder, view, size, true);
             commands.push(encoder.finish());
             match front.preview() {
                 Some((ride, turning)) => {
@@ -4548,7 +4580,7 @@ impl App {
                     if let Some(p) = &mut s.preview {
                         p.window = front.preview_window();
                         commands.push(
-                            p.render(&s.device, &s.queue, &view, size, now, self.frame, turning),
+                            p.render(&s.device, &s.queue, view, size, now, self.frame, turning),
                         );
                     }
                 }
@@ -4608,9 +4640,14 @@ impl ApplicationHandler for App {
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(s) = &self.state {
                     let size = (s.config.width, s.config.height);
-                    // The replay player is drawn stretched over the window.
+                    // The replay player is drawn stretched over the window,
+                    // or over the race between black bars.
                     let stretch = self.replay.is_some() && !self.in_menus();
-                    self.pointer = sprites::Sprites::to_screen_as(size, position.x, position.y, stretch);
+                    let (x, width) = match stretch {
+                        true => bars::race_area(size),
+                        false => (0, size.0),
+                    };
+                    self.pointer = sprites::Sprites::to_screen_as((width, size.1), position.x - x as f64, position.y, stretch);
                 }
                 if self.in_menus() {
                     let (x, y) = self.pointer;
