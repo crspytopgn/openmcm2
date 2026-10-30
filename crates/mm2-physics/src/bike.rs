@@ -138,6 +138,12 @@ const CRASH_VERTICAL: f32 = 0.996_194_7;
 const CRASH_ENDO: f32 = 0.766;
 const CRASH_LOWSIDE: f32 = 0.707;
 const CRASH_DROP: f32 = 1000.0;
+/// Forgiving landings (an option, not the game's): landing with the nose
+/// within 20° of the ground's slope (sin) and leaned less than 30° (cos)
+/// on it, the bike takes this many times the speed lost in one step.
+const LEVEL_PITCH: f32 = 0.342;
+const LEVEL_LEAN: f32 = 0.866;
+const FORGIVING: f32 = 2.5;
 /// How far the centre of mass keeps above the ground, the frame's
 /// underside, and how the body slides on it (ours; the game's frame and
 /// ragdoll collide instead).
@@ -425,6 +431,9 @@ pub struct Bike {
     pub fixed_step: bool,
     /// The player's crash tolerance: 1, 1.05 or 1.15 by difficulty.
     pub crash_tolerance: f32,
+    /// Forgiving landings (an option, not the game's): a hard landing
+    /// roughly level on both wheels is not a crash; see [`FORGIVING`].
+    pub forgiving_landings: bool,
     /// Whether the race's progress tracker finds the bike on the course
     /// (+0x78c, 0x4eb170). Off it, in any race mode but practice, the
     /// drive is halved (0x492b20). The caller decides; it starts true.
@@ -542,6 +551,7 @@ impl Bike {
             racing: true,
             fixed_step: false,
             crash_tolerance: 1.05,
+            forgiving_landings: false,
             on_course: true,
             reset_to: None,
             crash_time: CRASH_TIME,
@@ -2065,10 +2075,23 @@ impl Bike {
         // hit that takes its speed in one step (a bounce off a face) would
         // crash at 120 fps where it doesn't at 50, so the limit stops
         // shrinking at 0.02 s.
-        if self.velocity.length() - speed_before < -self.crash_tolerance * CRASH_DROP * h.max(STEP) {
+        let forgiven = if self.forgiving_landings && self.lands_level() { FORGIVING } else { 1.0 };
+        if self.velocity.length() - speed_before < -self.crash_tolerance * forgiven * CRASH_DROP * h.max(STEP) {
             return Some(Crash::Impact);
         }
         None
+    }
+
+    /// Whether the bike meets the ground roughly level on both wheels:
+    /// its nose along the touching tyres' ground and not leaned over on
+    /// it (for [`Bike::forgiving_landings`]).
+    fn lands_level(&self) -> bool {
+        let [f, r] = self.tyres;
+        if !(f.down || r.down) {
+            return false;
+        }
+        let n = (f.normal * f.down as u8 as f32 + r.normal * r.down as u8 as f32).normalize_or(Vec3::Y);
+        self.forward().dot(n).abs() < LEVEL_PITCH && self.ground_lean().cos() > LEVEL_LEAN
     }
 
     fn orthonormalize(&mut self) {
@@ -2276,6 +2299,35 @@ mod tests {
             off.speed(),
             on.speed()
         );
+    }
+
+    /// Drops the bike onto flat ground at `down` ft/s, 30 ft/s forward,
+    /// its nose `pitch` rad up, and says how it came off.
+    fn drop(down: f32, pitch: f32, forgiving: bool) -> Option<Crash> {
+        let mut bike = Bike::new(&Flat, Vec3::ZERO, Vec3::Z);
+        bike.forgiving_landings = forgiving;
+        let axes = Mat3::from_rotation_x(-pitch);
+        bike.set_state(Vec3::new(0.0, 6.0, 0.0) + axes * COM, Vec3::new(0.0, -down, 30.0), axes, Vec3::ZERO, [0.0; 2]);
+        bike.airborne = true;
+        let mut crash = None;
+        for _ in 0..120 {
+            bike.step(&Flat, Controls::default(), 1.0 / 60.0);
+            crash = crash.or(bike.crash.map(|c| c.0));
+        }
+        crash
+    }
+
+    #[test]
+    fn forgiving_landings_take_a_level_hit() {
+        // The slowest level drop the game's own limit crashes on.
+        let hard = (10..120)
+            .map(|v| v as f32)
+            .find(|&v| drop(v, 0.0, false) == Some(Crash::Impact))
+            .expect("some drop crashes");
+        assert_eq!(drop(hard, 0.0, true), None, "level at {hard} ft/s");
+        assert_eq!(drop(hard * 1.5, 0.0, true), None, "level at {} ft/s", hard * 1.5);
+        // Nose first is not level: it crashes as before.
+        assert!(drop(hard * 1.5, -0.6, true).is_some(), "nose first at {} ft/s", hard * 1.5);
     }
 
     #[test]

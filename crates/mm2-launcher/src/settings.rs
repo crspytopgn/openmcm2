@@ -95,6 +95,9 @@ pub struct Settings {
     /// (`--centred-display`).
     pub centred_display: bool,
     pub show_fps: bool,
+    /// Hard landings roughly level on both wheels don't crash
+    /// (`--forgiving-landings`).
+    pub forgiving_landings: bool,
     /// Look for a newer OpenMCM2 when the launcher opens.
     pub check_updates: bool,
 }
@@ -116,6 +119,7 @@ impl Default for Settings {
             vsync: true,
             centred_display: false,
             show_fps: false,
+            forgiving_landings: false,
             check_updates: true,
         }
     }
@@ -162,6 +166,7 @@ impl Settings {
                 "vsync" => s.vsync = yes(v),
                 "centred_display" => s.centred_display = yes(v),
                 "show_fps" => s.show_fps = yes(v),
+                "forgiving_landings" => s.forgiving_landings = yes(v),
                 "check_updates" => s.check_updates = yes(v),
                 // Files from before version 2 kept the replay blur on by
                 // default; it starts off now, so their setting is dropped.
@@ -180,7 +185,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ncheck_updates={}\n",
+            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\nforgiving_landings={}\ncheck_updates={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -195,6 +200,7 @@ impl Settings {
             b(self.vsync),
             b(self.centred_display),
             b(self.show_fps),
+            b(self.forgiving_landings),
             b(self.check_updates),
         );
         for (u, on) in UPGRADES.iter().zip(&self.upgrades) {
@@ -247,6 +253,9 @@ impl Settings {
         if self.show_fps {
             a.push("--show-fps".into());
         }
+        if self.forgiving_landings {
+            a.push("--forgiving-landings".into());
+        }
         a
     }
 }
@@ -276,6 +285,7 @@ mod tests {
         s.time = "dusk".into();
         s.window = (1920, 1080);
         s.centred_display = true;
+        s.forgiving_landings = true;
         s.check_updates = false;
         assert_eq!(Settings::parse(&s.text()), s);
         assert_eq!(
@@ -285,7 +295,8 @@ mod tests {
                 "--enhanced=quality=high,no-shadows,ruts,time=dusk",
                 "--window",
                 "1920x1080",
-                "--centred-display"
+                "--centred-display",
+                "--forgiving-landings"
             ]
         );
     }
