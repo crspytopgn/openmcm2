@@ -808,7 +808,7 @@ impl TerrainRenderer {
             (start, std::f32::consts::LN_2 / span, (start + 7.0 * span).clamp(end, 20_000.0))
         });
         let far = haze.map_or(end, |h| h.2);
-        let proj = Mat4::perspective_rh(camera.fovy(), aspect, 1.0, far);
+        let proj = Mat4::perspective_rh(camera.fovy(aspect), aspect, 1.0, far);
         // The shadow (0x4df8c0): a camera at the sun, 80000 ft away and so
         // as good as parallel, fitted round the casters, their middle and
         // a radius about them; what it sees is laid over the ground.
@@ -845,7 +845,7 @@ impl TerrainRenderer {
             self.blocks.iter().filter(|b| seen.sees(b.0, b.1)).map(|b| b.2.clone()),
             &mut self.runs,
         );
-        let (cascades, texels) = crate::enhance::cascades(camera.view(), camera.fovy(), aspect, lights.to_sun);
+        let (cascades, texels) = crate::enhance::cascades(camera.view(), camera.fovy(aspect), aspect, lights.to_sun);
         if let (Some(e), Some(on)) = (&self.enhanced, showing) {
             let flag = |b: bool| b as u32 as f32;
             let (h_start, density, _) = haze.unwrap_or((0.0, 0.0, far));

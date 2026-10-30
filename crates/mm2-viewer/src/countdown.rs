@@ -57,7 +57,7 @@ impl Countdown {
         let at = eye.at + forward * AHEAD + up * UP;
         // 0x401310: scale = pixels · depth / (size · the camera's focal
         // length in pixels, +0x198).
-        let half = (eye.fov.to_radians() / 2.0).tan() * 0.75;
+        let half = crate::camera::half_height(eye.fov, eye.aspect);
         let focal = 240.0 / half;
         let scale = PIXELS * DEPTH / (self.sizes[k].max(1e-3) * focal);
         crate::objects::orientation(forward.into(), up.into(), Vec3::splat(scale), at.into())

@@ -45,8 +45,12 @@ pub struct Sprites {
     pub scale: f32,
     /// With `stretch`, on a window wider than 4:3: keep each piece its
     /// shape and move it to the edge it is nearest, rather than stretch
-    /// it (an enhanced-graphics upgrade, not the game's).
+    /// it (not the game's own: it stretched).
     pub widescreen: bool,
+    /// With `widescreen` (`--centred-display`): the edges the pieces move
+    /// to are those of a 16:9 middle, nearer the rider on an ultrawide
+    /// window.
+    pub centred: bool,
     /// Whether the quads drawn now are placed in the 3D view, so only
     /// their place is stretched, not their shape.
     pub in_view: bool,
@@ -142,6 +146,7 @@ impl Sprites {
             stretch: false,
             scale: 1.0,
             widescreen: false,
+            centred: std::env::args().any(|a| a == "--centred-display"),
             in_view: false,
         }
     }
@@ -325,12 +330,19 @@ impl Sprites {
         let mut indices: Vec<u32> = Vec::with_capacity(self.quads.len() * 6);
         let mut batches: Vec<(TextureId, std::ops::Range<u32>)> = Vec::new();
         // Widescreen: one scale for both ways, and each piece moved to the
-        // edge it is nearest, by the third of the screen its middle is in.
-        let wide = (self.stretch && self.widescreen && width * 3 > height * 4)
-            .then(|| (height as f32 / SCREEN.1, width as f32 / SCREEN.0));
+        // edge it is nearest, by the third of the screen its middle is in:
+        // the window's edges, or a 16:9 middle's when centred.
+        let wide = (self.stretch && self.widescreen && width * 3 > height * 4).then(|| {
+            let across = match self.centred {
+                true => (width as f32).min(height as f32 * 16.0 / 9.0),
+                false => width as f32,
+            };
+            let left = (width as f32 - across) / 2.0;
+            (height as f32 / SCREEN.1, width as f32 / SCREEN.0, left, across / SCREEN.0)
+        });
         for (id, quad, in_view) in &self.quads {
             let base = vertices.len() as u32;
-            let shift = wide.map(|(s, stretched)| {
+            let shift = wide.map(|(s, stretched, left, edges)| {
                 let middle = quad.iter().map(|v| v.position[0]).sum::<f32>() / 4.0;
                 let anchor = if *in_view {
                     // Stays over its rider: its corner at its stretched place.
@@ -342,7 +354,11 @@ impl Sprites {
                 } else {
                     SCREEN.0 / 2.0
                 };
-                (anchor, anchor * stretched, s)
+                let to = match in_view {
+                    true => anchor * stretched,
+                    false => left + anchor * edges,
+                };
+                (anchor, to, s)
             });
             for v in quad {
                 let position = match shift {
