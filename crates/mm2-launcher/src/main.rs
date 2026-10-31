@@ -9,6 +9,7 @@
 mod game;
 mod iso;
 mod settings;
+mod shortcut;
 mod tracks;
 mod update;
 
@@ -295,6 +296,22 @@ impl Launcher {
         }
     }
 
+    /// A desktop shortcut that starts the game with the settings as they
+    /// are now, without the launcher.
+    fn make_shortcut(&mut self) {
+        let Some(viewer) = settings::viewer() else {
+            self.note = Some(("Can't find mm2-viewer next to the launcher.".into(), true));
+            return;
+        };
+        self.note = Some(match shortcut::make(&viewer, &self.settings.args(), self.settings.game.as_deref()) {
+            Ok(at) => (
+                format!("Shortcut made: {}. It keeps these settings; make it again after changing them.", at.display()),
+                false,
+            ),
+            Err(e) => (e, true),
+        });
+    }
+
     fn check_updates(&mut self) {
         let slot = Arc::new(Mutex::new(None));
         let s = slot.clone();
@@ -421,6 +438,18 @@ impl eframe::App for Launcher {
                 let _ = self.settings.save();
                 self.saved = self.settings.clone();
                 self.play(&ctx);
+            }
+            ui.add_space(4.0);
+            let can = self.settings.game.is_some() && !busy;
+            let made = ui
+                .vertical_centered(|ui| {
+                    ui.add_enabled(can, egui::Button::new("Make a desktop shortcut with these settings"))
+                        .on_hover_text("Starts the game straight away, skipping the launcher, with the settings as they are now.")
+                        .clicked()
+                })
+                .inner;
+            if made {
+                self.make_shortcut();
             }
             ui.add_space(8.0);
         });
