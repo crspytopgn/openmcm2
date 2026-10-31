@@ -98,6 +98,10 @@ pub struct Settings {
     /// Easier riding (`--easier`): forgiving landings, and on Easy
     /// slower computer riders and a player who comes off less.
     pub easier: bool,
+    /// Pad vibration from the riding and its strength, 0 to 100
+    /// (`--vibration=N`, or `off`).
+    pub vibration: bool,
+    pub vibration_strength: u32,
     /// Look for a newer OpenMCM2 when the launcher opens.
     pub check_updates: bool,
 }
@@ -120,6 +124,8 @@ impl Default for Settings {
             centred_display: false,
             show_fps: false,
             easier: false,
+            vibration: true,
+            vibration_strength: 50,
             check_updates: true,
         }
     }
@@ -168,6 +174,8 @@ impl Settings {
                 "show_fps" => s.show_fps = yes(v),
                 // Forgiving landings, before it became part of it.
                 "easier" | "forgiving_landings" => s.easier |= yes(v),
+                "vibration" => s.vibration = yes(v),
+                "vibration_strength" => s.vibration_strength = v.parse::<u32>().unwrap_or(50).min(100),
                 "check_updates" => s.check_updates = yes(v),
                 // Files from before version 2 kept the replay blur on by
                 // default; it starts off now, so their setting is dropped.
@@ -186,7 +194,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\neasier={}\ncheck_updates={}\n",
+            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\neasier={}\nvibration={}\nvibration_strength={}\ncheck_updates={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -202,6 +210,8 @@ impl Settings {
             b(self.centred_display),
             b(self.show_fps),
             b(self.easier),
+            b(self.vibration),
+            self.vibration_strength,
             b(self.check_updates),
         );
         for (u, on) in UPGRADES.iter().zip(&self.upgrades) {
@@ -257,6 +267,10 @@ impl Settings {
         if self.easier {
             a.push("--easier".into());
         }
+        a.push(match self.vibration {
+            true => format!("--vibration={}", self.vibration_strength),
+            false => "--vibration=off".into(),
+        });
         a
     }
 }
@@ -294,6 +308,7 @@ mod tests {
         s.window = (1920, 1080);
         s.centred_display = true;
         s.easier = true;
+        s.vibration_strength = 80;
         s.check_updates = false;
         assert_eq!(Settings::parse(&s.text()), s);
         assert_eq!(
@@ -304,7 +319,8 @@ mod tests {
                 "--window",
                 "1920x1080",
                 "--centred-display",
-                "--easier"
+                "--easier",
+                "--vibration=80"
             ]
         );
     }

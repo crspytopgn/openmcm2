@@ -587,6 +587,21 @@ impl Launcher {
                 )
                 .weak(),
             );
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut s.vibration, "Controller vibration");
+                ui.add_enabled_ui(s.vibration, |ui| {
+                    ui.label("Weaker");
+                    ui.add(egui::Slider::new(&mut s.vibration_strength, 0..=100).show_value(false));
+                    ui.label("Stronger");
+                });
+            });
+            ui.label(
+                egui::RichText::new(
+                    "The pad thumps when you land, knocks over sharp bumps and jolts when you crash. For pads that can vibrate (an Xbox pad on Windows; not on a Mac).",
+                )
+                .weak(),
+            );
         });
     }
 

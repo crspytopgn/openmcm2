@@ -195,6 +195,19 @@ fn graphics_checks(p: &mut Profile) -> [(&'static str, &mut bool); 3] {
     ]
 }
 
+/// The launcher's pad vibration (`--vibration=N`, 0 to 100, or `off`
+/// as `Some(None)`), in place of the profile's Force Feedback.
+pub fn vibration() -> Option<Option<u32>> {
+    static SET: std::sync::OnceLock<Option<Option<u32>>> = std::sync::OnceLock::new();
+    *SET.get_or_init(|| {
+        let v = std::env::args().find_map(|a| a.strip_prefix("--vibration=").map(str::to_owned))?;
+        Some(match v.as_str() {
+            "off" => None,
+            n => Some(n.parse::<u32>().ok()?.min(100)),
+        })
+    })
+}
+
 fn control_sliders(p: &mut Profile) -> [(&'static str, &mut u32); 8] {
     let c = &mut p.controls;
     [
@@ -373,7 +386,8 @@ impl Options {
                 // force feedback without a pad that can vibrate, as the
                 // original shows it with no joystick that has it.
                 d.show("ChkAnalogAxes", false);
-                let rumble = keys::pad().is_some_and(|p| p.rumble);
+                // The launcher's vibration setting stands in for it.
+                let rumble = keys::pad().is_some_and(|p| p.rumble) && vibration().is_none();
                 for name in [
                     "ForceFeedCheck",
                     "FeedbackSlider",

@@ -15,6 +15,7 @@
 //! mm2-viewer ... --fullscreen [--no-vsync]  // or Alt+Enter while playing
 //! mm2-viewer ... --show-fps                // or F2: the frame rate in the title and terminal
 //! mm2-viewer ... --centred-display         // ultrawide: the race display in a 16:9 middle
+//! mm2-viewer ... --vibration=N|off         // pad vibration strength 0 to 100 (else the profile's)
 //! mm2-viewer ... --easier                  // forgiving landings; on Easy, slower riders and fewer falls
 //! ```
 //!
@@ -4355,19 +4356,24 @@ impl App {
     fn poll_pads(&mut self, _event_loop: &ActiveEventLoop, _dt: f32) {}
 
     /// Runs the pad's motors at this frame's vibration, at the profile's
-    /// Force Feedback strength (the slider's least still felt; the box
-    /// off stops it).
+    /// Force Feedback strength: 0.15 times at the slider's least to twice
+    /// at its most (half way about 0.55), each step a like share
+    /// stronger; the box off stops it.
     #[cfg(feature = "gamepad")]
     fn feel_pad(&mut self) {
         let Some(pads) = &mut self.pads else { return };
+        // The launcher's strength, else the profile's.
         let controls = self.front.as_ref().map(|f| &f.user().profile.controls);
-        let gain = match controls {
-            _ if self.quiet => 0.0,
-            Some(c) if !c.force_feedback => 0.0,
-            Some(c) => 0.2 + 0.8 * (c.feedback as f32 / 100.0).min(1.0),
-            None => 0.6,
+        let strength = match screens::options::vibration() {
+            Some(set) => set,
+            None => controls.map_or(Some(50), |c| c.force_feedback.then_some(c.feedback)),
         };
-        pads.rumble(self.shake.map(|s| s * gain));
+        let gain = match strength {
+            _ if self.quiet => 0.0,
+            None => 0.0,
+            Some(s) => 0.15 * (2.0f32 / 0.15).powf((s as f32 / 100.0).min(1.0)),
+        };
+        pads.rumble(self.shake.map(|s| (s * gain).min(1.0)));
     }
 
     #[cfg(not(feature = "gamepad"))]
