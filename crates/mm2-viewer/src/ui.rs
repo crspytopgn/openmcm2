@@ -14,6 +14,57 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// How many times over the race's overlay pictures are enlarged.
+const OVERLAY_UPSCALE: u32 = 4;
+
+/// `img` enlarged `k` times with a Catmull-Rom curve through its pixels,
+/// on premultiplied alpha so see-through pixels lend no colour to edges.
+pub fn smooth_upscale(img: &tga::Image, k: u32) -> tga::Image {
+    let (w, h) = (img.width as i64, img.height as i64);
+    let px = |x: i64, y: i64| -> [f32; 4] {
+        let p = img.pixel(x.clamp(0, w - 1) as u32, y.clamp(0, h - 1) as u32);
+        let a = p[3] as f32 / 255.0;
+        [p[0] as f32 * a, p[1] as f32 * a, p[2] as f32 * a, p[3] as f32]
+    };
+    let weights = |t: f32| {
+        let (t2, t3) = (t * t, t * t * t);
+        [
+            (-t3 + 2.0 * t2 - t) * 0.5,
+            (3.0 * t3 - 5.0 * t2 + 2.0) * 0.5,
+            (-3.0 * t3 + 4.0 * t2 + t) * 0.5,
+            (t3 - t2) * 0.5,
+        ]
+    };
+    let (bw, bh) = (img.width * k, img.height * k);
+    let mut rgba = Vec::with_capacity((bw * bh * 4) as usize);
+    for by in 0..bh {
+        let sy = (by as f32 + 0.5) / k as f32 - 0.5;
+        let (y0, wy) = (sy.floor() as i64, weights(sy - sy.floor()));
+        for bx in 0..bw {
+            let sx = (bx as f32 + 0.5) / k as f32 - 0.5;
+            let (x0, wx) = (sx.floor() as i64, weights(sx - sx.floor()));
+            let mut sum = [0.0f32; 4];
+            for (j, wy) in wy.iter().enumerate() {
+                for (i, wx) in wx.iter().enumerate() {
+                    let p = px(x0 - 1 + i as i64, y0 - 1 + j as i64);
+                    for c in 0..4 {
+                        sum[c] += p[c] * wx * wy;
+                    }
+                }
+            }
+            let a = sum[3].clamp(0.0, 255.0);
+            let un = if a > 0.0 { 255.0 / a } else { 0.0 };
+            rgba.extend([
+                (sum[0] * un).clamp(0.0, 255.0).round() as u8,
+                (sum[1] * un).clamp(0.0, 255.0).round() as u8,
+                (sum[2] * un).clamp(0.0, 255.0).round() as u8,
+                a.round() as u8,
+            ]);
+        }
+    }
+    tga::Image { width: bw, height: bh, rgba }
+}
+
 /// The magenta the game's art uses for "see through" (RGB555 0x7c1f).
 const KEY: [u8; 3] = [255, 0, 255];
 
@@ -228,6 +279,8 @@ pub struct Ui {
     fonts: Fonts,
     /// A white pixel, for filled rectangles.
     white: Option<TextureId>,
+    /// A white pixel between two clear ones, for smooth-edged lines.
+    soft: Option<TextureId>,
     /// The menus' sounds' volume (the Sound page's), 0 to 1.
     pub volume: f32,
     /// The mixer, for the movies.
@@ -258,6 +311,7 @@ impl Ui {
             lang: strings("LANG.DLL"),
             fonts: Fonts::load(),
             white: None,
+            soft: None,
             volume: 1.0,
             audio: None,
         }
@@ -291,19 +345,29 @@ impl Ui {
         gfx.sprites.quad(white, [0.0, 0.0, 1.0, 1.0], rect, color);
     }
 
-    /// A line `width` pixels wide from `a` to `b`.
+    /// A line `width` pixels wide from `a` to `b` whose sides fade over
+    /// a screen pixel rather than step (the sprites' sharp bilinear
+    /// blends across each texel's edge).
     pub fn line(&mut self, gfx: &mut Gfx, a: [f32; 2], b: [f32; 2], width: f32, color: [f32; 4]) {
-        let white = self.white(gfx);
+        let soft = *self.soft.get_or_insert_with(|| {
+            let img = tga::Image {
+                width: 1,
+                height: 3,
+                rgba: [[255, 255, 255, 0], [255; 4], [255, 255, 255, 0]].concat(),
+            };
+            gfx.sprites.upload(gfx.device, gfx.queue, &img)
+        });
         let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
         let len = (dx * dx + dy * dy).sqrt().max(1e-3);
-        let (nx, ny) = (-dy / len * width / 2.0, dx / len * width / 2.0);
+        // Three times as wide: the white middle third is the line.
+        let (nx, ny) = (-dy / len * width * 1.5, dx / len * width * 1.5);
         gfx.sprites.corners(
-            white,
+            soft,
             [
-                [a[0] + nx, a[1] + ny],
-                [b[0] + nx, b[1] + ny],
-                [b[0] - nx, b[1] - ny],
                 [a[0] - nx, a[1] - ny],
+                [b[0] - nx, b[1] - ny],
+                [b[0] + nx, b[1] + ny],
+                [a[0] + nx, a[1] + ny],
             ],
             color,
         );
@@ -312,18 +376,45 @@ impl Ui {
     /// One of the race's overlay pictures in `RES/GLOBAL.RES` (they carry
     /// their own alpha).
     pub fn overlay(&mut self, gfx: &mut Gfx, name: &str) -> Option<TextureId> {
+        self.overlay_edited(gfx, name, "", |_| {})
+    }
+
+    /// An overlay picture changed by `edit`, kept apart from the plain one
+    /// by `version`. It is enlarged smoothly four times over (not the
+    /// game's: it drew the picture's own pixels), so its curves don't
+    /// step on a big window.
+    pub fn overlay_edited(
+        &mut self,
+        gfx: &mut Gfx,
+        name: &str,
+        version: &str,
+        edit: impl FnOnce(&mut tga::Image),
+    ) -> Option<TextureId> {
+        let key = ("".to_string(), format!("global.res#{name}{version}").to_ascii_lowercase());
+        if let Some(t) = self.images.get(&key) {
+            return *t;
+        }
         let path = self.game().join("RES").join("GLOBAL.RES");
-        self.picture(gfx, &format!("GLOBAL.RES#{name}"), || {
+        let load = || {
             let bytes = crate::read_archive(&path).ok()?;
             let ar = rs2::Archive::parse(&bytes).ok()?;
             let e = ar
                 .entries()
                 .iter()
                 .find(|e| e.name.eq_ignore_ascii_case(name))?;
-            mm2_formats::texture::parse_overlay(ar.data(e))
+            let mut img = mm2_formats::texture::parse_overlay(ar.data(e))
                 .map_err(|e| eprintln!("{name}: {e}"))
-                .ok()
-        })
+                .ok()?;
+            edit(&mut img);
+            Some(img)
+        };
+        let tex = load().map(|img| {
+            let big = smooth_upscale(&img, OVERLAY_UPSCALE);
+            gfx.sprites
+                .upload_covering(gfx.device, gfx.queue, &big, (img.width, img.height))
+        });
+        self.images.insert(key, tex);
+        tex
     }
 
     /// An image from an archive that is not a dialog's (a track's preview),
@@ -1983,6 +2074,24 @@ fn split_number(name: &str) -> (&str, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn smooth_upscale_keeps_flat_colour_and_clear_edges() {
+        // A red square in the middle of a clear picture.
+        let mut rgba = vec![0u8; 8 * 8 * 4];
+        for y in 2..6 {
+            for x in 2..6 {
+                rgba[(y * 8 + x) * 4..][..4].copy_from_slice(&[200, 0, 0, 255]);
+            }
+        }
+        let big = smooth_upscale(&tga::Image { width: 8, height: 8, rgba }, 4);
+        assert_eq!((big.width, big.height), (32, 32));
+        assert_eq!(big.pixel(16, 16), [200, 0, 0, 255]);
+        assert_eq!(big.pixel(0, 0)[3], 0);
+        // An edge pixel half see-through is still red, not darkened.
+        let edge = big.pixel(8, 16);
+        assert!(edge[3] > 0 && edge[3] < 255 && edge[0] >= 190, "{edge:?}");
+    }
 
     #[test]
     fn numbers_and_colours() {

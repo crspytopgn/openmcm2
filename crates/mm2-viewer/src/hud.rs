@@ -16,6 +16,23 @@ const SPEEDO: (f32, f32) = (511.0, 351.0);
 const NEEDLE_CENTRE: (f32, f32) = (64.0, 85.0);
 const NEEDLE: f32 = 45.0;
 
+/// The dial's marks and numbers, drawn at the window's resolution over
+/// `instr1.tga` with its own painted ones taken out (not the game's: it
+/// showed the 128-pixel picture's): a long mark each 10 mph and a short
+/// one between, out to `MARK_OUT` from the needle's centre, and the
+/// numbers centred `NUMBER_OUT` out, all as the picture has them.
+const MARK_OUT: f32 = 52.0;
+const MARK_LONG: f32 = 42.5;
+const MARK_SHORT: f32 = 47.5;
+const NUMBER_OUT: f32 = 34.0;
+const NUMBER_PT: f32 = 15.0;
+/// The top of the picture's bracket, which hides the marks below it.
+const BRACKET: f32 = 114.0;
+/// The picture's marks: light grey, as see-through as its face.
+const MARK_COLOUR: [f32; 4] = [0.8, 0.8, 0.8, 0.8];
+/// The face's colour in `instr1.tga`, and how see-through it is.
+const FACE: [u8; 4] = [0x11, 0x11, 0x11, 0x99];
+
 /// `BajaScore.tga` at the top left (`0x51eb30`), and its lines' top left
 /// corners in the panel.
 const PANEL: (f32, f32) = (0.0, 0.0);
@@ -27,8 +44,11 @@ const LINES: [(f32, f32); 6] = [
     (14.0, 87.0),
     (14.0, 105.0),
 ];
-/// The panel's text height (the game's 12 pixel font).
-const TEXT: f32 = 12.0;
+/// The panel's text height: a pixel under the game's 12, so its longer
+/// lines stay in their boxes, and the room in a box for a line (the
+/// panel's boxes end at 122); a line wider still is drawn smaller.
+const TEXT: f32 = 11.0;
+const LINE_ROOM: f32 = 106.0;
 
 /// `radar128.tga` at the top right, its centre and rim (`0x520e90`).
 const RADAR: (f32, f32) = (512.0, 1.0);
@@ -359,18 +379,35 @@ impl Hud {
         } else {
             self.shown = bike.speed().abs() * MPH;
         }
-        if let Some(t) = ui.overlay(gfx, "instr1.tga") {
+        if let Some(t) = ui.overlay_edited(gfx, "instr1.tga", "#blank", blank_dial) {
             gfx.sprites.image(t, SPEEDO.0, SPEEDO.1);
         }
-        let v = self.shown.clamp(0.0, 100.0);
-        let angle = if v < 50.0 {
-            230.0 + 130.0 * v / 50.0
-        } else {
-            130.0 * (v - 50.0) / 50.0
-        }
-        .to_radians();
         let c = [SPEEDO.0 + NEEDLE_CENTRE.0, SPEEDO.1 + NEEDLE_CENTRE.1];
-        let tip = [c[0] + angle.sin() * NEEDLE, c[1] - angle.cos() * NEEDLE];
+        let at = |mph: f32, out: f32| {
+            let a = dial_angle(mph);
+            [c[0] + a.sin() * out, c[1] - a.cos() * out]
+        };
+        for mph in (0..=100).step_by(5) {
+            let from = if mph % 10 == 0 { MARK_LONG } else { MARK_SHORT };
+            let (a, b) = (at(mph as f32, from), at(mph as f32, MARK_OUT));
+            // Cut where it goes behind the bracket.
+            let bottom = SPEEDO.1 + BRACKET;
+            if a[1] >= bottom {
+                continue;
+            }
+            let t = if b[1] > bottom { (bottom - a[1]) / (b[1] - a[1]) } else { 1.0 };
+            let b = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+            ui.line(gfx, a, b, 1.25, MARK_COLOUR);
+        }
+        for mph in (0..=100).step_by(10) {
+            if let Some(t) = ui.text(gfx, &mph.to_string(), NUMBER_PT, true) {
+                let (w, h) = gfx.sprites.size(t);
+                let (w, h) = (w as f32, h as f32);
+                let [x, y] = at(mph as f32, NUMBER_OUT);
+                gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [x - w / 2.0, y - h / 2.0, w, h], MARK_COLOUR);
+            }
+        }
+        let tip = at(self.shown, NEEDLE);
         ui.line(gfx, c, tip, 1.5, [1.0, 0.0, 0.0, 1.0]);
     }
 
@@ -523,10 +560,12 @@ impl Hud {
         for (text, (x, y)) in lines.iter().zip(LINES) {
             if let Some(t) = ui.cell_text(gfx, text, TEXT, false) {
                 let (w, h) = gfx.sprites.size(t);
+                let (w, h) = (w as f32, h as f32);
+                let fit = (LINE_ROOM / w).min(1.0);
                 gfx.sprites.quad(
                     t,
                     [0.0, 0.0, 1.0, 1.0],
-                    [PANEL.0 + x, PANEL.1 + y - 1.0, w as f32, h as f32],
+                    [PANEL.0 + x, PANEL.1 + y - 1.0 + h * (1.0 - fit) / 2.0, w * fit, h * fit],
                     [1.0; 4],
                 );
             }
@@ -571,12 +610,14 @@ impl Hud {
             let (cx, cy) = (RADAR_CENTRE.0 + x, RADAR_CENTRE.1 + y);
             ui.fill(gfx, [cx - 1.5, cy - 1.0, 3.0, 2.0], colour);
         }
-        // Whole pixels from the centre (0x5219b0).
+        // Not whole pixels from the centre as the game's (0x5219b0): on a
+        // big window those step the lines in blocks.
         let spot = |p: Vec3| {
             let rel = p - at;
-            [(rel.dot(right) * scale).trunc(), (-rel.dot(forward) * scale).trunc()]
+            [rel.dot(right) * scale, -rel.dot(forward) * scale]
         };
-        // The original's lines are one screen pixel wide at any size.
+        // The original's lines are one screen pixel wide at any size; here
+        // their sides fade rather than step.
         let width = 1.0 / gfx.sprites.scale.max(1.0);
         let line = |ui: &mut Ui, gfx: &mut Gfx, a: [f32; 2], b: [f32; 2], colour: [f32; 4]| {
             if let Some((a, b)) = clip_to_rim(a, b) {
@@ -635,6 +676,29 @@ impl Hud {
 }
 
 /// The panel's times: `%2d:%05.2f`.
+/// Where the needle points at `mph`, radians clockwise from straight up:
+/// 0 mph at 230°, 50 straight up and 100 at 130°.
+fn dial_angle(mph: f32) -> f32 {
+    let v = mph.clamp(0.0, 100.0);
+    if v < 50.0 {
+        230.0 + 130.0 * v / 50.0
+    } else {
+        130.0 * (v - 50.0) / 50.0
+    }
+    .to_radians()
+}
+
+/// `instr1.tga` without its painted marks and numbers: every pixel on the
+/// face lighter than it (they are as see-through as the face) takes the
+/// face's colour.
+fn blank_dial(img: &mut mm2_formats::tga::Image) {
+    for px in img.rgba.chunks_exact_mut(4) {
+        if px[3].abs_diff(FACE[3]) <= 8 && px[0] > FACE[0] {
+            px.copy_from_slice(&FACE);
+        }
+    }
+}
+
 pub fn clock_text(t: f32) -> String {
     let m = (t / 60.0).floor();
     format!("{:2}:{:05.2}", m as u32, t - m * 60.0)
@@ -648,4 +712,32 @@ fn ground_between(terrain: &mm2_formats::trn::Terrain, from: Vec3, to: Vec3) -> 
         let p = from.lerp(to, k as f32 / steps as f32);
         crate::ride::ground(terrain, p.x, p.z) > p.y
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_dial_runs_from_230_to_130_degrees() {
+        let deg = |mph: f32| dial_angle(mph).to_degrees().rem_euclid(360.0);
+        assert!((deg(0.0) - 230.0).abs() < 1e-3);
+        assert!(deg(50.0).abs() < 1e-3);
+        assert!((deg(100.0) - 130.0).abs() < 1e-3);
+        assert_eq!(dial_angle(150.0), dial_angle(100.0));
+    }
+
+    #[test]
+    fn blank_dial_takes_out_the_marks_only() {
+        let mark = [0xcc, 0xcc, 0xcc, 0x99];
+        let rim = [0x33, 0x33, 0x33, 0x55];
+        let bolt = [0x88, 0x88, 0x99, 0xff];
+        let mut img = mm2_formats::tga::Image {
+            width: 4,
+            height: 1,
+            rgba: [FACE, mark, rim, bolt].concat(),
+        };
+        blank_dial(&mut img);
+        assert_eq!(img.rgba, [FACE, FACE, rim, bolt].concat());
+    }
 }
