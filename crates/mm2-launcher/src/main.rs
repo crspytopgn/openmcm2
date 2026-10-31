@@ -574,7 +574,7 @@ impl Launcher {
             ui.checkbox(&mut s.easier, "Easier riding");
             ui.label(
                 egui::RichText::new(
-                    "Land a jump roughly level on both wheels and the bike takes a much harder landing without throwing you off (nose-first landings and flips still crash), and the course counts 20 ft wider on each side before the off-course timer starts. And when you pick Easy for a race, the computer riders are slower and you come off less. Off is the original game.",
+                    "Makes the Easy difficulty easier; Medium and Hard stay as they are. On Easy: land a jump roughly level on both wheels and the bike takes a much harder landing without throwing you off (nose-first landings and flips still crash), the course counts 20 ft wider on each side before the off-course timer starts, the computer riders are slower and you come off less. Off is the original game.",
                 )
                 .weak(),
             );

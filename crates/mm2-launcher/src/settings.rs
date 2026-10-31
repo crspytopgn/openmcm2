@@ -95,8 +95,8 @@ pub struct Settings {
     /// (`--centred-display`).
     pub centred_display: bool,
     pub show_fps: bool,
-    /// Easier riding (`--easier`): forgiving landings, and on Easy
-    /// slower computer riders and a player who comes off less.
+    /// Easier riding (`--easier`): on Easy, forgiving landings, a wider
+    /// course, slower computer riders and a player who comes off less.
     pub easier: bool,
     /// Pad vibration from the riding and its strength, 0 to 100
     /// (`--vibration=N`, or `off`).

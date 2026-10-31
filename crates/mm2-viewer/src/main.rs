@@ -17,7 +17,7 @@
 //! mm2-viewer ... --centred-display         // ultrawide: the race display in a 16:9 middle
 //! mm2-viewer ... --original-race-display  // the game's own speedometer, pictures and radar lines
 //! mm2-viewer ... --vibration=N|off         // pad vibration strength 0 to 100 (else the profile's)
-//! mm2-viewer ... --easier                  // forgiving landings; on Easy, slower riders and fewer falls
+//! mm2-viewer ... --easier                  // on Easy: forgiving landings, a wider course, slower riders, fewer falls
 //! ```
 //!
 //! Four bikes and riders from `RES/BIKE.RES` race from the start line in

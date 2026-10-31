@@ -841,12 +841,17 @@ impl Computer {
     }
 }
 
-/// The launcher's Easier riding (`--easier`, not the game's): forgiving
-/// landings, and on Easy slower computer riders and a player who comes
-/// off less.
+/// The launcher's Easier riding (`--easier`, not the game's), which
+/// changes only Easy (level 0): forgiving landings, a wider course,
+/// slower computer riders and a player who comes off less.
 fn easier() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::args().any(|a| a == "--easier"))
+}
+
+/// Whether Easier riding changes a race at `level`.
+pub fn eased(level: usize, easier: bool) -> bool {
+    easier && level == 0
 }
 
 /// How far past its sides the course still counts as ridden on with
@@ -858,7 +863,7 @@ pub const SLACK: f32 = 20.0;
 /// and 1.0 by difficulty (0x492950's K, +0x60c); Easier riding's Easy 1.4.
 pub fn player_tolerance(level: usize, easier: bool) -> f32 {
     match level.min(2) {
-        0 if easier => 1.4,
+        l if eased(l, easier) => 1.4,
         l => [1.15, 1.05, 1.0][l],
     }
 }
@@ -870,7 +875,7 @@ pub fn player_tolerance(level: usize, easier: bool) -> f32 {
 /// more than they use.
 pub fn computer_top_speed(level: usize, easier: bool) -> f32 {
     match level.min(2) {
-        0 if easier => 50.0,
+        l if eased(l, easier) => 50.0,
         _ => f32::INFINITY,
     }
 }
@@ -976,7 +981,6 @@ impl Racer {
                 bike.racing = false;
                 bike.hull = HULL.get().cloned();
                 bike.cross_up = CROSS_UP.get().cloned();
-                bike.forgiving_landings = easier();
                 Bike::Player(Box::new(bike))
             } else {
                 // A lane of ±7 ft from the line (±3 in the Baja and
@@ -1761,10 +1765,7 @@ impl Race {
         if grid.is_empty() {
             return None;
         }
-        let course = def.and_then(Course::new).map(|mut c| {
-            c.slack = if easier() { SLACK } else { 0.0 };
-            c
-        });
+        let course = def.and_then(Course::new);
         let player = player.min(grid.len() - 1);
         let racers: Vec<Racer> = grid
             .iter()
@@ -1867,6 +1868,11 @@ impl Race {
         } else {
             0.0
         };
+        // The level is set after the race is made, so Easier riding's
+        // wider course goes on here.
+        if let Some(c) = &mut self.course {
+            c.slack = if eased(self.level, easier()) { SLACK } else { 0.0 };
+        }
         let mut left = dt;
         while left > 0.0 {
             let first = left == dt;
@@ -1938,6 +1944,7 @@ impl Race {
                     // The game holds the player's bike itself, engine running.
                     b.racing = racing;
                     b.crash_tolerance = player_tolerance(self.level, easier());
+                    b.forgiving_landings = eased(self.level, easier());
                 } else if !racing {
                     c = Controls::default();
                 }
@@ -2490,6 +2497,12 @@ mod tests {
         c.slack = SLACK;
         assert!(c.places(beside).len() > 0, "with the slack it is on");
         assert!(c.places(mid + out * (edge + SLACK + 5.0)).is_empty());
+    }
+
+    #[test]
+    fn easier_riding_changes_only_easy() {
+        assert!(eased(0, true));
+        assert!(!eased(1, true) && !eased(2, true) && !eased(0, false));
     }
 
     #[test]
