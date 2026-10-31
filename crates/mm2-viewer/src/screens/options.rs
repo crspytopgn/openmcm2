@@ -370,16 +370,17 @@ impl Options {
                     d.set_on(name, *v);
                 }
                 // The analog axes box is hidden (`0x4b74e0`), and so is
-                // force feedback without a joystick that has it, as the
-                // original shows it with none.
+                // force feedback without a pad that can vibrate, as the
+                // original shows it with no joystick that has it.
                 d.show("ChkAnalogAxes", false);
+                let rumble = keys::pad().is_some_and(|p| p.rumble);
                 for name in [
                     "ForceFeedCheck",
                     "FeedbackSlider",
                     "WeakerText",
                     "StrongerText",
                 ] {
-                    d.show(name, false);
+                    d.show(name, rumble);
                 }
                 let actions = (0..ACTIONS as u32).map(|i| cx.ui.lang(402 + i)).collect();
                 d.set_items("ActionListBox", actions, 0);

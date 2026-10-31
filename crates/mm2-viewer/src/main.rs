@@ -78,6 +78,7 @@ mod replay;
 mod ride;
 mod riding;
 mod roster;
+mod rumble;
 mod screens;
 mod sky;
 mod sound;
@@ -3332,6 +3333,12 @@ struct App {
     pads: Option<pad::Pads>,
     #[cfg(not(feature = "gamepad"))]
     pads: Option<()>,
+    /// The pad's vibration from the player's riding, and this frame's
+    /// strengths of its heavy and light motors.
+    rumble: rumble::Rumble,
+    shake: [f32; 2],
+    /// The window out of focus or covered: the pad keeps still.
+    quiet: bool,
 }
 
 /// The device whose map the race uses when the profile's own is the
@@ -3439,6 +3446,9 @@ impl App {
             pads: pad::Pads::new(),
             #[cfg(not(feature = "gamepad"))]
             pads: None,
+            rumble: rumble::Rumble::default(),
+            shake: [0.0; 2],
+            quiet: false,
         }
     }
 
@@ -4343,6 +4353,25 @@ impl App {
 
     #[cfg(not(feature = "gamepad"))]
     fn poll_pads(&mut self, _event_loop: &ActiveEventLoop, _dt: f32) {}
+
+    /// Runs the pad's motors at this frame's vibration, at the profile's
+    /// Force Feedback strength (the slider's least still felt; the box
+    /// off stops it).
+    #[cfg(feature = "gamepad")]
+    fn feel_pad(&mut self) {
+        let Some(pads) = &mut self.pads else { return };
+        let controls = self.front.as_ref().map(|f| &f.user().profile.controls);
+        let gain = match controls {
+            _ if self.quiet => 0.0,
+            Some(c) if !c.force_feedback => 0.0,
+            Some(c) => 0.2 + 0.8 * (c.feedback as f32 / 100.0).min(1.0),
+            None => 0.6,
+        };
+        pads.rumble(self.shake.map(|s| s * gain));
+    }
+
+    #[cfg(not(feature = "gamepad"))]
+    fn feel_pad(&mut self) {}
     #[cfg(not(feature = "gamepad"))]
     fn pad_held(&self, _action: usize) -> bool {
         false
@@ -4351,7 +4380,9 @@ impl App {
     /// Rides the bike, or flies the camera when not following it.
     fn update(&mut self, dt: f32) {
         self.finish_loading();
+        self.shake = [0.0; 2];
         if self.track.is_none() {
+            self.rumble.reset();
             return;
         }
         let podium_over = |r: &Race| r.podium.is_some_and(|(_, at)| r.time + dt - at >= podium::LENGTH);
@@ -4466,6 +4497,16 @@ impl App {
                     let l = listener(r, eye, target);
                     sounds.update(&self.audio, r, &l, dt);
                     sounds.ambient(&self.audio, &l, |site| track.site(site, r.time), dt);
+                }
+                if self.follow {
+                    let bike = &r.racers[r.player].bike;
+                    let feel = rumble::Feel {
+                        airborne: bike.airborne(),
+                        crashed: bike.crashed(),
+                        tumbling: bike.rider_touching(),
+                        velocity: bike.velocity(),
+                    };
+                    self.shake = self.rumble.update(feel, dt);
                 }
                 if let Some(renderer) = &mut state.renderer {
                     let view = cues::Eye { at: eye, target, fov: r.fov(), aspect: renderer.aspect() };
@@ -4659,9 +4700,13 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Focused(on) => {
                 eprintln!("{now:.2}s: the game {} focus", if on { "has" } else { "lost" });
+                self.quiet = !on;
+                self.feel_pad();
             }
             WindowEvent::Occluded(hidden) => {
                 eprintln!("{now:.2}s: the game is {}", if hidden { "covered" } else { "uncovered" });
+                self.quiet = hidden;
+                self.feel_pad();
             }
             WindowEvent::Resized(size) => {
                 if let Some(s) = &mut self.state {
@@ -4969,6 +5014,7 @@ impl ApplicationHandler for App {
                 self.frame = dt;
                 self.poll_pads(event_loop, dt);
                 self.update(dt);
+                self.feel_pad();
                 self.redraw();
                 if let Some((since, frames, slowest)) = &mut self.fps {
                     *frames += 1;

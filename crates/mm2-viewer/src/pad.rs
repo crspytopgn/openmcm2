@@ -27,6 +27,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+use gilrs::ff::{BaseEffect, BaseEffectType, Effect, EffectBuilder};
 use gilrs::{Axis, Button, Gamepad, GamepadId, Gilrs, MappingSource};
 
 /// The axes found resting at an end: each one's rest, −1 or 1, by pad
@@ -94,6 +95,9 @@ pub struct Pads {
     /// the pad settles.
     rest: Rest,
     centred: HashSet<(GamepadId, u32)>,
+    /// The pad vibrating: its heavy and light motors, each a steady
+    /// effect turned up and down, and the strengths last asked.
+    motors: Option<(GamepadId, [Effect; 2], [f32; 2])>,
 }
 
 impl Pads {
@@ -112,6 +116,7 @@ impl Pads {
             first: HashMap::new(),
             rest: HashMap::new(),
             centred: HashSet::new(),
+            motors: None,
         })
     }
 
@@ -246,7 +251,25 @@ impl Pads {
             family,
             name: pad.name().to_string(),
             device: self.device(),
+            rumble: pad.is_ff_supported(),
         })
+    }
+
+    /// Runs the pad in use's heavy and light motors at these strengths,
+    /// 0 to 1 (the others stop).
+    pub fn rumble(&mut self, strength: [f32; 2]) {
+        let id = self.pad().filter(|p| p.is_ff_supported()).map(|p| p.id());
+        if self.motors.as_ref().map(|m| m.0) != id {
+            self.motors = id.and_then(|id| Some((id, motors(&mut self.gilrs, id)?, [0.0; 2])));
+        }
+        let Some((_, effects, was)) = &mut self.motors else { return };
+        for ((effect, was), s) in effects.iter().zip(was.iter_mut()).zip(strength) {
+            // Each change is a message to gilrs's effect thread.
+            if (s - *was).abs() > 0.02 || (s == 0.0 && *was != 0.0) {
+                let _ = effect.set_gain(s);
+                *was = s;
+            }
+        }
     }
 
     /// Takes each pad's axes at rest in its first moments: one past nine
@@ -300,6 +323,25 @@ impl Pads {
             None => crate::input::KEYBOARD,
         }
     }
+}
+
+/// A pad's heavy and light motors, each running for good at no strength.
+fn motors(gilrs: &mut Gilrs, id: GamepadId) -> Option<[Effect; 2]> {
+    let mut motor = |kind| {
+        let effect = EffectBuilder::new()
+            .add_effect(BaseEffect { kind, ..Default::default() })
+            .gamepads(&[id])
+            .gain(0.0)
+            .finish(gilrs)
+            .map_err(|err| eprintln!("no vibration: {err}"))
+            .ok()?;
+        effect.play().ok()?;
+        Some(effect)
+    };
+    Some([
+        motor(BaseEffectType::Strong { magnitude: u16::MAX })?,
+        motor(BaseEffectType::Weak { magnitude: u16::MAX })?,
+    ])
 }
 
 /// Whether gilrs knows the pad's layout (an Xbox, PlayStation, Switch or

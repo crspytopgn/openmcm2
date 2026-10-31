@@ -22,6 +22,8 @@ pub struct PadInfo {
     pub family: Option<PadFamily>,
     pub name: String,
     pub device: usize,
+    /// Whether it can vibrate.
+    pub rumble: bool,
 }
 
 static PAD: Mutex<Option<PadInfo>> = Mutex::new(None);
@@ -376,6 +378,7 @@ mod tests {
             family: Some(PadFamily::PlayStation),
             name: "DualShock 4".into(),
             device: 3,
+            rumble: true,
         }));
         assert_eq!(input_name(2, 1, lang), "PS Circle");
         assert_eq!(input_name(2, -9, lang), "PS Right Stick X");
