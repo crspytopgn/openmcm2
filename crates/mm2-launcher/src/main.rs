@@ -296,16 +296,16 @@ impl Launcher {
         }
     }
 
-    /// A desktop shortcut that starts the game with the settings as they
-    /// are now, without the launcher.
+    /// A desktop shortcut that starts the game straight away, without the
+    /// launcher, with the settings last saved here.
     fn make_shortcut(&mut self) {
         let Some(viewer) = settings::viewer() else {
             self.note = Some(("Can't find mm2-viewer next to the launcher.".into(), true));
             return;
         };
-        self.note = Some(match shortcut::make(&viewer, &self.settings.args(), self.settings.game.as_deref()) {
+        self.note = Some(match shortcut::make(&viewer) {
             Ok(at) => (
-                format!("Shortcut made: {}. It keeps these settings; make it again after changing them.", at.display()),
+                format!("Shortcut made: {}. It always starts with the settings here.", at.display()),
                 false,
             ),
             Err(e) => (e, true),
@@ -443,8 +443,8 @@ impl eframe::App for Launcher {
             let can = self.settings.game.is_some() && !busy;
             let made = ui
                 .vertical_centered(|ui| {
-                    ui.add_enabled(can, egui::Button::new("Make a desktop shortcut with these settings"))
-                        .on_hover_text("Starts the game straight away, skipping the launcher, with the settings as they are now.")
+                    ui.add_enabled(can, egui::Button::new("Make a desktop shortcut"))
+                        .on_hover_text("Starts the game straight away, skipping the launcher, with the settings here. Change them here and the shortcut follows.")
                         .clicked()
                 })
                 .inner;

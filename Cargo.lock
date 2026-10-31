@@ -1531,6 +1531,7 @@ version = "0.2.1"
 dependencies = [
  "eframe",
  "flate2",
+ "mm2-settings",
  "rfd",
  "serde_json",
  "sha2",
@@ -1547,6 +1548,10 @@ dependencies = [
  "glam",
  "mm2-formats",
 ]
+
+[[package]]
+name = "mm2-settings"
+version = "0.2.1"
 
 [[package]]
 name = "mm2-tools"
@@ -1568,6 +1573,7 @@ dependencies = [
  "mm2-formats",
  "mm2-indeo",
  "mm2-physics",
+ "mm2-settings",
  "png",
  "pollster 1.0.1",
  "wgpu",

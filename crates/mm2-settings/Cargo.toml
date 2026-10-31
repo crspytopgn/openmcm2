@@ -1,0 +1,6 @@
+[package]
+name = "mm2-settings"
+description = "The OpenMCM2 launcher's settings and the command line they make"
+version.workspace = true
+edition.workspace = true
+license.workspace = true

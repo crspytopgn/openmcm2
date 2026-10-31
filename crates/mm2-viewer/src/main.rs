@@ -2,7 +2,8 @@
 //!
 //! ```text
 //! mm2-viewer <GAME/TERAFORM/.../TRACK.ENV>
-//! mm2-viewer                      // the game's menus (GAME found above here)
+//! mm2-viewer                      // with the launcher's saved settings, else the
+//!                                 // game's menus (GAME found above here)
 //! mm2-viewer <GAME folder>
 //! mm2-viewer <TRACK.ENV> [--laps 3] [--riders 4]
 //! mm2-viewer <TRACK.ENV> --screenshot out.png [--size 1280x720]
@@ -117,6 +118,11 @@ type BoxError = Box<dyn std::error::Error>;
 
 fn main() -> Result<(), BoxError> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Started with nothing (a shortcut, a double-click): as the launcher
+    // starts it, with its saved settings.
+    if args.is_empty() && play_with_launcher_settings() {
+        return Ok(());
+    }
     let flag = |name: &str| {
         args.iter()
             .position(|a| a == name)
@@ -727,6 +733,34 @@ fn window_size() -> winit::dpi::LogicalSize<f64> {
 
 /// The game folder: `GAME` in or above the folder the port starts in, or
 /// the copy the launcher made in the user folder.
+/// Starts the game again as the launcher does, with the settings it saved,
+/// from the game folder and with the error output in `last-run.log`.
+/// With none saved, or the game folder gone, and no game to be found
+/// here either, opens the launcher beside the game to set it up. Whether
+/// either started.
+fn play_with_launcher_settings() -> bool {
+    use std::process::{Command, Stdio};
+    let Ok(me) = std::env::current_exe() else {
+        return false;
+    };
+    let settings = mm2_settings::Settings::load();
+    if let Some(game) = settings.game.as_ref().filter(|g| g.join("UI").join("MAINMENU.DAT").is_file()) {
+        let log = std::fs::File::create(mm2_settings::user_dir().join("last-run.log"));
+        return Command::new(&me)
+            .args(settings.args())
+            .current_dir(game)
+            .stdout(Stdio::null())
+            .stderr(log.map(Stdio::from).unwrap_or(Stdio::null()))
+            .spawn()
+            .is_ok();
+    }
+    if find_game().is_some() {
+        return false;
+    }
+    let launcher = me.with_file_name(format!("mm2-launcher{}", std::env::consts::EXE_SUFFIX));
+    launcher.is_file() && Command::new(launcher).spawn().is_ok()
+}
+
 fn find_game() -> Option<std::path::PathBuf> {
     let here = std::env::current_dir().ok()?;
     here.ancestors()
