@@ -345,8 +345,8 @@ impl Ui {
         gfx.sprites.quad(white, [0.0, 0.0, 1.0, 1.0], rect, color);
     }
 
-    /// A line `width` pixels wide from `a` to `b`. On the sharper race
-    /// display its sides fade over a screen pixel rather than step (the
+    /// A line `width` pixels wide from `a` to `b`. With the modernised
+    /// HUD its sides fade over a screen pixel rather than step (the
     /// sprites' sharp bilinear blends across each texel's edge).
     pub fn line(&mut self, gfx: &mut Gfx, a: [f32; 2], b: [f32; 2], width: f32, color: [f32; 4]) {
         let (texture, across) = if crate::hud::sharp() {
@@ -385,7 +385,7 @@ impl Ui {
     }
 
     /// An overlay picture changed by `edit`, kept apart from the plain one
-    /// by `version`. On the sharper race display it is enlarged smoothly
+    /// by `version`. With the modernised HUD it is enlarged smoothly
     /// four times over (not the game's: it drew the picture's own
     /// pixels), so its curves don't step on a big window.
     pub fn overlay_edited(
@@ -421,6 +421,18 @@ impl Ui {
         });
         self.images.insert(key, tex);
         tex
+    }
+
+    /// A picture made here rather than read from the game, made once and
+    /// kept under `key`.
+    pub fn made(&mut self, gfx: &mut Gfx, key: &str, make: impl FnOnce() -> tga::Image) -> TextureId {
+        let key = (String::new(), format!("made#{key}"));
+        if let Some(&Some(t)) = self.images.get(&key) {
+            return t;
+        }
+        let t = gfx.sprites.upload(gfx.device, gfx.queue, &make());
+        self.images.insert(key, Some(t));
+        t
     }
 
     /// An image from an archive that is not a dialog's (a track's preview),

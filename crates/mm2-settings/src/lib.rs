@@ -104,8 +104,14 @@ pub struct Settings {
     /// (`--vibration=N`, or `off`).
     pub vibration: bool,
     pub vibration_strength: u32,
-    /// The sharper race display (off: `--original-race-display`).
+    /// The modernised HUD (off: `--original-race-display`).
     pub sharp_display: bool,
+    /// The live gap to the best lap (`--lap-gap`).
+    pub lap_gap: bool,
+    /// The steadier camera (`--steady-camera`).
+    pub steady_camera: bool,
+    /// The Chase Cam's field of view, degrees (`--fov=N`; the game's 85).
+    pub fov: u32,
     /// Look for a newer OpenMCM2 when the launcher opens.
     pub check_updates: bool,
 }
@@ -131,6 +137,9 @@ impl Default for Settings {
             vibration: true,
             vibration_strength: 50,
             sharp_display: true,
+            lap_gap: true,
+            steady_camera: true,
+            fov: 85,
             check_updates: true,
         }
     }
@@ -181,6 +190,9 @@ impl Settings {
                 "easier" | "forgiving_landings" => s.easier |= yes(v),
                 "vibration" => s.vibration = yes(v),
                 "sharp_display" => s.sharp_display = yes(v),
+                "lap_gap" => s.lap_gap = yes(v),
+                "steady_camera" => s.steady_camera = yes(v),
+                "fov" => s.fov = v.parse::<u32>().unwrap_or(85).clamp(60, 120),
                 "vibration_strength" => s.vibration_strength = v.parse::<u32>().unwrap_or(50).min(100),
                 "check_updates" => s.check_updates = yes(v),
                 // Files from before version 2 kept the replay blur on by
@@ -200,7 +212,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\neasier={}\nvibration={}\nvibration_strength={}\nsharp_display={}\ncheck_updates={}\n",
+            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\neasier={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -219,6 +231,9 @@ impl Settings {
             b(self.vibration),
             self.vibration_strength,
             b(self.sharp_display),
+            b(self.lap_gap),
+            b(self.steady_camera),
+            self.fov,
             b(self.check_updates),
         );
         for (u, on) in UPGRADES.iter().zip(&self.upgrades) {
@@ -274,6 +289,15 @@ impl Settings {
         if self.easier {
             a.push("--easier".into());
         }
+        if self.lap_gap {
+            a.push("--lap-gap".into());
+        }
+        if self.steady_camera {
+            a.push("--steady-camera".into());
+        }
+        if self.fov != 85 {
+            a.push(format!("--fov={}", self.fov));
+        }
         if !self.sharp_display {
             a.push("--original-race-display".into());
         }
@@ -308,6 +332,8 @@ mod tests {
         s.centred_display = true;
         s.easier = true;
         s.vibration_strength = 80;
+        s.steady_camera = false;
+        s.fov = 100;
         s.check_updates = false;
         assert_eq!(Settings::parse(&s.text()), s);
         assert_eq!(
@@ -319,6 +345,8 @@ mod tests {
                 "1920x1080",
                 "--centred-display",
                 "--easier",
+                "--lap-gap",
+                "--fov=100",
                 "--vibration=80"
             ]
         );

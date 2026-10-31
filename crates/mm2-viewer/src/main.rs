@@ -18,6 +18,9 @@
 //! mm2-viewer ... --centred-display         // ultrawide: the race display in a 16:9 middle
 //! mm2-viewer ... --original-race-display  // the game's own speedometer, pictures and radar lines
 //! mm2-viewer ... --vibration=N|off         // pad vibration strength 0 to 100 (else the profile's)
+//! mm2-viewer ... --lap-gap                 // live gap to the best lap under the race panel
+//! mm2-viewer ... --steady-camera           // the chase camera turns and rises more gently
+//! mm2-viewer ... --fov=N                   // the Chase Cam's field of view (the game's 85)
 //! mm2-viewer ... --easier                  // on Easy: forgiving landings, a wider course, slower riders, fewer falls
 //! ```
 //!
@@ -82,6 +85,7 @@ mod ride;
 mod riding;
 mod roster;
 mod rumble;
+mod lapgap;
 mod screens;
 mod sky;
 mod sound;
@@ -3715,6 +3719,7 @@ impl App {
                     if let Some(f) = &self.front {
                         let p = &f.user().profile;
                         r.wreck_reset = p.game.wreck_reset || setup.net.is_some();
+                        r.quick_get_up = setup.net.is_none();
                         r.player_indicator = p.game.player_indicator;
                         r.visual_cues = self.visual_cues;
                         let map = input::KeyMap::from_profile(&p.keys);
@@ -4073,6 +4078,16 @@ impl App {
         }
     }
 
+    /// The fork's quick get-up, riding (not watching a replay or flying).
+    fn get_back_on(&mut self) {
+        if !self.follow || self.replay.is_some() {
+            return;
+        }
+        if let (Some(r), Some(t)) = (&mut self.race, &self.track) {
+            r.get_back_on(&t.ground());
+        }
+    }
+
     fn ctrl(&self) -> bool {
         self.keys.contains(&KeyCode::ControlLeft) || self.keys.contains(&KeyCode::ControlRight)
     }
@@ -4338,6 +4353,10 @@ impl App {
         let (stick, a, b) = pads.pointer();
         let (was_a, was_b) = std::mem::replace(&mut self.pad_click, (a, b));
         if !self.in_menus() {
+            // Back (DirectInput's button 6): the fork's quick get-up.
+            if presses.contains(&pad::Press::Button(6)) {
+                self.get_back_on();
+            }
             return;
         }
         let now = self.start.elapsed().as_secs_f32();
@@ -4933,6 +4952,8 @@ impl ApplicationHandler for App {
                             // [ and ], Page Up and Down watch the others
                             // (0x4203e0).
                             KeyCode::KeyG | KeyCode::KeyB if self.ctrl() => self.flip_gyro(code == KeyCode::KeyG),
+                            // G alone: the fork's quick get-up.
+                            KeyCode::KeyG => self.get_back_on(),
                             KeyCode::Digit0
                             | KeyCode::Digit1
                             | KeyCode::Digit2

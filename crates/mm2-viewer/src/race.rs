@@ -898,6 +898,8 @@ pub struct Racer {
     /// follows the gas).
     pub controls: Controls,
     lap_start: f32,
+    /// The fork's live lap timing.
+    pub lap_gap: crate::lapgap::LapGap,
     /// Where the finish line probe was last step (race entry +0x28),
     /// none yet at the origin.
     probe: Vec3,
@@ -1004,6 +1006,7 @@ impl Racer {
             laps: 0,
             finished: None,
             lap_times: Vec::new(),
+            lap_gap: Default::default(),
             controls: Controls::default(),
             lap_start: 0.0,
             probe: Vec3::ZERO,
@@ -1318,6 +1321,7 @@ impl Racer {
             self.laps += 1;
             self.passed = 0;
             self.lap_times.push(clock - self.lap_start);
+            self.lap_gap.lap(clock - self.lap_start, clock);
             self.lap_start = clock;
             if self.laps >= laps {
                 self.finished = Some(clock);
@@ -1609,6 +1613,7 @@ impl Racer {
             }
             self.target = course.next[self.target];
             self.passed += 1;
+            self.lap_gap.mark(self.target, clock - self.lap_start);
         }
 
         if gates {
@@ -1625,6 +1630,7 @@ impl Racer {
             self.laps += 1;
             self.passed = 0;
             self.lap_times.push(clock - self.lap_start);
+            self.lap_gap.lap(clock - self.lap_start, clock);
             self.lap_start = clock;
             self.timing.cross_line(laps, laps >= ENDLESS);
             if self.laps >= laps {
@@ -1646,6 +1652,8 @@ pub struct Race {
     /// course; off, where the bike came to rest (0x492cc0). Network races
     /// always reset.
     pub wreck_reset: bool,
+    /// The fork's quick get-up (G, or a pad's Back); not in network races.
+    pub quick_get_up: bool,
     /// Visual Cues (F4, profile +0x6a8, on in a new profile): the green
     /// arrow to where the player should head and, in a lap race, the
     /// runway lights back to the course (0x4e54c0).
@@ -1783,6 +1791,7 @@ impl Race {
             autopilot: false,
             cam_keys: Default::default(),
             wreck_reset: true,
+            quick_get_up: true,
             visual_cues: true,
             player_indicator: true,
             watched: None,
@@ -1830,6 +1839,7 @@ impl Race {
                 b.fixed_step = was.fixed_step;
             }
             r.timing = Timing::new(!self.gates.is_empty());
+            r.lap_gap = old.lap_gap.restarted();
             if let Some(c) = &self.course {
                 r.target = c.nearest(r.bike.position());
                 r.probe = Vec3::ZERO;
@@ -1839,6 +1849,28 @@ impl Race {
         self.popup = None;
         let me = &self.racers[self.player].bike;
         self.chase = self.chase.restart(me.position(), me.forward());
+    }
+
+    /// The fork's quick get-up for the player: a crash ends now, as when
+    /// its time runs out; upright (stuck, say), the bike is put back on the
+    /// course where a crash would put it. Not before the gate drops nor
+    /// once finished.
+    pub fn get_back_on(&mut self, ground: &TrackGround) {
+        if !self.quick_get_up || !self.gate_down() {
+            return;
+        }
+        let r = &mut self.racers[self.player];
+        if r.finished.is_some() {
+            return;
+        }
+        let Bike::Player(b) = &mut r.bike else {
+            return;
+        };
+        if b.crash.is_some() {
+            b.get_up();
+        } else if let Some((at, way)) = b.reset_to {
+            b.reset(ground, at - way * 3.5, way);
+        }
     }
 
     pub fn gate_down(&self) -> bool {

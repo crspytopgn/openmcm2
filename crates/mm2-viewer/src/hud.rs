@@ -16,31 +16,38 @@ const SPEEDO: (f32, f32) = (511.0, 351.0);
 const NEEDLE_CENTRE: (f32, f32) = (64.0, 85.0);
 const NEEDLE: f32 = 45.0;
 
-/// The sharper race display, unless the launcher asks for the original
-/// (`--original-race-display`): the dial's marks and numbers drawn at the
-/// window's resolution, the pictures enlarged smoothly and the lines
-/// smooth-edged.
+/// The modernised HUD (the launcher's name), unless the launcher asks for
+/// the original (`--original-race-display`): the panel, radar and dial
+/// drawn at the window's resolution, the other pictures enlarged smoothly
+/// and the lines smooth-edged.
 pub fn sharp() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| !std::env::args().any(|a| a == "--original-race-display"))
 }
 
-/// The dial's marks and numbers, drawn at the window's resolution over
-/// `instr1.tga` with its own painted ones taken out (not the game's: it
-/// showed the 128-pixel picture's): a long mark each 10 mph and a short
-/// one between, out to `MARK_OUT` from the needle's centre, and the
-/// numbers centred `NUMBER_OUT` out, all as the picture has them.
+/// The modernised HUD's dial, drawn at the window's resolution in place
+/// of `instr1.tga` (not the game's: it showed the 128-pixel picture): a
+/// long mark each 10 mph and a short one between, out to `MARK_OUT` from
+/// the needle's centre, and the numbers centred `NUMBER_OUT` out, all as
+/// the picture has them.
 const MARK_OUT: f32 = 52.0;
 const MARK_LONG: f32 = 42.5;
 const MARK_SHORT: f32 = 47.5;
 const NUMBER_OUT: f32 = 34.0;
 const NUMBER_PT: f32 = 15.0;
-/// The top of the picture's bracket, which hides the marks below it.
-const BRACKET: f32 = 114.0;
 /// The picture's marks: light grey, as see-through as its face.
 const MARK_COLOUR: [f32; 4] = [0.8, 0.8, 0.8, 0.8];
-/// The face's colour in `instr1.tga`, and how see-through it is.
-const FACE: [u8; 4] = [0x11, 0x11, 0x11, 0x99];
+/// The dial's face: round about the needle's centre and cut flat below
+/// it, as far as the picture's bracket went; and the hub over the
+/// needle's end.
+const DIAL_RADIUS: f32 = 57.0;
+const DIAL_FLAT: f32 = 36.0;
+const HUB: f32 = 5.0;
+/// The modernised HUD's radar: a disc a little past the rim, with the
+/// rim, a ring half way and a cross drawn in.
+const RADAR_DISC: f32 = 58.0;
+/// The player's arrow on it, wide and tall, pointing up.
+const ARROW: [f32; 2] = [5.0, 6.0];
 
 /// `BajaScore.tga` at the top left (`0x51eb30`), and its lines' top left
 /// corners in the panel.
@@ -58,6 +65,16 @@ const LINES: [(f32, f32); 6] = [
 /// panel's boxes end at 122); a line wider still is drawn smaller.
 const TEXT: f32 = 11.0;
 const LINE_ROOM: f32 = 106.0;
+/// The modernised HUD's panel in place of `BajaScore.tga`: a rounded,
+/// see-through grey box behind the lines, from the panel's top left, and
+/// faint rules where the picture ruled the lines off.
+const PANEL_BOX: [f32; 4] = [6.0, 12.0, 118.0, 112.0];
+const RULES: [f32; 4] = [33.0, 49.5, 83.0, 101.0];
+const RULE: [f32; 4] = [1.0, 1.0, 1.0, 0.16];
+/// The live lap timing's box under the panel, from its top left.
+const GAP_BOX: [f32; 4] = [6.0, 127.0, 118.0, 16.0];
+/// The quick get-up's hint, across the middle near the bottom.
+const GET_UP_Y: f32 = 400.0;
 
 /// `radar128.tga` at the top right, its centre and rim (`0x520e90`).
 const RADAR: (f32, f32) = (512.0, 1.0);
@@ -312,7 +329,9 @@ impl Hud {
         }
         if self.show.stats {
             self.draw_panel(ui, gfx, race);
+            self.draw_lap_gap(ui, gfx, race);
         }
+        self.draw_get_up(ui, gfx, race);
         // The finish (`0x497740`): "You finished 2nd", or the
         // congratulations for a win.
         if me.finished.is_some() && !self.told {
@@ -400,14 +419,19 @@ impl Hud {
             ui.line(gfx, c, at(self.shown, NEEDLE), 1.5, [1.0, 0.0, 0.0, 1.0]);
             return;
         }
-        if let Some(t) = ui.overlay_edited(gfx, "instr1.tga", "#blank", blank_dial) {
-            gfx.sprites.image(t, SPEEDO.0, SPEEDO.1);
-        }
+        let (r, flat) = (DIAL_RADIUS, DIAL_FLAT);
+        let face = ui.made(gfx, "dial", || {
+            painted(2.0 * r, r + flat, 0.58, |x, y| {
+                let d = (x - r).hypot(y - r) - r;
+                d.max(y - (r + flat))
+            }, |_, _| 0.0)
+        });
+        gfx.sprites.quad(face, [0.0, 0.0, 1.0, 1.0], [c[0] - r, c[1] - r, 2.0 * r, r + flat], [1.0; 4]);
         for mph in (0..=100).step_by(5) {
             let from = if mph % 10 == 0 { MARK_LONG } else { MARK_SHORT };
             let (a, b) = (at(mph as f32, from), at(mph as f32, MARK_OUT));
-            // Cut where it goes behind the bracket.
-            let bottom = SPEEDO.1 + BRACKET;
+            // Cut short of the face's flat bottom.
+            let bottom = c[1] + flat - 2.0;
             if a[1] >= bottom {
                 continue;
             }
@@ -425,12 +449,21 @@ impl Hud {
         }
         let tip = at(self.shown, NEEDLE);
         ui.line(gfx, c, tip, 1.5, [1.0, 0.0, 0.0, 1.0]);
+        let hub = ui.made(gfx, "hub", || {
+            painted(2.0 * HUB, 2.0 * HUB, 0.95, |x, y| (x - HUB).hypot(y - HUB) - HUB, |_, _| 0.0)
+        });
+        gfx.sprites.quad(hub, [0.0, 0.0, 1.0, 1.0], [c[0] - HUB, c[1] - HUB, 2.0 * HUB, 2.0 * HUB], [1.0; 4]);
     }
 
     fn draw_panel(&mut self, ui: &mut Ui, gfx: &mut Gfx, race: &Race) {
         let me = &race.racers[race.player];
         // Race panel.
-        if let Some(t) = ui.overlay(gfx, "BajaScore.tga") {
+        if sharp() {
+            draw_box(ui, gfx, PANEL_BOX);
+            for y in RULES {
+                ui.fill(gfx, [PANEL.0 + 12.0, PANEL.1 + y, 106.0, 0.5], RULE);
+            }
+        } else if let Some(t) = ui.overlay(gfx, "BajaScore.tga") {
             gfx.sprites.image(t, PANEL.0, PANEL.1);
         }
         let clock = race.clock();
@@ -589,10 +622,91 @@ impl Hud {
 
     }
 
+    /// The fork's live lap timing, in a box under the panel: the gap to
+    /// the best lap, green ahead and red behind, and each lap's time and
+    /// gap for a while as it ends.
+    fn draw_lap_gap(&mut self, ui: &mut Ui, gfx: &mut Gfx, race: &Race) {
+        if !crate::lapgap::on() || race.stunt_event || race.tag.is_some() {
+            return;
+        }
+        let me = &race.racers[race.player];
+        let Some(shown) = me.lap_gap.shown(race.clock()) else {
+            return;
+        };
+        let signed = |g: f32| format!("{g:+.2}");
+        let (text, gap) = match shown {
+            crate::lapgap::Shown::Lap(time, gap) => (
+                match gap {
+                    Some(g) => format!("Lap {}  {}", clock_text(time), signed(g)),
+                    None => format!("Lap {}", clock_text(time)),
+                },
+                gap,
+            ),
+            crate::lapgap::Shown::Gap(g) => (format!("Gap to best {}", signed(g)), Some(g)),
+        };
+        let colour = match gap {
+            Some(g) if g < 0.0 => [0.45, 1.0, 0.45, 1.0],
+            Some(g) if g > 0.0 => [1.0, 0.5, 0.45, 1.0],
+            _ => [1.0; 4],
+        };
+        let [x, y, w, h] = GAP_BOX;
+        if sharp() {
+            draw_box(ui, gfx, GAP_BOX);
+        } else {
+            ui.fill(gfx, [PANEL.0 + x, PANEL.1 + y, w, h], [0.0, 0.0, 0.0, 0.55]);
+        }
+        let Some(t) = ui.cell_text(gfx, &text, TEXT, false) else {
+            return;
+        };
+        let (tw, th) = gfx.sprites.size(t);
+        let (tw, th) = (tw as f32, th as f32);
+        let fit = ((w - 12.0) / tw).min(1.0);
+        let at = [PANEL.0 + x + 6.0, PANEL.1 + y + (h - th * fit) / 2.0];
+        for (d, c) in [(1.0, [0.0, 0.0, 0.0, 1.0]), (0.0, colour)] {
+            gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [at[0] + d, at[1] + d, tw * fit, th * fit], c);
+        }
+    }
+
+    /// While the player is down: which buttons put them straight back on
+    /// the bike (the fork's quick get-up).
+    fn draw_get_up(&mut self, ui: &mut Ui, gfx: &mut Gfx, race: &Race) {
+        let me = &race.racers[race.player];
+        if !race.quick_get_up || !race.gate_down() || me.finished.is_some() || !me.bike.crashed() {
+            return;
+        }
+        let Some(t) = ui.cell_text(gfx, "G or Back: get back on", TEXT, false) else {
+            return;
+        };
+        let (w, h) = gfx.sprites.size(t);
+        let (w, h) = (w as f32, h as f32);
+        let at = [(320.0 - w / 2.0).round(), GET_UP_Y];
+        for (d, c) in [(1.0, [0.0, 0.0, 0.0, 1.0]), (0.0, [1.0, 1.0, 1.0, 0.9])] {
+            gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [at[0] + d, at[1] + d, w, h], c);
+        }
+    }
+
     fn draw_radar(&mut self, ui: &mut Ui, gfx: &mut Gfx, race: &Race) {
         let bike = &race.racers[race.player].bike;
         // Radar, heading up.
-        if let Some(t) = ui.overlay(gfx, "radar128.tga") {
+        if sharp() {
+            let r = RADAR_DISC;
+            let disc = ui.made(gfx, "radar", || {
+                painted(2.0 * r, 2.0 * r, 0.58, |x, y| (x - r).hypot(y - r) - r, |x, y| {
+                    let (dx, dy) = (x - r, y - r);
+                    let d = dx.hypot(dy);
+                    let ring = (d - RADAR_RIM).abs().min((d - RADAR_RIM / 2.0).abs());
+                    let cross = if d < RADAR_RIM { dx.abs().min(dy.abs()) } else { f32::MAX };
+                    // Lines half a pixel wide.
+                    (1.5 - ring.min(cross) * 4.0).clamp(0.0, 1.0)
+                })
+            });
+            let (cx, cy) = RADAR_CENTRE;
+            gfx.sprites.quad(disc, [0.0, 0.0, 1.0, 1.0], [cx - r, cy - r, 2.0 * r, 2.0 * r], [1.0; 4]);
+            // The player's arrow in the middle, which the picture had.
+            let [w, h] = ARROW;
+            let arrow = ui.made(gfx, "arrow", arrow);
+            gfx.sprites.quad(arrow, [0.0, 0.0, 1.0, 1.0], [cx - w / 2.0, cy - h / 2.0, w, h], [1.0; 4]);
+        } else if let Some(t) = ui.overlay(gfx, "radar128.tga") {
             gfx.sprites.image(t, RADAR.0, RADAR.1);
         }
         let at = bike.position();
@@ -626,8 +740,8 @@ impl Hud {
             let (cx, cy) = (RADAR_CENTRE.0 + x, RADAR_CENTRE.1 + y);
             ui.fill(gfx, [cx - 1.5, cy - 1.0, 3.0, 2.0], colour);
         }
-        // Whole pixels from the centre (0x5219b0), but not on the sharper
-        // display: on a big window those step the lines in blocks.
+        // Whole pixels from the centre (0x5219b0), but not with the
+        // modernised HUD: on a big window those step the lines in blocks.
         let whole = |v: f32| if sharp() { v } else { v.trunc() };
         let spot = |p: Vec3| {
             let rel = p - at;
@@ -691,6 +805,84 @@ impl Hud {
     }
 }
 
+/// The modernised HUD's rounded box at `rect` in the panel.
+fn draw_box(ui: &mut Ui, gfx: &mut Gfx, rect: [f32; 4]) {
+    let [x, y, w, h] = rect;
+    let t = ui.made(gfx, &format!("box{w}x{h}"), || rounded_box(w, h));
+    gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [PANEL.0 + x, PANEL.1 + y, w, h], [1.0; 4]);
+}
+
+/// A rounded, see-through grey box `w` by `h` (640×480 pixels).
+fn rounded_box(w: f32, h: f32) -> mm2_formats::tga::Image {
+    const RADIUS: f32 = 5.0;
+    let outside = |x: f32, y: f32| {
+        let qx = (x - w / 2.0).abs() - (w / 2.0 - RADIUS);
+        let qy = (y - h / 2.0).abs() - (h / 2.0 - RADIUS);
+        qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - RADIUS
+    };
+    painted(w, h, 0.58, outside, |_, _| 0.0)
+}
+
+/// One of the modernised HUD's see-through grey pieces, `w` by `h`
+/// (640×480 pixels) at four texels a pixel: `outside(x, y)` is how far a
+/// point (pixels from the top left) lies outside the shape, and
+/// `lines(x, y)` how much a faint drawn line covers it, 0 to 1. Shaded a
+/// little darker towards the bottom, with a faint light rim; `opacity`
+/// inside.
+fn painted(
+    w: f32,
+    h: f32,
+    opacity: f32,
+    outside: impl Fn(f32, f32) -> f32,
+    lines: impl Fn(f32, f32) -> f32,
+) -> mm2_formats::tga::Image {
+    const K: f32 = 4.0;
+    let (tw, th) = ((w * K).round() as u32, (h * K).round() as u32);
+    let mut rgba = Vec::with_capacity((tw * th * 4) as usize);
+    for y in 0..th {
+        for x in 0..tw {
+            let (px, py) = ((x as f32 + 0.5) / K, (y as f32 + 0.5) / K);
+            // How far outside the edge, texels.
+            let d = outside(px, py) * K;
+            let inside = (0.5 - d).clamp(0.0, 1.0);
+            let rim = (1.0 - (d + 2.0).abs() / 1.5).clamp(0.0, 1.0);
+            let line = lines(px, py).clamp(0.0, 1.0);
+            let shade = 0.17 - 0.07 * (y as f32 / th as f32);
+            let grey = shade + (0.8 - shade) * rim.max(line * 0.7);
+            let alpha = inside * (opacity + 0.12 * rim + 0.1 * line).min(1.0);
+            let v = (grey * 255.0).round() as u8;
+            rgba.extend_from_slice(&[v, v, v, (alpha * 255.0).round() as u8]);
+        }
+    }
+    mm2_formats::tga::Image { width: tw, height: th, rgba }
+}
+
+/// The radar's red arrow, [`ARROW`] at four texels a pixel, with smooth
+/// edges.
+fn arrow() -> mm2_formats::tga::Image {
+    const K: f32 = 4.0;
+    let [w, h] = ARROW.map(|v| v * K);
+    let (tw, th) = (w as u32, h as u32);
+    // Each side as a line `a·p + c` that is negative inside, in texels.
+    let side = |(x0, y0): (f32, f32), (x1, y1): (f32, f32)| {
+        let (nx, ny) = (y1 - y0, x0 - x1);
+        let l = nx.hypot(ny);
+        move |x: f32, y: f32| ((x - x0) * nx + (y - y0) * ny) / l
+    };
+    let (top, left, right) = ((w / 2.0, 0.0), (0.0, h), (w, h));
+    let sides = [side(top, right), side(right, left), side(left, top)];
+    let mut rgba = Vec::with_capacity((tw * th * 4) as usize);
+    for y in 0..th {
+        for x in 0..tw {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            let d = sides.iter().map(|s| s(px, py)).fold(f32::MIN, f32::max);
+            let a = (0.5 - d).clamp(0.0, 1.0);
+            rgba.extend_from_slice(&[235, 30, 30, (a * 255.0).round() as u8]);
+        }
+    }
+    mm2_formats::tga::Image { width: tw, height: th, rgba }
+}
+
 /// The panel's times: `%2d:%05.2f`.
 /// Where the needle points at `mph`, radians clockwise from straight up:
 /// 0 mph at 230°, 50 straight up and 100 at 130°.
@@ -702,17 +894,6 @@ fn dial_angle(mph: f32) -> f32 {
         130.0 * (v - 50.0) / 50.0
     }
     .to_radians()
-}
-
-/// `instr1.tga` without its painted marks and numbers: every pixel on the
-/// face lighter than it (they are as see-through as the face) takes the
-/// face's colour.
-fn blank_dial(img: &mut mm2_formats::tga::Image) {
-    for px in img.rgba.chunks_exact_mut(4) {
-        if px[3].abs_diff(FACE[3]) <= 8 && px[0] > FACE[0] {
-            px.copy_from_slice(&FACE);
-        }
-    }
 }
 
 pub fn clock_text(t: f32) -> String {
@@ -735,25 +916,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rounded_box_is_clear_at_the_corners_and_see_through_inside() {
+        let img = rounded_box(20.0, 10.0);
+        assert_eq!((img.width, img.height), (80, 40));
+        assert_eq!(img.pixel(0, 0)[3], 0);
+        let middle = img.pixel(40, 20);
+        assert!(middle[3] > 100 && middle[3] < 200, "{middle:?}");
+    }
+
+    #[test]
+    fn the_arrow_points_up() {
+        let img = arrow();
+        assert_eq!(img.pixel(10, 22)[3], 255);
+        assert_eq!(img.pixel(1, 1)[3], 0);
+        assert_eq!(img.pixel(18, 1)[3], 0);
+    }
+
+    #[test]
     fn the_dial_runs_from_230_to_130_degrees() {
         let deg = |mph: f32| dial_angle(mph).to_degrees().rem_euclid(360.0);
         assert!((deg(0.0) - 230.0).abs() < 1e-3);
         assert!(deg(50.0).abs() < 1e-3);
         assert!((deg(100.0) - 130.0).abs() < 1e-3);
         assert_eq!(dial_angle(150.0), dial_angle(100.0));
-    }
-
-    #[test]
-    fn blank_dial_takes_out_the_marks_only() {
-        let mark = [0xcc, 0xcc, 0xcc, 0x99];
-        let rim = [0x33, 0x33, 0x33, 0x55];
-        let bolt = [0x88, 0x88, 0x99, 0xff];
-        let mut img = mm2_formats::tga::Image {
-            width: 4,
-            height: 1,
-            rgba: [FACE, mark, rim, bolt].concat(),
-        };
-        blank_dial(&mut img);
-        assert_eq!(img.rgba, [FACE, FACE, rim, bolt].concat());
     }
 }

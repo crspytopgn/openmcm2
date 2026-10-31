@@ -623,10 +623,37 @@ impl Launcher {
                 .weak(),
             );
             ui.add_space(4.0);
-            ui.checkbox(&mut s.sharp_display, "Sharper race display");
+            ui.checkbox(&mut s.lap_gap, "Live gap to your best lap");
             ui.label(
                 egui::RichText::new(
-                    "The speedometer's numbers and marks drawn crisp at your screen's resolution, and the race display's pictures and radar lines smoothed instead of blocky. Off is the original game's.",
+                    "Under the race panel: how far ahead (green) or behind (red) of your best lap you are, at each point of the course, and each lap's time and gap as it ends. Lap 1 starts at the gate, so the comparing starts from lap 2.",
+                )
+                .weak(),
+            );
+            ui.add_space(4.0);
+            ui.checkbox(&mut s.steady_camera, "Steadier camera");
+            ui.label(
+                egui::RichText::new(
+                    "The chase camera rises and dips with the bike more gently, so bumps don't shake the view; it still turns with the bike as the original does. Off is the original game's.",
+                )
+                .weak(),
+            );
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Field of view");
+                ui.add(egui::Slider::new(&mut s.fov, 60..=120).suffix("°"));
+            });
+            ui.label(
+                egui::RichText::new(
+                    "How wide the riding cameras see. 85° is the original game's; wider shows more round the bike. Home and End still zoom while riding.",
+                )
+                .weak(),
+            );
+            ui.add_space(4.0);
+            ui.checkbox(&mut s.sharp_display, "Modernised HUD");
+            ui.label(
+                egui::RichText::new(
+                    "The race panel, radar and speedometer redrawn as clean see-through shapes, crisp at your screen's resolution, with smooth radar lines and needle. Off is the original game's pictures.",
                 )
                 .weak(),
             );

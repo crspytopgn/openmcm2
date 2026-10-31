@@ -9,6 +9,25 @@ use mm2_physics::camera::{Preset, View};
 /// What the rider is asking for this frame; shared with the player's bike.
 pub use mm2_physics::Controls;
 
+/// The fork's steadier camera (`--steady-camera`, not the game's): the
+/// Chase Cam rises and looks with the bike more gently, so bumps don't
+/// shake the view. It still turns with the bike as the game's does.
+fn steady() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::args().any(|a| a == "--steady-camera"))
+}
+
+/// How much wider than the game's the cameras see (`--fov=N`, the
+/// fork's, for the Chase Cam's 85°), degrees.
+fn wider() -> f32 {
+    static BY: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *BY.get_or_init(|| {
+        std::env::args()
+            .find_map(|a| a.strip_prefix("--fov=").and_then(|n| n.parse::<f32>().ok()))
+            .map_or(0.0, |f| f.clamp(60.0, 120.0) - 85.0)
+    })
+}
+
 /// The terrain's surface normal at `at` (0x50d3b0): the stored normals
 /// of the corners of the triangle under it, each weighted by one over its
 /// squared distance. On an even cell's lower triangle the original takes
@@ -125,6 +144,11 @@ impl Chase {
     const HEAD: f32 = 3.0;
     /// How fast the field of view follows, 1/s.
     const FOV_EASE: f32 = 4.0;
+    /// The steadier camera's lags, s: the rise and the look point, and the
+    /// Rider Cam's eye.
+    const STEADY_RISE: f32 = 0.15;
+    const STEADY_TARGET: f32 = 0.15;
+    const STEADY_HEAD: f32 = 0.06;
 
     /// Behind a bike at `position` heading `forward`.
     pub fn new(position: Vec3, forward: Vec3) -> Self {
@@ -135,8 +159,8 @@ impl Chase {
             yaw,
             crash: 0.0,
             view: View::Chase,
-            fov: 85.0,
-            want_fov: 85.0,
+            fov: 85.0 + wider(),
+            want_fov: 85.0 + wider(),
             takeoff: (position, Vec3::ZERO),
             was_airborne: false,
             thrill: None,
@@ -164,7 +188,7 @@ impl Chase {
         }
         self.view = self.view.next();
         if let Some(fov) = self.view.preset().and_then(|p| p.fov) {
-            self.want_fov = fov;
+            self.want_fov = (fov + wider()).clamp(10.0, 120.0);
         }
         self.view.name()
     }
@@ -273,7 +297,8 @@ impl Chase {
         let (ride_eye, ride_target) = match (self.view, preset) {
             (View::Rider, _) if !keys.reverse => {
                 let head = position + bike.up * Self::HEAD;
-                let k = 1.0 - (-dt / 0.02).exp();
+                let lag = if steady() { Self::STEADY_HEAD } else { 0.02 };
+                let k = 1.0 - (-dt / lag).exp();
                 self.eye += (head - self.eye) * k;
                 self.target = head + forward * 30.0;
                 let floor = ground(terrain, self.eye.x, self.eye.z) + 0.5;
@@ -307,9 +332,11 @@ impl Chase {
         let k = 1.0 - (-dt / Self::EYE_LAG).exp();
         self.eye.x += (eye.x - self.eye.x) * k;
         self.eye.z += (eye.z - self.eye.z) * k;
-        // The height doesn't lag while riding.
-        self.eye.y = eye.y + (self.eye.y + (eye.y - self.eye.y) * k - eye.y) * c;
-        self.target += (target - self.target) * (1.0 - (-dt / Self::TARGET_LAG).exp());
+        // The height doesn't lag while riding, unless steadier.
+        let rise = if steady() { 1.0 - (-dt / Self::STEADY_RISE).exp() } else { 1.0 };
+        self.eye.y += (eye.y - self.eye.y) * (rise + (k - rise) * c);
+        let lag = if steady() { Self::STEADY_TARGET } else { Self::TARGET_LAG };
+        self.target += (target - self.target) * (1.0 - (-dt / lag).exp());
         let floor = ground(terrain, self.eye.x, self.eye.z) + Self::CLEARANCE;
         self.eye.y = self.eye.y.max(floor);
         (self.eye, self.target)

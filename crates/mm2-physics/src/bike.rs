@@ -584,6 +584,16 @@ impl Bike {
         bike
     }
 
+    /// Ends a crash now (the fork's quick get-up, not the game's): the
+    /// rider is put back on the next step, as when the crash's time runs
+    /// out.
+    pub fn get_up(&mut self) {
+        if let Some((why, _)) = self.crash {
+            self.crash = Some((why, 0.0));
+            self.touched = true;
+        }
+    }
+
     /// Puts the bike upright and at rest on the ground at `origin` (the
     /// model's origin) facing `direction`, pitched to the slope, with its
     /// static sag; any crash is over.
