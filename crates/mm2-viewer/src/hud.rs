@@ -16,6 +16,15 @@ const SPEEDO: (f32, f32) = (511.0, 351.0);
 const NEEDLE_CENTRE: (f32, f32) = (64.0, 85.0);
 const NEEDLE: f32 = 45.0;
 
+/// The sharper race display, unless the launcher asks for the original
+/// (`--original-race-display`): the dial's marks and numbers drawn at the
+/// window's resolution, the pictures enlarged smoothly and the lines
+/// smooth-edged.
+pub fn sharp() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| !std::env::args().any(|a| a == "--original-race-display"))
+}
+
 /// The dial's marks and numbers, drawn at the window's resolution over
 /// `instr1.tga` with its own painted ones taken out (not the game's: it
 /// showed the 128-pixel picture's): a long mark each 10 mph and a short
@@ -379,14 +388,21 @@ impl Hud {
         } else {
             self.shown = bike.speed().abs() * MPH;
         }
-        if let Some(t) = ui.overlay_edited(gfx, "instr1.tga", "#blank", blank_dial) {
-            gfx.sprites.image(t, SPEEDO.0, SPEEDO.1);
-        }
         let c = [SPEEDO.0 + NEEDLE_CENTRE.0, SPEEDO.1 + NEEDLE_CENTRE.1];
         let at = |mph: f32, out: f32| {
             let a = dial_angle(mph);
             [c[0] + a.sin() * out, c[1] - a.cos() * out]
         };
+        if !sharp() {
+            if let Some(t) = ui.overlay(gfx, "instr1.tga") {
+                gfx.sprites.image(t, SPEEDO.0, SPEEDO.1);
+            }
+            ui.line(gfx, c, at(self.shown, NEEDLE), 1.5, [1.0, 0.0, 0.0, 1.0]);
+            return;
+        }
+        if let Some(t) = ui.overlay_edited(gfx, "instr1.tga", "#blank", blank_dial) {
+            gfx.sprites.image(t, SPEEDO.0, SPEEDO.1);
+        }
         for mph in (0..=100).step_by(5) {
             let from = if mph % 10 == 0 { MARK_LONG } else { MARK_SHORT };
             let (a, b) = (at(mph as f32, from), at(mph as f32, MARK_OUT));
@@ -610,14 +626,14 @@ impl Hud {
             let (cx, cy) = (RADAR_CENTRE.0 + x, RADAR_CENTRE.1 + y);
             ui.fill(gfx, [cx - 1.5, cy - 1.0, 3.0, 2.0], colour);
         }
-        // Not whole pixels from the centre as the game's (0x5219b0): on a
-        // big window those step the lines in blocks.
+        // Whole pixels from the centre (0x5219b0), but not on the sharper
+        // display: on a big window those step the lines in blocks.
+        let whole = |v: f32| if sharp() { v } else { v.trunc() };
         let spot = |p: Vec3| {
             let rel = p - at;
-            [rel.dot(right) * scale, -rel.dot(forward) * scale]
+            [whole(rel.dot(right) * scale), whole(-rel.dot(forward) * scale)]
         };
-        // The original's lines are one screen pixel wide at any size; here
-        // their sides fade rather than step.
+        // The original's lines are one screen pixel wide at any size.
         let width = 1.0 / gfx.sprites.scale.max(1.0);
         let line = |ui: &mut Ui, gfx: &mut Gfx, a: [f32; 2], b: [f32; 2], colour: [f32; 4]| {
             if let Some((a, b)) = clip_to_rim(a, b) {

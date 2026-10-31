@@ -345,24 +345,29 @@ impl Ui {
         gfx.sprites.quad(white, [0.0, 0.0, 1.0, 1.0], rect, color);
     }
 
-    /// A line `width` pixels wide from `a` to `b` whose sides fade over
-    /// a screen pixel rather than step (the sprites' sharp bilinear
-    /// blends across each texel's edge).
+    /// A line `width` pixels wide from `a` to `b`. On the sharper race
+    /// display its sides fade over a screen pixel rather than step (the
+    /// sprites' sharp bilinear blends across each texel's edge).
     pub fn line(&mut self, gfx: &mut Gfx, a: [f32; 2], b: [f32; 2], width: f32, color: [f32; 4]) {
-        let soft = *self.soft.get_or_insert_with(|| {
-            let img = tga::Image {
-                width: 1,
-                height: 3,
-                rgba: [[255, 255, 255, 0], [255; 4], [255, 255, 255, 0]].concat(),
-            };
-            gfx.sprites.upload(gfx.device, gfx.queue, &img)
-        });
+        let (texture, across) = if crate::hud::sharp() {
+            let soft = *self.soft.get_or_insert_with(|| {
+                let img = tga::Image {
+                    width: 1,
+                    height: 3,
+                    rgba: [[255, 255, 255, 0], [255; 4], [255, 255, 255, 0]].concat(),
+                };
+                gfx.sprites.upload(gfx.device, gfx.queue, &img)
+            });
+            // Three times as wide: the white middle third is the line.
+            (soft, width * 3.0)
+        } else {
+            (self.white(gfx), width)
+        };
         let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
         let len = (dx * dx + dy * dy).sqrt().max(1e-3);
-        // Three times as wide: the white middle third is the line.
-        let (nx, ny) = (-dy / len * width * 1.5, dx / len * width * 1.5);
+        let (nx, ny) = (-dy / len * across / 2.0, dx / len * across / 2.0);
         gfx.sprites.corners(
-            soft,
+            texture,
             [
                 [a[0] - nx, a[1] - ny],
                 [b[0] - nx, b[1] - ny],
@@ -380,9 +385,9 @@ impl Ui {
     }
 
     /// An overlay picture changed by `edit`, kept apart from the plain one
-    /// by `version`. It is enlarged smoothly four times over (not the
-    /// game's: it drew the picture's own pixels), so its curves don't
-    /// step on a big window.
+    /// by `version`. On the sharper race display it is enlarged smoothly
+    /// four times over (not the game's: it drew the picture's own
+    /// pixels), so its curves don't step on a big window.
     pub fn overlay_edited(
         &mut self,
         gfx: &mut Gfx,
@@ -409,7 +414,8 @@ impl Ui {
             Some(img)
         };
         let tex = load().map(|img| {
-            let big = smooth_upscale(&img, OVERLAY_UPSCALE);
+            let k = if crate::hud::sharp() { OVERLAY_UPSCALE } else { 1 };
+            let big = smooth_upscale(&img, k);
             gfx.sprites
                 .upload_covering(gfx.device, gfx.queue, &big, (img.width, img.height))
         });

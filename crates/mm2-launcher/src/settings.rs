@@ -102,6 +102,8 @@ pub struct Settings {
     /// (`--vibration=N`, or `off`).
     pub vibration: bool,
     pub vibration_strength: u32,
+    /// The sharper race display (off: `--original-race-display`).
+    pub sharp_display: bool,
     /// Look for a newer OpenMCM2 when the launcher opens.
     pub check_updates: bool,
 }
@@ -126,6 +128,7 @@ impl Default for Settings {
             easier: false,
             vibration: true,
             vibration_strength: 50,
+            sharp_display: true,
             check_updates: true,
         }
     }
@@ -175,6 +178,7 @@ impl Settings {
                 // Forgiving landings, before it became part of it.
                 "easier" | "forgiving_landings" => s.easier |= yes(v),
                 "vibration" => s.vibration = yes(v),
+                "sharp_display" => s.sharp_display = yes(v),
                 "vibration_strength" => s.vibration_strength = v.parse::<u32>().unwrap_or(50).min(100),
                 "check_updates" => s.check_updates = yes(v),
                 // Files from before version 2 kept the replay blur on by
@@ -194,7 +198,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\neasier={}\nvibration={}\nvibration_strength={}\ncheck_updates={}\n",
+            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\neasier={}\nvibration={}\nvibration_strength={}\nsharp_display={}\ncheck_updates={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -212,6 +216,7 @@ impl Settings {
             b(self.easier),
             b(self.vibration),
             self.vibration_strength,
+            b(self.sharp_display),
             b(self.check_updates),
         );
         for (u, on) in UPGRADES.iter().zip(&self.upgrades) {
@@ -266,6 +271,9 @@ impl Settings {
         }
         if self.easier {
             a.push("--easier".into());
+        }
+        if !self.sharp_display {
+            a.push("--original-race-display".into());
         }
         a.push(match self.vibration {
             true => format!("--vibration={}", self.vibration_strength),

@@ -563,15 +563,6 @@ impl Launcher {
                 });
             }
             ui.add_space(4.0);
-            // Only asked where it makes a difference: wider than 16:9.
-            let wide = match s.fullscreen {
-                true => monitor.is_none_or(|m| m.0 * 9 > m.1 * 16),
-                false => s.window.0 * 9 > s.window.1 * 16,
-            };
-            if wide {
-                ui.checkbox(&mut s.centred_display, "Race display nearer the middle")
-                    .on_hover_text("Puts the speedometer, map and race info where they sit on a 16:9 screen, instead of out at the edges.");
-            }
             ui.checkbox(&mut s.vsync, "VSync (smooth picture, no tearing)");
             ui.checkbox(&mut s.show_fps, "Show frame rate");
         });
@@ -579,7 +570,7 @@ impl Launcher {
 
     fn gameplay_ui(&mut self, ui: &mut egui::Ui) {
         let s = &mut self.settings;
-        section(ui, "Gameplay", |ui| {
+        section(ui, "Additional Tweaks", |ui| {
             ui.checkbox(&mut s.easier, "Easier riding");
             ui.label(
                 egui::RichText::new(
@@ -599,6 +590,22 @@ impl Launcher {
             ui.label(
                 egui::RichText::new(
                     "The pad thumps when you land, knocks over sharp bumps and jolts when you crash. For pads that can vibrate (an Xbox pad on Windows; not on a Mac).",
+                )
+                .weak(),
+            );
+            ui.add_space(4.0);
+            ui.checkbox(&mut s.sharp_display, "Sharper race display");
+            ui.label(
+                egui::RichText::new(
+                    "The speedometer's numbers and marks drawn crisp at your screen's resolution, and the race display's pictures and radar lines smoothed instead of blocky. Off is the original game's.",
+                )
+                .weak(),
+            );
+            ui.add_space(4.0);
+            ui.checkbox(&mut s.centred_display, "Race display nearer the middle");
+            ui.label(
+                egui::RichText::new(
+                    "On screens wider than 16:9: puts the speedometer, map and race info where they sit on a 16:9 screen, instead of out at the edges.",
                 )
                 .weak(),
             );
