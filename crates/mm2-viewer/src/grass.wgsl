@@ -41,8 +41,16 @@ const STEP: f32 = 0.85;
 const FADE: f32 = 70.0;
 const END: f32 = 105.0;
 
+// 0..1, the same for the same `p`. An integer hash (PCG): the usual
+// fract(sin(..)) one breaks down this far from the origin, where the GPU's
+// sin loses its precision and gives 0 for whole stretches, which let tufts
+// stand on ground with no grass at all.
 fn hash(p: vec2<f32>) -> f32 {
-    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
+    let q = vec2<u32>(vec2<i32>(floor(p * 64.0)));
+    var h = q.x * 747796405u + q.y * 2891336453u + 1442695041u;
+    h = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
+    h = (h >> 22u) ^ h;
+    return f32(h >> 8u) / 16777216.0;
 }
 
 fn height_at(t: vec2<f32>) -> f32 {
@@ -111,7 +119,8 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     }
     // Thinner further off.
     density *= 1.0 - smoothstep(FADE, END, dist) * 0.8;
-    if (r3 > density) {
+    // `>=`: where there is no grass, none, whatever the roll.
+    if (r3 >= density) {
         return out;
     }
     let ground = height_at(t) * scale;
