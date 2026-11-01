@@ -25,7 +25,7 @@
 //! mm2-viewer ... --lap-gap                 // live gap to the best lap under the race panel
 //! mm2-viewer ... --steady-camera           // the chase camera turns and rises more gently
 //! mm2-viewer ... --fov=N                   // the Chase Cam's field of view (the game's 85)
-//! mm2-viewer ... --difficulty=N,..         // the Difficulty box's 12 numbers, row by row, Easy to Hard
+//! mm2-viewer ... --difficulty=N,..         // the Difficulty box's 12 steps (1-10), row by row, Easy to Hard
 //! ```
 //!
 //! Four bikes and riders from `RES/BIKE.RES` race from the start line in

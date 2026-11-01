@@ -7,7 +7,7 @@ use std::sync::{OnceLock, RwLock};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tweaks {
-    /// The difficulty table (`--difficulty=`), Easy to Hard; see
+    /// The difficulty table's steps (`--difficulty=`), Easy to Hard; see
     /// [`mm2_settings::DIFFICULTY`].
     pub difficulty: [[u32; 3]; 4],
     /// Steering in the air bends the flight (`--air-steer`).
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn the_launchers_command_line_round_trips() {
         let mut s = mm2_settings::Settings {
-            difficulty: [[100, 130, 150], [115, 100, 77], [140, 105, 100], [25, 15, 0]],
+            difficulty: [[4, 6, 8], [3, 5, 7], [9, 6, 5], [3, 5, 10]],
             air_steer: false,
             fov: 100,
             sharp_display: false,
@@ -139,7 +139,7 @@ mod tests {
         let mut args = vec!["mm2-viewer".to_string()];
         args.extend(s.args());
         let t = Tweaks::from_args(&args);
-        assert_eq!(t.difficulty[2][0], 140);
+        assert_eq!(t.difficulty[2][0], 9);
         assert!(!t.air_steer && t.air_brake && !t.wide_course && !t.quick_get_up && !t.modern_hud && !t.vsync && t.show_fps);
         assert_eq!((t.fov, t.vibration), (100, Some(Some(30))));
         let before = s.clone();

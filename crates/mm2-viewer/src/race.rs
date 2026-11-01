@@ -44,6 +44,19 @@ pub const START_LEAD: f32 = 5.2;
 /// (0x492ac0, 6.0 at 0x555c2c).
 pub const OFF_COURSE_RESET: f32 = 6.0;
 
+/// The fork's start in a lap race, so the computer riders don't funnel
+/// into each other off the gate: their lanes keep the gate's order, at
+/// least this far apart, ft, within ±7 ft where they fit (the game's
+/// spread).
+const LANE_GAP: f32 = 3.5;
+const LANE_SPAN: f32 = 7.0;
+/// Each rider keeps its place across the gate for this long after the
+/// drop, s, then eases into its lane over this long.
+const START_HOLD: f32 = 2.0;
+const START_EASE: f32 = 6.0;
+/// While easing, a lane stays this far inside the course's sides, ft.
+const EDGE_ROOM: f32 = 4.0;
+
 /// The computer riders' frame in live play, s: the original's AI tape
 /// (`ai_race4.csv`) runs at 0.028 s a frame, and the port's riders were
 /// matched to it there. Run each screen frame at 120 fps they crash a
@@ -284,6 +297,12 @@ impl Course {
     /// The point at `p` (0x51d700).
     fn point(&self, p: Place) -> Vec3 {
         self.points[p.leg].lerp(self.points[self.next[p.leg]], p.t.clamp(0.0, 1.0))
+    }
+
+    /// Half the course's width at `p`, ft.
+    fn half_width(&self, p: Place) -> f32 {
+        let (a, b) = (self.widths[p.leg], self.widths[self.next[p.leg]]);
+        a + (b - a) * p.t
     }
 
     /// The level way along the leg at `p` (0x51d7b0).
@@ -858,13 +877,15 @@ fn air_brake() -> bool {
 /// the halved drive off it) waits until a rider is this much further out.
 pub const SLACK: f32 = 20.0;
 
-/// The game's `game` for `level` 0 to 2, scaled by the difficulty
-/// table's `row` against the game's own (see [`mm2_settings::DIFFICULTY`]),
-/// as the Difficulty box sets it: the game's number untouched.
+/// The game's `game` for `level` 0 to 2, scaled by what the difficulty
+/// table's step on `row` stands for against what the game's own step does
+/// (see [`mm2_settings::DIFFICULTY_STEPS`]): the game's own step leaves
+/// the game's number untouched.
 fn table(row: usize, level: usize, game: f32) -> f32 {
     let level = level.min(2);
-    let set = crate::tweaks::get().difficulty[row][level] as f32;
-    game * set / mm2_settings::DIFFICULTY[row][level].max(1) as f32
+    let set = mm2_settings::difficulty_value(row, crate::tweaks::get().difficulty[row][level]) as f32;
+    let own = mm2_settings::difficulty_value(row, mm2_settings::DIFFICULTY[row][level]);
+    game * set / own.max(1) as f32
 }
 
 /// The player's crash tolerance by level 0 to 2: the game's 1.15, 1.05
@@ -883,6 +904,24 @@ fn computer_power(level: usize) -> f32 {
 /// `computer::tolerance`), as the table has it.
 fn computer_tolerance(level: usize, supercross: bool) -> f32 {
     table(1, level, mm2_physics::computer::tolerance(level, supercross))
+}
+
+/// `lanes` in order, each at least [`LANE_GAP`] from the last, moved to
+/// fit within ±[`LANE_SPAN`] where they can and centred where they can't.
+fn spaced_lanes(mut lanes: Vec<f32>) -> Vec<f32> {
+    lanes.sort_by(f32::total_cmp);
+    for i in 1..lanes.len() {
+        lanes[i] = lanes[i].max(lanes[i - 1] + LANE_GAP);
+    }
+    if let (Some(&lo), Some(&hi)) = (lanes.first(), lanes.last()) {
+        let shift = if hi - lo > 2.0 * LANE_SPAN {
+            -(lo + hi) / 2.0
+        } else {
+            (LANE_SPAN - hi).min(0.0) + (-LANE_SPAN - lo).max(0.0)
+        };
+        lanes.iter_mut().for_each(|l| *l += shift);
+    }
+    lanes
 }
 
 /// One bike in the race.
@@ -914,6 +953,10 @@ pub struct Racer {
     /// far to the side of it the autopilot keeps.
     line: Option<mm2_physics::ai::Path>,
     lane: f32,
+    /// Where a computer rider stood across the gate in a lap race, ft
+    /// right of the course's middle, which it keeps off the start (see
+    /// [`START_HOLD`]).
+    gate_across: Option<f32>,
     /// The confirmed place on the course (race entry +0x44), whether the
     /// tracker found the bike on the course this frame (+0x78c), and how
     /// long it has been off it (+0x76c).
@@ -1019,6 +1062,7 @@ impl Racer {
             line: None,
             // Riders spread across the track by their start positions.
             lane: ((object as f32 * 0.618).fract() - 0.5) * 4.0,
+            gate_across: None,
             wander: mm2_physics::ai::Wander::new(),
             place: None,
             line_place: None,
@@ -1514,6 +1558,7 @@ impl Racer {
         movers: &[mm2_physics::ai::Mover],
         spec: &Spec,
         frame: f32,
+        since_drop: f32,
     ) {
         // Where it is on the course (0x4eb170, from 3.5 ft ahead). The
         // tracker follows a crashed bike too, so the rider is put back
@@ -1572,7 +1617,19 @@ impl Racer {
         let place = c.place();
         let (_, turn, at) = place.to_scale_rotation_translation();
         c.was = Some((at, turn));
+        // Off the start, the line runs from the rider's place across the
+        // gate into its own lane.
+        let lane = c.rider.lane;
+        if let (Some(from), Some(course), Some(on)) = (self.gate_across, course, self.place) {
+            if since_drop < START_HOLD + START_EASE {
+                let k = ((since_drop - START_HOLD) / START_EASE).clamp(0.0, 1.0);
+                let k = k * k * (3.0 - 2.0 * k);
+                let room = (course.half_width(on) - EDGE_ROOM).max(0.0);
+                c.rider.lane = (from + (lane - from) * k).clamp(-room, room);
+            }
+        }
         let crash = c.rider.step(ground, path, frame, air_lean, !gates.is_empty(), movers);
+        c.rider.lane = lane;
         if crash || std::mem::take(&mut c.thrown) {
             c.crash(ground, spec, reset_to);
         }
@@ -1850,6 +1907,7 @@ impl Race {
                 r.probe = Vec3::ZERO;
             }
         }
+        self.spread_lanes();
         self.time = 0.0;
         self.popup = None;
         let me = &self.racers[self.player].bike;
@@ -1959,6 +2017,7 @@ impl Race {
                         &movers,
                         &self.spec,
                         if wrecked { dt } else { ai_dt },
+                        self.time - self.lead,
                     );
                 }
                 let mut c = match (&self.course, computer) {
@@ -2237,6 +2296,37 @@ impl Race {
         }
         for r in &mut self.racers {
             r.stood = r.bike.stance();
+        }
+    }
+
+    /// The fork's lanes for a lap race's computer riders: the lanes they
+    /// drew, handed out in the gate's order from left to right and spaced
+    /// (see [`spaced_lanes`]), so none crosses another's way off the start
+    /// or shares its lane. Each keeps its place across the gate at first.
+    fn spread_lanes(&mut self) {
+        let Some(course) = &self.course else {
+            return;
+        };
+        let Some(start) = course.start.filter(|_| self.gates.is_empty()) else {
+            return;
+        };
+        let mid = course.point(start);
+        let way = course.way(start);
+        let right = Vec3::new(way.z, 0.0, -way.x).normalize_or_zero();
+        let mut riders: Vec<(usize, f32, f32)> = (self.racers.iter().enumerate())
+            .filter_map(|(i, r)| match &r.bike {
+                Bike::Computer(c) => Some((i, flat(r.start.0 - mid).dot(right), c.rider.lane)),
+                _ => None,
+            })
+            .collect();
+        riders.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let lanes = spaced_lanes(riders.iter().map(|r| r.2).collect());
+        for (&(i, across, _), lane) in riders.iter().zip(lanes) {
+            let r = &mut self.racers[i];
+            r.gate_across = Some(across);
+            if let Bike::Computer(c) = &mut r.bike {
+                c.rider.lane = lane;
+            }
         }
     }
 
@@ -2536,9 +2626,24 @@ mod tests {
     }
 
     #[test]
+    fn lanes_keep_their_order_a_bike_apart() {
+        let l = spaced_lanes(vec![-5.3, -4.7, 6.6, -2.5, -2.1, 3.9, -6.4]);
+        assert_eq!(l.len(), 7);
+        for w in l.windows(2) {
+            assert!(w[1] - w[0] >= LANE_GAP - 1e-4, "{l:?}");
+        }
+        // Too many for ±7 ft: centred.
+        assert!((l[0] + l[6]).abs() < 1e-4, "{l:?}");
+        // Few enough: kept within ±7 ft.
+        let l = spaced_lanes(vec![6.0, 6.5]);
+        assert!(l[1] <= LANE_SPAN + 1e-4 && l[1] - l[0] >= LANE_GAP - 1e-4, "{l:?}");
+    }
+
+    #[test]
     fn the_tables_numbers_are_the_games() {
         // Each of the game's numbers against its Normal, rounded.
-        let t = mm2_settings::DIFFICULTY;
+        let d = mm2_settings::DIFFICULTY;
+        let t: [[u32; 3]; 4] = std::array::from_fn(|r| d[r].map(|step| mm2_settings::difficulty_value(r, step)));
         let power = mm2_physics::computer::POWER;
         let crash = [0, 1, 2].map(|l| mm2_physics::computer::tolerance(l, false));
         let player = [1.15, 1.05, 1.0];

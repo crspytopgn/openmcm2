@@ -89,28 +89,46 @@ impl Quality {
 /// The enhanced look's switches the launcher shows, each with the name
 /// `--enhanced` knows it by, what it is, and whether it's on unless
 /// turned off.
-/// The difficulty table: by Easy, Normal and Hard, the computer riders'
+/// The difficulty table: by Easy, Normal and Hard, a step from 1 to 10
+/// for each of [`DIFFICULTY_STEPS`]' rows, higher always harder. The
+/// game's own are steps 3, 5 and 7.
+pub const DIFFICULTY: [[u32; 3]; 4] = [[3, 5, 7]; 4];
+
+/// The most a difficulty step goes to.
+pub const MOST_STEP: u32 = 10;
+
+/// What each difficulty step, 1 to 10, stands for: the computer riders'
 /// engine power, how easily they crash and how big a hit the player takes
 /// before crashing, each as a % of the game's Normal, and the computer
-/// riders' wait between tricks in the Stunt Quarry (s). These are the
-/// game's own, rounded.
-pub const DIFFICULTY: [[u32; 3]; 4] = [[85, 100, 115], [115, 100, 77], [110, 100, 95], [25, 15, 5]];
+/// riders' wait between tricks in the Stunt Quarry (s). Steps 3, 5 and 7
+/// are the game's Easy, Normal and Hard, rounded.
+pub const DIFFICULTY_STEPS: [[u32; 10]; 4] = [
+    [70, 77, 85, 92, 100, 107, 115, 122, 130, 140],
+    [150, 130, 115, 107, 100, 88, 77, 70, 60, 50],
+    [130, 120, 110, 105, 100, 97, 95, 90, 85, 75],
+    [35, 30, 25, 20, 15, 10, 5, 3, 1, 0],
+];
+
+/// What `row`'s difficulty `step` stands for (see [`DIFFICULTY_STEPS`]).
+pub fn difficulty_value(row: usize, step: u32) -> u32 {
+    DIFFICULTY_STEPS[row.min(3)][step.clamp(1, MOST_STEP) as usize - 1]
+}
 
 /// The difficulty table as `launcher.ini` and `--difficulty=` write it:
-/// its twelve numbers, row by row.
+/// its twelve steps, row by row.
 pub fn difficulty_text(t: &[[u32; 3]; 4]) -> String {
     t.iter().flatten().map(u32::to_string).collect::<Vec<_>>().join(",")
 }
 
 /// A difficulty table from [`difficulty_text`]'s numbers, if all twelve
-/// are there.
+/// are there and are steps (an older table of percentages is not).
 pub fn parse_difficulty(text: &str) -> Option<[[u32; 3]; 4]> {
     let n: Vec<u32> = text.split(',').map(|v| v.trim().parse().ok()).collect::<Option<_>>()?;
     let mut t = [[0; 3]; 4];
     for (i, v) in t.iter_mut().flatten().enumerate() {
         *v = *n.get(i)?;
     }
-    (n.len() == 12).then_some(t)
+    (n.len() == 12 && n.iter().all(|v| (1..=MOST_STEP).contains(v))).then_some(t)
 }
 
 pub const UPGRADES: [(&str, &str, bool); 16] = [
@@ -404,6 +422,10 @@ mod tests {
     fn a_broken_difficulty_table_is_the_games() {
         assert_eq!(Settings::parse("difficulty=1,2,3\n").difficulty, DIFFICULTY);
         assert_eq!(parse_difficulty(&difficulty_text(&DIFFICULTY)), Some(DIFFICULTY));
+        // The percentages the table held before it had steps.
+        let old = "difficulty=85,100,115,115,100,77,110,100,95,25,15,5
+";
+        assert_eq!(Settings::parse(old).difficulty, DIFFICULTY);
     }
 
     #[test]
@@ -416,7 +438,7 @@ mod tests {
         s.time = "dusk".into();
         s.window = (1920, 1080);
         s.centred_display = true;
-        s.difficulty[2][0] = 140;
+        s.difficulty[2][0] = 9;
         s.wide_course = true;
         s.quick_get_up = false;
         s.vibration_strength = 80;
@@ -432,7 +454,7 @@ mod tests {
                 "--window",
                 "1920x1080",
                 "--centred-display",
-                "--difficulty=85,100,115,115,100,77,140,100,95,25,15,5",
+                "--difficulty=3,5,7,3,5,7,9,5,7,3,5,7",
                 "--air-steer",
                 "--air-brake",
                 "--wide-course",

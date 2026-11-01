@@ -336,48 +336,45 @@ const VIBRATION_SLIDER: (&str, &str) = ("SldVisibility", "How hard the pad vibra
 /// when pointed at.
 const DIFFICULTY_BUTTON: [i32; 4] = [24, 70, 117, 33];
 const DIFFICULTY_BUTTON_ABOUT: &str =
-    "Easy, Normal and Hard's numbers: the other riders' engine power, how easily they crash, how big a hit you take, and their tricks in the Stunt Quarry.";
+    "Easy, Normal and Hard, each set from 1 to 10: the other riders' speed and skill, how easily you crash, and their tricks in the Stunt Quarry.";
 
 /// One row of the Difficulty box's table: its text, what it says when
-/// pointed at, how far an arrow moves it and its least and most.
+/// pointed at, and what a step stands for, `#` its value from
+/// [`mm2_settings::DIFFICULTY_STEPS`].
 struct Row {
     text: &'static str,
     about: &'static str,
-    step: u32,
-    range: (u32, u32),
+    shows: &'static str,
 }
 
-/// The table's rows, in [`mm2_settings::DIFFICULTY`]'s order.
+/// The table's rows, in [`mm2_settings::DIFFICULTY`]'s order. Higher is
+/// harder on each.
 const DIFFICULTY_ROWS: [Row; 4] = [
     Row {
-        text: "Rivals' engine power, %",
-        about: "How hard the other riders' engines pull, against the game's Normal. More helps them out of slow corners; their top speed hardly changes, as they already have more than they use.",
-        step: 5,
-        range: (50, 300),
+        text: "Rivals' speed",
+        about: "How hard the other riders' engines pull. Higher gets them out of slow corners quicker; their top speed hardly changes, as they already have more than they use.",
+        shows: "their engines at #% of the game's Normal",
     },
     Row {
-        text: "How easily rivals crash, %",
-        about: "How small a hit throws the other riders off, against the game's Normal. More and they crash sooner; less and they hardly ever fall.",
-        step: 5,
-        range: (25, 300),
+        text: "Rivals' skill",
+        about: "How big a hit the other riders can take before they fall. Higher and they crash less.",
+        shows: "they crash at #% of the game's Normal",
     },
     Row {
-        text: "How big a hit you can take before falling, %",
-        about: "How big a hit you can take before you come off your bike, against the game's Normal. More and you crash less.",
-        step: 5,
-        range: (50, 300),
+        text: "How easily you crash",
+        about: "How small a hit throws you off your bike. Higher and you crash sooner.",
+        shows: "you take #% of the game's Normal hit",
     },
     Row {
-        text: "Rivals' trick wait (Quarry), s",
-        about: "In the Stunt Quarry, how many seconds the other riders wait between tricks.",
-        step: 5,
-        range: (0, 60),
+        text: "Rivals' tricks (Stunt Quarry)",
+        about: "In the Stunt Quarry, how often the other riders do tricks. Higher and they wait less between them.",
+        shows: "they wait # s between tricks",
     },
 ];
 
 /// What the Difficulty box says when the pointer is on none of it.
 const DIFFICULTY_ABOUT: &str =
-    "Point at a row to see what it does. 100% is the original game's Normal. The single event's Difficulty Level, or a Pro Circuit's or network game's, picks the column.";
+    "Point at a row to see what it does. Each is 1 to 10, higher is harder; the original game's Easy, Normal and Hard are 3, 5 and 7. The single event's Difficulty Level, or a Pro Circuit's or network game's, picks the column.";
 const ORIGINAL_ABOUT: &str = "Puts back the original game's numbers.";
 
 /// Where the table's first arrow, the heading row and the first row sit,
@@ -433,11 +430,9 @@ fn difficulty_arrow(name: &str) -> Option<(i32, usize, usize)> {
     }
 }
 
-/// `v` an arrow's step up or down, on the step's multiples, within the
-/// row's range.
-fn step_difficulty(v: u32, by: i32, row: &Row) -> u32 {
-    let n = if by > 0 { v / row.step + 1 } else { v.div_ceil(row.step).saturating_sub(1) };
-    (n * row.step).clamp(row.range.0, row.range.1)
+/// `v` an arrow's step up or down, from 1 to 10.
+fn step_difficulty(v: u32, by: i32) -> u32 {
+    v.saturating_add_signed(by).clamp(1, mm2_settings::MOST_STEP)
 }
 
 /// What the Tweaks box says when the pointer is on none of them.
@@ -1319,32 +1314,43 @@ impl Options {
         if n.eq_ignore_ascii_case("DifOriginal") {
             *table = mm2_settings::DIFFICULTY;
         } else if let Some((by, r, l)) = difficulty_arrow(&n) {
-            table[r][l] = step_difficulty(table[r][l], by, &DIFFICULTY_ROWS[r]);
+            table[r][l] = step_difficulty(table[r][l], by);
         } else {
             return;
         }
         Self::show_difficulty(d, table);
     }
 
-    /// What the row under the pointer does.
+    /// What the row under the pointer does, and on a cell what its step
+    /// stands for.
     fn describe_difficulty(&mut self) {
-        let Some(Sub::Difficulty(d, _)) = &mut self.sub else {
+        let Some(Sub::Difficulty(d, table)) = &mut self.sub else {
             return;
         };
         let original = d.hovered().is_some_and(|h| h.eq_ignore_ascii_case("DifOriginal"));
         // Anywhere along a row, its text included.
-        let (_, head, first, _, down) = TABLE;
+        let (left, head, first, across, down) = TABLE;
         let (x, y) = d.pointer();
         let row = (y - first as f32 + (down as f32 - 21.0) / 2.0) / down as f32;
         let row = (x > 16.0 && x < 620.0 && row >= 0.0 && y > head as f32 + 24.0)
-            .then(|| DIFFICULTY_ROWS.get(row as usize))
-            .flatten();
-        let about = match (original, row) {
-            (true, _) => Some(ORIGINAL_ABOUT),
-            (_, Some(r)) => Some(r.about),
-            _ => None,
+            .then_some(row as usize)
+            .filter(|&r| r < DIFFICULTY_ROWS.len());
+        let column = (x >= left as f32 - 6.0)
+            .then(|| ((x - left as f32 + 6.0) / across as f32) as usize)
+            .filter(|&l| l < 3);
+        let about = match (original, row, column) {
+            (true, ..) => ORIGINAL_ABOUT.to_string(),
+            (_, Some(r), Some(l)) => {
+                let row = &DIFFICULTY_ROWS[r];
+                let step = table[r][l];
+                let value = mm2_settings::difficulty_value(r, step).to_string();
+                let level = ["Easy", "Normal", "Hard"][l];
+                format!("{} {level} at {step} of 10: {}.", row.about, row.shows.replace('#', &value))
+            }
+            (_, Some(r), None) => DIFFICULTY_ROWS[r].about.to_string(),
+            _ => DIFFICULTY_ABOUT.to_string(),
         };
-        d.set_text("DifAbout", about.unwrap_or(DIFFICULTY_ABOUT));
+        d.set_text("DifAbout", &about);
     }
 
     // ---- Restore (`0x4b9470`) ----
@@ -1580,16 +1586,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn difficulty_arrows_step_on_multiples() {
+    fn difficulty_arrows_step_from_1_to_10() {
         assert_eq!(difficulty_arrow("DifMore21"), Some((1, 2, 1)));
         assert_eq!(difficulty_arrow("DifLess30"), Some((-1, 3, 0)));
         assert_eq!(difficulty_arrow("DifBox21"), None);
-        let row = &DIFFICULTY_ROWS[1];
-        assert_eq!(step_difficulty(77, 1, row), 80);
-        assert_eq!(step_difficulty(77, -1, row), 75);
-        assert_eq!(step_difficulty(80, -1, row), 75);
-        assert_eq!(step_difficulty(25, -1, row), 25);
-        assert_eq!(step_difficulty(0, -1, &DIFFICULTY_ROWS[3]), 0);
+        assert_eq!(step_difficulty(5, 1), 6);
+        assert_eq!(step_difficulty(5, -1), 4);
+        assert_eq!(step_difficulty(1, -1), 1);
+        assert_eq!(step_difficulty(10, 1), 10);
     }
 
     #[test]
