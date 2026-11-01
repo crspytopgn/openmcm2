@@ -849,6 +849,13 @@ fn easier() -> bool {
     *ON.get_or_init(|| std::env::args().any(|a| a == "--easier"))
 }
 
+/// The launcher's Air steering (`--air-steer`, not the game's): steering
+/// in the air bends the flight a little.
+fn air_steer() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::args().any(|a| a == "--air-steer"))
+}
+
 /// Whether Easier riding changes a race at `level`.
 pub fn eased(level: usize, easier: bool) -> bool {
     easier && level == 0
@@ -1977,6 +1984,7 @@ impl Race {
                     b.racing = racing;
                     b.crash_tolerance = player_tolerance(self.level, easier());
                     b.forgiving_landings = eased(self.level, easier());
+                    b.air_steer = air_steer();
                 } else if !racing {
                     c = Controls::default();
                 }

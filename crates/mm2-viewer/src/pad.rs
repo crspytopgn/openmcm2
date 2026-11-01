@@ -261,6 +261,9 @@ impl Pads {
         let id = self.pad().filter(|p| p.is_ff_supported()).map(|p| p.id());
         if self.motors.as_ref().map(|m| m.0) != id {
             self.motors = id.and_then(|id| Some((id, motors(&mut self.gilrs, id)?, [0.0; 2])));
+            if let Some((id, ..)) = &self.motors {
+                eprintln!("vibration: on {}", self.gilrs.gamepad(*id).name());
+            }
         }
         let Some((_, effects, was)) = &mut self.motors else { return };
         for ((effect, was), s) in effects.iter().zip(was.iter_mut()).zip(strength) {

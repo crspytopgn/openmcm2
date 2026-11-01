@@ -608,6 +608,14 @@ impl Launcher {
                 .weak(),
             );
             ui.add_space(4.0);
+            ui.checkbox(&mut s.air_steer, "Air steering");
+            ui.label(
+                egui::RichText::new(
+                    "Steering in the air bends your flight a little, about 20° a second at full lock, and turns the bike with it so you land in line. Off is the original game, where steering in the air only turns the bike slightly.",
+                )
+                .weak(),
+            );
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.checkbox(&mut s.vibration, "Controller vibration");
                 ui.add_enabled_ui(s.vibration, |ui| {

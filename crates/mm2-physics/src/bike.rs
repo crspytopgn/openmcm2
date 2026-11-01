@@ -122,6 +122,9 @@ const PUSH: f32 = 1010.67;
 /// Air control (0x40bcc0): pitch and yaw per unit input, rad/s.
 const AIR_PITCH: f32 = 0.83;
 const AIR_YAW: f32 = 0.2;
+/// The fork's air steering (not the game's): how fast full steer turns
+/// the flight path, and the bike with it, rad/s (about 20° a second).
+const AIR_STEER: f32 = 0.35;
 /// How long the air pose takes to follow the bars, s (`f_704`).
 const POSE_LAG: f32 = 0.55;
 /// Spin damping per step: on the ground, in the air and always (0.85,
@@ -434,6 +437,10 @@ pub struct Bike {
     /// Forgiving landings (an option, not the game's): a hard landing
     /// roughly level on both wheels is not a crash; see [`FORGIVING`].
     pub forgiving_landings: bool,
+    /// Steering in the air also bends the flight a little, turning the
+    /// bike with it so it lands in line (the fork's, not the game's); see
+    /// [`AIR_STEER`].
+    pub air_steer: bool,
     /// Whether the race's progress tracker finds the bike on the course
     /// (+0x78c, 0x4eb170). Off it, in any race mode but practice, the
     /// drive is halved (0x492b20). The caller decides; it starts true.
@@ -552,6 +559,7 @@ impl Bike {
             fixed_step: false,
             crash_tolerance: 1.05,
             forgiving_landings: false,
+            air_steer: false,
             on_course: true,
             reset_to: None,
             crash_time: CRASH_TIME,
@@ -1877,6 +1885,13 @@ impl Bike {
             let axis = self.orientation * Vec3::new(pitch, yaw, 0.0) / angle;
             self.turn(axis.normalize(), angle, self.position);
         }
+        if self.air_steer && c.steer != 0.0 {
+            let a = c.steer * AIR_STEER * h;
+            let q = Quat::from_rotation_y(a);
+            self.velocity = q * self.velocity;
+            self.last_velocity = q * self.last_velocity;
+            self.turn(Vec3::Y, a, self.position);
+        }
         // Self-righting: faster the longer the bike is up.
         let t = self.air_time;
         let rate = (self.lean.abs() / h).min(t * t * t * 0.357_792);
@@ -2338,6 +2353,34 @@ mod tests {
         assert_eq!(drop(hard * 1.5, 0.0, true), None, "level at {} ft/s", hard * 1.5);
         // Nose first is not level: it crashes as before.
         assert!(drop(hard * 1.5, -0.6, true).is_some(), "nose first at {} ft/s", hard * 1.5);
+    }
+
+    /// Where a bike thrown high and forward heads after a second in the
+    /// air steering full right, and where it points, radians from straight
+    /// on (right positive).
+    fn steer_in_the_air(air_steer: bool) -> (f32, f32) {
+        let mut bike = Bike::new(&Flat, Vec3::ZERO, Vec3::Z);
+        bike.air_steer = air_steer;
+        bike.set_state(Vec3::new(0.0, 60.0, 0.0) + COM, Vec3::new(0.0, 10.0, 40.0), Mat3::IDENTITY, Vec3::ZERO, [0.0; 2]);
+        bike.airborne = true;
+        let steer = Controls { steer: 1.0, ..Default::default() };
+        for _ in 0..50 {
+            bike.step(&Flat, steer, 0.02);
+        }
+        assert!(bike.airborne);
+        let v = bike.velocity;
+        let f = bike.forward();
+        (v.x.atan2(v.z), f.x.atan2(f.z))
+    }
+
+    #[test]
+    fn air_steering_bends_the_flight_and_keeps_the_bike_in_line() {
+        let (path, _) = steer_in_the_air(false);
+        assert!(path.abs() < 0.05, "{path}");
+        let (path, look) = steer_in_the_air(true);
+        assert!((path - AIR_STEER).abs() < 0.05, "{path}");
+        // The game's own air yaw turns the bike a little further still.
+        assert!((look - path - AIR_YAW).abs() < 0.08, "{look} {path}");
     }
 
     #[test]

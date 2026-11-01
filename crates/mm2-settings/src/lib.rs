@@ -106,6 +106,8 @@ pub struct Settings {
     pub vibration_strength: u32,
     /// The modernised HUD (off: `--original-race-display`).
     pub sharp_display: bool,
+    /// Steering in the air bends the flight (`--air-steer`).
+    pub air_steer: bool,
     /// The live gap to the best lap (`--lap-gap`).
     pub lap_gap: bool,
     /// The steadier camera (`--steady-camera`).
@@ -137,6 +139,7 @@ impl Default for Settings {
             vibration: true,
             vibration_strength: 50,
             sharp_display: true,
+            air_steer: true,
             lap_gap: true,
             steady_camera: true,
             fov: 85,
@@ -190,6 +193,7 @@ impl Settings {
                 "easier" | "forgiving_landings" => s.easier |= yes(v),
                 "vibration" => s.vibration = yes(v),
                 "sharp_display" => s.sharp_display = yes(v),
+                "air_steer" => s.air_steer = yes(v),
                 "lap_gap" => s.lap_gap = yes(v),
                 "steady_camera" => s.steady_camera = yes(v),
                 "fov" => s.fov = v.parse::<u32>().unwrap_or(85).clamp(60, 120),
@@ -212,7 +216,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\neasier={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\n",
+            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\neasier={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -231,6 +235,7 @@ impl Settings {
             b(self.vibration),
             self.vibration_strength,
             b(self.sharp_display),
+            b(self.air_steer),
             b(self.lap_gap),
             b(self.steady_camera),
             self.fov,
@@ -289,6 +294,9 @@ impl Settings {
         if self.easier {
             a.push("--easier".into());
         }
+        if self.air_steer {
+            a.push("--air-steer".into());
+        }
         if self.lap_gap {
             a.push("--lap-gap".into());
         }
@@ -345,6 +353,7 @@ mod tests {
                 "1920x1080",
                 "--centred-display",
                 "--easier",
+                "--air-steer",
                 "--lap-gap",
                 "--fov=100",
                 "--vibration=80"

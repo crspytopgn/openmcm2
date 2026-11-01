@@ -18,6 +18,7 @@
 //! mm2-viewer ... --centred-display         // ultrawide: the race display in a 16:9 middle
 //! mm2-viewer ... --original-race-display  // the game's own speedometer, pictures and radar lines
 //! mm2-viewer ... --vibration=N|off         // pad vibration strength 0 to 100 (else the profile's)
+//! mm2-viewer ... --air-steer               // steering in the air bends the flight a little
 //! mm2-viewer ... --lap-gap                 // live gap to the best lap under the race panel
 //! mm2-viewer ... --steady-camera           // the chase camera turns and rises more gently
 //! mm2-viewer ... --fov=N                   // the Chase Cam's field of view (the game's 85)
