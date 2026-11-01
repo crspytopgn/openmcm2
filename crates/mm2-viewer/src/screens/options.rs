@@ -12,6 +12,7 @@ use super::keys;
 use super::{popup, Cx, Go, MsgBox, Screen};
 use crate::audio::Voice;
 use crate::profile::{Controls, Profile, ACTIONS};
+use crate::tweaks::{Tweaks, FOV};
 use crate::ui::{Dlg, Event, Gfx, Ui};
 use mm2_formats::rs2;
 use std::path::Path;
@@ -31,18 +32,6 @@ const PAGE_AT: (f32, f32) = (20.0, 35.0);
 
 /// The engine sizes, one class each (`0x572bec`).
 const ENGINE_SIZES: [u32; 5] = [125, 250, 400, 500, 600];
-
-/// The display modes the graphics page offers: the 16-bit modes a card
-/// of the time listed.
-const MODES: [(u32, u32); 7] = [
-    (640, 480),
-    (800, 600),
-    (1024, 768),
-    (1152, 864),
-    (1280, 960),
-    (1280, 1024),
-    (1600, 1200),
-];
 
 /// One engine class's power bands, from `UI/UIRES.RES` `presets.pb`
 /// (`0x49b460`).
@@ -198,14 +187,7 @@ fn graphics_checks(p: &mut Profile) -> [(&'static str, &mut bool); 3] {
 /// The launcher's pad vibration (`--vibration=N`, 0 to 100, or `off`
 /// as `Some(None)`), in place of the profile's Force Feedback.
 pub fn vibration() -> Option<Option<u32>> {
-    static SET: std::sync::OnceLock<Option<Option<u32>>> = std::sync::OnceLock::new();
-    *SET.get_or_init(|| {
-        let v = std::env::args().find_map(|a| a.strip_prefix("--vibration=").map(str::to_owned))?;
-        Some(match v.as_str() {
-            "off" => None,
-            n => Some(n.parse::<u32>().ok()?.min(100)),
-        })
-    })
+    crate::tweaks::get().vibration
 }
 
 fn control_sliders(p: &mut Profile) -> [(&'static str, &mut u32); 8] {
@@ -248,9 +230,251 @@ const CHAT_MODES: [u32; 3] = [5131, 5130, 5132];
 /// The advanced screen's quality sliders, after the video memory box.
 pub(crate) const DETAILS: [&str; 4] = ["SldEcosystem", "SldObjects", "SldTerrain", "SldVisibility"];
 
+/// Where the Tweaks button sits on the screen.
+const TWEAKS_BUTTON: [i32; 4] = [206, 416, 117, 33];
+
+/// One of the Tweaks box's check boxes: its name, text, where it sits,
+/// what it says when pointed at, and what it sets.
+struct Check {
+    name: &'static str,
+    text: &'static str,
+    rect: [i32; 4],
+    about: &'static str,
+    field: fn(&mut Tweaks) -> &mut bool,
+}
+
+const TWEAK_CHECKS: [Check; 10] = [
+    Check {
+        name: "ChkAirSteer",
+        text: "Air steering",
+        rect: [24, 110, 329, 20],
+        about: "Steering in the air bends your flight a little and turns the bike with it, so you land in line. Off is the original, where it only turns the bike slightly.",
+        field: |t| &mut t.air_steer,
+    },
+    Check {
+        name: "ChkAirBrake",
+        text: "Air braking",
+        rect: [24, 132, 329, 20],
+        about: "Holding the brake in the air takes off a little speed, so you can come up short of a landing. The brake still tips the nose down if Brake Gyro is on.",
+        field: |t| &mut t.air_brake,
+    },
+    Check {
+        name: "ChkWideCourse",
+        text: "Wider course",
+        rect: [24, 154, 329, 20],
+        about: "The course counts 20 ft wider on each side before the off-course timer starts, on every difficulty. Off is the original.",
+        field: |t| &mut t.wide_course,
+    },
+    Check {
+        name: "ChkQuickGetUp",
+        text: "Quick get-up",
+        rect: [24, 176, 329, 20],
+        about: "After a crash, G on the keyboard or Back on a pad puts you straight back on the bike instead of waiting for the crash to play out. Not in network races.",
+        field: |t| &mut t.quick_get_up,
+    },
+    Check {
+        name: "ChkModernHud",
+        text: "Modernised HUD",
+        rect: [24, 226, 329, 20],
+        about: "The race panel, radar and speedometer as clean see-through shapes, crisp at your screen's resolution. Off is the original game's pictures.",
+        field: |t| &mut t.modern_hud,
+    },
+    Check {
+        name: "ChkCentred",
+        text: "Race display nearer the middle",
+        rect: [24, 248, 329, 20],
+        about: "On screens wider than 16:9: the speedometer, map and race info where they sit on a 16:9 screen, instead of out at the edges.",
+        field: |t| &mut t.centred,
+    },
+    Check {
+        name: "ChkLapGap",
+        text: "Live gap to your best lap",
+        rect: [24, 270, 329, 20],
+        about: "Under the race panel: how far ahead (green) or behind (red) your best lap you are, and each lap's time as it ends. Comparing starts from lap 2.",
+        field: |t| &mut t.lap_gap,
+    },
+    Check {
+        name: "ChkSteady",
+        text: "Steadier camera",
+        rect: [381, 140, 207, 20],
+        about: "The chase camera rises and dips with the bike more gently, so bumps don't shake the view. It still turns with the bike as the original does.",
+        field: |t| &mut t.steady_camera,
+    },
+    Check {
+        name: "ChkVsync",
+        text: "VSync",
+        rect: [366, 318, 248, 20],
+        about: "Draws a picture each time the screen refreshes: smooth, with no tearing. Off draws as fast as the computer can.",
+        field: |t| &mut t.vsync,
+    },
+    Check {
+        name: "ChkShowFps",
+        text: "Show frame rate",
+        rect: [366, 342, 248, 20],
+        about: "The frames a second, small at the bottom left of the screen, in the menus and in races. F2 shows or hides it too.",
+        field: |t| &mut t.show_fps,
+    },
+];
+
+/// The vibration check box, which sets a strength rather than a flag.
+const VIBRATION_CHECK: (&str, &str, [i32; 4], &str) = (
+    "ChkVibration",
+    "Controller vibration",
+    [381, 180, 207, 20],
+    "The pad thumps when you land, knocks over sharp bumps and jolts when you crash, on pads that can vibrate.",
+);
+
+/// The Tweaks box's sliders (the advanced screen's) and what they say
+/// when pointed at.
+const FOV_SLIDER: (&str, &str) = (
+    "SldEcosystem",
+    "How wide the riding cameras see. 85° is the original game's; wider shows more round the bike.",
+);
+const VIBRATION_SLIDER: (&str, &str) = ("SldVisibility", "How hard the pad vibrates.");
+
+/// The Tweaks box's Difficulty button, where it sits and what it says
+/// when pointed at.
+const DIFFICULTY_BUTTON: [i32; 4] = [24, 70, 117, 33];
+const DIFFICULTY_BUTTON_ABOUT: &str =
+    "Easy, Normal and Hard's numbers: the other riders' engine power, how easily they crash, how big a hit you take, and their tricks in the Stunt Quarry.";
+
+/// One row of the Difficulty box's table: its text, what it says when
+/// pointed at, how far an arrow moves it and its least and most.
+struct Row {
+    text: &'static str,
+    about: &'static str,
+    step: u32,
+    range: (u32, u32),
+}
+
+/// The table's rows, in [`mm2_settings::DIFFICULTY`]'s order.
+const DIFFICULTY_ROWS: [Row; 4] = [
+    Row {
+        text: "Rivals' engine power, %",
+        about: "How hard the other riders' engines pull, against the game's Normal. More helps them out of slow corners; their top speed hardly changes, as they already have more than they use.",
+        step: 5,
+        range: (50, 300),
+    },
+    Row {
+        text: "How easily rivals crash, %",
+        about: "How small a hit throws the other riders off, against the game's Normal. More and they crash sooner; less and they hardly ever fall.",
+        step: 5,
+        range: (25, 300),
+    },
+    Row {
+        text: "How big a hit you can take before falling, %",
+        about: "How big a hit you can take before you come off your bike, against the game's Normal. More and you crash less.",
+        step: 5,
+        range: (50, 300),
+    },
+    Row {
+        text: "Rivals' trick wait (Quarry), s",
+        about: "In the Stunt Quarry, how many seconds the other riders wait between tricks.",
+        step: 5,
+        range: (0, 60),
+    },
+];
+
+/// What the Difficulty box says when the pointer is on none of it.
+const DIFFICULTY_ABOUT: &str =
+    "Point at a row to see what it does. 100% is the original game's Normal. The single event's Difficulty Level, or a Pro Circuit's or network game's, picks the column.";
+const ORIGINAL_ABOUT: &str = "Puts back the original game's numbers.";
+
+/// Where the table's first arrow, the heading row and the first row sit,
+/// and the spacing of its columns and rows.
+const TABLE: (i32, i32, i32, i32, i32) = (368, 62, 100, 82, 40);
+const ORIGINAL_BUTTON: [i32; 4] = [472, 416, 117, 33];
+
+/// The pieces of the advanced screen the Difficulty box doesn't use.
+const NOT_DIFFICULTY: [&str; 29] = [
+    "SldVisibility",
+    "UnusedSlide03Text",
+    "Less03",
+    "More03",
+    "rbwLabel1",
+    "rbwLabel3",
+    "rbwLabel4",
+    "SldTerrain",
+    "SldObjects",
+    "rbwLabel5",
+    "rbwLabel6",
+    "rbwLabel7",
+    "SldEcosystem",
+    "rbwLabel8",
+    "rbwLabel9",
+    "rbwLabel10",
+    "rbwLabel11",
+    "StartupCardSelectionText",
+    "ChkShowPick3D",
+    "Txt3DCard",
+    "ChkForceVideoMem",
+    "rbwLabel2",
+    "RadTerrSingle",
+    "RadTerrDual",
+    "RadTerrNone",
+    "rbwLabel12",
+    "ChkFilterInput",
+    "ChkShowPickController",
+    "Help",
+];
+
+/// A table cell's arrow, from its name (`DifLess21`): which way, its row
+/// and its level.
+fn difficulty_arrow(name: &str) -> Option<(i32, usize, usize)> {
+    let (by, rest) = match name.get(..7) {
+        Some("DifLess") => (-1, &name[7..]),
+        Some("DifMore") => (1, &name[7..]),
+        _ => return None,
+    };
+    let d: Vec<usize> = rest.chars().map(|c| c.to_digit(10).map(|d| d as usize)).collect::<Option<_>>()?;
+    match d[..] {
+        [r, l] if r < 4 && l < 3 => Some((by, r, l)),
+        _ => None,
+    }
+}
+
+/// `v` an arrow's step up or down, on the step's multiples, within the
+/// row's range.
+fn step_difficulty(v: u32, by: i32, row: &Row) -> u32 {
+    let n = if by > 0 { v / row.step + 1 } else { v.div_ceil(row.step).saturating_sub(1) };
+    (n * row.step).clamp(row.range.0, row.range.1)
+}
+
+/// What the Tweaks box says when the pointer is on none of them.
+const TWEAKS_ABOUT: &str =
+    "Point at a tweak to see what it does. Changes count from the next race, and the launcher keeps them too.";
+
+/// The pieces of the advanced screen the Tweaks box doesn't use.
+const NOT_TWEAKS: [&str; 20] = [
+    "ChkForceVideoMem",
+    "rbwLabel2",
+    "RadTerrSingle",
+    "RadTerrDual",
+    "RadTerrNone",
+    "rbwLabel12",
+    "ChkFilterInput",
+    "CardSelectionBox",
+    "StartupCardSelectionText",
+    "ChkShowPick3D",
+    "Txt3DCard",
+    "ChkShowPickController",
+    "SldObjects",
+    "rbwLabel5",
+    "rbwLabel6",
+    "rbwLabel7",
+    "SldTerrain",
+    "rbwLabel4",
+    "rbwLabel1",
+    "rbwLabel3",
+];
+
 #[allow(clippy::large_enum_variant)]
 enum Sub {
     Advanced(Dlg),
+    /// The fork's Additional Tweaks, and the tweaks as the box opened.
+    Tweaks(Dlg, Tweaks),
+    /// The fork's difficulty table, as it is now.
+    Difficulty(Dlg, [[u32; 3]; 4]),
     Restore { dlg: Dlg, confirm: Option<MsgBox> },
 }
 
@@ -290,6 +514,9 @@ impl Options {
             ratchet: None,
             ratchet_at: f32::MIN,
         };
+        // The fork's Tweaks box, between Help and Advanced.
+        o.base.add_copy("Restore", "Tweaks", TWEAKS_BUTTON);
+        o.base.set_text("Tweaks", "Tweaks...");
         o.show_page(cx, page.min(5));
         // Without a profile there is nothing to restore (`0x527300`).
         if cx.user.store.list().is_empty() {
@@ -351,11 +578,12 @@ impl Options {
                 d.set_text("TxtPID", format!("{}: {pid}", cx.ui.lang(5047)));
             }
             1 => {
-                let modes: Vec<String> = MODES.iter().map(|(w, h)| format!("{w} X {h}")).collect();
-                let at = modes
-                    .iter()
-                    .position(|m| *m == p.graphics.resolution)
-                    .unwrap_or(0);
+                // Not the game's 16-bit modes of the time: full screen or
+                // a window of a size that fits, changed at once.
+                let modes = crate::display::modes();
+                let now = crate::display::current();
+                let at = modes.iter().position(|m| *m == now).unwrap_or(0);
+                let modes = modes.iter().map(|m| m.text()).collect();
                 d.set_items("DisplayResolutionDropDown", modes, at);
                 // 0x4b6ac0: white and centred.
                 d.set_color("DisplayResolutionDropDown", 0xffffff);
@@ -454,9 +682,6 @@ impl Options {
                 }
             }
             1 => {
-                if let Some(m) = d.get("DisplayResolutionDropDown").and_then(|c| c.item()) {
-                    p.graphics.resolution = m.to_string();
-                }
                 p.graphics.terrain = d.slider("TerrainQualitySliderBar");
                 for (name, v) in graphics_checks(p) {
                     *v = d.get(name).is_some_and(|c| c.on);
@@ -748,6 +973,11 @@ impl Options {
                     }
                 }
             }
+            (1, Event::Selected(n, line)) if n.eq_ignore_ascii_case("DisplayResolutionDropDown") => {
+                if let Some(&m) = crate::display::modes().get(line) {
+                    crate::display::request(m);
+                }
+            }
             (2, Event::Clicked(_)) => self.commit_sound(cx.ui),
             (2, Event::Changed(_)) => {
                 self.commit_sound(cx.ui);
@@ -879,6 +1109,244 @@ impl Options {
         }
     }
 
+    // ---- Tweaks (the fork's) ----
+
+    /// The Additional Tweaks, in a box made from the advanced screen's
+    /// pieces: riding and the race display on the left, the camera and
+    /// pad on the plate, and what the tweak under the pointer does below.
+    fn open_tweaks(&mut self, cx: &mut Cx) {
+        let Some(mut d) = Dlg::open(cx.ui, "OPTADVG", (0.0, 0.0)) else {
+            return;
+        };
+        let mut t = crate::tweaks::get();
+        d.set_text("AdvancedGraphicsTitle", "Additional Tweaks");
+        d.add_copy("rbwLabel12", "TwkDisplay", [24, 200, 249, 25]);
+        d.set_text("TwkDisplay", "Race Display:");
+        d.add_copy("rbwLabel12", "TwkScreen", [366, 290, 249, 25]);
+        d.set_text("TwkScreen", "Screen:");
+        // In the frame the background has there.
+        d.add_copy("StartupCardSelectionText", "TwkAbout", [33, 303, 294, 80]);
+        d.set_text("TwkAbout", TWEAKS_ABOUT);
+        if let Some(c) = d.ctl("TwkAbout") {
+            c.wrap = true;
+        }
+        d.add_from(&self.base, "Restore", "Difficulty", DIFFICULTY_BUTTON);
+        d.set_text("Difficulty", "Difficulty...");
+        for c in &TWEAK_CHECKS {
+            d.add_copy("ChkForceVideoMem", c.name, c.rect);
+            d.set_text(c.name, c.text);
+            d.set_on(c.name, *(c.field)(&mut t));
+        }
+        let (name, text, rect, _) = VIBRATION_CHECK;
+        d.add_copy("ChkForceVideoMem", name, rect);
+        d.set_text(name, text);
+        for name in NOT_TWEAKS {
+            d.show(name, false);
+        }
+        d.set_text("rbwLabel11", "Camera and Controller");
+        let fov = FOV_SLIDER.0;
+        if let Some(c) = d.ctl(fov) {
+            c.range = FOV.1 - FOV.0;
+        }
+        d.set_steps(fov, (FOV.1 - FOV.0) / 5 + 1);
+        d.set_slider(fov, t.fov - FOV.0, None);
+        let vib = VIBRATION_SLIDER.0;
+        if let Some(c) = d.ctl(vib) {
+            c.range = 100;
+        }
+        d.set_steps(vib, 21);
+        // Without the launcher's setting, the profile's Force Feedback.
+        let c = &self.p.controls;
+        let (on, strength) = match t.vibration {
+            Some(v) => (v.is_some(), v.unwrap_or(c.feedback)),
+            None => (c.force_feedback, c.feedback),
+        };
+        d.set_on(VIBRATION_CHECK.0, on);
+        d.set_slider(vib, strength, None);
+        Self::label_tweaks(&mut d, t.fov, strength, on);
+        self.sub = Some(Sub::Tweaks(d, t));
+    }
+
+    /// The sliders' headings, with their values.
+    fn label_tweaks(d: &mut Dlg, fov: u32, strength: u32, vibration: bool) {
+        d.set_text("rbwLabel8", format!("Field of view: {fov}°"));
+        d.set_text("UnusedSlide03Text", format!("Vibration strength: {strength}%"));
+        d.enable(VIBRATION_SLIDER.0, vibration);
+    }
+
+    /// The box's tweaks, and its vibration strength and whether it is on.
+    fn read_tweaks(d: &Dlg, was: Tweaks) -> (Tweaks, u32, bool) {
+        let mut t = was;
+        let on = |n: &str| d.get(n).is_some_and(|c| c.on);
+        for c in &TWEAK_CHECKS {
+            *(c.field)(&mut t) = on(c.name);
+        }
+        t.fov = FOV.0 + d.slider(FOV_SLIDER.0);
+        (t, d.slider(VIBRATION_SLIDER.0), on(VIBRATION_CHECK.0))
+    }
+
+    /// Closing keeps the tweaks, saved for the launcher too.
+    fn close_tweaks(&mut self) {
+        let Some(Sub::Tweaks(d, was)) = self.sub.take() else {
+            return;
+        };
+        let (mut t, strength, on) = Self::read_tweaks(&d, was);
+        let vibration = on.then_some(strength);
+        // Left to the profile while the box shows the profile's.
+        let c = &self.p.controls;
+        if was.vibration.is_some() || vibration != c.force_feedback.then_some(c.feedback) {
+            t.vibration = Some(vibration);
+        }
+        if t != was {
+            crate::tweaks::set(t);
+        }
+    }
+
+    fn tweaks_event(&mut self, cx: &mut Cx, e: Event) {
+        let Some(Sub::Tweaks(d, was)) = &mut self.sub else {
+            return;
+        };
+        match e {
+            Event::Clicked(n) if n.eq_ignore_ascii_case("Back") => self.close_tweaks(),
+            Event::Clicked(n) if n.eq_ignore_ascii_case("Difficulty") => {
+                self.close_tweaks();
+                self.open_difficulty(cx);
+            }
+            Event::Clicked(_) | Event::Changed(_) | Event::Released(_) => {
+                let (t, strength, on) = Self::read_tweaks(d, *was);
+                Self::label_tweaks(d, t.fov, strength, on);
+            }
+            _ => {}
+        }
+    }
+
+    /// What the tweak under the pointer does.
+    fn describe_tweak(&mut self) {
+        let Some(Sub::Tweaks(d, _)) = &mut self.sub else {
+            return;
+        };
+        let about = d.hovered().and_then(|h| {
+            let is = |n: &str| n.eq_ignore_ascii_case(h);
+            let check = TWEAK_CHECKS.iter().find(|c| is(c.name)).map(|c| c.about);
+            let vibration = is(VIBRATION_CHECK.0).then_some(VIBRATION_CHECK.3);
+            let vibration = vibration.or(is("Difficulty").then_some(DIFFICULTY_BUTTON_ABOUT));
+            let slider = [FOV_SLIDER, VIBRATION_SLIDER].into_iter().find(|s| is(s.0)).map(|s| s.1);
+            check.or(vibration).or(slider)
+        });
+        let about = about.unwrap_or(TWEAKS_ABOUT);
+        d.set_text("TwkAbout", about);
+    }
+
+    // ---- The fork's Difficulty box ----
+
+    /// The advanced screen's pieces again, with the single event page's
+    /// arrows and number boxes for a table of Easy, Normal and Hard.
+    fn open_difficulty(&mut self, cx: &mut Cx) {
+        let (Some(mut d), Some(event)) = (
+            Dlg::open(cx.ui, "OPTADVG", (0.0, 0.0)),
+            Dlg::open(cx.ui, "SPEVENT", (0.0, 0.0)),
+        ) else {
+            return;
+        };
+        let (x, head, top, across, down) = TABLE;
+        d.set_text("AdvancedGraphicsTitle", "Difficulty");
+        for (l, name) in ["Easy", "Normal", "Hard"].into_iter().enumerate() {
+            let at = x + l as i32 * across;
+            let id = format!("DifHead{l}");
+            d.add_copy("rbwLabel11", &id, [at - 6, head, 89, 21]);
+            d.set_text(&id, name);
+        }
+        for (r, row) in DIFFICULTY_ROWS.iter().enumerate() {
+            let y = top + r as i32 * down;
+            let id = format!("DifRow{r}");
+            d.add_copy("rbwLabel2", &id, [24, y, 330, 21]);
+            d.set_text(&id, row.text);
+            for l in 0..3 {
+                let at = x + l as i32 * across;
+                d.add_from(&event, "OpponentsLeftarrow", &format!("DifLess{r}{l}"), [at, y, 21, 21]);
+                d.add_from(&event, "OpponentsListBox", &format!("DifBox{r}{l}"), [at + 22, y, 33, 21]);
+                d.add_from(&event, "OpponentsrightArrow", &format!("DifMore{r}{l}"), [at + 56, y, 21, 21]);
+            }
+        }
+        d.add_copy("StartupCardSelectionText", "DifAbout", [33, 303, 294, 80]);
+        d.set_text("DifAbout", DIFFICULTY_ABOUT);
+        if let Some(c) = d.ctl("DifAbout") {
+            c.wrap = true;
+        }
+        d.add_from(&self.base, "Restore", "DifOriginal", ORIGINAL_BUTTON);
+        d.set_text("DifOriginal", "Original");
+        for name in NOT_DIFFICULTY {
+            d.show(name, false);
+        }
+        let table = crate::tweaks::get().difficulty;
+        Self::show_difficulty(&mut d, &table);
+        self.sub = Some(Sub::Difficulty(d, table));
+    }
+
+    /// The table's numbers into their boxes.
+    fn show_difficulty(d: &mut Dlg, table: &[[u32; 3]; 4]) {
+        for (r, row) in table.iter().enumerate() {
+            for (l, v) in row.iter().enumerate() {
+                d.set_items(&format!("DifBox{r}{l}"), vec![v.to_string()], 0);
+            }
+        }
+    }
+
+    /// Closing keeps the table, saved for the launcher too, and goes back
+    /// to the Tweaks box.
+    fn close_difficulty(&mut self, cx: &mut Cx) {
+        let Some(Sub::Difficulty(_, table)) = self.sub.take() else {
+            return;
+        };
+        let mut t = crate::tweaks::get();
+        if t.difficulty != table {
+            t.difficulty = table;
+            crate::tweaks::set(t);
+        }
+        self.open_tweaks(cx);
+    }
+
+    fn difficulty_event(&mut self, cx: &mut Cx, e: Event) {
+        let Some(Sub::Difficulty(d, table)) = &mut self.sub else {
+            return;
+        };
+        let Event::Clicked(n) = e else {
+            return;
+        };
+        if n.eq_ignore_ascii_case("Back") {
+            return self.close_difficulty(cx);
+        }
+        if n.eq_ignore_ascii_case("DifOriginal") {
+            *table = mm2_settings::DIFFICULTY;
+        } else if let Some((by, r, l)) = difficulty_arrow(&n) {
+            table[r][l] = step_difficulty(table[r][l], by, &DIFFICULTY_ROWS[r]);
+        } else {
+            return;
+        }
+        Self::show_difficulty(d, table);
+    }
+
+    /// What the row under the pointer does.
+    fn describe_difficulty(&mut self) {
+        let Some(Sub::Difficulty(d, _)) = &mut self.sub else {
+            return;
+        };
+        let original = d.hovered().is_some_and(|h| h.eq_ignore_ascii_case("DifOriginal"));
+        // Anywhere along a row, its text included.
+        let (_, head, first, _, down) = TABLE;
+        let (x, y) = d.pointer();
+        let row = (y - first as f32 + (down as f32 - 21.0) / 2.0) / down as f32;
+        let row = (x > 16.0 && x < 620.0 && row >= 0.0 && y > head as f32 + 24.0)
+            .then(|| DIFFICULTY_ROWS.get(row as usize))
+            .flatten();
+        let about = match (original, row) {
+            (true, _) => Some(ORIGINAL_ABOUT),
+            (_, Some(r)) => Some(r.about),
+            _ => None,
+        };
+        d.set_text("DifAbout", about.unwrap_or(DIFFICULTY_ABOUT));
+    }
+
     // ---- Restore (`0x4b9470`) ----
 
     fn open_restore(&mut self, cx: &mut Cx) {
@@ -970,7 +1438,7 @@ impl Options {
 impl Screen for Options {
     fn layers(&mut self) -> Vec<&mut Dlg> {
         match &mut self.sub {
-            Some(Sub::Advanced(d)) => vec![d],
+            Some(Sub::Advanced(d)) | Some(Sub::Tweaks(d, _)) | Some(Sub::Difficulty(d, _)) => vec![d],
             Some(Sub::Restore { dlg, confirm }) => {
                 let mut v = vec![&mut self.base];
                 if let Some((_, p)) = &mut self.page {
@@ -1010,6 +1478,14 @@ impl Screen for Options {
                 self.restore_event(cx, e);
                 return Go::Stay;
             }
+            Some(Sub::Tweaks(..)) => {
+                self.tweaks_event(cx, e);
+                return Go::Stay;
+            }
+            Some(Sub::Difficulty(..)) => {
+                self.difficulty_event(cx, e);
+                return Go::Stay;
+            }
             None => {}
         }
         if let Event::Clicked(n) = &e {
@@ -1032,6 +1508,10 @@ impl Screen for Options {
                     self.open_advanced(cx);
                     return Go::Stay;
                 }
+                "tweaks" => {
+                    self.open_tweaks(cx);
+                    return Go::Stay;
+                }
                 "restore" => {
                     self.open_restore(cx);
                     return Go::Stay;
@@ -1048,6 +1528,8 @@ impl Screen for Options {
     fn escape(&mut self, cx: &mut Cx) -> Go {
         match &mut self.sub {
             Some(Sub::Advanced(_)) => self.close_advanced(cx),
+            Some(Sub::Tweaks(..)) => self.close_tweaks(),
+            Some(Sub::Difficulty(..)) => self.close_difficulty(cx),
             Some(Sub::Restore { confirm, .. }) => {
                 if confirm.is_some() {
                     *confirm = None;
@@ -1079,6 +1561,12 @@ impl Screen for Options {
         Go::Stay
     }
 
+    fn tick(&mut self, _cx: &mut Cx) -> Go {
+        self.describe_tweak();
+        self.describe_difficulty();
+        Go::Stay
+    }
+
     fn draw(&mut self, ui: &mut Ui, gfx: &mut Gfx, now: f32) {
         for d in self.layers() {
             d.tick(now);
@@ -1090,6 +1578,19 @@ impl Screen for Options {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn difficulty_arrows_step_on_multiples() {
+        assert_eq!(difficulty_arrow("DifMore21"), Some((1, 2, 1)));
+        assert_eq!(difficulty_arrow("DifLess30"), Some((-1, 3, 0)));
+        assert_eq!(difficulty_arrow("DifBox21"), None);
+        let row = &DIFFICULTY_ROWS[1];
+        assert_eq!(step_difficulty(77, 1, row), 80);
+        assert_eq!(step_difficulty(77, -1, row), 75);
+        assert_eq!(step_difficulty(80, -1, row), 75);
+        assert_eq!(step_difficulty(25, -1, row), 25);
+        assert_eq!(step_difficulty(0, -1, &DIFFICULTY_ROWS[3]), 0);
+    }
 
     #[test]
     fn classes() {

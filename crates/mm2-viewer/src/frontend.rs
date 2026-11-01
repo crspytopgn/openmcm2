@@ -188,6 +188,10 @@ enum Screen {
     Extra(Box<dyn screens::Screen>),
 }
 
+/// The event page's difficulty boxes, Easy to Hard: the computer riders'
+/// level, 0 to 2.
+const LEVELS: [&str; 3] = ["RadLODEasy", "RadLODMedium", "RadLODHard"];
+
 pub struct Frontend {
     ui: Ui,
     screen: Screen,
@@ -195,6 +199,8 @@ pub struct Frontend {
     mode: u32,
     laps: u32,
     opponents: u32,
+    /// The Easy, Medium or Hard box on the event page, 0 to 2.
+    level: usize,
     track: usize,
     tracks: HashMap<EventKind, Vec<TrackEntry>>,
     /// The last race's results, for the Race Info page.
@@ -261,6 +267,7 @@ impl Frontend {
             mode: 1,
             laps: 3,
             opponents: 3,
+            level: 1,
             track: 0,
             tracks: HashMap::new(),
             results: RaceResults::default(),
@@ -358,6 +365,11 @@ impl Frontend {
     }
 
     /// The player's profile.
+    /// The menus' pictures and texts, for drawing over them.
+    pub fn ui_mut(&mut self) -> &mut Ui {
+        &mut self.ui
+    }
+
     pub fn user(&self) -> &screens::User {
         &self.user
     }
@@ -1228,6 +1240,9 @@ impl Frontend {
         if let Some(n) = item("OpponentsListBox") {
             self.opponents = n;
         }
+        if let Some(l) = LEVELS.iter().position(|n| page.get(n).is_some_and(|c| c.on)) {
+            self.level = l;
+        }
         self.track = page.selected("DDLTextBox");
         self.ghost = page.selected("DDLGhostRaces");
     }
@@ -1356,7 +1371,9 @@ impl Frontend {
         // Random gates are for Baja races.
         page.show("WaypointBox", event == EventKind::Baja && mode != GHOST);
         page.show("ChkTreeCollision", true);
-        page.set_on("RadLODMedium", true);
+        for (i, name) in LEVELS.iter().enumerate() {
+            page.set_on(name, i == self.level);
+        }
     }
 
     /// The tracks of an event, in the order the game lists them (by file
@@ -1401,7 +1418,7 @@ impl Frontend {
             mode: self.mode,
             name: entry.name,
             ride: self.ride(),
-            level: 1,
+            level: self.level,
             names: vec![self.user.profile.name.clone()],
             rides: Vec::new(),
             ghost: match self.mode {

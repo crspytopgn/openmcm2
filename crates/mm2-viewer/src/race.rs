@@ -67,7 +67,7 @@ pub struct Course {
     /// Points in one lap.
     lap: usize,
     /// How far past its sides the course still counts as ridden on, ft:
-    /// none in the game; [`SLACK`] with Easier riding.
+    /// none in the game; [`SLACK`] with the Wider course tweak.
     slack: f32,
     finish: Line,
     /// Where every rider's confirmed place starts: the start line's
@@ -841,50 +841,48 @@ impl Computer {
     }
 }
 
-/// The launcher's Easier riding (`--easier`, not the game's), which
-/// changes only Easy (level 0): forgiving landings, a wider course,
-/// slower computer riders and a player who comes off less.
-fn easier() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::args().any(|a| a == "--easier"))
-}
-
 /// The launcher's Air steering (`--air-steer`, not the game's): steering
 /// in the air bends the flight a little.
 fn air_steer() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::args().any(|a| a == "--air-steer"))
+    crate::tweaks::get().air_steer
 }
 
-/// Whether Easier riding changes a race at `level`.
-pub fn eased(level: usize, easier: bool) -> bool {
-    easier && level == 0
+/// The fork's Air braking (`--air-brake`, not the game's): braking in the
+/// air shortens the flight a little.
+fn air_brake() -> bool {
+    crate::tweaks::get().air_brake
 }
 
-/// How far past its sides the course still counts as ridden on with
-/// Easier riding, ft: the off-course clock (and the halved drive off it)
-/// waits until a rider is this much further out.
+/// How far past its sides the course still counts as ridden on with the
+/// fork's Wider course (`--wide-course`), ft: the off-course clock (and
+/// the halved drive off it) waits until a rider is this much further out.
 pub const SLACK: f32 = 20.0;
 
-/// The player's crash tolerance by level 0 to 2: the game's 1.15, 1.05
-/// and 1.0 by difficulty (0x492950's K, +0x60c); Easier riding's Easy 1.4.
-pub fn player_tolerance(level: usize, easier: bool) -> f32 {
-    match level.min(2) {
-        l if eased(l, easier) => 1.4,
-        l => [1.15, 1.05, 1.0][l],
-    }
+/// The game's `game` for `level` 0 to 2, scaled by the difficulty
+/// table's `row` against the game's own (see [`mm2_settings::DIFFICULTY`]),
+/// as the Difficulty box sets it: the game's number untouched.
+fn table(row: usize, level: usize, game: f32) -> f32 {
+    let level = level.min(2);
+    let set = crate::tweaks::get().difficulty[row][level] as f32;
+    game * set / mm2_settings::DIFFICULTY[row][level].max(1) as f32
 }
 
-/// The fastest the computer riders aim to go, ft/s, by level 0 to 2: no
-/// limit but the course's (and a jump's); Easier riding's Easy 50, about 34
-/// mph, which leaves them 13–22% behind over a race start (Chanos, Farm,
-/// SX01). A cut in their engine power hardly slows them: they have far
-/// more than they use.
-pub fn computer_top_speed(level: usize, easier: bool) -> f32 {
-    match level.min(2) {
-        l if eased(l, easier) => 50.0,
-        _ => f32::INFINITY,
-    }
+/// The player's crash tolerance by level 0 to 2: the game's 1.15, 1.05
+/// and 1.0 by difficulty (0x492950's K, +0x60c), as the table has it.
+pub fn player_tolerance(level: usize) -> f32 {
+    table(2, level, [1.15, 1.05, 1.0][level.min(2)])
+}
+
+/// The computer riders' engine power by level (the game's 1.1, 1.3, 1.5,
+/// `computer::POWER`), as the table has it.
+fn computer_power(level: usize) -> f32 {
+    table(0, level, mm2_physics::computer::POWER[level.min(2)])
+}
+
+/// The computer riders' speed-loss tolerance (the game's
+/// `computer::tolerance`), as the table has it.
+fn computer_tolerance(level: usize, supercross: bool) -> f32 {
+    table(1, level, mm2_physics::computer::tolerance(level, supercross))
 }
 
 /// One bike in the race.
@@ -1199,7 +1197,7 @@ impl Racer {
         // branches of 0x415170 compare the timer with the level's int
         // loaded as float bits (0x415199, 0x4162c2), a denormal, so there
         // the wait is a single frame.
-        let wait = if quarry { stunt::AI_TRICK_WAIT[level] } else { f32::from_bits(level as u32 + 1) };
+        let wait = if quarry { table(3, level, stunt::AI_TRICK_WAIT[level]) } else { f32::from_bits(level as u32 + 1) };
         if self.trick_wait < wait {
             self.trick_wait += dt;
             return None;
@@ -1411,7 +1409,7 @@ impl Racer {
         };
         let r = &c.rider;
         let (at, speed) = (r.position, r.speed);
-        let mut power = mm2_physics::computer::POWER[level.min(2)];
+        let mut power = computer_power(level);
         let mut limit: f32 = 1000.0;
         let raise = |p: Vec3| Vec3::new(p.x, at.y + 2.0, p.z);
         let mut widen = false;
@@ -1495,7 +1493,7 @@ impl Racer {
             vec![target]
         };
         let mut path = mm2_physics::ai::Path::new(points, speed * 0.25);
-        path.limit = limit.min(computer_top_speed(level, easier()));
+        path.limit = limit;
         path.power = power;
         path.widen = widen;
         self.line = Some(path);
@@ -1566,7 +1564,7 @@ impl Racer {
             self.off_course = 0.0;
         }
         let path = self.line.as_mut().expect("planned");
-        c.rider.tolerance = mm2_physics::computer::tolerance(level, supercross);
+        c.rider.tolerance = computer_tolerance(level, supercross);
         if c.rider.hull.is_none() {
             c.rider.hull = HULL.get().cloned();
             c.rider.weight = spec.weight + mm2_physics::bike::RIDER;
@@ -1798,7 +1796,7 @@ impl Race {
             autopilot: false,
             cam_keys: Default::default(),
             wreck_reset: true,
-            quick_get_up: true,
+            quick_get_up: crate::tweaks::get().quick_get_up,
             visual_cues: true,
             player_indicator: true,
             watched: None,
@@ -1907,10 +1905,8 @@ impl Race {
         } else {
             0.0
         };
-        // The level is set after the race is made, so Easier riding's
-        // wider course goes on here.
         if let Some(c) = &mut self.course {
-            c.slack = if eased(self.level, easier()) { SLACK } else { 0.0 };
+            c.slack = if crate::tweaks::get().wide_course { SLACK } else { 0.0 };
         }
         let mut left = dt;
         while left > 0.0 {
@@ -1982,9 +1978,9 @@ impl Race {
                 if let Bike::Player(b) = &mut r.bike {
                     // The game holds the player's bike itself, engine running.
                     b.racing = racing;
-                    b.crash_tolerance = player_tolerance(self.level, easier());
-                    b.forgiving_landings = eased(self.level, easier());
+                    b.crash_tolerance = player_tolerance(self.level);
                     b.air_steer = air_steer();
+                    b.air_brake = air_brake();
                 } else if !racing {
                     c = Controls::default();
                 }
@@ -2540,23 +2536,19 @@ mod tests {
     }
 
     #[test]
-    fn easier_riding_changes_only_easy() {
-        assert!(eased(0, true));
-        assert!(!eased(1, true) && !eased(2, true) && !eased(0, false));
-    }
-
-    #[test]
-    fn easy_is_easier() {
-        // The game's own levels: the player takes more on Easy.
-        assert_eq!(player_tolerance(0, false), 1.15);
-        assert_eq!(player_tolerance(1, false), 1.05);
-        assert_eq!(player_tolerance(2, false), 1.0);
-        // Easier riding changes only Easy.
-        assert!(player_tolerance(0, true) > player_tolerance(0, false));
-        assert!(computer_top_speed(0, true) < computer_top_speed(0, false));
-        for level in 1..3 {
-            assert_eq!(player_tolerance(level, true), player_tolerance(level, false));
-            assert_eq!(computer_top_speed(level, true), computer_top_speed(level, false));
+    fn the_tables_numbers_are_the_games() {
+        // Each of the game's numbers against its Normal, rounded.
+        let t = mm2_settings::DIFFICULTY;
+        let power = mm2_physics::computer::POWER;
+        let crash = [0, 1, 2].map(|l| mm2_physics::computer::tolerance(l, false));
+        let player = [1.15, 1.05, 1.0];
+        for (row, game) in [(0, power), (1, crash), (2, player)] {
+            for level in 0..3 {
+                assert_eq!((game[level] / game[1] * 100.0).round() as u32, t[row][level], "row {row}");
+            }
+        }
+        for level in 0..3 {
+            assert_eq!(t[3][level] as f32, stunt::AI_TRICK_WAIT[level]);
         }
     }
 

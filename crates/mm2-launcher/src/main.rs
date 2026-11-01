@@ -15,38 +15,13 @@ mod update;
 
 use eframe::egui;
 use game::Source;
-use settings::{Quality, Settings, UPGRADES};
+use settings::{Quality, Settings, SHAPES, UPGRADES};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// The screen shapes the game fits: the shape, what it suits, and its
-/// window sizes with their everyday names.
-const SHAPES: [(&str, &str, &[(u32, u32, &str)]); 3] = [
-    (
-        "4:3 Classic",
-        "The original game's shape, for older square monitors.",
-        &[(800, 600, "SVGA"), (1024, 768, "XGA"), (1280, 960, ""), (1600, 1200, "UXGA")],
-    ),
-    (
-        "16:9 Widescreen",
-        "Most monitors, laptops and TVs.",
-        &[
-            (1280, 720, "HD 720p"),
-            (1600, 900, "HD+"),
-            (1920, 1080, "Full HD 1080p"),
-            (2560, 1440, "QHD 1440p"),
-            (3840, 2160, "4K UHD"),
-        ],
-    ),
-    (
-        "21:9 Ultrawide",
-        "Ultrawide monitors: the race shows more to the sides.",
-        &[(2560, 1080, "UW-FHD"), (3440, 1440, "UW-QHD"), (3840, 1600, "UW-QHD+")],
-    ),
-];
 const TIMES: [(&str, &str); 6] =
     [("", "Track's own"), ("dawn", "Dawn"), ("morning", "Morning"), ("noon", "Noon"), ("afternoon", "Afternoon"), ("dusk", "Dusk")];
 const WEATHERS: [(&str, &str); 3] = [("clear", "Clear"), ("overcast", "Overcast"), ("rain", "Rain")];
@@ -393,6 +368,12 @@ impl Launcher {
                         self.note = Some((format!("The game stopped with an error: {last}\n(full log: {})", log.display()), true));
                     }
                     self.running = None;
+                    // The game's Tweaks box may have changed them.
+                    let game = Settings::load();
+                    if game != self.saved {
+                        self.settings = game.clone();
+                        self.saved = game;
+                    }
                     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
@@ -465,7 +446,6 @@ impl eframe::App for Launcher {
                 self.game_ui(ui, busy);
                 self.more_tracks_ui(ui, busy);
                 self.display_ui(ui);
-                self.gameplay_ui(ui);
                 self.graphics_ui(ui);
                 self.updates_ui(ui);
                 ui.collapsing("Command line", |ui| {
@@ -530,146 +510,19 @@ impl Launcher {
         });
     }
 
+    /// How the game starts: full screen or a window, chosen in the game
+    /// (Options, Graphics, Display Resolution) and saved here.
     fn display_ui(&mut self, ui: &mut egui::Ui) {
-        // The monitor the launcher is on, in pixels.
-        let monitor = ui.ctx().input(|i| {
-            let v = i.viewport();
-            v.monitor_size.map(|m| m * v.native_pixels_per_point.unwrap_or(1.0))
-        });
-        let monitor = monitor.map(|m| (m.x.round() as u32, m.y.round() as u32));
         let s = &mut self.settings;
         section(ui, "Display", |ui| {
-            ui.radio_value(&mut s.fullscreen, true, "Full screen (recommended)");
-            if s.fullscreen {
-                let text = match monitor {
-                    // The game draws the race no wider than 21:9 (12:5).
-                    Some(m) if m.0 * 5 > m.1 * 12 => format!(
-                        "At your screen's {}, Super ultrawide. The race is drawn 21:9 in the middle, with black bars at the sides.",
-                        size_text(m)
-                    ),
-                    Some(m) => format!("At your screen's {}, {}. {}", size_text(m), SHAPES[shape_of(m)].0, SHAPES[shape_of(m)].1),
-                    None => "At your screen's own size.".into(),
-                };
-                ui.indent("full", |ui| ui.label(egui::RichText::new(text).weak()));
-            }
-            if ui.radio(!s.fullscreen, "In a window").clicked() {
-                s.fullscreen = false;
-            }
-            if !s.fullscreen {
-                // A window as big as the screen is full screen done worse:
-                // a size that doesn't fit gives way to the biggest that does.
-                if !fits(s.window, monitor) {
-                    s.window = fitting(SHAPES[shape_of(s.window)].2, monitor)
-                        .or_else(|| SHAPES.iter().rev().find_map(|z| fitting(z.2, monitor)))
-                        .unwrap_or((1024, 768));
-                }
-                ui.indent("window", |ui| {
-                    let shape = shape_of(s.window);
-                    egui::Grid::new("window").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                        ui.label("Shape");
-                        ui.horizontal(|ui| {
-                            for (k, (name, _, sizes)) in SHAPES.iter().enumerate() {
-                                let size = fitting(sizes, monitor);
-                                let r = ui
-                                    .add_enabled(size.is_some(), egui::RadioButton::new(k == shape, *name))
-                                    .on_disabled_hover_text("Too big for a window on your screen: use Full screen.");
-                                if let (true, Some(size)) = (r.clicked() && k != shape, size) {
-                                    s.window = size;
-                                }
-                            }
-                        });
-                        ui.end_row();
-                        ui.label("Size");
-                        egui::ComboBox::from_id_salt("size").selected_text(size_text(s.window)).show_ui(ui, |ui| {
-                            for &(w, h, _) in SHAPES[shape].2.iter().filter(|z| fits((z.0, z.1), monitor)) {
-                                ui.selectable_value(&mut s.window, (w, h), size_text((w, h)));
-                            }
-                        });
-                        ui.end_row();
-                    });
-                    let note = SHAPES[shape].1;
-                    ui.label(egui::RichText::new(format!("{note} Alt+Enter switches to full screen while playing.")).weak());
-                });
-            }
-            ui.add_space(4.0);
-            ui.checkbox(&mut s.vsync, "VSync (smooth picture, no tearing)");
-            ui.checkbox(&mut s.show_fps, "Show frame rate");
-        });
-    }
-
-    fn gameplay_ui(&mut self, ui: &mut egui::Ui) {
-        let s = &mut self.settings;
-        section(ui, "Additional Tweaks", |ui| {
-            ui.checkbox(&mut s.easier, "Easier riding");
+            let now = match s.fullscreen {
+                true => "The game starts full screen.".to_string(),
+                false => format!("The game starts in a {} window.", size_text(s.window)),
+            };
+            ui.label(now);
             ui.label(
                 egui::RichText::new(
-                    "Makes the Easy difficulty easier; Medium and Hard stay as they are. On Easy: land a jump roughly level on both wheels and the bike takes a much harder landing without throwing you off (nose-first landings and flips still crash), the course counts 20 ft wider on each side before the off-course timer starts, the computer riders are slower and you come off less. Off is the original game.",
-                )
-                .weak(),
-            );
-            ui.add_space(4.0);
-            ui.checkbox(&mut s.air_steer, "Air steering");
-            ui.label(
-                egui::RichText::new(
-                    "Steering in the air bends your flight a little, about 20° a second at full lock, and turns the bike with it so you land in line. Off is the original game, where steering in the air only turns the bike slightly.",
-                )
-                .weak(),
-            );
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut s.vibration, "Controller vibration");
-                ui.add_enabled_ui(s.vibration, |ui| {
-                    ui.label("Weaker");
-                    ui.add(egui::Slider::new(&mut s.vibration_strength, 0..=100).show_value(false));
-                    ui.label("Stronger");
-                });
-            });
-            ui.label(
-                egui::RichText::new(
-                    "The pad thumps when you land, knocks over sharp bumps and jolts when you crash. For pads that can vibrate (an Xbox pad on Windows; not on a Mac).",
-                )
-                .weak(),
-            );
-            ui.add_space(4.0);
-            ui.checkbox(&mut s.lap_gap, "Live gap to your best lap");
-            ui.label(
-                egui::RichText::new(
-                    "Under the race panel: how far ahead (green) or behind (red) of your best lap you are, at each point of the course, and each lap's time and gap as it ends. Lap 1 starts at the gate, so the comparing starts from lap 2.",
-                )
-                .weak(),
-            );
-            ui.add_space(4.0);
-            ui.checkbox(&mut s.steady_camera, "Steadier camera");
-            ui.label(
-                egui::RichText::new(
-                    "The chase camera rises and dips with the bike more gently, so bumps don't shake the view; it still turns with the bike as the original does. Off is the original game's.",
-                )
-                .weak(),
-            );
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label("Field of view");
-                ui.add(egui::Slider::new(&mut s.fov, 60..=120).suffix("°"));
-            });
-            ui.label(
-                egui::RichText::new(
-                    "How wide the riding cameras see. 85° is the original game's; wider shows more round the bike. Home and End still zoom while riding.",
-                )
-                .weak(),
-            );
-            ui.add_space(4.0);
-            ui.checkbox(&mut s.sharp_display, "Modernised HUD");
-            ui.label(
-                egui::RichText::new(
-                    "The race panel, radar and speedometer redrawn as clean see-through shapes, crisp at your screen's resolution, with smooth radar lines and needle. Off is the original game's pictures.",
-                )
-                .weak(),
-            );
-            ui.add_space(4.0);
-            ui.checkbox(&mut s.centred_display, "Race display nearer the middle");
-            ui.label(
-                egui::RichText::new(
-                    "On screens wider than 16:9: puts the speedometer, map and race info where they sit on a 16:9 screen, instead of out at the edges.",
+                    "Change it in the game: Options, Graphics, Display Resolution. Alt+Enter switches to full screen and back while playing. VSync, the frame rate, the difficulty table, air steering and braking, the wider course, quick get-up, vibration, the camera and the HUD are in the game too: Options, then Tweaks... at the bottom.",
                 )
                 .weak(),
             );
@@ -995,15 +848,6 @@ impl Launcher {
     }
 }
 
-/// Which of [`SHAPES`] a `width × height` is nearest.
-fn shape_of((w, h): (u32, u32)) -> usize {
-    match w as f32 / h.max(1) as f32 {
-        r if r < 1.55 => 0,
-        r if r < 2.1 => 1,
-        _ => 2,
-    }
-}
-
 /// "1920 × 1080 (Full HD 1080p)", or just the size when it has no name.
 fn size_text((w, h): (u32, u32)) -> String {
     let name = SHAPES.iter().flat_map(|s| s.2).find(|z| (z.0, z.1) == (w, h)).map_or("", |z| z.2);
@@ -1011,22 +855,6 @@ fn size_text((w, h): (u32, u32)) -> String {
         "" => format!("{w} × {h}"),
         _ => format!("{w} × {h} ({name})"),
     }
-}
-
-/// Whether a window `size` fits on `monitor` with room to spare: narrower,
-/// and short enough to leave the title bar and taskbar showing.
-fn fits((w, h): (u32, u32), monitor: Option<(u32, u32)>) -> bool {
-    monitor.is_none_or(|m| w < m.0 && h <= m.1 - m.1 / 12)
-}
-
-/// The biggest of `sizes` that fits on `monitor`, or the second smallest
-/// when it isn't known; none when none fit.
-fn fitting(sizes: &[(u32, u32, &str)], monitor: Option<(u32, u32)>) -> Option<(u32, u32)> {
-    let best = match monitor {
-        Some(_) => sizes.iter().filter(|z| fits((z.0, z.1), monitor)).last(),
-        None => sizes.get(1),
-    };
-    best.map(|z| (z.0, z.1))
 }
 
 fn title(s: &str) -> String {

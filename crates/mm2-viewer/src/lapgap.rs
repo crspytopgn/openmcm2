@@ -7,10 +7,9 @@
 /// How long a finished lap's time and gap stay up, s.
 pub const LAST_SHOWN: f32 = 4.0;
 
-/// Whether the launcher asked for it.
+/// Whether it is on (a tweak).
 pub fn on() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::args().any(|a| a == "--lap-gap"))
+    crate::tweaks::get().lap_gap
 }
 
 #[derive(Debug, Clone, Default)]

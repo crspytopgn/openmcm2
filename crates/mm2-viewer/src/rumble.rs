@@ -8,16 +8,16 @@
 use glam::Vec3;
 
 /// A landing falling slower than this, ft/s, is felt not at all…
-const SOFT: f32 = 8.0;
+const SOFT: f32 = 5.0;
 /// …and one this fast at full strength (a level landing crashes the
 /// game's bike from 44).
-const HARD: f32 = 40.0;
+const HARD: f32 = 32.0;
 /// A rise in speed upwards in one frame on the ground, ft/s, that
 /// counts as a bump, and the rise felt at full strength.
-const BUMP: f32 = 6.0;
-const BUMP_FULL: f32 = 20.0;
+const BUMP: f32 = 4.0;
+const BUMP_FULL: f32 = 14.0;
 /// The tumbling rider's rumble, heavy and light motor.
-const TUMBLE: [f32; 2] = [0.15, 0.35];
+const TUMBLE: [f32; 2] = [0.3, 0.5];
 
 /// What the vibration needs of the player's bike each frame.
 #[derive(Debug, Clone, Copy, Default)]
@@ -56,17 +56,17 @@ impl Rumble {
                 let s = ((self.fall - SOFT) / (HARD - SOFT)).clamp(0.0, 1.0);
                 if s > 0.0 {
                     let wreck = if now.crashed { 0.5 } else { 1.0 };
-                    self.kick([s * wreck, (0.15 + 0.85 * s) * wreck], 0.12 + 0.2 * s);
+                    self.kick([(0.2 + 0.8 * s) * wreck, (0.3 + 0.7 * s) * wreck], 0.18 + 0.27 * s);
                 }
             } else if !now.crashed {
                 let rise = now.velocity.y - was.velocity.y;
                 let s = ((rise - BUMP) / (BUMP_FULL - BUMP)).clamp(0.0, 1.0);
                 if s > 0.0 {
-                    self.kick([0.4 * s, 0.2 + 0.4 * s], 0.08);
+                    self.kick([0.25 + 0.45 * s, 0.35 + 0.45 * s], 0.11);
                 }
             }
             if now.crashed && !was.crashed {
-                self.kick([1.0, 1.0], 0.45);
+                self.kick([1.0, 1.0], 0.6);
             }
         }
         self.last = Some(now);

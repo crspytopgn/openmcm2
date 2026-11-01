@@ -395,7 +395,9 @@ impl Ui {
         version: &str,
         edit: impl FnOnce(&mut tga::Image),
     ) -> Option<TextureId> {
-        let key = ("".to_string(), format!("global.res#{name}{version}").to_ascii_lowercase());
+        // Kept apart by the HUD, which can change between races.
+        let k = if crate::hud::sharp() { OVERLAY_UPSCALE } else { 1 };
+        let key = ("".to_string(), format!("global.res#{name}{version}#{k}").to_ascii_lowercase());
         if let Some(t) = self.images.get(&key) {
             return *t;
         }
@@ -414,13 +416,37 @@ impl Ui {
             Some(img)
         };
         let tex = load().map(|img| {
-            let k = if crate::hud::sharp() { OVERLAY_UPSCALE } else { 1 };
             let big = smooth_upscale(&img, k);
             gfx.sprites
                 .upload_covering(gfx.device, gfx.queue, &big, (img.width, img.height))
         });
         self.images.insert(key, tex);
         tex
+    }
+
+    /// The frame rate, small at the bottom left of the screen (the
+    /// fork's, for F2 or the Show frame rate tweak), a figure at a time so
+    /// a new number makes no new texture.
+    pub fn frame_rate(&mut self, gfx: &mut Gfx, fps: u32) {
+        const PT: f32 = 10.0;
+        let mut pieces: Vec<String> = fps.to_string().chars().map(String::from).collect();
+        pieces.push(" fps".into());
+        let mut quads = Vec::new();
+        let mut w = 0.0;
+        for p in &pieces {
+            let Some(t) = self.text(gfx, p, PT, true) else {
+                return;
+            };
+            let (tw, th) = gfx.sprites.size(t);
+            quads.push((t, w, tw as f32, th as f32));
+            w += tw as f32;
+        }
+        let h = quads.iter().map(|q| q.3).fold(0.0, f32::max);
+        let (x, y) = (6.0, 478.0 - h);
+        self.fill(gfx, [x - 4.0, y - 1.0, w + 8.0, h + 1.0], [0.0, 0.0, 0.0, 0.5]);
+        for (t, at, tw, th) in quads {
+            gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [x + at, y, tw, th], [1.0, 1.0, 0.6, 1.0]);
+        }
     }
 
     /// A picture made here rather than read from the game, made once and
@@ -717,6 +743,9 @@ pub struct Ctl {
     /// The text breaks into lines at the control's width (the game's
     /// `0x1e8`, set for prompts).
     pub wrap: bool,
+    /// The archive its pictures come from, when not the dialog's: a
+    /// control borrowed from another dialog (the fork's).
+    pack: Option<String>,
 }
 
 impl Ctl {
@@ -808,6 +837,7 @@ impl Dlg {
                 mark: None,
                 selectable: false,
                 wrap: false,
+                pack: None,
             })
             .collect();
         Some(Dlg {
@@ -856,6 +886,58 @@ impl Dlg {
         if let Some(c) = self.ctl(name) {
             c.text = Some(text.into());
         }
+    }
+
+    /// Adds a copy of control `of`, as it is now, named `name` at `rect`
+    /// on the 640×480 screen (not the game's: for the fork's own boxes,
+    /// made from the game's pieces).
+    pub fn add_copy(&mut self, of: &str, name: &str, rect: [i32; 4]) {
+        let Some(i) = self.index(of) else {
+            return;
+        };
+        let mut c = self.dialog.controls[i].clone();
+        c.name = name.to_string();
+        c.rect = rect;
+        c.anchor = None;
+        c.props.0.retain(|(k, _)| !k.eq_ignore_ascii_case("ToolTipText"));
+        self.dialog.controls.push(c);
+        self.ctls.push(self.ctls[i].clone());
+    }
+
+    /// Adds a copy of another dialog's control `of`, with its pictures, as
+    /// `name` at `rect`, showing and in no group: its clicks are the
+    /// caller's to handle.
+    pub fn add_from(&mut self, other: &Dlg, of: &str, name: &str, rect: [i32; 4]) {
+        let Some(i) = other.index(of) else {
+            return;
+        };
+        let mut c = other.dialog.controls[i].clone();
+        c.name = name.to_string();
+        c.rect = rect;
+        c.anchor = None;
+        c.props.0.retain(|(k, _)| {
+            !["ToolTipText", "AttachId", "GroupId"].iter().any(|n| k.eq_ignore_ascii_case(n))
+        });
+        let mut ctl = other.ctls[i].clone();
+        ctl.pack = Some(other.pack_of(i).to_string());
+        ctl.visible = true;
+        self.dialog.controls.push(c);
+        self.ctls.push(ctl);
+    }
+
+    /// The archive control `i`'s pictures come from.
+    fn pack_of(&self, i: usize) -> &str {
+        self.ctls[i].pack.as_deref().unwrap_or(&self.pack)
+    }
+
+    /// The control under the pointer, if it takes clicks.
+    pub fn hovered(&self) -> Option<&str> {
+        self.hover.map(|i| self.dialog.controls[i].name.as_str())
+    }
+
+    /// Where the pointer last was, on the 640 × 480 screen.
+    pub fn pointer(&self) -> (f32, f32) {
+        self.pointer
     }
 
     /// Changes a control's text height (the game's `FontHeight`).
@@ -1639,7 +1721,7 @@ impl Dlg {
                 // The text's box at the left, the arrow at the right.
                 if let Some(t) = c
                     .anim("AnimTextBack")
-                    .and_then(|n| ui.image(gfx, &self.pack, n))
+                    .and_then(|n| ui.image(gfx, self.pack_of(i), n))
                 {
                     let (w, h) = gfx.sprites.size(t);
                     gfx.sprites.image(t, rect[0], rect[1]);
@@ -1647,14 +1729,14 @@ impl Dlg {
                 }
                 if let Some(t) = self
                     .image_for(i, now)
-                    .and_then(|n| ui.image(gfx, &self.pack, &n))
+                    .and_then(|n| ui.image(gfx, self.pack_of(i), &n))
                 {
                     let (w, _) = gfx.sprites.size(t);
                     gfx.sprites.image(t, rect[0] + rect[2] - w as f32, rect[1]);
                 }
             } else if let Some(t) = self
                 .image_for(i, now)
-                .and_then(|n| ui.image(gfx, &self.pack, &n))
+                .and_then(|n| ui.image(gfx, self.pack_of(i), &n))
             {
                 let (w, h) = gfx.sprites.size(t);
                 gfx.sprites.image(t, rect[0], rect[1]);
@@ -1840,7 +1922,7 @@ impl Dlg {
         let across = c.kind == Kind::HScrollBar;
         if let Some(t) = c
             .anim("AnimNorm")
-            .and_then(|n| ui.image(gfx, &self.pack, n))
+            .and_then(|n| ui.image(gfx, self.pack_of(i), n))
         {
             let (w, h) = gfx.sprites.size(t);
             let (x, y) = if across {
@@ -1858,7 +1940,7 @@ impl Dlg {
                 "AnimThumbDisable"
             })
             .or_else(|| c.anim("AnimThumb"))
-            .and_then(|n| ui.image(gfx, &self.pack, n));
+            .and_then(|n| ui.image(gfx, self.pack_of(i), n));
         let Some(t) = thumb else { return };
         // A list's bar has no thumb while its lines all fit (the replays,
         // the records, the Pro-Circuit careers), unless it has arrows too

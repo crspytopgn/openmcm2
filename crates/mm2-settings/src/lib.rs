@@ -5,6 +5,38 @@
 
 use std::path::PathBuf;
 
+/// The window sizes on offer by shape: its name, what it suits, and the
+/// sizes with their names.
+pub const SHAPES: [(&str, &str, &[(u32, u32, &str)]); 3] = [
+    (
+        "4:3 Classic",
+        "The original game's shape, for older square monitors.",
+        &[(800, 600, "SVGA"), (1024, 768, "XGA"), (1280, 960, ""), (1600, 1200, "UXGA")],
+    ),
+    (
+        "16:9 Widescreen",
+        "Most monitors, laptops and TVs.",
+        &[
+            (1280, 720, "HD 720p"),
+            (1600, 900, "HD+"),
+            (1920, 1080, "Full HD 1080p"),
+            (2560, 1440, "QHD 1440p"),
+            (3840, 2160, "4K UHD"),
+        ],
+    ),
+    (
+        "21:9 Ultrawide",
+        "Ultrawide monitors: the race shows more to the sides.",
+        &[(2560, 1080, "UW-FHD"), (3440, 1440, "UW-QHD"), (3840, 1600, "UW-QHD+")],
+    ),
+];
+
+/// Whether a window `size` fits on `monitor` with room to spare: narrower,
+/// and short enough to leave the title bar and taskbar showing.
+pub fn fits((w, h): (u32, u32), monitor: Option<(u32, u32)>) -> bool {
+    monitor.is_none_or(|m| w < m.0 && h <= m.1 - m.1 / 12)
+}
+
 /// The folder the port keeps its saves in (the same as `mm2-viewer`'s),
 /// where the launcher puts the copied game and its settings too.
 pub fn user_dir() -> PathBuf {
@@ -57,6 +89,30 @@ impl Quality {
 /// The enhanced look's switches the launcher shows, each with the name
 /// `--enhanced` knows it by, what it is, and whether it's on unless
 /// turned off.
+/// The difficulty table: by Easy, Normal and Hard, the computer riders'
+/// engine power, how easily they crash and how big a hit the player takes
+/// before crashing, each as a % of the game's Normal, and the computer
+/// riders' wait between tricks in the Stunt Quarry (s). These are the
+/// game's own, rounded.
+pub const DIFFICULTY: [[u32; 3]; 4] = [[85, 100, 115], [115, 100, 77], [110, 100, 95], [25, 15, 5]];
+
+/// The difficulty table as `launcher.ini` and `--difficulty=` write it:
+/// its twelve numbers, row by row.
+pub fn difficulty_text(t: &[[u32; 3]; 4]) -> String {
+    t.iter().flatten().map(u32::to_string).collect::<Vec<_>>().join(",")
+}
+
+/// A difficulty table from [`difficulty_text`]'s numbers, if all twelve
+/// are there.
+pub fn parse_difficulty(text: &str) -> Option<[[u32; 3]; 4]> {
+    let n: Vec<u32> = text.split(',').map(|v| v.trim().parse().ok()).collect::<Option<_>>()?;
+    let mut t = [[0; 3]; 4];
+    for (i, v) in t.iter_mut().flatten().enumerate() {
+        *v = *n.get(i)?;
+    }
+    (n.len() == 12).then_some(t)
+}
+
 pub const UPGRADES: [(&str, &str, bool); 16] = [
     ("lighting", "Per-pixel lighting", true),
     ("shadows", "Sun shadows", true),
@@ -97,9 +153,8 @@ pub struct Settings {
     /// (`--centred-display`).
     pub centred_display: bool,
     pub show_fps: bool,
-    /// Easier riding (`--easier`): on Easy, forgiving landings, a wider
-    /// course, slower computer riders and a player who comes off less.
-    pub easier: bool,
+    /// The difficulty table (`--difficulty=`); see [`DIFFICULTY`].
+    pub difficulty: [[u32; 3]; 4],
     /// Pad vibration from the riding and its strength, 0 to 100
     /// (`--vibration=N`, or `off`).
     pub vibration: bool,
@@ -108,6 +163,13 @@ pub struct Settings {
     pub sharp_display: bool,
     /// Steering in the air bends the flight (`--air-steer`).
     pub air_steer: bool,
+    /// Braking in the air shortens the flight (`--air-brake`).
+    pub air_brake: bool,
+    /// The course counts wider before the off-course timer (`--wide-course`).
+    pub wide_course: bool,
+    /// G or a pad's Back puts the player back on the bike after a crash
+    /// (off: `--no-quick-get-up`).
+    pub quick_get_up: bool,
     /// The live gap to the best lap (`--lap-gap`).
     pub lap_gap: bool,
     /// The steadier camera (`--steady-camera`).
@@ -135,11 +197,14 @@ impl Default for Settings {
             vsync: true,
             centred_display: false,
             show_fps: false,
-            easier: false,
+            difficulty: DIFFICULTY,
             vibration: true,
             vibration_strength: 50,
             sharp_display: true,
             air_steer: true,
+            air_brake: true,
+            wide_course: false,
+            quick_get_up: true,
             lap_gap: true,
             steady_camera: true,
             fov: 85,
@@ -189,11 +254,13 @@ impl Settings {
                 "vsync" => s.vsync = yes(v),
                 "centred_display" => s.centred_display = yes(v),
                 "show_fps" => s.show_fps = yes(v),
-                // Forgiving landings, before it became part of it.
-                "easier" | "forgiving_landings" => s.easier |= yes(v),
+                "difficulty" => s.difficulty = parse_difficulty(v).unwrap_or(DIFFICULTY),
                 "vibration" => s.vibration = yes(v),
                 "sharp_display" => s.sharp_display = yes(v),
                 "air_steer" => s.air_steer = yes(v),
+                "air_brake" => s.air_brake = yes(v),
+                "wide_course" => s.wide_course = yes(v),
+                "quick_get_up" => s.quick_get_up = yes(v),
                 "lap_gap" => s.lap_gap = yes(v),
                 "steady_camera" => s.steady_camera = yes(v),
                 "fov" => s.fov = v.parse::<u32>().unwrap_or(85).clamp(60, 120),
@@ -216,7 +283,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\neasier={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\n",
+            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nwide_course={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -231,11 +298,14 @@ impl Settings {
             b(self.vsync),
             b(self.centred_display),
             b(self.show_fps),
-            b(self.easier),
+            difficulty_text(&self.difficulty),
             b(self.vibration),
             self.vibration_strength,
             b(self.sharp_display),
             b(self.air_steer),
+            b(self.air_brake),
+            b(self.wide_course),
+            b(self.quick_get_up),
             b(self.lap_gap),
             b(self.steady_camera),
             self.fov,
@@ -291,11 +361,20 @@ impl Settings {
         if self.show_fps {
             a.push("--show-fps".into());
         }
-        if self.easier {
-            a.push("--easier".into());
+        if self.difficulty != DIFFICULTY {
+            a.push(format!("--difficulty={}", difficulty_text(&self.difficulty)));
         }
         if self.air_steer {
             a.push("--air-steer".into());
+        }
+        if self.air_brake {
+            a.push("--air-brake".into());
+        }
+        if self.wide_course {
+            a.push("--wide-course".into());
+        }
+        if !self.quick_get_up {
+            a.push("--no-quick-get-up".into());
         }
         if self.lap_gap {
             a.push("--lap-gap".into());
@@ -322,10 +401,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn forgiving_landings_turns_on_easier_riding() {
-        assert!(Settings::parse("forgiving_landings=1\n").easier);
-        assert!(!Settings::parse("forgiving_landings=0\n").easier);
-        assert!(Settings::parse("easier=1\nforgiving_landings=0\n").easier);
+    fn a_broken_difficulty_table_is_the_games() {
+        assert_eq!(Settings::parse("difficulty=1,2,3\n").difficulty, DIFFICULTY);
+        assert_eq!(parse_difficulty(&difficulty_text(&DIFFICULTY)), Some(DIFFICULTY));
     }
 
     #[test]
@@ -338,7 +416,9 @@ mod tests {
         s.time = "dusk".into();
         s.window = (1920, 1080);
         s.centred_display = true;
-        s.easier = true;
+        s.difficulty[2][0] = 140;
+        s.wide_course = true;
+        s.quick_get_up = false;
         s.vibration_strength = 80;
         s.steady_camera = false;
         s.fov = 100;
@@ -352,8 +432,11 @@ mod tests {
                 "--window",
                 "1920x1080",
                 "--centred-display",
-                "--easier",
+                "--difficulty=85,100,115,115,100,77,140,100,95,25,15,5",
                 "--air-steer",
+                "--air-brake",
+                "--wide-course",
+                "--no-quick-get-up",
                 "--lap-gap",
                 "--fov=100",
                 "--vibration=80"

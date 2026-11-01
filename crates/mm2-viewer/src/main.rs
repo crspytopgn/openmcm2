@@ -19,10 +19,13 @@
 //! mm2-viewer ... --original-race-display  // the game's own speedometer, pictures and radar lines
 //! mm2-viewer ... --vibration=N|off         // pad vibration strength 0 to 100 (else the profile's)
 //! mm2-viewer ... --air-steer               // steering in the air bends the flight a little
+//! mm2-viewer ... --air-brake               // braking in the air shortens the flight a little
+//! mm2-viewer ... --wide-course             // the course counts 20 ft wider before the off-course timer
+//! mm2-viewer ... --no-quick-get-up         // G or a pad's Back no longer puts you back on after a crash
 //! mm2-viewer ... --lap-gap                 // live gap to the best lap under the race panel
 //! mm2-viewer ... --steady-camera           // the chase camera turns and rises more gently
 //! mm2-viewer ... --fov=N                   // the Chase Cam's field of view (the game's 85)
-//! mm2-viewer ... --easier                  // on Easy: forgiving landings, a wider course, slower riders, fewer falls
+//! mm2-viewer ... --difficulty=N,..         // the Difficulty box's 12 numbers, row by row, Easy to Hard
 //! ```
 //!
 //! Four bikes and riders from `RES/BIKE.RES` race from the start line in
@@ -87,6 +90,8 @@ mod riding;
 mod roster;
 mod rumble;
 mod lapgap;
+mod tweaks;
+mod display;
 mod screens;
 mod sky;
 mod sound;
@@ -723,6 +728,16 @@ fn run(mut app: App) -> Result<(), BoxError> {
     let event_loop = EventLoop::new()?;
     event_loop.run_app(&mut app)?;
     Ok(())
+}
+
+/// At the screen's refresh, or as fast as the machine can with the VSync
+/// tweak off (`--no-vsync`). Either way the bike steps once a frame, as
+/// the game does.
+fn present_mode() -> wgpu::PresentMode {
+    match tweaks::get().vsync {
+        true => wgpu::PresentMode::AutoVsync,
+        false => wgpu::PresentMode::AutoNoVsync,
+    }
 }
 
 /// `--window WxH`: the window's size, 1024 × 768 unless given.
@@ -3327,10 +3342,12 @@ struct App {
     visual_cues: bool,
     looking: bool,
     last: Instant,
-    /// F2 (or `--show-fps`): the frame rate, in the window's
-    /// title and the terminal, each second: since when, the frames and the
-    /// slowest.
+    /// F2 (or the Show frame rate tweak): the frame rate, at the bottom
+    /// of the screen and in the terminal, each second: since when, the
+    /// frames and the slowest.
     fps: Option<(Instant, u32, f32)>,
+    /// The frame rate shown, from the last whole second.
+    fps_shown: Option<u32>,
     start: Instant,
     race: Option<Race>,
     /// The camera follows the bike rather than flying free.
@@ -3460,7 +3477,8 @@ impl App {
             visual_cues: true,
             looking: false,
             last: Instant::now(),
-            fps: std::env::args().any(|a| a == "--show-fps").then(|| (Instant::now(), 0, 0.0)),
+            fps: tweaks::get().show_fps.then(|| (Instant::now(), 0, 0.0)),
+            fps_shown: None,
             start: Instant::now(),
             follow: race.is_some(),
             race,
@@ -3529,12 +3547,7 @@ impl App {
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(config.format);
-        // `--no-vsync`: draw as fast as the machine can rather than at the
-        // screen's refresh. Either way the bike steps once a frame, as the
-        // game does.
-        if std::env::args().any(|a| a == "--no-vsync") {
-            config.present_mode = wgpu::PresentMode::AutoNoVsync;
-        }
+        config.present_mode = present_mode();
         // The race is copied in between black bars on a window wider than 21:9.
         if caps.usages.contains(wgpu::TextureUsages::COPY_DST) {
             config.usage |= wgpu::TextureUsages::COPY_DST;
@@ -3720,7 +3733,7 @@ impl App {
                     if let Some(f) = &self.front {
                         let p = &f.user().profile;
                         r.wreck_reset = p.game.wreck_reset || setup.net.is_some();
-                        r.quick_get_up = setup.net.is_none();
+                        r.quick_get_up = setup.net.is_none() && tweaks::get().quick_get_up;
                         r.player_indicator = p.game.player_indicator;
                         r.visual_cues = self.visual_cues;
                         let map = input::KeyMap::from_profile(&p.keys);
@@ -4411,8 +4424,8 @@ impl App {
     fn poll_pads(&mut self, _event_loop: &ActiveEventLoop, _dt: f32) {}
 
     /// Runs the pad's motors at this frame's vibration, at the profile's
-    /// Force Feedback strength: 0.15 times at the slider's least to twice
-    /// at its most (half way about 0.55), each step a like share
+    /// Force Feedback strength: 0.4 times at the slider's least to three
+    /// times at its most (half way about 1.1), each step a like share
     /// stronger; the box off stops it.
     #[cfg(feature = "gamepad")]
     fn feel_pad(&mut self) {
@@ -4426,7 +4439,7 @@ impl App {
         let gain = match strength {
             _ if self.quiet => 0.0,
             None => 0.0,
-            Some(s) => 0.15 * (2.0f32 / 0.15).powf((s as f32 / 100.0).min(1.0)),
+            Some(s) => 0.4 * (3.0f32 / 0.4).powf((s as f32 / 100.0).min(1.0)),
         };
         pads.rumble(self.shake.map(|s| (s * gain).min(1.0)));
     }
@@ -4600,6 +4613,11 @@ impl App {
             steps as f32 / LOAD_BAR_STEPS as f32
         });
         let Some(s) = &mut self.state else { return };
+        display::tick(&s.window);
+        if s.config.present_mode != present_mode() {
+            s.config.present_mode = present_mode();
+            s.surface.configure(&s.device, &s.config);
+        }
         let frame = match s.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => frame,
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
@@ -4666,6 +4684,9 @@ impl App {
                     None if race.podium.is_some() => {}
                     None => hud.draw(ui, &mut gfx, race, self.frame),
                 }
+                if let Some(fps) = self.fps_shown {
+                    ui.frame_rate(&mut gfx, fps);
+                }
                 let mut encoder = s.device.create_command_encoder(&Default::default());
                 s.sprites.stretch = true;
                 s.sprites.widescreen = self.replay.is_none();
@@ -4687,6 +4708,9 @@ impl App {
                 queue: &s.queue,
             };
             front.draw(&mut gfx, now, progress);
+            if let Some(fps) = self.fps_shown {
+                front.ui_mut().frame_rate(&mut gfx, fps);
+            }
             let mut encoder = s.device.create_command_encoder(&Default::default());
             s.sprites.render(&s.device, &mut encoder, view, size, true);
             commands.push(encoder.finish());
@@ -4838,15 +4862,9 @@ impl ApplicationHandler for App {
                         return;
                     }
                     if code == KeyCode::F2 {
-                        self.fps = match self.fps {
-                            Some(_) => {
-                                if let Some(s) = &self.state {
-                                    s.window.set_title("Motocross Madness 2");
-                                }
-                                None
-                            }
-                            None => Some((Instant::now(), 0, 0.0)),
-                        };
+                        let mut t = tweaks::get();
+                        t.show_fps = !t.show_fps;
+                        tweaks::set(t);
                         return;
                     }
                     if code == KeyCode::F3 && graphics::enhanced().is_some() {
@@ -5079,6 +5097,10 @@ impl ApplicationHandler for App {
                 self.update(dt);
                 self.feel_pad();
                 self.redraw();
+                if tweaks::get().show_fps != self.fps.is_some() {
+                    self.fps = self.fps.is_none().then(|| (Instant::now(), 0, 0.0));
+                    self.fps_shown = None;
+                }
                 if let Some((since, frames, slowest)) = &mut self.fps {
                     *frames += 1;
                     *slowest = slowest.max(dt);
@@ -5091,9 +5113,7 @@ impl ApplicationHandler for App {
                             *slowest * 1000.0
                         );
                         eprintln!("{text}");
-                        if let Some(s) = &self.state {
-                            s.window.set_title(&format!("Motocross Madness 2 - {text}"));
-                        }
+                        self.fps_shown = Some((*frames as f32 / span).round() as u32);
                         self.fps = Some((Instant::now(), 0, 0.0));
                     }
                 }

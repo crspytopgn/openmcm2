@@ -47,10 +47,6 @@ pub struct Sprites {
     /// shape and move it to the edge it is nearest, rather than stretch
     /// it (not the game's own: it stretched).
     pub widescreen: bool,
-    /// With `widescreen` (`--centred-display`): the edges the pieces move
-    /// to are those of a 16:9 middle, nearer the rider on an ultrawide
-    /// window.
-    pub centred: bool,
     /// Whether the quads drawn now are placed in the 3D view, so only
     /// their place is stretched, not their shape.
     pub in_view: bool,
@@ -146,7 +142,6 @@ impl Sprites {
             stretch: false,
             scale: 1.0,
             widescreen: false,
-            centred: std::env::args().any(|a| a == "--centred-display"),
             in_view: false,
         }
     }
@@ -331,9 +326,11 @@ impl Sprites {
         let mut batches: Vec<(TextureId, std::ops::Range<u32>)> = Vec::new();
         // Widescreen: one scale for both ways, and each piece moved to the
         // edge it is nearest, by the third of the screen its middle is in:
-        // the window's edges, or a 16:9 middle's when centred.
+        // the window's edges, or a 16:9 middle's with the centred
+        // display tweak (`--centred-display`), nearer the rider on an
+        // ultrawide window.
         let wide = (self.stretch && self.widescreen && width * 3 > height * 4).then(|| {
-            let across = match self.centred {
+            let across = match crate::tweaks::get().centred {
                 true => (width as f32).min(height as f32 * 16.0 / 9.0),
                 false => width as f32,
             };

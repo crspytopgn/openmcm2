@@ -13,19 +13,13 @@ pub use mm2_physics::Controls;
 /// Chase Cam rises and looks with the bike more gently, so bumps don't
 /// shake the view. It still turns with the bike as the game's does.
 fn steady() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::args().any(|a| a == "--steady-camera"))
+    crate::tweaks::get().steady_camera
 }
 
 /// How much wider than the game's the cameras see (`--fov=N`, the
 /// fork's, for the Chase Cam's 85°), degrees.
 fn wider() -> f32 {
-    static BY: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-    *BY.get_or_init(|| {
-        std::env::args()
-            .find_map(|a| a.strip_prefix("--fov=").and_then(|n| n.parse::<f32>().ok()))
-            .map_or(0.0, |f| f.clamp(60.0, 120.0) - 85.0)
-    })
+    crate::tweaks::get().fov as f32 - 85.0
 }
 
 /// The terrain's surface normal at `at` (0x50d3b0): the stored normals

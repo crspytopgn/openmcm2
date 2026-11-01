@@ -16,13 +16,11 @@ const SPEEDO: (f32, f32) = (511.0, 351.0);
 const NEEDLE_CENTRE: (f32, f32) = (64.0, 85.0);
 const NEEDLE: f32 = 45.0;
 
-/// The modernised HUD (the launcher's name), unless the launcher asks for
-/// the original (`--original-race-display`): the panel, radar and dial
-/// drawn at the window's resolution, the other pictures enlarged smoothly
-/// and the lines smooth-edged.
+/// The modernised HUD (a tweak, on unless `--original-race-display`):
+/// the panel, radar and dial drawn at the window's resolution, the other
+/// pictures enlarged smoothly and the lines smooth-edged.
 pub fn sharp() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| !std::env::args().any(|a| a == "--original-race-display"))
+    crate::tweaks::get().modern_hud
 }
 
 /// The modernised HUD's dial, drawn at the window's resolution in place

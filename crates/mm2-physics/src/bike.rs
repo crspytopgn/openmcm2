@@ -125,6 +125,10 @@ const AIR_YAW: f32 = 0.2;
 /// The fork's air steering (not the game's): how fast full steer turns
 /// the flight path, and the bike with it, rad/s (about 20° a second).
 const AIR_STEER: f32 = 0.35;
+/// The fork's air braking (not the game's): how fast the full brake takes
+/// off the flight's speed along the ground, ft/s² (a 40 ft/s jump loses
+/// about a fifth of its length over a second and a half).
+const AIR_BRAKE: f32 = 6.0;
 /// How long the air pose takes to follow the bars, s (`f_704`).
 const POSE_LAG: f32 = 0.55;
 /// Spin damping per step: on the ground, in the air and always (0.85,
@@ -141,12 +145,6 @@ const CRASH_VERTICAL: f32 = 0.996_194_7;
 const CRASH_ENDO: f32 = 0.766;
 const CRASH_LOWSIDE: f32 = 0.707;
 const CRASH_DROP: f32 = 1000.0;
-/// Forgiving landings (an option, not the game's): landing with the nose
-/// within 20° of the ground's slope (sin) and leaned less than 30° (cos)
-/// on it, the bike takes this many times the speed lost in one step.
-const LEVEL_PITCH: f32 = 0.342;
-const LEVEL_LEAN: f32 = 0.866;
-const FORGIVING: f32 = 2.5;
 /// How far the centre of mass keeps above the ground, the frame's
 /// underside, and how the body slides on it (ours; the game's frame and
 /// ragdoll collide instead).
@@ -434,13 +432,14 @@ pub struct Bike {
     pub fixed_step: bool,
     /// The player's crash tolerance: 1, 1.05 or 1.15 by difficulty.
     pub crash_tolerance: f32,
-    /// Forgiving landings (an option, not the game's): a hard landing
-    /// roughly level on both wheels is not a crash; see [`FORGIVING`].
-    pub forgiving_landings: bool,
     /// Steering in the air also bends the flight a little, turning the
     /// bike with it so it lands in line (the fork's, not the game's); see
     /// [`AIR_STEER`].
     pub air_steer: bool,
+    /// Braking in the air takes off a little of the flight's speed along
+    /// the ground, to come up short of a landing (the fork's, not the
+    /// game's); see [`AIR_BRAKE`].
+    pub air_brake: bool,
     /// Whether the race's progress tracker finds the bike on the course
     /// (+0x78c, 0x4eb170). Off it, in any race mode but practice, the
     /// drive is halved (0x492b20). The caller decides; it starts true.
@@ -558,8 +557,8 @@ impl Bike {
             racing: true,
             fixed_step: false,
             crash_tolerance: 1.05,
-            forgiving_landings: false,
             air_steer: false,
+            air_brake: false,
             on_course: true,
             reset_to: None,
             crash_time: CRASH_TIME,
@@ -1892,6 +1891,16 @@ impl Bike {
             self.last_velocity = q * self.last_velocity;
             self.turn(Vec3::Y, a, self.position);
         }
+        if self.air_brake && c.brake > 0.0 {
+            let flat = Vec3::new(self.velocity.x, 0.0, self.velocity.z);
+            let speed = flat.length();
+            if speed > 1e-3 {
+                let slow = (AIR_BRAKE * c.brake * h).min(speed);
+                let less = flat / speed * slow;
+                self.velocity -= less;
+                self.last_velocity -= less;
+            }
+        }
         // Self-righting: faster the longer the bike is up.
         let t = self.air_time;
         let rate = (self.lean.abs() / h).min(t * t * t * 0.357_792);
@@ -2100,23 +2109,10 @@ impl Bike {
         // hit that takes its speed in one step (a bounce off a face) would
         // crash at 120 fps where it doesn't at 50, so the limit stops
         // shrinking at 0.02 s.
-        let forgiven = if self.forgiving_landings && self.lands_level() { FORGIVING } else { 1.0 };
-        if self.velocity.length() - speed_before < -self.crash_tolerance * forgiven * CRASH_DROP * h.max(STEP) {
+        if self.velocity.length() - speed_before < -self.crash_tolerance * CRASH_DROP * h.max(STEP) {
             return Some(Crash::Impact);
         }
         None
-    }
-
-    /// Whether the bike meets the ground roughly level on both wheels:
-    /// its nose along the touching tyres' ground and not leaned over on
-    /// it (for [`Bike::forgiving_landings`]).
-    fn lands_level(&self) -> bool {
-        let [f, r] = self.tyres;
-        if !(f.down || r.down) {
-            return false;
-        }
-        let n = (f.normal * f.down as u8 as f32 + r.normal * r.down as u8 as f32).normalize_or(Vec3::Y);
-        self.forward().dot(n).abs() < LEVEL_PITCH && self.ground_lean().cos() > LEVEL_LEAN
     }
 
     fn orthonormalize(&mut self) {
@@ -2326,35 +2322,6 @@ mod tests {
         );
     }
 
-    /// Drops the bike onto flat ground at `down` ft/s, 30 ft/s forward,
-    /// its nose `pitch` rad up, and says how it came off.
-    fn drop(down: f32, pitch: f32, forgiving: bool) -> Option<Crash> {
-        let mut bike = Bike::new(&Flat, Vec3::ZERO, Vec3::Z);
-        bike.forgiving_landings = forgiving;
-        let axes = Mat3::from_rotation_x(-pitch);
-        bike.set_state(Vec3::new(0.0, 6.0, 0.0) + axes * COM, Vec3::new(0.0, -down, 30.0), axes, Vec3::ZERO, [0.0; 2]);
-        bike.airborne = true;
-        let mut crash = None;
-        for _ in 0..120 {
-            bike.step(&Flat, Controls::default(), 1.0 / 60.0);
-            crash = crash.or(bike.crash.map(|c| c.0));
-        }
-        crash
-    }
-
-    #[test]
-    fn forgiving_landings_take_a_level_hit() {
-        // The slowest level drop the game's own limit crashes on.
-        let hard = (10..120)
-            .map(|v| v as f32)
-            .find(|&v| drop(v, 0.0, false) == Some(Crash::Impact))
-            .expect("some drop crashes");
-        assert_eq!(drop(hard, 0.0, true), None, "level at {hard} ft/s");
-        assert_eq!(drop(hard * 1.5, 0.0, true), None, "level at {} ft/s", hard * 1.5);
-        // Nose first is not level: it crashes as before.
-        assert!(drop(hard * 1.5, -0.6, true).is_some(), "nose first at {} ft/s", hard * 1.5);
-    }
-
     /// Where a bike thrown high and forward heads after a second in the
     /// air steering full right, and where it points, radians from straight
     /// on (right positive).
@@ -2381,6 +2348,28 @@ mod tests {
         assert!((path - AIR_STEER).abs() < 0.05, "{path}");
         // The game's own air yaw turns the bike a little further still.
         assert!((look - path - AIR_YAW).abs() < 0.08, "{look} {path}");
+    }
+
+    /// How far a bike thrown high and forward goes along the ground in a
+    /// second in the air with the brake held.
+    fn brake_in_the_air(air_brake: bool) -> f32 {
+        let mut bike = Bike::new(&Flat, Vec3::ZERO, Vec3::Z);
+        bike.air_brake = air_brake;
+        bike.set_state(Vec3::new(0.0, 60.0, 0.0) + COM, Vec3::new(0.0, 10.0, 40.0), Mat3::IDENTITY, Vec3::ZERO, [0.0; 2]);
+        bike.airborne = true;
+        let brake = Controls { brake: 1.0, ..Default::default() };
+        for _ in 0..50 {
+            bike.step(&Flat, brake, 0.02);
+        }
+        assert!(bike.airborne);
+        bike.position.z
+    }
+
+    #[test]
+    fn air_braking_shortens_the_jump() {
+        let (free, braked) = (brake_in_the_air(false), brake_in_the_air(true));
+        // A second at 6 ft/s² comes up 3 ft short.
+        assert!((free - braked - AIR_BRAKE / 2.0).abs() < 0.5, "{free} {braked}");
     }
 
     #[test]
