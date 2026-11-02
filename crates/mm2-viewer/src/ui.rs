@@ -116,8 +116,43 @@ impl Pack {
     }
 }
 
-/// Text in one size and weight, as GDI drew it: a system Arial (or a
-/// metric twin), else the game's own small bitmap font.
+/// Every file in the Linux and BSD font folders, a few levels deep: each
+/// distribution files fonts differently (Debian under `truetype/`, Arch
+/// under `TTF/` and `liberation/`), so they are found by name.
+fn font_files() -> Vec<PathBuf> {
+    if cfg!(any(windows, target_os = "macos")) {
+        return Vec::new();
+    }
+    let mut dirs: Vec<(PathBuf, u32)> = ["/usr/share/fonts", "/usr/local/share/fonts"]
+        .iter()
+        .map(|d| (PathBuf::from(d), 0))
+        .collect();
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        dirs.push((home.join(".local/share/fonts"), 0));
+        dirs.push((home.join(".fonts"), 0));
+    }
+    let mut files = Vec::new();
+    while let Some((dir, depth)) = dirs.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if depth < 4 {
+                    dirs.push((p, depth + 1));
+                }
+            } else {
+                files.push(p);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+/// Text in one size and weight, as GDI drew it: a system Arial, else a
+/// metric twin (Liberation Sans, Arimo), else DejaVu Sans.
 struct Fonts {
     regular: Option<ab_glyph::FontVec>,
     bold: Option<ab_glyph::FontVec>,
@@ -127,45 +162,83 @@ struct Fonts {
 
 impl Fonts {
     fn load() -> Self {
-        let find = |names: &[&str]| {
-            names.iter().find_map(|p| {
-                let bytes = std::fs::read(p).ok()?;
-                ab_glyph::FontVec::try_from_vec(bytes).ok()
-            })
+        let files = font_files();
+        // A fixed path (Windows, macOS), else the first of `names` found in
+        // the font folders, in order: Arial, its metric twins Liberation
+        // Sans and Arimo, then DejaVu Sans so there is text at all.
+        let find = |paths: &[&str], names: &[&str]| {
+            let named = names.iter().flat_map(|n| {
+                files.iter().filter(move |f| {
+                    f.file_name()
+                        .and_then(|s| s.to_str())
+                        .is_some_and(|s| s.eq_ignore_ascii_case(n))
+                })
+            });
+            paths
+                .iter()
+                .map(PathBuf::from)
+                .chain(named.cloned())
+                .find_map(|p| {
+                    let bytes = std::fs::read(p).ok()?;
+                    ab_glyph::FontVec::try_from_vec(bytes).ok()
+                })
         };
         Fonts {
-            regular: find(&[
-                "/System/Library/Fonts/Supplemental/Arial.ttf",
-                "/Library/Fonts/Arial.ttf",
-                "C:\\Windows\\Fonts\\arial.ttf",
-                "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
-                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
-            ]),
-            bold: find(&[
-                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-                "/Library/Fonts/Arial Bold.ttf",
-                "C:\\Windows\\Fonts\\arialbd.ttf",
-                "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
-                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-                "/usr/share/fonts/liberation-sans/LiberationSans-Bold.ttf",
-            ]),
-            bold_italic: find(&[
-                "/System/Library/Fonts/Supplemental/Arial Bold Italic.ttf",
-                "/Library/Fonts/Arial Bold Italic.ttf",
-                "C:\\Windows\\Fonts\\arialbi.ttf",
-                "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold_Italic.ttf",
-                "/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf",
-                "/usr/share/fonts/liberation-sans/LiberationSans-BoldItalic.ttf",
-            ]),
-            italic: find(&[
-                "/System/Library/Fonts/Supplemental/Arial Italic.ttf",
-                "/Library/Fonts/Arial Italic.ttf",
-                "C:\\Windows\\Fonts\\ariali.ttf",
-                "/usr/share/fonts/truetype/msttcorefonts/Arial_Italic.ttf",
-                "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
-                "/usr/share/fonts/liberation-sans/LiberationSans-Italic.ttf",
-            ]),
+            regular: find(
+                &[
+                    "/System/Library/Fonts/Supplemental/Arial.ttf",
+                    "/Library/Fonts/Arial.ttf",
+                    "C:\\Windows\\Fonts\\arial.ttf",
+                ],
+                &[
+                    "arial.ttf",
+                    "LiberationSans-Regular.ttf",
+                    "Arimo-Regular.ttf",
+                    "DejaVuSans.ttf",
+                ],
+            ),
+            bold: find(
+                &[
+                    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+                    "/Library/Fonts/Arial Bold.ttf",
+                    "C:\\Windows\\Fonts\\arialbd.ttf",
+                ],
+                &[
+                    "arialbd.ttf",
+                    "Arial_Bold.ttf",
+                    "LiberationSans-Bold.ttf",
+                    "Arimo-Bold.ttf",
+                    "DejaVuSans-Bold.ttf",
+                ],
+            ),
+            bold_italic: find(
+                &[
+                    "/System/Library/Fonts/Supplemental/Arial Bold Italic.ttf",
+                    "/Library/Fonts/Arial Bold Italic.ttf",
+                    "C:\\Windows\\Fonts\\arialbi.ttf",
+                ],
+                &[
+                    "arialbi.ttf",
+                    "Arial_Bold_Italic.ttf",
+                    "LiberationSans-BoldItalic.ttf",
+                    "Arimo-BoldItalic.ttf",
+                    "DejaVuSans-BoldOblique.ttf",
+                ],
+            ),
+            italic: find(
+                &[
+                    "/System/Library/Fonts/Supplemental/Arial Italic.ttf",
+                    "/Library/Fonts/Arial Italic.ttf",
+                    "C:\\Windows\\Fonts\\ariali.ttf",
+                ],
+                &[
+                    "ariali.ttf",
+                    "Arial_Italic.ttf",
+                    "LiberationSans-Italic.ttf",
+                    "Arimo-Italic.ttf",
+                    "DejaVuSans-Oblique.ttf",
+                ],
+            ),
         }
     }
 
