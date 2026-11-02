@@ -27,7 +27,13 @@ struct Export {
     images: usize,
     clashes: usize,
     skipped: usize,
+    /// Model textures under [`SMALLEST`] a side, left out.
+    tiny: usize,
 }
+
+/// The smallest model texture exported: upscalers fail on the menus' 4×4
+/// frame corners, and there is nothing in them to sharpen.
+const SMALLEST: u32 = 16;
 
 pub fn export(game: &Path, out: &Path) -> Result<(), Box<dyn std::error::Error>> {
     for dir in ["models", "terrain", "skies", "images"] {
@@ -88,7 +94,7 @@ pub fn export(game: &Path, out: &Path) -> Result<(), Box<dyn std::error::Error>>
     }
     println!(
         "wrote {} model textures, {} terrain textures, {} sky faces and {} images to {}",
-        ex.models.len(),
+        ex.models.len() - ex.tiny,
         ex.terrain,
         ex.skies,
         ex.images,
@@ -98,6 +104,12 @@ pub fn export(game: &Path, out: &Path) -> Result<(), Box<dyn std::error::Error>>
         println!(
             "skipped {} .tga entries in formats this tool does not read",
             ex.skipped
+        );
+    }
+    if ex.tiny > 0 {
+        println!(
+            "left out {} model textures under {SMALLEST}x{SMALLEST}, too small to upscale",
+            ex.tiny
         );
     }
     if ex.clashes > 0 {
@@ -128,13 +140,16 @@ impl Export {
             }
             return Ok(());
         }
+        if tex.size < SMALLEST {
+            self.models.insert(key, data.to_vec());
+            self.tiny += 1;
+            return Ok(());
+        }
         write_texture(&out.join("models").join(format!("{key}.png")), tex)?;
         self.models.insert(key, data.to_vec());
         Ok(())
     }
 
-    /// Writes a plain TGA as `images/<name>.png`, with the folders in
-    /// `name` flattened to `__`.
     /// Writes a plain TGA as `images/<name>.png`, with the folders in
     /// `name` flattened to `__`.
     fn image(&mut self, name: &str, data: &[u8], out: &Path) -> std::io::Result<()> {
