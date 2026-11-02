@@ -94,18 +94,31 @@ impl Quality {
 /// game's own are steps 3, 5 and 7.
 pub const DIFFICULTY: [[u32; 3]; 4] = [[3, 5, 7]; 4];
 
+/// The most air steering and braking go to, % of the fork's own.
+pub const AIR_MOST: u32 = 200;
+
+/// An air steering or braking strength as `launcher.ini` holds it: a %
+/// (a multiple of 10), or from before it was one, on (`1`) or off.
+fn air(v: &str) -> u32 {
+    match v {
+        "1" | "true" => 100,
+        _ => v.parse::<u32>().map_or(0, |n| n.min(AIR_MOST)),
+    }
+}
+
 /// The most a difficulty step goes to.
 pub const MOST_STEP: u32 = 10;
 
 /// What each difficulty step, 1 to 10, stands for: the computer riders'
-/// engine power, how easily they crash and how big a hit the player takes
-/// before crashing, each as a % of the game's Normal, and the computer
-/// riders' wait between tricks in the Stunt Quarry (s). Steps 3, 5 and 7
-/// are the game's Easy, Normal and Hard, rounded.
+/// engine power, how easily they crash (and how often they try a trick in
+/// a race) and how big a hit the player takes before crashing, each as a %
+/// of the game's Normal, and the computer riders' wait between tricks in
+/// the Stunt Quarry (s). Steps 3, 5 and 7 are the game's Easy, Normal and
+/// Hard, rounded; 8 to 10 climb steeply, so 10 is far past Hard.
 pub const DIFFICULTY_STEPS: [[u32; 10]; 4] = [
-    [70, 77, 85, 92, 100, 107, 115, 122, 130, 140],
-    [150, 130, 115, 107, 100, 88, 77, 70, 60, 50],
-    [130, 120, 110, 105, 100, 97, 95, 90, 85, 75],
+    [70, 77, 85, 92, 100, 107, 115, 135, 160, 180],
+    [150, 130, 115, 107, 100, 88, 77, 55, 35, 20],
+    [130, 120, 110, 105, 100, 97, 95, 80, 65, 50],
     [35, 30, 25, 20, 15, 10, 5, 3, 1, 0],
 ];
 
@@ -179,12 +192,12 @@ pub struct Settings {
     pub vibration_strength: u32,
     /// The modernised HUD (off: `--original-race-display`).
     pub sharp_display: bool,
-    /// Steering in the air bends the flight (`--air-steer`).
-    pub air_steer: bool,
-    /// Braking in the air shortens the flight (`--air-brake`).
-    pub air_brake: bool,
-    /// The course counts wider before the off-course timer (`--wide-course`).
-    pub wide_course: bool,
+    /// How much steering in the air bends the flight, % of the fork's
+    /// own, 0 the game's none (`--air-steer=N`); see [`AIR_MOST`].
+    pub air_steer: u32,
+    /// How much braking in the air shortens the flight, % of the fork's
+    /// own, 0 the game's none (`--air-brake=N`).
+    pub air_brake: u32,
     /// G or a pad's Back puts the player back on the bike after a crash
     /// (off: `--no-quick-get-up`).
     pub quick_get_up: bool,
@@ -219,9 +232,8 @@ impl Default for Settings {
             vibration: true,
             vibration_strength: 50,
             sharp_display: true,
-            air_steer: true,
-            air_brake: true,
-            wide_course: false,
+            air_steer: 100,
+            air_brake: 100,
             quick_get_up: true,
             lap_gap: true,
             steady_camera: true,
@@ -275,9 +287,8 @@ impl Settings {
                 "difficulty" => s.difficulty = parse_difficulty(v).unwrap_or(DIFFICULTY),
                 "vibration" => s.vibration = yes(v),
                 "sharp_display" => s.sharp_display = yes(v),
-                "air_steer" => s.air_steer = yes(v),
-                "air_brake" => s.air_brake = yes(v),
-                "wide_course" => s.wide_course = yes(v),
+                "air_steer" => s.air_steer = air(v),
+                "air_brake" => s.air_brake = air(v),
                 "quick_get_up" => s.quick_get_up = yes(v),
                 "lap_gap" => s.lap_gap = yes(v),
                 "steady_camera" => s.steady_camera = yes(v),
@@ -301,7 +312,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nwide_course={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\n",
+            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -320,9 +331,8 @@ impl Settings {
             b(self.vibration),
             self.vibration_strength,
             b(self.sharp_display),
-            b(self.air_steer),
-            b(self.air_brake),
-            b(self.wide_course),
+            self.air_steer,
+            self.air_brake,
             b(self.quick_get_up),
             b(self.lap_gap),
             b(self.steady_camera),
@@ -382,14 +392,11 @@ impl Settings {
         if self.difficulty != DIFFICULTY {
             a.push(format!("--difficulty={}", difficulty_text(&self.difficulty)));
         }
-        if self.air_steer {
-            a.push("--air-steer".into());
+        if self.air_steer > 0 {
+            a.push(format!("--air-steer={}", self.air_steer));
         }
-        if self.air_brake {
-            a.push("--air-brake".into());
-        }
-        if self.wide_course {
-            a.push("--wide-course".into());
+        if self.air_brake > 0 {
+            a.push(format!("--air-brake={}", self.air_brake));
         }
         if !self.quick_get_up {
             a.push("--no-quick-get-up".into());
@@ -423,9 +430,11 @@ mod tests {
         assert_eq!(Settings::parse("difficulty=1,2,3\n").difficulty, DIFFICULTY);
         assert_eq!(parse_difficulty(&difficulty_text(&DIFFICULTY)), Some(DIFFICULTY));
         // The percentages the table held before it had steps.
-        let old = "difficulty=85,100,115,115,100,77,110,100,95,25,15,5
-";
+        let old = "difficulty=85,100,115,115,100,77,110,100,95,25,15,5\n";
         assert_eq!(Settings::parse(old).difficulty, DIFFICULTY);
+        // Air steering and braking from when they were on or off.
+        let old = Settings::parse("air_steer=1\nair_brake=0\n");
+        assert_eq!((old.air_steer, old.air_brake), (100, 0));
     }
 
     #[test]
@@ -439,7 +448,7 @@ mod tests {
         s.window = (1920, 1080);
         s.centred_display = true;
         s.difficulty[2][0] = 9;
-        s.wide_course = true;
+        s.air_brake = 150;
         s.quick_get_up = false;
         s.vibration_strength = 80;
         s.steady_camera = false;
@@ -455,9 +464,8 @@ mod tests {
                 "1920x1080",
                 "--centred-display",
                 "--difficulty=3,5,7,3,5,7,9,5,7,3,5,7",
-                "--air-steer",
-                "--air-brake",
-                "--wide-course",
+                "--air-steer=100",
+                "--air-brake=150",
                 "--no-quick-get-up",
                 "--lap-gap",
                 "--fov=100",

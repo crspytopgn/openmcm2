@@ -79,9 +79,6 @@ pub struct Course {
     next: Vec<usize>,
     /// Points in one lap.
     lap: usize,
-    /// How far past its sides the course still counts as ridden on, ft:
-    /// none in the game; [`SLACK`] with the Wider course tweak.
-    slack: f32,
     finish: Line,
     /// Where every rider's confirmed place starts: the start line's
     /// place, 0.1 on (0x4eb170).
@@ -157,7 +154,6 @@ impl Course {
             edges,
             next,
             lap,
-            slack: 0.0,
             finish,
             start: None,
         };
@@ -363,9 +359,7 @@ impl Course {
                 continue;
             }
             let (a, b) = (self.points[leg], self.points[to]);
-            // Each side pushed out by the slack, away from the middle.
-            let out = |e: Vec3, middle: Vec3| e + flat(e - middle).normalize_or_zero() * self.slack;
-            let ([a0, a1], [b0, b1]) = (self.edges[leg].map(|e| out(e, a)), self.edges[to].map(|e| out(e, b)));
+            let ([a0, a1], [b0, b1]) = (self.edges[leg], self.edges[to]);
             if !inside(p, &[a0, b0, b, b1, a1, a]) {
                 continue;
             }
@@ -860,22 +854,17 @@ impl Computer {
     }
 }
 
-/// The launcher's Air steering (`--air-steer`, not the game's): steering
-/// in the air bends the flight a little.
-fn air_steer() -> bool {
-    crate::tweaks::get().air_steer
+/// The fork's Air steering (`--air-steer=N`, not the game's): how much
+/// steering in the air bends the flight, as a share of the fork's own.
+fn air_steer() -> f32 {
+    crate::tweaks::get().air_steer as f32 / 100.0
 }
 
-/// The fork's Air braking (`--air-brake`, not the game's): braking in the
-/// air shortens the flight a little.
-fn air_brake() -> bool {
-    crate::tweaks::get().air_brake
+/// The fork's Air braking (`--air-brake=N`, not the game's): how much
+/// braking in the air shortens the flight, as a share of the fork's own.
+fn air_brake() -> f32 {
+    crate::tweaks::get().air_brake as f32 / 100.0
 }
-
-/// How far past its sides the course still counts as ridden on with the
-/// fork's Wider course (`--wide-course`), ft: the off-course clock (and
-/// the halved drive off it) waits until a rider is this much further out.
-pub const SLACK: f32 = 20.0;
 
 /// The game's `game` for `level` 0 to 2, scaled by what the difficulty
 /// table's step on `row` stands for against what the game's own step does
@@ -1252,11 +1241,13 @@ impl Racer {
         let air = stunt::flight_time(ground, self.bike.position(), self.bike.velocity());
         // In a race the chance is 2% a frame (bike +0x15dc, 0x490c30). The
         // quarry's level chance is set too, but its wander branch reloads
-        // race +0xa4 every frame, so there it is always that one.
+        // race +0xa4 every frame, so there it is always that one. In a
+        // race the difficulty table's crash row scales it too, so riders
+        // that crash less also risk fewer tricks.
         let chance = if quarry {
             stunt::AI_TRICK_CHANCE[2]
         } else {
-            stunt::AI_RACE_TRICK_CHANCE
+            table(1, level, stunt::AI_RACE_TRICK_CHANCE)
         };
         let pick = stunt::ai_trick(air, chance, || {
             *seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
@@ -1963,9 +1954,6 @@ impl Race {
         } else {
             0.0
         };
-        if let Some(c) = &mut self.course {
-            c.slack = if crate::tweaks::get().wide_course { SLACK } else { 0.0 };
-        }
         let mut left = dt;
         while left > 0.0 {
             let first = left == dt;
@@ -2606,23 +2594,6 @@ mod tests {
         let line = Course::new(&def()).unwrap().finish_line();
         assert!(line.crossed(south, north, true));
         assert!(!line.crossed(north, south, true));
-    }
-
-    #[test]
-    fn slack_widens_the_course() {
-        let mut c = Course::new(&def()).unwrap();
-        // Find how far out the edge is beside the first stretch, then
-        // stand 10 ft past it.
-        let (a, b) = (c.points[0], c.points[c.next[0]]);
-        let mid = (a + b) * 0.5;
-        let out = flat(c.edges[0][0] - a).normalize();
-        let edge = flat(c.edges[0][0] - a).length();
-        let beside = mid + out * (edge + 10.0);
-        assert!(c.places(mid).len() > 0);
-        assert!(c.places(beside).is_empty(), "10 ft out is off the course");
-        c.slack = SLACK;
-        assert!(c.places(beside).len() > 0, "with the slack it is on");
-        assert!(c.places(mid + out * (edge + SLACK + 5.0)).is_empty());
     }
 
     #[test]

@@ -432,14 +432,14 @@ pub struct Bike {
     pub fixed_step: bool,
     /// The player's crash tolerance: 1, 1.05 or 1.15 by difficulty.
     pub crash_tolerance: f32,
-    /// Steering in the air also bends the flight a little, turning the
-    /// bike with it so it lands in line (the fork's, not the game's); see
-    /// [`AIR_STEER`].
-    pub air_steer: bool,
-    /// Braking in the air takes off a little of the flight's speed along
-    /// the ground, to come up short of a landing (the fork's, not the
-    /// game's); see [`AIR_BRAKE`].
-    pub air_brake: bool,
+    /// How much steering in the air also bends the flight, turning the
+    /// bike with it so it lands in line (the fork's, not the game's): a
+    /// share of [`AIR_STEER`], 0 the game's none.
+    pub air_steer: f32,
+    /// How much braking in the air takes off the flight's speed along the
+    /// ground, to come up short of a landing (the fork's, not the game's):
+    /// a share of [`AIR_BRAKE`], 0 the game's none.
+    pub air_brake: f32,
     /// Whether the race's progress tracker finds the bike on the course
     /// (+0x78c, 0x4eb170). Off it, in any race mode but practice, the
     /// drive is halved (0x492b20). The caller decides; it starts true.
@@ -557,8 +557,8 @@ impl Bike {
             racing: true,
             fixed_step: false,
             crash_tolerance: 1.05,
-            air_steer: false,
-            air_brake: false,
+            air_steer: 0.0,
+            air_brake: 0.0,
             on_course: true,
             reset_to: None,
             crash_time: CRASH_TIME,
@@ -1884,18 +1884,18 @@ impl Bike {
             let axis = self.orientation * Vec3::new(pitch, yaw, 0.0) / angle;
             self.turn(axis.normalize(), angle, self.position);
         }
-        if self.air_steer && c.steer != 0.0 {
-            let a = c.steer * AIR_STEER * h;
+        if self.air_steer > 0.0 && c.steer != 0.0 {
+            let a = c.steer * AIR_STEER * self.air_steer * h;
             let q = Quat::from_rotation_y(a);
             self.velocity = q * self.velocity;
             self.last_velocity = q * self.last_velocity;
             self.turn(Vec3::Y, a, self.position);
         }
-        if self.air_brake && c.brake > 0.0 {
+        if self.air_brake > 0.0 && c.brake > 0.0 {
             let flat = Vec3::new(self.velocity.x, 0.0, self.velocity.z);
             let speed = flat.length();
             if speed > 1e-3 {
-                let slow = (AIR_BRAKE * c.brake * h).min(speed);
+                let slow = (AIR_BRAKE * self.air_brake * c.brake * h).min(speed);
                 let less = flat / speed * slow;
                 self.velocity -= less;
                 self.last_velocity -= less;
@@ -2325,7 +2325,7 @@ mod tests {
     /// Where a bike thrown high and forward heads after a second in the
     /// air steering full right, and where it points, radians from straight
     /// on (right positive).
-    fn steer_in_the_air(air_steer: bool) -> (f32, f32) {
+    fn steer_in_the_air(air_steer: f32) -> (f32, f32) {
         let mut bike = Bike::new(&Flat, Vec3::ZERO, Vec3::Z);
         bike.air_steer = air_steer;
         bike.set_state(Vec3::new(0.0, 60.0, 0.0) + COM, Vec3::new(0.0, 10.0, 40.0), Mat3::IDENTITY, Vec3::ZERO, [0.0; 2]);
@@ -2342,17 +2342,20 @@ mod tests {
 
     #[test]
     fn air_steering_bends_the_flight_and_keeps_the_bike_in_line() {
-        let (path, _) = steer_in_the_air(false);
+        let (path, _) = steer_in_the_air(0.0);
         assert!(path.abs() < 0.05, "{path}");
-        let (path, look) = steer_in_the_air(true);
+        let (path, look) = steer_in_the_air(1.0);
         assert!((path - AIR_STEER).abs() < 0.05, "{path}");
+        // Twice the share bends it twice as far.
+        let (twice, _) = steer_in_the_air(2.0);
+        assert!((twice - 2.0 * AIR_STEER).abs() < 0.1, "{twice}");
         // The game's own air yaw turns the bike a little further still.
         assert!((look - path - AIR_YAW).abs() < 0.08, "{look} {path}");
     }
 
     /// How far a bike thrown high and forward goes along the ground in a
     /// second in the air with the brake held.
-    fn brake_in_the_air(air_brake: bool) -> f32 {
+    fn brake_in_the_air(air_brake: f32) -> f32 {
         let mut bike = Bike::new(&Flat, Vec3::ZERO, Vec3::Z);
         bike.air_brake = air_brake;
         bike.set_state(Vec3::new(0.0, 60.0, 0.0) + COM, Vec3::new(0.0, 10.0, 40.0), Mat3::IDENTITY, Vec3::ZERO, [0.0; 2]);
@@ -2367,7 +2370,7 @@ mod tests {
 
     #[test]
     fn air_braking_shortens_the_jump() {
-        let (free, braked) = (brake_in_the_air(false), brake_in_the_air(true));
+        let (free, braked) = (brake_in_the_air(0.0), brake_in_the_air(1.0));
         // A second at 6 ft/s² comes up 3 ft short.
         assert!((free - braked - AIR_BRAKE / 2.0).abs() < 0.5, "{free} {braked}");
     }

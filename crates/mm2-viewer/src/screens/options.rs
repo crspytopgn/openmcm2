@@ -243,53 +243,32 @@ struct Check {
     field: fn(&mut Tweaks) -> &mut bool,
 }
 
-const TWEAK_CHECKS: [Check; 10] = [
-    Check {
-        name: "ChkAirSteer",
-        text: "Air steering",
-        rect: [24, 110, 329, 20],
-        about: "Steering in the air bends your flight a little and turns the bike with it, so you land in line. Off is the original, where it only turns the bike slightly.",
-        field: |t| &mut t.air_steer,
-    },
-    Check {
-        name: "ChkAirBrake",
-        text: "Air braking",
-        rect: [24, 132, 329, 20],
-        about: "Holding the brake in the air takes off a little speed, so you can come up short of a landing. The brake still tips the nose down if Brake Gyro is on.",
-        field: |t| &mut t.air_brake,
-    },
-    Check {
-        name: "ChkWideCourse",
-        text: "Wider course",
-        rect: [24, 154, 329, 20],
-        about: "The course counts 20 ft wider on each side before the off-course timer starts, on every difficulty. Off is the original.",
-        field: |t| &mut t.wide_course,
-    },
+const TWEAK_CHECKS: [Check; 7] = [
     Check {
         name: "ChkQuickGetUp",
         text: "Quick get-up",
-        rect: [24, 176, 329, 20],
+        rect: [24, 152, 329, 20],
         about: "After a crash, G on the keyboard or Back on a pad puts you straight back on the bike instead of waiting for the crash to play out. Not in network races.",
         field: |t| &mut t.quick_get_up,
     },
     Check {
         name: "ChkModernHud",
         text: "Modernised HUD",
-        rect: [24, 226, 329, 20],
+        rect: [24, 174, 329, 20],
         about: "The race panel, radar and speedometer as clean see-through shapes, crisp at your screen's resolution. Off is the original game's pictures.",
         field: |t| &mut t.modern_hud,
     },
     Check {
         name: "ChkCentred",
         text: "Race display nearer the middle",
-        rect: [24, 248, 329, 20],
+        rect: [24, 196, 329, 20],
         about: "On screens wider than 16:9: the speedometer, map and race info where they sit on a 16:9 screen, instead of out at the edges.",
         field: |t| &mut t.centred,
     },
     Check {
         name: "ChkLapGap",
         text: "Live gap to your best lap",
-        rect: [24, 270, 329, 20],
+        rect: [24, 218, 329, 20],
         about: "Under the race panel: how far ahead (green) or behind (red) your best lap you are, and each lap's time as it ends. Comparing starts from lap 2.",
         field: |t| &mut t.lap_gap,
     },
@@ -332,9 +311,41 @@ const FOV_SLIDER: (&str, &str) = (
 );
 const VIBRATION_SLIDER: (&str, &str) = ("SldVisibility", "How hard the pad vibrates.");
 
+/// The air steering and braking sliders (copies of the advanced screen's
+/// Objects slider and its heading and signs): their name, heading, where
+/// the heading sits (the slider 17 below it, the signs 12 below), and what
+/// they say when pointed at.
+struct AirSlider {
+    name: &'static str,
+    text: &'static str,
+    at: [i32; 2],
+    about: &'static str,
+    field: fn(&mut Tweaks) -> &mut u32,
+}
+
+const AIR_SLIDERS: [AirSlider; 2] = [
+    AirSlider {
+        name: "SldAirSteer",
+        text: "Air steering",
+        at: [43, 70],
+        about: "How much steering in the air bends your flight, and turns the bike with it so you land in line. The middle is this version's own; far left is the original, where it only turns the bike slightly.",
+        field: |t| &mut t.air_steer,
+    },
+    AirSlider {
+        name: "SldAirBrake",
+        text: "Air braking",
+        at: [43, 110],
+        about: "How much holding the brake in the air takes off your speed, so you can come up short of a landing. The middle is this version's own; far left is the original, where it changes nothing about the flight. The brake still tips the nose down if Brake Gyro is on.",
+        field: |t| &mut t.air_brake,
+    },
+];
+
+/// The air sliders' step, %.
+const AIR_STEP: u32 = 10;
+
 /// The Tweaks box's Difficulty button, where it sits and what it says
 /// when pointed at.
-const DIFFICULTY_BUTTON: [i32; 4] = [24, 70, 117, 33];
+const DIFFICULTY_BUTTON: [i32; 4] = [24, 250, 117, 33];
 const DIFFICULTY_BUTTON_ABOUT: &str =
     "Easy, Normal and Hard, each set from 1 to 10: the other riders' speed and skill, how easily you crash, and their tricks in the Stunt Quarry.";
 
@@ -357,7 +368,7 @@ const DIFFICULTY_ROWS: [Row; 4] = [
     },
     Row {
         text: "Rivals' skill",
-        about: "How big a hit the other riders can take before they fall. Higher and they crash less.",
+        about: "How big a hit the other riders can take before they fall, and how often they risk a trick in a race. Higher and they crash less.",
         shows: "they crash at #% of the game's Normal",
     },
     Row {
@@ -1115,8 +1126,6 @@ impl Options {
         };
         let mut t = crate::tweaks::get();
         d.set_text("AdvancedGraphicsTitle", "Additional Tweaks");
-        d.add_copy("rbwLabel12", "TwkDisplay", [24, 200, 249, 25]);
-        d.set_text("TwkDisplay", "Race Display:");
         d.add_copy("rbwLabel12", "TwkScreen", [366, 290, 249, 25]);
         d.set_text("TwkScreen", "Screen:");
         // In the frame the background has there.
@@ -1131,6 +1140,18 @@ impl Options {
             d.add_copy("ChkForceVideoMem", c.name, c.rect);
             d.set_text(c.name, c.text);
             d.set_on(c.name, *(c.field)(&mut t));
+        }
+        for s in &AIR_SLIDERS {
+            let [x, y] = s.at;
+            d.add_copy("rbwLabel5", &format!("{}Text", s.name), [x - 2, y, 207, 17]);
+            d.add_copy("rbwLabel6", &format!("{}Less", s.name), [x - 19, y + 12, 15, 17]);
+            d.add_copy("rbwLabel7", &format!("{}More", s.name), [x + 208, y + 12, 18, 17]);
+            d.add_copy("SldObjects", s.name, [x, y + 17, 204, 16]);
+            if let Some(c) = d.ctl(s.name) {
+                c.range = mm2_settings::AIR_MOST;
+            }
+            d.set_steps(s.name, mm2_settings::AIR_MOST / AIR_STEP + 1);
+            d.set_slider(s.name, *(s.field)(&mut t), None);
         }
         let (name, text, rect, _) = VIBRATION_CHECK;
         d.add_copy("ChkForceVideoMem", name, rect);
@@ -1158,13 +1179,21 @@ impl Options {
         };
         d.set_on(VIBRATION_CHECK.0, on);
         d.set_slider(vib, strength, None);
-        Self::label_tweaks(&mut d, t.fov, strength, on);
+        Self::label_tweaks(&mut d, &t, strength, on);
         self.sub = Some(Sub::Tweaks(d, t));
     }
 
     /// The sliders' headings, with their values.
-    fn label_tweaks(d: &mut Dlg, fov: u32, strength: u32, vibration: bool) {
-        d.set_text("rbwLabel8", format!("Field of view: {fov}°"));
+    fn label_tweaks(d: &mut Dlg, t: &Tweaks, strength: u32, vibration: bool) {
+        let mut t = *t;
+        for s in &AIR_SLIDERS {
+            let text = match *(s.field)(&mut t) {
+                0 => format!("{}: off (the original)", s.text),
+                n => format!("{}: {n}%", s.text),
+            };
+            d.set_text(&format!("{}Text", s.name), text);
+        }
+        d.set_text("rbwLabel8", format!("Field of view: {}°", t.fov));
         d.set_text("UnusedSlide03Text", format!("Vibration strength: {strength}%"));
         d.enable(VIBRATION_SLIDER.0, vibration);
     }
@@ -1177,6 +1206,11 @@ impl Options {
             *(c.field)(&mut t) = on(c.name);
         }
         t.fov = FOV.0 + d.slider(FOV_SLIDER.0);
+        for s in &AIR_SLIDERS {
+            // On the steps, as the arrows and drags leave it between them.
+            let v = d.slider(s.name);
+            *(s.field)(&mut t) = ((v + AIR_STEP / 2) / AIR_STEP * AIR_STEP).min(mm2_settings::AIR_MOST);
+        }
         (t, d.slider(VIBRATION_SLIDER.0), on(VIBRATION_CHECK.0))
     }
 
@@ -1209,7 +1243,7 @@ impl Options {
             }
             Event::Clicked(_) | Event::Changed(_) | Event::Released(_) => {
                 let (t, strength, on) = Self::read_tweaks(d, *was);
-                Self::label_tweaks(d, t.fov, strength, on);
+                Self::label_tweaks(d, &t, strength, on);
             }
             _ => {}
         }
@@ -1226,7 +1260,8 @@ impl Options {
             let vibration = is(VIBRATION_CHECK.0).then_some(VIBRATION_CHECK.3);
             let vibration = vibration.or(is("Difficulty").then_some(DIFFICULTY_BUTTON_ABOUT));
             let slider = [FOV_SLIDER, VIBRATION_SLIDER].into_iter().find(|s| is(s.0)).map(|s| s.1);
-            check.or(vibration).or(slider)
+            let air = AIR_SLIDERS.iter().find(|s| is(s.name)).map(|s| s.about);
+            check.or(vibration).or(slider).or(air)
         });
         let about = about.unwrap_or(TWEAKS_ABOUT);
         d.set_text("TwkAbout", about);

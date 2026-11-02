@@ -18,9 +18,8 @@
 //! mm2-viewer ... --centred-display         // ultrawide: the race display in a 16:9 middle
 //! mm2-viewer ... --original-race-display  // the game's own speedometer, pictures and radar lines
 //! mm2-viewer ... --vibration=N|off         // pad vibration strength 0 to 100 (else the profile's)
-//! mm2-viewer ... --air-steer               // steering in the air bends the flight a little
-//! mm2-viewer ... --air-brake               // braking in the air shortens the flight a little
-//! mm2-viewer ... --wide-course             // the course counts 20 ft wider before the off-course timer
+//! mm2-viewer ... --air-steer[=N]           // steering in the air bends the flight, N% of the fork's (0-200)
+//! mm2-viewer ... --air-brake[=N]           // braking in the air shortens the flight, N% of the fork's (0-200)
 //! mm2-viewer ... --no-quick-get-up         // G or a pad's Back no longer puts you back on after a crash
 //! mm2-viewer ... --lap-gap                 // live gap to the best lap under the race panel
 //! mm2-viewer ... --steady-camera           // the chase camera turns and rises more gently

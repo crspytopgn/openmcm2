@@ -10,12 +10,12 @@ pub struct Tweaks {
     /// The difficulty table's steps (`--difficulty=`), Easy to Hard; see
     /// [`mm2_settings::DIFFICULTY`].
     pub difficulty: [[u32; 3]; 4],
-    /// Steering in the air bends the flight (`--air-steer`).
-    pub air_steer: bool,
-    /// Braking in the air shortens the flight (`--air-brake`).
-    pub air_brake: bool,
-    /// The course counts wider before the off-course timer (`--wide-course`).
-    pub wide_course: bool,
+    /// How much steering in the air bends the flight, % of the fork's
+    /// own, 0 none (`--air-steer=N`; `--air-steer` alone is 100).
+    pub air_steer: u32,
+    /// How much braking in the air shortens the flight, % of the fork's
+    /// own, 0 none (`--air-brake=N`; `--air-brake` alone is 100).
+    pub air_brake: u32,
     /// G or a pad's Back puts the player back on the bike after a crash
     /// (off with `--no-quick-get-up`).
     pub quick_get_up: bool,
@@ -46,13 +46,16 @@ impl Tweaks {
     pub fn from_args(args: &[String]) -> Tweaks {
         let has = |f: &str| args.iter().any(|a| a == f);
         let value = |f: &str| args.iter().find_map(|a| a.strip_prefix(f));
+        let strength = |f: &str| match value(&format!("{f}=")) {
+            Some(n) => n.parse::<u32>().map_or(0, |n| n.min(mm2_settings::AIR_MOST)),
+            None => if has(f) { 100 } else { 0 },
+        };
         Tweaks {
             difficulty: value("--difficulty=")
                 .and_then(mm2_settings::parse_difficulty)
                 .unwrap_or(mm2_settings::DIFFICULTY),
-            air_steer: has("--air-steer"),
-            air_brake: has("--air-brake"),
-            wide_course: has("--wide-course"),
+            air_steer: strength("--air-steer"),
+            air_brake: strength("--air-brake"),
             quick_get_up: !has("--no-quick-get-up"),
             lap_gap: has("--lap-gap"),
             steady_camera: has("--steady-camera"),
@@ -75,7 +78,6 @@ impl Tweaks {
         s.difficulty = self.difficulty;
         s.air_steer = self.air_steer;
         s.air_brake = self.air_brake;
-        s.wide_course = self.wide_course;
         s.quick_get_up = self.quick_get_up;
         s.lap_gap = self.lap_gap;
         s.steady_camera = self.steady_camera;
@@ -126,7 +128,8 @@ mod tests {
     fn the_launchers_command_line_round_trips() {
         let mut s = mm2_settings::Settings {
             difficulty: [[4, 6, 8], [3, 5, 7], [9, 6, 5], [3, 5, 10]],
-            air_steer: false,
+            air_steer: 0,
+            air_brake: 150,
             fov: 100,
             sharp_display: false,
             vibration: true,
@@ -140,7 +143,8 @@ mod tests {
         args.extend(s.args());
         let t = Tweaks::from_args(&args);
         assert_eq!(t.difficulty[2][0], 9);
-        assert!(!t.air_steer && t.air_brake && !t.wide_course && !t.quick_get_up && !t.modern_hud && !t.vsync && t.show_fps);
+        assert_eq!((t.air_steer, t.air_brake), (0, 150));
+        assert!(!t.quick_get_up && !t.modern_hud && !t.vsync && t.show_fps);
         assert_eq!((t.fov, t.vibration), (100, Some(Some(30))));
         let before = s.clone();
         t.into_settings(&mut s);
@@ -153,5 +157,7 @@ mod tests {
         assert_eq!(t.vibration, Some(None));
         let t = Tweaks::from_args(&["mm2-viewer".into()]);
         assert_eq!((t.vibration, t.fov, t.modern_hud), (None, 85, true));
+        let t = Tweaks::from_args(&["mm2-viewer".into(), "--air-steer".into()]);
+        assert_eq!((t.air_steer, t.air_brake), (100, 0));
     }
 }

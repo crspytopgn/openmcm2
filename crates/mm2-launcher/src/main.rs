@@ -522,7 +522,7 @@ impl Launcher {
             ui.label(now);
             ui.label(
                 egui::RichText::new(
-                    "Change it in the game: Options, Graphics, Display Resolution. Alt+Enter switches to full screen and back while playing. VSync, the frame rate, the difficulty table, air steering and braking, the wider course, quick get-up, vibration, the camera and the HUD are in the game too: Options, then Tweaks... at the bottom.",
+                    "Change it in the game: Options, Graphics, Display Resolution. Alt+Enter switches to full screen and back while playing. VSync, the frame rate, the difficulty table, air steering and braking, quick get-up, vibration, the camera and the HUD are in the game too: Options, then Tweaks... at the bottom.",
                 )
                 .weak(),
             );
