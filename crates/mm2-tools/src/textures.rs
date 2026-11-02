@@ -175,7 +175,9 @@ fn write_texture(path: &Path, tex: &trn::Texture) -> std::io::Result<()> {
 }
 
 fn write_png(path: &Path, w: u32, h: u32, rgba: &[u8]) -> std::io::Result<()> {
-    let file = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let file = std::fs::File::create(path)
+        .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
+    let file = std::io::BufWriter::new(file);
     let mut encoder = png::Encoder::new(file, w, h);
     encoder.set_color(png::ColorType::Rgba);
     encoder

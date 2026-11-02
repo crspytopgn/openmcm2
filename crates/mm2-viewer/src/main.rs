@@ -3189,8 +3189,7 @@ async fn menu_screenshot(
         device: &device,
         queue: &queue,
     };
-    front.draw(&mut gfx, now, 0.5);
-    let mut encoder = device.create_command_encoder(&Default::default());
+    front.draw(&mut gfx, now, 0.5);    let mut encoder = device.create_command_encoder(&Default::default());
     let view = target.create_view(&Default::default());
     sprites.render(&device, &mut encoder, &view, (w, h), true);
     let mut commands = vec![encoder.finish()];
@@ -3533,6 +3532,10 @@ impl App {
             attrs
         };
         let window = Arc::new(event_loop.create_window(attrs)?);
+        // The game's own is drawn instead, so never two.
+        if ui::draws_pointer() {
+            window.set_cursor_visible(false);
+        }
         #[cfg(windows)]
         {
             use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -4697,6 +4700,9 @@ impl App {
                 if let Some(fps) = self.fps_shown {
                     ui.frame_rate(&mut gfx, fps);
                 }
+                if self.replay.is_some() && ui::draws_pointer() {
+                    ui.pointer(&mut gfx, self.pointer);
+                }
                 let mut encoder = s.device.create_command_encoder(&Default::default());
                 s.sprites.stretch = true;
                 s.sprites.widescreen = self.replay.is_none();
@@ -4720,6 +4726,9 @@ impl App {
             front.draw(&mut gfx, now, progress);
             if let Some(fps) = self.fps_shown {
                 front.ui_mut().frame_rate(&mut gfx, fps);
+            }
+            if ui::draws_pointer() {
+                front.ui_mut().pointer(&mut gfx, self.pointer);
             }
             let mut encoder = s.device.create_command_encoder(&Default::default());
             s.sprites.render(&s.device, &mut encoder, view, size, true);
@@ -5095,7 +5104,7 @@ impl ApplicationHandler for App {
                         .window
                         .set_cursor_grab(mode)
                         .or_else(|_| s.window.set_cursor_grab(CursorGrabMode::Confined));
-                    s.window.set_cursor_visible(!self.looking);
+                    s.window.set_cursor_visible(!self.looking && !ui::draws_pointer());
                 }
             }
             WindowEvent::RedrawRequested => {

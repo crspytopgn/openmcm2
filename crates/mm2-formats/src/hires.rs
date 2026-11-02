@@ -23,12 +23,19 @@ use crate::trn::{PixelFormat, Texture};
 /// RGB555 pixels of this colour are transparent.
 pub const COLOR_KEY: u16 = 0x7c1f;
 
-/// The key for model texture `name` from the archive file `archive`.
+/// The key for model texture `name` from the archive file `archive`. A
+/// name with folders in it (`multiplayer\multibike_rider\b_rcornerll.tga`)
+/// has them joined by `__`, as Windows can't have `\` in a file name.
 pub fn model_key(archive: &str, name: &str) -> String {
+    let name = flat(name);
     match archive.to_ascii_lowercase().strip_suffix(".tex") {
-        Some(set) => format!("{set}-{}", name.to_ascii_lowercase()),
-        None => name.to_ascii_lowercase(),
+        Some(set) => format!("{set}-{name}"),
+        None => name,
     }
+}
+
+fn flat(name: &str) -> String {
+    name.to_ascii_lowercase().replace(['\\', '/'], "__")
 }
 
 /// The key for terrain texture `index` of the track whose `.ENV` file is
@@ -52,7 +59,8 @@ pub fn key_from_file_name(file_name: &str) -> Option<String> {
     let stem = lower.strip_suffix(".png")?;
     // Upscayl names its output `<name>_upscayl_4x_<model>.png`.
     let stem = stem.find("_upscayl").map_or(stem, |i| &stem[..i]);
-    Some(stem.to_string())
+    // Packs exported on a Mac before names were flattened keep the `\`.
+    Some(flat(stem))
 }
 
 /// Whether a texture uses the magenta colour key.
@@ -290,6 +298,8 @@ mod tests {
         assert_eq!(sky_key("Terra01.cub", 4), "sky-terra01-4");
         assert_eq!(model_key("OBJECTS.RES", "Barrel.tga"), "barrel.tga");
         assert_eq!(model_key("EURO.TEX", "Wall.tga"), "euro-wall.tga");
+        assert_eq!(model_key("MULTI.RES", "Multi\\B_R.tga"), "multi__b_r.tga");
+        assert_eq!(key_from_file_name("multi\\b_r.tga.png"), Some("multi__b_r.tga".into()));
     }
 
     #[test]

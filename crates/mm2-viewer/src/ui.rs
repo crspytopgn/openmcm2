@@ -116,6 +116,16 @@ impl Pack {
     }
 }
 
+/// Whether the game draws its own mouse pointer: under gamescope, the
+/// Steam Deck's Gaming Mode, which doesn't show the system's.
+pub fn draws_pointer() -> bool {
+    static GAMESCOPE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *GAMESCOPE.get_or_init(|| {
+        std::env::var_os("GAMESCOPE_WAYLAND_DISPLAY").is_some()
+            || std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.eq_ignore_ascii_case("gamescope"))
+    })
+}
+
 /// Every file in the Linux and BSD font folders, a few levels deep: each
 /// distribution files fonts differently (Debian under `truetype/`, Arch
 /// under `TTF/` and `liberation/`), so they are found by name.
@@ -520,6 +530,32 @@ impl Ui {
         for (t, at, tw, th) in quads {
             gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [x + at, y, tw, th], [1.0, 1.0, 0.6, 1.0]);
         }
+    }
+
+    /// The mouse pointer, the classic arrow with its tip at (`x`, `y`), for
+    /// where the system's is not shown (see [`draws_pointer`]).
+    pub fn pointer(&mut self, gfx: &mut Gfx, (x, y): (f32, f32)) {
+        const ARROW: [&str; 19] = [
+            "B", "BB", "BWB", "BWWB", "BWWWB", "BWWWWB", "BWWWWWB", "BWWWWWWB",
+            "BWWWWWWWB", "BWWWWWWWWB", "BWWWWWWWWWB", "BWWWWWWBBBBB", "BWWWBWWB",
+            "BWWBBWWB", "BWB  BWWB", "BB   BWWB", "B     BWWB", "      BWWB", "       BB",
+        ];
+        let arrow = self.made(gfx, "pointer", || {
+            let mut rgba = vec![0; 12 * ARROW.len() * 4];
+            for (row, line) in ARROW.iter().enumerate() {
+                for (col, c) in line.bytes().enumerate() {
+                    let px = match c {
+                        b'B' => [0, 0, 0, 255],
+                        b'W' => [255, 255, 255, 255],
+                        _ => continue,
+                    };
+                    let at = (row * 12 + col) * 4;
+                    rgba[at..at + 4].copy_from_slice(&px);
+                }
+            }
+            tga::Image { width: 12, height: ARROW.len() as u32, rgba }
+        });
+        gfx.sprites.quad(arrow, [0.0, 0.0, 1.0, 1.0], [x, y, 12.0, ARROW.len() as f32], [1.0; 4]);
     }
 
     /// A picture made here rather than read from the game, made once and
