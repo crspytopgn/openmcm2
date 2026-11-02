@@ -3430,6 +3430,17 @@ struct State {
     bike_res: Option<Vec<u8>>,
 }
 
+impl State {
+    /// Makes the surface anew at the window's size; never while a frame
+    /// is out.
+    fn fit_surface(&mut self) {
+        let size = self.window.inner_size();
+        self.config.width = size.width.max(1);
+        self.config.height = size.height.max(1);
+        self.surface.configure(&self.device, &self.config);
+    }
+}
+
 impl App {
     fn new(
         track: Option<Track>,
@@ -4617,15 +4628,15 @@ impl App {
             s.config.present_mode = present_mode();
             s.surface.configure(&s.device, &s.config);
         }
-        let frame = match s.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => frame,
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
-                s.surface.configure(&s.device, &s.config);
-                frame
-            }
+        // A suboptimal frame (the Steam Deck's full screen gives them) is
+        // still drawn and shown, and the surface made anew after: wgpu
+        // refuses to configure it while a frame is out.
+        let (frame, suboptimal) = match s.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
             wgpu::CurrentSurfaceTexture::Outdated => {
                 skipped("the window's surface is out of date");
-                s.surface.configure(&s.device, &s.config);
+                s.fit_surface();
                 return;
             }
             other => {
@@ -4748,6 +4759,9 @@ impl App {
         s.queue.submit(commands);
         s.window.pre_present_notify();
         s.queue.present(frame);
+        if suboptimal {
+            s.fit_surface();
+        }
     }
 
     /// Acts on what the menus ask.
