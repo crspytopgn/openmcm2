@@ -230,6 +230,23 @@ const CHAT_MODES: [u32; 3] = [5131, 5130, 5132];
 /// The advanced screen's quality sliders, after the video memory box.
 pub(crate) const DETAILS: [&str; 4] = ["SldEcosystem", "SldObjects", "SldTerrain", "SldVisibility"];
 
+/// The advanced screen's settings this engine doesn't read, greyed: the
+/// details other than Visibility, the video card and memory, the terrain
+/// detail method, and the startup pickers and joystick filter. They are
+/// still saved, as the original did.
+const NO_EFFECT: [&str; 10] = [
+    "SldEcosystem",
+    "SldObjects",
+    "SldTerrain",
+    "ChkForceVideoMem",
+    "ChkShowPick3D",
+    "RadTerrSingle",
+    "RadTerrDual",
+    "RadTerrNone",
+    "ChkFilterInput",
+    "ChkShowPickController",
+];
+
 /// Where the Tweaks button sits on the screen.
 const TWEAKS_BUTTON: [i32; 4] = [206, 416, 117, 33];
 
@@ -608,6 +625,8 @@ impl Options {
                 }
                 d.set_on("Rad16Bit", p.sound.sixteen_bit);
                 d.set_on("Rad8Bit", !p.sound.sixteen_bit);
+                // Kept, but nothing here plays through sound hardware.
+                d.enable("SoundHardwareCheckBox", false);
             }
             3 => {
                 for (name, v) in control_sliders(p) {
@@ -802,6 +821,8 @@ impl Options {
         d.set_text("HPUnused", (class.total - self.used).to_string());
         for (i, name) in SUSPENSION.iter().enumerate() {
             d.set_slider(name, (suspension[i] * 100.0) as u32, Some(100));
+            // Kept in the profile, but the bike doesn't read them yet.
+            d.enable(name, false);
         }
     }
 
@@ -1072,6 +1093,9 @@ impl Options {
             "ChkShowPickController",
             s.number("UseLastController", 0) == 0,
         );
+        for name in NO_EFFECT {
+            d.enable(name, false);
+        }
         self.sub = Some(Sub::Advanced(d));
     }
 

@@ -254,6 +254,17 @@ const ENGINE_SIZES: [(u32, &str); 5] = [
 /// Where the single player screen's tab pages go (`0x44e600`).
 const PAGE: (f32, f32) = (16.0, 41.0);
 
+/// The menus' rows of tabs, for the pad's shoulder buttons (the fork's):
+/// single player and the lobby, the options, the career, the records'
+/// events, and the ghosts and replays.
+const TAB_ROWS: [&[&str]; 5] = [
+    &["EventTab", "BikeRiderTab", "RaceInfoTab", "OptionsTab"],
+    &["GameSettings", "Graphics", "Sound", "Controls", "Messages", "Garage"],
+    &["TabNext", "TabBikeRider", "TabStandings"],
+    &["TabQuarry", "TabBaja", "TabNationals", "TabSupercross", "TabTag", "TabEnduro"],
+    &["TabLeft", "TabMiddle", "TabRight"],
+];
+
 impl Frontend {
     pub fn new(game: &Path) -> Option<Frontend> {
         let mut ui = Ui::new(game);
@@ -619,6 +630,27 @@ impl Frontend {
                 events.extend(d.mouse_up(x, y));
             }
         }
+        self.handle(audio, events, now)
+    }
+
+    /// The pad's shoulder buttons: the next tab along (`step` 1) or the
+    /// one before (−1), as clicked.
+    #[cfg_attr(not(feature = "gamepad"), allow(dead_code))]
+    pub fn step_tab(&mut self, audio: &Audio, step: i32, now: f32) -> Next {
+        if self.ghost_ask.is_some() || self.dialogs().iter().any(|d| d.list_open()) {
+            return Next::Stay;
+        }
+        let events = self.dialogs().into_iter().find_map(|d| {
+            TAB_ROWS.iter().find_map(|row| d.step_tab(row, step))
+        });
+        match events {
+            Some(events) => self.handle(audio, events, now),
+            None => Next::Stay,
+        }
+    }
+
+    /// What a click's events do.
+    fn handle(&mut self, audio: &Audio, events: Vec<Event>, now: f32) -> Next {
         self.sounds(audio, &events);
         if let Screen::Extra(s) = &mut self.screen {
             let mut cx = Cx {

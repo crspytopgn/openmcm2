@@ -4403,6 +4403,18 @@ impl App {
             }
             return;
         }
+        // The shoulder buttons (DirectInput's 4 and 5) go along the tabs.
+        for (button, step) in [(4, -1), (5, 1)] {
+            if presses.contains(&pad::Press::Button(button)) {
+                let Some(f) = &mut self.front else { return };
+                let next = f.step_tab(&self.audio, step, now);
+                if !matches!(next, frontend::Next::Stay) {
+                    self.next(next, event_loop);
+                    return;
+                }
+            }
+        }
+        let Some(f) = &mut self.front else { return };
         // Past a fifth of the stick, up to 500 of the 640×480 screen a second.
         let speed = |v: f32| if v.abs() < 0.2 { 0.0 } else { v * 500.0 * dt };
         let (dx, dy) = (speed(stick[0]), speed(stick[1]));

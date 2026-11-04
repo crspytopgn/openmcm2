@@ -1360,6 +1360,31 @@ impl Dlg {
         if p != h {
             return events;
         }
+        self.click(h, y)
+    }
+
+    /// The tab beside the one on, `step` along (wrapping round), pressed
+    /// as a click would: for the pad's shoulder buttons. `tabs` are the
+    /// names a screen's tabs may have; those this dialog shows and takes
+    /// go in their order across the screen.
+    pub fn step_tab(&mut self, tabs: &[&str], step: i32) -> Option<Vec<Event>> {
+        let mut row: Vec<usize> = tabs
+            .iter()
+            .filter_map(|t| self.index(t))
+            .filter(|&i| self.ctls[i].visible && self.ctls[i].enabled)
+            .collect();
+        row.sort_by(|&a, &b| self.rect(a)[0].total_cmp(&self.rect(b)[0]));
+        let at = row.iter().position(|&i| self.ctls[i].on)?;
+        let next = row[(at as i32 + step).rem_euclid(row.len() as i32) as usize];
+        if next == row[at] {
+            return None;
+        }
+        Some(self.click(next, 0.0))
+    }
+
+    /// What a click on control `h` does, `y` down the screen.
+    fn click(&mut self, h: usize, y: f32) -> Vec<Event> {
+        let mut events = Vec::new();
         let c = &self.dialog.controls[h];
         if let Some(s) = c.get("SoundPush") {
             events.push(Event::Sound(s.to_string()));
@@ -1937,6 +1962,11 @@ impl Dlg {
                         .0
                         .retain(|(k, _)| !k.eq_ignore_ascii_case("TextAlignV"));
                     middle.props.0.push(("TextAlignV".into(), "MIDDLE".into()));
+                    // A greyed one's text greys with its box.
+                    if !self.ctls[i].enabled {
+                        middle.props.0.retain(|(k, _)| !k.eq_ignore_ascii_case("TextColor"));
+                        middle.props.0.push(("TextColor".into(), GREYED.to_string()));
+                    }
                     self.draw_text(ui, gfx, &middle, text_rect, &text, focus);
                 } else if c.kind == Kind::Button
                     && !self.ctls[i].enabled
@@ -2042,12 +2072,10 @@ impl Dlg {
             gfx.sprites.image(t, x, y);
         }
         let enabled = self.ctls[i].enabled;
-        let thumb = c
-            .anim(if enabled {
-                "AnimThumb"
-            } else {
-                "AnimThumbDisable"
-            })
+        let greyed = c.anim("AnimThumbDisable").filter(|_| !enabled);
+        // Without a greyed thumb of its own, a greyed slider's is dimmed.
+        let dim = !enabled && greyed.is_none();
+        let thumb = greyed
             .or_else(|| c.anim("AnimThumb"))
             .and_then(|n| ui.image(gfx, self.pack_of(i), n));
         let Some(t) = thumb else { return };
@@ -2081,7 +2109,8 @@ impl Dlg {
         } else {
             (r[0] + ((r[2] - w as f32) / 2.0).floor(), r[1] + at)
         };
-        gfx.sprites.image(t, x, y);
+        let tint = if dim { [0.45, 0.45, 0.45, 1.0] } else { [1.0; 4] };
+        gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [x, y, w as f32, h as f32], tint);
     }
 
     /// Whether the control under the pointer has a tip to show.
