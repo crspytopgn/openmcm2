@@ -5,8 +5,8 @@
 
 use mm2_formats::trn::Terrain;
 
-/// Tufts on the grid round the camera (256 a side).
-const TUFTS: u32 = 256 * 256;
+/// Tufts on the grid round the camera (384 a side, `SIDE` in the shader).
+const TUFTS: u32 = 384 * 384;
 
 pub struct GrassRenderer {
     pipeline: wgpu::RenderPipeline,

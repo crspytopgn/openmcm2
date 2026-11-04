@@ -35,11 +35,11 @@ struct Globals {
 @group(2) @binding(0) var heights: texture_2d<f32>;
 
 // Tufts a side of the grid, and ft between them.
-const SIDE: u32 = 256u;
+const SIDE: u32 = 384u;
 const STEP: f32 = 0.85;
-// Where the grass thins out and ends, ft.
-const FADE: f32 = 70.0;
-const END: f32 = 105.0;
+// Where the grass starts to sink into the ground, and where it is gone, ft.
+const FADE: f32 = 90.0;
+const END: f32 = 160.0;
 
 // 0..1, the same for the same `p`. An integer hash (PCG): the usual
 // fract(sin(..)) one breaks down this far from the origin, where the GPU's
@@ -78,10 +78,17 @@ fn painted_at(t: vec2<f32>) -> vec3<f32> {
     return textureSampleLevel(textures, tex_sampler, tc - vec2<f32>(cell), layer, 3.0).rgb;
 }
 
-// How grassy painted colour `p` (linear) is, as the ground's shader sorts it.
+// How grassy painted colour `p` (linear) is: green over red and blue, and
+// not a grey. Warm grey roads (Trailer's tarmac, Ski Lodge's tracks) are a
+// touch greener than red and blue, but grass of every track has colour
+// (saturation above 0.35) where they and their verges have little (below
+// 0.25).
 fn grassy(p: vec3<f32>) -> f32 {
     let c = pow(p, vec3<f32>(1.0 / 2.2));
-    return smoothstep(0.0, 0.06, c.g - c.r * 0.86) * smoothstep(0.0, 0.04, c.g - c.b);
+    let hi = max(c.r, max(c.g, c.b));
+    let sat = (hi - min(c.r, min(c.g, c.b))) / max(hi, 0.01);
+    return smoothstep(0.0, 0.06, c.g - c.r * 0.86) * smoothstep(0.0, 0.04, c.g - c.b)
+        * smoothstep(0.25, 0.35, sat);
 }
 
 struct Out {
@@ -117,12 +124,13 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
         let ruv = (xz - enh.ruts.xy) / enh.ruts.z;
         density *= 1.0 - smoothstep(0.1, 0.4, textureSampleLevel(rut_map, rut_sampler, ruv, 0.0).r);
     }
-    // Thinner further off.
-    density *= 1.0 - smoothstep(FADE, END, dist) * 0.8;
     // `>=`: where there is no grass, none, whatever the roll.
     if (r3 >= density) {
         return out;
     }
+    // Further off a tuft sinks into the ground, so none ever pops up as
+    // the camera nears: the same tufts at every distance, only shorter.
+    let grow = 1.0 - smoothstep(FADE, END, dist);
     let ground = height_at(t) * scale;
     // Three cards crossed, each two triangles.
     let card = vi / 6u;
@@ -132,7 +140,8 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     )[vi % 6u];
     let turn = r1 * 6.2832 + f32(card) * 2.0944;
     let across = vec3<f32>(cos(turn), 0.0, sin(turn));
-    let tall = mix(0.7, 1.6, hash(cell + 3.3)) * (1.0 + smoothstep(FADE * 0.5, END, dist) * 0.6);
+    // 0.45 to 1.05 ft: short enough to sit round a bike's wheels.
+    let tall = mix(0.45, 1.05, hash(cell + 3.3)) * grow;
     let wide = 1.3 + 0.3 * r2;
     // Sway in the wind, more at the tips.
     let time = enh.world.x;
