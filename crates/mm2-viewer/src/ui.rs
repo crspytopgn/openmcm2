@@ -162,7 +162,8 @@ fn font_files() -> Vec<PathBuf> {
 }
 
 /// Text in one size and weight, as GDI drew it: a system Arial, else a
-/// metric twin (Liberation Sans, Arimo), else DejaVu Sans.
+/// metric twin (Liberation Sans, Arimo), else DejaVu Sans, else (on Linux
+/// and BSD) the Liberation Sans built into the game.
 struct Fonts {
     regular: Option<ab_glyph::FontVec>,
     bold: Option<ab_glyph::FontVec>,
@@ -193,7 +194,7 @@ impl Fonts {
                     ab_glyph::FontVec::try_from_vec(bytes).ok()
                 })
         };
-        Fonts {
+        let fonts = Fonts {
             regular: find(
                 &[
                     "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -249,7 +250,31 @@ impl Fonts {
                     "DejaVuSans-Oblique.ttf",
                 ],
             ),
-        }
+        };
+        fonts.or_built_in()
+    }
+
+    /// A system with none of those fonts (many Linux installs have only
+    /// Noto or Cantarell) would show no text at all: it gets the Liberation
+    /// Sans built in (SIL OFL 1.1, assets/fonts).
+    #[cfg(not(any(windows, target_os = "macos")))]
+    fn or_built_in(mut self) -> Self {
+        let built_in = |bytes: &'static [u8]| ab_glyph::FontVec::try_from_vec(bytes.to_vec()).ok();
+        let fill = |f: &mut Option<ab_glyph::FontVec>, bytes: &'static [u8]| {
+            if f.is_none() {
+                *f = built_in(bytes);
+            }
+        };
+        fill(&mut self.regular, include_bytes!("../../../assets/fonts/LiberationSans-Regular.ttf"));
+        fill(&mut self.bold, include_bytes!("../../../assets/fonts/LiberationSans-Bold.ttf"));
+        fill(&mut self.italic, include_bytes!("../../../assets/fonts/LiberationSans-Italic.ttf"));
+        fill(&mut self.bold_italic, include_bytes!("../../../assets/fonts/LiberationSans-BoldItalic.ttf"));
+        self
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    fn or_built_in(self) -> Self {
+        self
     }
 
     /// `text` rendered white on clear, `em` whole pixels to the em as GDI
@@ -2312,6 +2337,13 @@ fn split_number(name: &str) -> (&str, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(any(windows, target_os = "macos")))]
+    #[test]
+    fn with_no_system_fonts_the_text_is_built_in() {
+        let none = Fonts { regular: None, bold: None, bold_italic: None, italic: None }.or_built_in();
+        assert!(none.regular.is_some() && none.bold.is_some() && none.italic.is_some() && none.bold_italic.is_some());
+    }
 
     #[test]
     fn smooth_upscale_keeps_flat_colour_and_clear_edges() {
