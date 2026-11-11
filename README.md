@@ -31,7 +31,9 @@ OpenMCM2 is free and always will be. It's made with paid AI tools, though,
 and those cost real money every month. If you enjoy it, a small donation
 helps cover that and pays for future updates.
 
-**[♥ Donate on GitHub Sponsors](https://github.com/sponsors/crspytopgn)**
+**[♥ Donate on GitHub Sponsors](https://github.com/sponsors/crspytopgn)** · **[☕ Buy me a coffee](https://buymeacoffee.com/crspytopgn)**
+
+More from me: [OpenSGolf](https://github.com/crspytopgn/opensgolf) · [OpenLinks2003](https://github.com/crspytopgn/openlinks2003) · [Pitwall](https://github.com/crspytopgn/pitwall).
 
 ## Playing
 
