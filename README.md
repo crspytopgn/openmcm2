@@ -183,6 +183,9 @@ MM2_DATA="/path/to/Motocross Madness 2" cargo test
   licence (below).
 * Ground materials for `--enhanced` are from [ambientCG](https://ambientcg.com),
   CC0.
+* The Linux build carries [Liberation Sans](https://github.com/liberationfonts)
+  for the menus' text on systems without Arial or a look-alike, under the
+  SIL Open Font License 1.1 ([assets/fonts/LICENSE-OFL.txt](assets/fonts/LICENSE-OFL.txt)).
 
 ## Legal
 
