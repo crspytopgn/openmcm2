@@ -1,4 +1,16 @@
-# OpenMCM2 0.3.0
+# OpenMCM2 0.3.1
+
+## New in 0.3.1
+
+* **Linux: the menus show their text again** on systems without Arial or
+  a look-alike font installed (many Fedora, Arch and Void installs). The
+  Linux build now carries Liberation Sans for this (#7).
+* **Older graphics cards:** the game already falls back to OpenGL when
+  there is no Vulkan; a new **Use OpenGL** switch in the launcher's
+  Graphics section (or `--opengl`) makes it use OpenGL even when a Vulkan
+  driver is there but doesn't work (#8).
+
+If you're on 0.1.6 or later, the launcher will offer this update itself.
 
 ## New in 0.3.0
 
