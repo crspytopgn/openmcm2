@@ -40,12 +40,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev pkg-config
       - uses: Swatinem/rust-cache@v2
+        if: runner.os != 'Linux'
         with:
           key: ${{ matrix.target }}
-      - run: cargo build --release --locked -p mm2-viewer -p mm2-launcher -p mm2-tools --target ${{ matrix.target }}
+      - if: runner.os != 'Linux'
+        run: cargo build --release --locked -p mm2-viewer -p mm2-launcher -p mm2-tools --target ${{ matrix.target }}
+      # Linux builds in a Debian 12 container: its packages come from
+      # Debian's mirrors (the runners' Ubuntu mirrors can be unreachable),
+      # and its older glibc lets the release run on more distributions.
+      - if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD":/w -w /w -e OPENMCM2_VERSION -e VERSION rust:1-bookworm bash -c \
+            "apt-get update && apt-get install -y libasound2-dev libudev-dev pkg-config && \
+             cargo build --release --locked -p mm2-viewer -p mm2-launcher -p mm2-tools --target ${{ matrix.target }}"
+          sudo chown -R "$(id -u):$(id -g)" target
       - name: Package
         shell: bash
         run: |
