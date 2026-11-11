@@ -575,6 +575,11 @@ impl Launcher {
                     });
                 });
             }
+            if !cfg!(target_os = "macos") {
+                ui.checkbox(&mut s.opengl, "Use OpenGL (for older graphics cards)").on_hover_text(
+                    "Draws with OpenGL instead of Vulkan or DirectX. Try it if the game won't start or shows a black window on an older graphics card.",
+                );
+            }
             ui.add_space(6.0);
             ui.separator();
             ui.checkbox(&mut s.use_hires, "High-res textures");

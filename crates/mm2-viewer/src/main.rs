@@ -14,6 +14,7 @@
 //! mm2-viewer <TRACK.ENV> --hires <dir>   // with upscaled textures
 //! mm2-viewer ... --enhanced[=no-bloom,no-ao,...]  // modern graphics (F3 compares)
 //! mm2-viewer ... --fullscreen [--no-vsync]  // or Alt+Enter while playing
+//! mm2-viewer ... --opengl                  // draw with OpenGL, for GPUs without Vulkan
 //! mm2-viewer ... --show-fps                // or F2: the frame rate in the title and terminal
 //! mm2-viewer ... --centred-display         // ultrawide: the race display in a 16:9 middle
 //! mm2-viewer ... --modern-hud             // crisp see-through speedometer, panel and radar
@@ -136,6 +137,12 @@ fn main() -> Result<(), BoxError> {
     // starts it, with its saved settings.
     if args.is_empty() && play_with_launcher_settings() {
         return Ok(());
+    }
+    // Older graphics cards with no Vulkan driver (or a broken one) draw
+    // through OpenGL instead. Without this the GPU's best API is used, and
+    // OpenGL only when nothing else works.
+    if args.iter().any(|a| a == "--opengl") {
+        std::env::set_var("WGPU_BACKEND", "gl");
     }
     let flag = |name: &str| {
         args.iter()
@@ -2856,7 +2863,7 @@ async fn screenshot(
     height: u32,
 ) -> Result<(), BoxError> {
     let (adapter, device, queue) = gpu(None).await?;
-    eprintln!("rendering on {}", adapter.get_info().name);
+    eprintln!("rendering on {} ({:?})", adapter.get_info().name, adapter.get_info().backend);
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let mut renderer = track_renderer(track, &device, &queue, format);
     if let Some((d, tyres)) = dirt {

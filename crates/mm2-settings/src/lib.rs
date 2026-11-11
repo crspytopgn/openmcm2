@@ -222,6 +222,9 @@ pub struct Settings {
     /// Ctrl+P saves a picture of the screen to the saves folder's
     /// Screenshots (`--screenshot-key`).
     pub screenshot_key: bool,
+    /// Draw with OpenGL instead of the GPU's best API, for older graphics
+    /// cards without Vulkan (`--opengl`; not on a Mac).
+    pub opengl: bool,
 }
 
 /// The game's field of view, degrees.
@@ -262,6 +265,7 @@ impl Default for Settings {
             kmh: false,
             mute_in_background: false,
             screenshot_key: false,
+            opengl: false,
         }
     }
 }
@@ -352,6 +356,7 @@ impl Settings {
                 "kmh" => s.kmh = yes(v),
                 "mute_in_background" => s.mute_in_background = yes(v),
                 "screenshot_key" => s.screenshot_key = yes(v),
+                "opengl" => s.opengl = yes(v),
                 // Files from before version 2 kept the replay blur on by
                 // default; it starts off now, so their setting is dropped.
                 "upgrade.cinematic" if !text.lines().any(|l| l.trim() == "version=2") => {}
@@ -369,7 +374,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\n",
+            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\nopengl={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -400,6 +405,7 @@ impl Settings {
             b(self.kmh),
             b(self.mute_in_background),
             b(self.screenshot_key),
+            b(self.opengl),
         );
         for (u, on) in UPGRADES.iter().zip(&self.upgrades) {
             t += &format!("upgrade.{}={}\n", u.0, b(*on));
@@ -444,6 +450,9 @@ impl Settings {
         }
         if !self.vsync {
             a.push("--no-vsync".into());
+        }
+        if self.opengl && !cfg!(target_os = "macos") {
+            a.push("--opengl".into());
         }
         if self.centred_display {
             a.push("--centred-display".into());
