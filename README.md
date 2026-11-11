@@ -25,6 +25,14 @@ Project page: https://crspytopgn.github.io/openmcm2/
 
 Watch the showcase video: https://youtu.be/rP0TEnWLzNo
 
+## Support the project
+
+OpenMCM2 is free and always will be. It's made with paid AI tools, though,
+and those cost real money every month. If you enjoy it, a small donation
+helps cover that and pays for future updates.
+
+**[♥ Donate on GitHub Sponsors](https://github.com/sponsors/crspytopgn)**
+
 ## Playing
 
 Download a release and start **OpenMCM2** (`OpenMCM2.app` on a Mac,
@@ -175,11 +183,6 @@ MM2_DATA="/path/to/Motocross Madness 2" cargo test
   licence (below).
 * Ground materials for `--enhanced` are from [ambientCG](https://ambientcg.com),
   CC0.
-
-## Supporting the project
-
-OpenMCM2 is free and always will be. If you enjoy it and want to chip in,
-you can [sponsor it on GitHub](https://github.com/sponsors/crspytopgn).
 
 ## Legal
 
