@@ -9,6 +9,8 @@ use glam::Vec3;
 
 /// ft/s to mph.
 const MPH: f32 = 0.68182;
+/// mph in a km/h.
+const MPH_PER_KMH: f32 = 0.621_371;
 
 /// Where `instr1.tga` goes (`0x51ddf0`: the rect 511,351 to 639,479), and
 /// its needle's centre and length.
@@ -16,7 +18,7 @@ const SPEEDO: (f32, f32) = (511.0, 351.0);
 const NEEDLE_CENTRE: (f32, f32) = (64.0, 85.0);
 const NEEDLE: f32 = 45.0;
 
-/// The modernised HUD (a tweak, on unless `--original-race-display`):
+/// The modernised HUD (a tweak, off unless `--modern-hud`):
 /// the panel, radar and dial drawn at the window's resolution, the other
 /// pictures enlarged smoothly and the lines smooth-edged.
 pub fn sharp() -> bool {
@@ -415,8 +417,24 @@ impl Hud {
                 gfx.sprites.image(t, SPEEDO.0, SPEEDO.1);
             }
             ui.line(gfx, c, at(self.shown, NEEDLE), 1.5, [1.0, 0.0, 0.0, 1.0]);
+            // The original's dial is printed in mph: the km/h extra adds
+            // the speed as a number under the needle.
+            if crate::tweaks::get().kmh {
+                let text = format!("{:.0} km/h", self.shown / MPH_PER_KMH);
+                if let Some(t) = ui.text(gfx, &text, NUMBER_PT, true) {
+                    let (w, h) = gfx.sprites.size(t);
+                    let (w, h) = (w as f32, h as f32);
+                    let y = c[1] + 14.0;
+                    gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [c[0] - w / 2.0 + 1.0, y + 1.0, w, h], [0.0, 0.0, 0.0, 1.0]);
+                    gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [c[0] - w / 2.0, y, w, h], [1.0; 4]);
+                }
+            }
             return;
         }
+        // With the km/h extra the marks and numbers are km/h ones, set
+        // where the mph needle points at that speed.
+        let kmh = crate::tweaks::get().kmh;
+        let (unit, top, number_step) = if kmh { (MPH_PER_KMH, 160, 20) } else { (1.0, 100, 10) };
         let (r, flat) = (DIAL_RADIUS, DIAL_FLAT);
         let face = ui.made(gfx, "dial", || {
             painted(2.0 * r, r + flat, 0.58, |x, y| {
@@ -425,9 +443,10 @@ impl Hud {
             }, |_, _| 0.0)
         });
         gfx.sprites.quad(face, [0.0, 0.0, 1.0, 1.0], [c[0] - r, c[1] - r, 2.0 * r, r + flat], [1.0; 4]);
-        for mph in (0..=100).step_by(5) {
-            let from = if mph % 10 == 0 { MARK_LONG } else { MARK_SHORT };
-            let (a, b) = (at(mph as f32, from), at(mph as f32, MARK_OUT));
+        for mark in (0..=top).step_by(number_step / 2) {
+            let from = if mark % number_step == 0 { MARK_LONG } else { MARK_SHORT };
+            let mph = mark as f32 * unit;
+            let (a, b) = (at(mph, from), at(mph, MARK_OUT));
             // Cut short of the face's flat bottom.
             let bottom = c[1] + flat - 2.0;
             if a[1] >= bottom {
@@ -437,11 +456,11 @@ impl Hud {
             let b = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
             ui.line(gfx, a, b, 1.25, MARK_COLOUR);
         }
-        for mph in (0..=100).step_by(10) {
-            if let Some(t) = ui.text(gfx, &mph.to_string(), NUMBER_PT, true) {
+        for mark in (0..=top).step_by(number_step) {
+            if let Some(t) = ui.text(gfx, &mark.to_string(), NUMBER_PT, true) {
                 let (w, h) = gfx.sprites.size(t);
                 let (w, h) = (w as f32, h as f32);
-                let [x, y] = at(mph as f32, NUMBER_OUT);
+                let [x, y] = at(mark as f32 * unit, NUMBER_OUT);
                 gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [x - w / 2.0, y - h / 2.0, w, h], MARK_COLOUR);
             }
         }

@@ -99,6 +99,13 @@ one last touched rides.
   yourself from your own copy of the game. See
   [docs/hires-textures.md](docs/hires-textures.md). Packs are never shared
   here.
+* The launcher's **Extras** section (and the game's Options > Tweaks...)
+  turns on things the original didn't have, all off unless chosen: a
+  modernised HUD, quick get-up (G), air steering and braking, a live gap
+  to your best lap, a steadier camera, a field of view slider, controller
+  vibration, a difficulty table, cleaner AI starts, one-lap races, a km/h
+  speedometer, mute in the background and a screenshot key (Ctrl+P).
+  "Back to the original" turns them all off again.
 
 On Linux, building needs ALSA and libudev headers
 (`sudo apt install libasound2-dev libudev-dev pkg-config`); build with
@@ -156,6 +163,12 @@ MM2_DATA="/path/to/Motocross Madness 2" cargo test
 ```
 
 ## Credits
+
+* Many fixes and most of the Extras came from Daniel's fork,
+  [dwolp/MCM2](https://github.com/dwolp/MCM2): ultrawide support, saved
+  track records, gates in either direction, the single-event difficulty,
+  the terrain line and grass fixes, display settings in the game, and
+  more. Thank you, Daniel.
 
 * The Indeo 5 decoder in `crates/mm2-indeo` is a port of
   [FFmpeg](https://ffmpeg.org)'s, by Maxim Poliakovski, and keeps FFmpeg's

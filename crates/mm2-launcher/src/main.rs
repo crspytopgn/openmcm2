@@ -447,6 +447,7 @@ impl eframe::App for Launcher {
                 self.more_tracks_ui(ui, busy);
                 self.display_ui(ui);
                 self.graphics_ui(ui);
+                self.extras_ui(ui);
                 self.updates_ui(ui);
                 ui.collapsing("Command line", |ui| {
                     let line = std::iter::once("mm2-viewer".to_string())
@@ -522,7 +523,7 @@ impl Launcher {
             ui.label(now);
             ui.label(
                 egui::RichText::new(
-                    "Change it in the game: Options, Graphics, Display Resolution. Alt+Enter switches to full screen and back while playing. VSync, the frame rate, the difficulty table, air steering and braking, quick get-up, vibration, the camera and the HUD are in the game too: Options, then Tweaks... at the bottom.",
+                    "Change it in the game: Options, Graphics, Display Resolution. Alt+Enter switches to full screen and back while playing.",
                 )
                 .weak(),
             );
@@ -598,6 +599,73 @@ impl Launcher {
 }
 
 impl Launcher {
+    /// The extras the original game didn't have, all off unless turned
+    /// on. Most of them come from Daniel's fork (github.com/dwolp/MCM2).
+    fn extras_ui(&mut self, ui: &mut egui::Ui) {
+        let s = &mut self.settings;
+        section(ui, "Extras", |ui| {
+            ui.label(
+                egui::RichText::new(
+                    "Things the original game didn't have. They all start off, so the game plays as it did. Most of them are also in the game: Options, then Tweaks... at the bottom.",
+                )
+                .weak(),
+            );
+            ui.add_space(4.0);
+            let original = s.is_original();
+            if ui
+                .add_enabled(!original, egui::Button::new("Back to the original"))
+                .on_hover_text("Turns every extra here off, and the difficulty table back to the game's.")
+                .clicked()
+            {
+                s.original();
+            }
+            let check = |ui: &mut egui::Ui, on: &mut bool, text: &str, about: &str| {
+                ui.checkbox(on, text).on_hover_text(about);
+            };
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Riding").strong());
+            check(ui, &mut s.quick_get_up, "Quick get-up", "After a crash, G or a pad's Back puts you straight back on the bike. Not in network races.");
+            ui.horizontal(|ui| {
+                ui.label("Air steering");
+                ui.add(egui::Slider::new(&mut s.air_steer, 0..=mm2_settings::AIR_MOST).step_by(10.0).suffix("%"))
+                    .on_hover_text("How much steering in the air bends your flight. 0% is the original game.");
+            });
+            ui.horizontal(|ui| {
+                ui.label("Air braking");
+                ui.add(egui::Slider::new(&mut s.air_brake, 0..=mm2_settings::AIR_MOST).step_by(10.0).suffix("%"))
+                    .on_hover_text("How much braking in the air shortens your flight. 0% is the original game.");
+            });
+            check(ui, &mut s.clean_starts, "Cleaner starts", "The computer riders keep their order across the gate off the start, so fewer pile into each other.");
+            check(ui, &mut s.one_lap, "One-lap races", "National and Supercross races can be 1 lap long (the original starts at 2).");
+            ui.label(egui::RichText::new("The difficulty table is in the game: Options, Tweaks..., Difficulty...").weak());
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Race display and camera").strong());
+            check(ui, &mut s.sharp_display, "Modernised HUD", "Crisp see-through race panel, radar and speedometer at your screen's resolution.");
+            check(ui, &mut s.kmh, "Speedometer in km/h", "The speed in kilometres an hour instead of miles an hour.");
+            check(ui, &mut s.lap_gap, "Live gap to your best lap", "Under the race panel: how far ahead or behind your best lap you are.");
+            check(ui, &mut s.centred_display, "Race display nearer the middle", "On screens wider than 16:9, the race display where it sits on a 16:9 screen.");
+            check(ui, &mut s.steady_camera, "Steadier camera", "The chase camera rises and dips with the bike more gently.");
+            ui.horizontal(|ui| {
+                ui.label("Field of view");
+                ui.add(egui::Slider::new(&mut s.fov, 60..=120).suffix("°"))
+                    .on_hover_text("How wide the riding cameras see. 85° is the original game's.");
+            });
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Controllers, sound and screen").strong());
+            ui.horizontal(|ui| {
+                check(ui, &mut s.vibration, "Controller vibration", "The pad thumps on landings, knocks over bumps and jolts in crashes.");
+                ui.add_enabled(s.vibration, egui::Slider::new(&mut s.vibration_strength, 0..=100).suffix("%"));
+            });
+            check(ui, &mut s.mute_in_background, "Mute in the background", "The game goes quiet while its window isn't the one in front.");
+            check(ui, &mut s.screenshot_key, "Screenshot key (Ctrl+P)", "Ctrl+P in a race saves a picture to the Screenshots folder beside your saves.");
+            ui.add_space(4.0);
+            ui.separator();
+            check(ui, &mut s.vsync, "VSync", "A picture each time the screen refreshes, with no tearing.");
+            check(ui, &mut s.show_fps, "Show frame rate", "The frames a second at the bottom left (F2 too).");
+            ui.label(egui::RichText::new("Thanks to Daniel (github.com/dwolp) for most of these, and for the fixes that came with them.").weak());
+        });
+    }
+
     /// The notice at the top when a newer release is out, and the
     /// download's progress once the player says yes.
     fn update_banner(&mut self, ui: &mut egui::Ui, busy: bool) {

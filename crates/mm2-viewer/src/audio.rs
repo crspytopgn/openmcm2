@@ -37,6 +37,8 @@ struct Mixer {
     rate: f32,
     /// The EAX reverb on the whole mix, while a race asks for one.
     reverb: Option<crate::reverb::Tail>,
+    /// Silent, with the voices playing on (the mute-in-background extra).
+    muted: bool,
 }
 
 impl Mixer {
@@ -78,6 +80,9 @@ impl Mixer {
         });
         if let Some(tail) = &mut self.reverb {
             tail.apply(out);
+        }
+        if self.muted {
+            out.fill(0.0);
         }
         for s in out {
             *s = s.clamp(-1.0, 1.0);
@@ -219,6 +224,11 @@ impl Audio {
             let rate = m.rate;
             m.reverb = reverb.map(|r| crate::reverb::Tail::new(r, rate));
         }
+    }
+
+    /// Silences the mix, or lets it be heard again; the voices play on.
+    pub fn set_muted(&self, muted: bool) {
+        self.mixer.lock().unwrap().muted = muted;
     }
 
     pub fn stop_all(&self) {

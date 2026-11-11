@@ -17,7 +17,7 @@ pub struct Tweaks {
     /// own, 0 none (`--air-brake=N`; `--air-brake` alone is 100).
     pub air_brake: u32,
     /// G or a pad's Back puts the player back on the bike after a crash
-    /// (off with `--no-quick-get-up`).
+    /// (`--quick-get-up`).
     pub quick_get_up: bool,
     /// The live gap to the best lap (`--lap-gap`).
     pub lap_gap: bool,
@@ -25,7 +25,7 @@ pub struct Tweaks {
     pub steady_camera: bool,
     /// The Chase Cam's field of view, degrees (`--fov=N`; the game's 85).
     pub fov: u32,
-    /// The modernised HUD (off with `--original-race-display`).
+    /// The modernised HUD (`--modern-hud`).
     pub modern_hud: bool,
     /// On an ultrawide window, the race display in a 16:9 middle
     /// (`--centred-display`).
@@ -37,6 +37,16 @@ pub struct Tweaks {
     pub vsync: bool,
     /// The frame rate at the bottom of the screen (`--show-fps`, or F2).
     pub show_fps: bool,
+    /// Daniel's cleaner starts for the computer riders (`--clean-starts`).
+    pub clean_starts: bool,
+    /// National and Supercross races may be one lap long (`--one-lap`).
+    pub one_lap: bool,
+    /// The speedometer in km/h (`--kmh`).
+    pub kmh: bool,
+    /// Quiet while the window is in the background (`--mute-in-background`).
+    pub mute_in_background: bool,
+    /// Ctrl+P saves a screenshot (`--screenshot-key`).
+    pub screenshot_key: bool,
 }
 
 /// The field of view's range, degrees.
@@ -56,13 +66,13 @@ impl Tweaks {
                 .unwrap_or(mm2_settings::DIFFICULTY),
             air_steer: strength("--air-steer"),
             air_brake: strength("--air-brake"),
-            quick_get_up: !has("--no-quick-get-up"),
+            quick_get_up: has("--quick-get-up"),
             lap_gap: has("--lap-gap"),
             steady_camera: has("--steady-camera"),
             fov: value("--fov=")
                 .and_then(|n| n.parse::<u32>().ok())
-                .map_or(85, |f| f.clamp(FOV.0, FOV.1)),
-            modern_hud: !has("--original-race-display"),
+                .map_or(mm2_settings::GAME_FOV, |f| f.clamp(FOV.0, FOV.1)),
+            modern_hud: has("--modern-hud"),
             centred: has("--centred-display"),
             vibration: value("--vibration=").and_then(|v| match v {
                 "off" => Some(None),
@@ -70,6 +80,11 @@ impl Tweaks {
             }),
             vsync: !has("--no-vsync"),
             show_fps: has("--show-fps"),
+            clean_starts: has("--clean-starts"),
+            one_lap: has("--one-lap"),
+            kmh: has("--kmh"),
+            mute_in_background: has("--mute-in-background"),
+            screenshot_key: has("--screenshot-key"),
         }
     }
 
@@ -86,6 +101,11 @@ impl Tweaks {
         s.centred_display = self.centred;
         s.vsync = self.vsync;
         s.show_fps = self.show_fps;
+        s.clean_starts = self.clean_starts;
+        s.one_lap = self.one_lap;
+        s.kmh = self.kmh;
+        s.mute_in_background = self.mute_in_background;
+        s.screenshot_key = self.screenshot_key;
         match self.vibration {
             Some(Some(n)) => {
                 s.vibration = true;
@@ -131,12 +151,13 @@ mod tests {
             air_steer: 0,
             air_brake: 150,
             fov: 100,
-            sharp_display: false,
             vibration: true,
             vibration_strength: 30,
             vsync: false,
             show_fps: true,
-            quick_get_up: false,
+            quick_get_up: true,
+            sharp_display: true,
+            kmh: true,
             ..Default::default()
         };
         let mut args = vec!["mm2-viewer".to_string()];
@@ -144,7 +165,7 @@ mod tests {
         let t = Tweaks::from_args(&args);
         assert_eq!(t.difficulty[2][0], 9);
         assert_eq!((t.air_steer, t.air_brake), (0, 150));
-        assert!(!t.quick_get_up && !t.modern_hud && !t.vsync && t.show_fps);
+        assert!(t.quick_get_up && t.modern_hud && t.kmh && !t.vsync && t.show_fps);
         assert_eq!((t.fov, t.vibration), (100, Some(Some(30))));
         let before = s.clone();
         t.into_settings(&mut s);
@@ -156,7 +177,7 @@ mod tests {
         let t = Tweaks::from_args(&["mm2-viewer".into(), "--vibration=off".into()]);
         assert_eq!(t.vibration, Some(None));
         let t = Tweaks::from_args(&["mm2-viewer".into()]);
-        assert_eq!((t.vibration, t.fov, t.modern_hud), (None, 85, true));
+        assert_eq!((t.vibration, t.fov, t.modern_hud, t.quick_get_up), (None, 85, false, false));
         let t = Tweaks::from_args(&["mm2-viewer".into(), "--air-steer".into()]);
         assert_eq!((t.air_steer, t.air_brake), (100, 0));
     }

@@ -1,4 +1,47 @@
-# OpenMCM2 0.2.1
+# OpenMCM2 0.3.0
+
+## New in 0.3.0
+
+Most of this release comes from **Daniel's fork,
+[dwolp/MCM2](https://github.com/dwolp/MCM2)**. Thank you, Daniel.
+
+Fixes:
+
+* **Track records are saved:** best laps, stunt scores and race times now
+  go into the High Scores tables after a single-player race.
+* **Enduro and Baja gates count from either side** for you, as in the
+  original.
+* **Difficulty Level works in single events:** Easy and Hard were always
+  raced as Normal before.
+* **Ultrawide screens:** a 21:9 view with black bars beyond it, and a race
+  display that isn't stretched. The launcher's display sizes are grouped by
+  shape.
+* **Options > Graphics > Display Resolution** works, and the frame rate
+  (F2) shows on screen, full screen too.
+* **Enhanced look:** no more bright line across the ground, and 3D grass
+  only grows on green ground (not on dirt, sand, rock or roads).
+* Options that have no effect yet are greyed out, and a pad's shoulder
+  buttons switch the menu tabs.
+* Linux: menu fonts are found in any font folder; Steam Deck: the pointer
+  shows in Gaming Mode and suboptimal frames no longer stall. Texture
+  export works on Windows.
+* The game can start without the launcher, with the launcher's settings,
+  and the launcher can make a desktop shortcut.
+
+**Extras**, all off unless you turn them on in the launcher's new Extras
+section (or the game's Options > Tweaks...). "Back to the original" turns
+them all off again:
+
+* From Daniel: modernised HUD, quick get-up (G or a pad's Back), air
+  steering and air braking, live gap to your best lap, steadier camera,
+  field of view, controller vibration, a 1 to 10 difficulty table, cleaner
+  starts for the computer riders, and one-lap National and Supercross
+  races.
+* New: a **km/h speedometer**, **mute in the background**, and a
+  **screenshot key** (Ctrl+P saves to the Screenshots folder beside your
+  saves).
+
+If you're on 0.1.6 or later, the launcher will offer this update itself.
 
 ## New in 0.2.1
 

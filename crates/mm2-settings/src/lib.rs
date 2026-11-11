@@ -190,7 +190,7 @@ pub struct Settings {
     /// (`--vibration=N`, or `off`).
     pub vibration: bool,
     pub vibration_strength: u32,
-    /// The modernised HUD (off: `--original-race-display`).
+    /// The modernised HUD (`--modern-hud`).
     pub sharp_display: bool,
     /// How much steering in the air bends the flight, % of the fork's
     /// own, 0 the game's none (`--air-steer=N`); see [`AIR_MOST`].
@@ -199,7 +199,7 @@ pub struct Settings {
     /// own, 0 the game's none (`--air-brake=N`).
     pub air_brake: u32,
     /// G or a pad's Back puts the player back on the bike after a crash
-    /// (off: `--no-quick-get-up`).
+    /// (`--quick-get-up`).
     pub quick_get_up: bool,
     /// The live gap to the best lap (`--lap-gap`).
     pub lap_gap: bool,
@@ -209,7 +209,23 @@ pub struct Settings {
     pub fov: u32,
     /// Look for a newer OpenMCM2 when the launcher opens.
     pub check_updates: bool,
+    /// Daniel's cleaner starts: the computer riders keep their order
+    /// across the gate off the start (`--clean-starts`).
+    pub clean_starts: bool,
+    /// National and Supercross races may be one lap long (`--one-lap`).
+    pub one_lap: bool,
+    /// The speedometer in km/h (`--kmh`).
+    pub kmh: bool,
+    /// The race's sound goes quiet while the game's window is in the
+    /// background (`--mute-in-background`).
+    pub mute_in_background: bool,
+    /// Ctrl+P saves a picture of the screen to the saves folder's
+    /// Screenshots (`--screenshot-key`).
+    pub screenshot_key: bool,
 }
+
+/// The game's field of view, degrees.
+pub const GAME_FOV: u32 = 85;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -229,16 +245,23 @@ impl Default for Settings {
             centred_display: false,
             show_fps: false,
             difficulty: DIFFICULTY,
-            vibration: true,
+            // Everything the original game didn't have starts off, so
+            // the game plays as it did unless the player turns it on.
+            vibration: false,
             vibration_strength: 50,
-            sharp_display: true,
-            air_steer: 100,
-            air_brake: 100,
-            quick_get_up: true,
-            lap_gap: true,
-            steady_camera: true,
-            fov: 85,
+            sharp_display: false,
+            air_steer: 0,
+            air_brake: 0,
+            quick_get_up: false,
+            lap_gap: false,
+            steady_camera: false,
+            fov: GAME_FOV,
             check_updates: true,
+            clean_starts: false,
+            one_lap: false,
+            kmh: false,
+            mute_in_background: false,
+            screenshot_key: false,
         }
     }
 }
@@ -246,6 +269,35 @@ impl Default for Settings {
 impl Settings {
     pub fn path() -> PathBuf {
         user_dir().join("launcher.ini")
+    }
+
+    /// Whether every extra the original game didn't have is off, as it
+    /// starts.
+    pub fn is_original(&self) -> bool {
+        let mut o = self.clone();
+        o.original();
+        o == *self
+    }
+
+    /// Turns off every extra the original game didn't have, keeping the
+    /// display, graphics and game folder as they are.
+    pub fn original(&mut self) {
+        let d = Settings::default();
+        self.centred_display = d.centred_display;
+        self.difficulty = d.difficulty;
+        self.vibration = d.vibration;
+        self.sharp_display = d.sharp_display;
+        self.air_steer = d.air_steer;
+        self.air_brake = d.air_brake;
+        self.quick_get_up = d.quick_get_up;
+        self.lap_gap = d.lap_gap;
+        self.steady_camera = d.steady_camera;
+        self.fov = d.fov;
+        self.clean_starts = d.clean_starts;
+        self.one_lap = d.one_lap;
+        self.kmh = d.kmh;
+        self.mute_in_background = d.mute_in_background;
+        self.screenshot_key = d.screenshot_key;
     }
 
     pub fn load() -> Settings {
@@ -295,6 +347,11 @@ impl Settings {
                 "fov" => s.fov = v.parse::<u32>().unwrap_or(85).clamp(60, 120),
                 "vibration_strength" => s.vibration_strength = v.parse::<u32>().unwrap_or(50).min(100),
                 "check_updates" => s.check_updates = yes(v),
+                "clean_starts" => s.clean_starts = yes(v),
+                "one_lap" => s.one_lap = yes(v),
+                "kmh" => s.kmh = yes(v),
+                "mute_in_background" => s.mute_in_background = yes(v),
+                "screenshot_key" => s.screenshot_key = yes(v),
                 // Files from before version 2 kept the replay blur on by
                 // default; it starts off now, so their setting is dropped.
                 "upgrade.cinematic" if !text.lines().any(|l| l.trim() == "version=2") => {}
@@ -312,7 +369,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\n",
+            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -338,6 +395,11 @@ impl Settings {
             b(self.steady_camera),
             self.fov,
             b(self.check_updates),
+            b(self.clean_starts),
+            b(self.one_lap),
+            b(self.kmh),
+            b(self.mute_in_background),
+            b(self.screenshot_key),
         );
         for (u, on) in UPGRADES.iter().zip(&self.upgrades) {
             t += &format!("upgrade.{}={}\n", u.0, b(*on));
@@ -398,8 +460,8 @@ impl Settings {
         if self.air_brake > 0 {
             a.push(format!("--air-brake={}", self.air_brake));
         }
-        if !self.quick_get_up {
-            a.push("--no-quick-get-up".into());
+        if self.quick_get_up {
+            a.push("--quick-get-up".into());
         }
         if self.lap_gap {
             a.push("--lap-gap".into());
@@ -407,11 +469,22 @@ impl Settings {
         if self.steady_camera {
             a.push("--steady-camera".into());
         }
-        if self.fov != 85 {
+        if self.fov != GAME_FOV {
             a.push(format!("--fov={}", self.fov));
         }
-        if !self.sharp_display {
-            a.push("--original-race-display".into());
+        if self.sharp_display {
+            a.push("--modern-hud".into());
+        }
+        for (on, flag) in [
+            (self.clean_starts, "--clean-starts"),
+            (self.one_lap, "--one-lap"),
+            (self.kmh, "--kmh"),
+            (self.mute_in_background, "--mute-in-background"),
+            (self.screenshot_key, "--screenshot-key"),
+        ] {
+            if on {
+                a.push(flag.into());
+            }
         }
         a.push(match self.vibration {
             true => format!("--vibration={}", self.vibration_strength),
@@ -448,12 +521,16 @@ mod tests {
         s.window = (1920, 1080);
         s.centred_display = true;
         s.difficulty[2][0] = 9;
+        s.air_steer = 100;
         s.air_brake = 150;
-        s.quick_get_up = false;
+        s.quick_get_up = true;
+        s.lap_gap = true;
+        s.vibration = true;
         s.vibration_strength = 80;
-        s.steady_camera = false;
         s.fov = 100;
         s.check_updates = false;
+        s.kmh = true;
+        s.screenshot_key = true;
         assert_eq!(Settings::parse(&s.text()), s);
         assert_eq!(
             s.args(),
@@ -466,11 +543,24 @@ mod tests {
                 "--difficulty=3,5,7,3,5,7,9,5,7,3,5,7",
                 "--air-steer=100",
                 "--air-brake=150",
-                "--no-quick-get-up",
+                "--quick-get-up",
                 "--lap-gap",
                 "--fov=100",
+                "--kmh",
+                "--screenshot-key",
                 "--vibration=80"
             ]
         );
+        assert!(!s.is_original());
+        s.original();
+        assert!(s.is_original());
+    }
+
+    #[test]
+    fn the_extras_start_off() {
+        let s = Settings::default();
+        assert!(s.is_original());
+        let args = s.args();
+        assert_eq!(&args[args.len() - 1..], ["--vibration=off"]);
     }
 }

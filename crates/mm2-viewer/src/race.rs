@@ -2292,6 +2292,10 @@ impl Race {
     /// (see [`spaced_lanes`]), so none crosses another's way off the start
     /// or shares its lane. Each keeps its place across the gate at first.
     fn spread_lanes(&mut self) {
+        // An extra (`--clean-starts`): the original lets them funnel.
+        if !crate::tweaks::get().clean_starts {
+            return;
+        }
         let Some(course) = &self.course else {
             return;
         };

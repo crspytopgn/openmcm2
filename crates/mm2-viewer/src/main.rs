@@ -16,11 +16,16 @@
 //! mm2-viewer ... --fullscreen [--no-vsync]  // or Alt+Enter while playing
 //! mm2-viewer ... --show-fps                // or F2: the frame rate in the title and terminal
 //! mm2-viewer ... --centred-display         // ultrawide: the race display in a 16:9 middle
-//! mm2-viewer ... --original-race-display  // the game's own speedometer, pictures and radar lines
+//! mm2-viewer ... --modern-hud             // crisp see-through speedometer, panel and radar
 //! mm2-viewer ... --vibration=N|off         // pad vibration strength 0 to 100 (else the profile's)
 //! mm2-viewer ... --air-steer[=N]           // steering in the air bends the flight, N% of the fork's (0-200)
 //! mm2-viewer ... --air-brake[=N]           // braking in the air shortens the flight, N% of the fork's (0-200)
-//! mm2-viewer ... --no-quick-get-up         // G or a pad's Back no longer puts you back on after a crash
+//! mm2-viewer ... --quick-get-up            // G or a pad's Back puts you back on after a crash
+//! mm2-viewer ... --clean-starts            // computer riders keep their order across the gate
+//! mm2-viewer ... --one-lap                 // National and Supercross races may be 1 lap
+//! mm2-viewer ... --kmh                     // the speedometer in km/h
+//! mm2-viewer ... --mute-in-background      // quiet while the window is in the background
+//! mm2-viewer ... --screenshot-key          // Ctrl+P saves a screenshot
 //! mm2-viewer ... --lap-gap                 // live gap to the best lap under the race panel
 //! mm2-viewer ... --steady-camera           // the chase camera turns and rises more gently
 //! mm2-viewer ... --fov=N                   // the Chase Cam's field of view (the game's 85)
@@ -3239,6 +3244,23 @@ fn skipped(why: &str) {
     }
 }
 
+/// Saves the window's picture `frame` to the saves folder's Screenshots,
+/// numbered after the last there (the screenshot key, an extra).
+fn save_screenshot(device: &wgpu::Device, queue: &wgpu::Queue, frame: &wgpu::Texture) -> Result<PathBuf, BoxError> {
+    if !frame.usage().contains(wgpu::TextureUsages::COPY_SRC) {
+        return Err("this window's picture can't be read back".into());
+    }
+    let dir = mm2_settings::user_dir().join("Screenshots");
+    std::fs::create_dir_all(&dir)?;
+    let out = (1..)
+        .map(|n| dir.join(format!("OpenMCM2 {n:04}.png")))
+        .find(|p| !p.exists())
+        .expect("a free name");
+    let none = device.create_command_encoder(&Default::default()).finish();
+    save_png(device, queue, none, frame, &out)?;
+    Ok(out)
+}
+
 /// Runs `draw` and saves `target` as a PNG.
 fn save_png(
     device: &wgpu::Device,
@@ -3278,11 +3300,19 @@ fn save_png(
         .map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
     device.poll(wgpu::PollType::wait_indefinitely())?;
     let data = readback.slice(..).get_mapped_range()?;
-    let pixels: Vec<u8> = data
+    let mut pixels: Vec<u8> = data
         .chunks(row as usize)
         .flat_map(|r| &r[..(width * 4) as usize])
         .copied()
         .collect();
+    // A window's picture (the screenshot key) may be blue first, and its
+    // alpha isn't meant to be seen.
+    if matches!(target.format(), wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb) {
+        pixels.chunks_exact_mut(4).for_each(|p| {
+            p.swap(0, 2);
+            p[3] = 255;
+        });
+    }
     let mut encoder = png::Encoder::new(
         std::io::BufWriter::new(std::fs::File::create(out)?),
         width,
@@ -3395,6 +3425,8 @@ struct App {
     shake: [f32; 2],
     /// The window out of focus or covered: the pad keeps still.
     quiet: bool,
+    /// The screenshot key was pressed: save the next frame.
+    shoot: bool,
 }
 
 /// The device whose map the race uses when the profile's own is the
@@ -3517,6 +3549,7 @@ impl App {
             rumble: rumble::Rumble::default(),
             shake: [0.0; 2],
             quiet: false,
+            shoot: false,
         }
     }
 
@@ -3564,6 +3597,10 @@ impl App {
         // The race is copied in between black bars on a window wider than 21:9.
         if caps.usages.contains(wgpu::TextureUsages::COPY_DST) {
             config.usage |= wgpu::TextureUsages::COPY_DST;
+        }
+        // The screenshot key reads the window's picture back.
+        if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
+            config.usage |= wgpu::TextureUsages::COPY_SRC;
         }
         surface.configure(&device, &config);
         let sprites = sprites::Sprites::new(&device, config.format);
@@ -4778,6 +4815,18 @@ impl App {
             }
         }
         s.queue.submit(commands);
+        if std::mem::take(&mut self.shoot) {
+            let said = match save_screenshot(&s.device, &s.queue, &frame.texture) {
+                Ok(path) => format!("Screenshot saved: {}", path.file_name().unwrap_or_default().to_string_lossy()),
+                Err(e) => {
+                    eprintln!("screenshot: {e}");
+                    "Couldn't save the screenshot".to_string()
+                }
+            };
+            if let Some((_, hud)) = &mut self.hud {
+                hud.say(&said);
+            }
+        }
         s.window.pre_present_notify();
         s.queue.present(frame);
         if suboptimal {
@@ -4820,6 +4869,10 @@ impl ApplicationHandler for App {
             WindowEvent::Focused(on) => {
                 eprintln!("{now:.2}s: the game {} focus", if on { "has" } else { "lost" });
                 self.quiet = !on;
+                // An extra: the original played on in the background.
+                if tweaks::get().mute_in_background {
+                    self.audio.set_muted(!on);
+                }
                 self.feel_pad();
             }
             WindowEvent::Occluded(hidden) => {
@@ -5052,6 +5105,7 @@ impl ApplicationHandler for App {
                                     r.zoom(if code == KeyCode::Home { -1.0 } else { 1.0 });
                                 }
                             }
+                            KeyCode::KeyP if self.ctrl() && tweaks::get().screenshot_key => self.shoot = true,
                             KeyCode::KeyP => {
                                 if let Some(r) = &mut self.race {
                                     r.autopilot = !r.autopilot;

@@ -79,6 +79,15 @@ impl EventKind {
     pub fn courses(self) -> bool {
         matches!(self, EventKind::Baja | EventKind::Enduro)
     }
+
+    /// Laps start at 2 for the stadium and outdoor races, as in the
+    /// original, or at 1 with the one-lap extra (`--one-lap`).
+    fn fewest_laps(self) -> u32 {
+        match self {
+            EventKind::Nationals | EventKind::Supercross if !crate::tweaks::get().one_lap => 2,
+            _ => 1,
+        }
+    }
 }
 
 /// The race modes, as the game numbers them, with their text.
@@ -1362,7 +1371,7 @@ impl Frontend {
         let (from, to) = if event == EventKind::Stunt {
             (2, 30)
         } else {
-            (1, 20)
+            (event.fewest_laps(), 20)
         };
         self.laps = self.laps.clamp(from, to);
         page.set_items(
