@@ -300,9 +300,17 @@ pub fn enable(e: Enhanced) {
     let _ = ENHANCED.set(e);
 }
 
+/// False once the GPU turned out unable to draw the upgrades (OpenGL).
+static DRAWABLE: AtomicBool = AtomicBool::new(true);
+
+/// The GPU cannot draw the upgrades: the original look it is.
+pub fn not_drawable() {
+    DRAWABLE.store(false, Ordering::Relaxed);
+}
+
 /// The upgrades, when on.
 pub fn enhanced() -> Option<Enhanced> {
-    ENHANCED.get().copied()
+    ENHANCED.get().copied().filter(|_| DRAWABLE.load(Ordering::Relaxed))
 }
 
 /// The upgrades as they show now: none while F3 has switched to the

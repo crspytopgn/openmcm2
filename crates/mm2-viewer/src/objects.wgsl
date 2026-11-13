@@ -21,8 +21,23 @@ fn scene_light(facing: f32) -> vec3<f32> {
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
-// Transforms for the parts of animated models; 0 is the identity.
-@group(0) @binding(1) var<storage, read> nodes: array<mat4x4<f32>>;
+// Transforms for the parts of animated models; 0 is the identity. A
+// texture of four texels (columns) per node, not a storage buffer, since
+// older graphics cards' OpenGL has no storage buffers in vertex shaders.
+@group(0) @binding(1) var nodes: texture_2d<f32>;
+
+// Node `n`'s transform, from row-wrapped texels (NODE_ROW texels a row).
+const NODE_ROW: u32 = 1024u;
+fn node_matrix(n: u32) -> mat4x4<f32> {
+    let i = n * 4u;
+    let at = vec2<i32>(i32(i % NODE_ROW), i32(i / NODE_ROW));
+    return mat4x4<f32>(
+        textureLoad(nodes, at, 0),
+        textureLoad(nodes, at + vec2<i32>(1, 0), 0),
+        textureLoad(nodes, at + vec2<i32>(2, 0), 0),
+        textureLoad(nodes, at + vec2<i32>(3, 0), 0),
+    );
+}
 @group(1) @binding(0) var tex: texture_2d<f32>;
 @group(1) @binding(1) var tex_sampler: sampler;
 
@@ -76,7 +91,7 @@ fn vs_main(
     @location(3) color: vec4<f32>,
     @location(4) node: u32,
 ) -> VertexOut {
-    let m = nodes[node & 0x3fffffffu];
+    let m = node_matrix(node & 0x3fffffffu);
     let world = (m * vec4<f32>(position, 1.0)).xyz;
     var out: VertexOut;
     out.clip = globals.view_proj * vec4<f32>(world, 1.0);
@@ -134,7 +149,7 @@ fn vs_caster(
     @location(3) color: vec4<f32>,
     @location(4) node: u32,
 ) -> CasterOut {
-    let m = nodes[node & 0x3fffffffu];
+    let m = node_matrix(node & 0x3fffffffu);
     let world = (m * vec4<f32>(position, 1.0)).xyz;
     var out: CasterOut;
     out.clip = shadow.view_proj * vec4<f32>(world, 1.0);
