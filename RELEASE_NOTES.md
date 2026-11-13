@@ -1,4 +1,18 @@
-# OpenMCM2 0.3.1
+# OpenMCM2 0.3.2
+
+## New in 0.3.2
+
+* **OpenGL on older graphics cards works:** the game no longer stops at
+  the track on cards whose OpenGL can't read storage buffers in vertex
+  shaders, such as Intel HD Graphics 2000/3000 (#13). The picture is
+  the same as before.
+* **The Linux build runs on older distributions:** it is now built
+  against glibc 2.28, so it runs on RHEL 8 and 9, Debian 10, Ubuntu
+  18.04 and later without rebuilding.
+* The optional Enhanced graphics need Vulkan, Metal or DirectX 12; on
+  OpenGL the game now draws the original look instead of stopping.
+
+If you're on 0.1.6 or later, the launcher will offer this update itself.
 
 ## New in 0.3.1
 

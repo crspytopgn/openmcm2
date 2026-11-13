@@ -718,7 +718,7 @@ pub struct ObjectRenderer {
     /// What each view sees ([`ObjectRenderer::cull`]): runs of indices and
     /// their draw, for the camera and each sun cascade.
     seen: Vec<Vec<(std::ops::Range<u32>, usize)>>,
-    nodes: wgpu::Buffer,
+    nodes: wgpu::Texture,
     animated: Vec<AnimatedModel>,
     node_count: usize,
     /// The dressing's node, and whether it shows.
@@ -739,6 +739,41 @@ struct Enhanced {
     /// texture draw: the only casters indoors, where the "sun" is the
     /// stadium's lights and the roof would shade the whole floor.
     moving: Option<(wgpu::Buffer, Vec<(std::ops::Range<u32>, usize)>)>,
+}
+
+/// Texels in a row of the node texture (objects.wgsl's NODE_ROW): four
+/// per node, one for each column of its transform.
+const NODE_ROW: u32 = 1024;
+
+/// The node texture's size for `count` nodes: whole rows, as few as fit.
+fn node_texture_size(count: usize) -> wgpu::Extent3d {
+    let texels = count as u32 * 4;
+    wgpu::Extent3d {
+        width: NODE_ROW,
+        height: texels.div_ceil(NODE_ROW).max(1),
+        depth_or_array_layers: 1,
+    }
+}
+
+/// Writes the nodes' transforms into the node texture, row-wrapped.
+fn write_nodes(queue: &wgpu::Queue, texture: &wgpu::Texture, nodes: &[Mat4]) {
+    let size = texture.size();
+    let mut data = vec![[0f32; 4]; (size.width * size.height) as usize];
+    for (i, m) in nodes.iter().enumerate() {
+        for c in 0..4 {
+            data[i * 4 + c] = m.col(c).to_array();
+        }
+    }
+    queue.write_texture(
+        texture.as_image_copy(),
+        bytemuck::cast_slice(&data),
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(size.width * 16),
+            rows_per_image: Some(size.height),
+        },
+        size,
+    );
 }
 
 impl ObjectRenderer {
@@ -784,10 +819,10 @@ impl ObjectRenderer {
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
                     count: None,
                 },
@@ -1045,11 +1080,18 @@ impl ObjectRenderer {
             Enhanced { lit, depth, cascades, moving }
         });
         let node_count = mesh.node_count.max(1) as usize;
-        let nodes = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let nodes = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("object nodes"),
-            contents: bytemuck::cast_slice(&vec![Mat4::IDENTITY.to_cols_array(); node_count]),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            size: node_texture_size(node_count),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         });
+        write_nodes(queue, &nodes, &vec![Mat4::IDENTITY; node_count]);
+        let nodes_view = nodes.create_view(&Default::default());
         let globals = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("object globals"),
             layout: &globals_layout,
@@ -1060,7 +1102,7 @@ impl ObjectRenderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: nodes.as_entire_binding(),
+                    resource: wgpu::BindingResource::TextureView(&nodes_view),
                 },
             ],
         });
@@ -1295,8 +1337,7 @@ impl ObjectRenderer {
                 queue.write_buffer(&self.vertices, at, bytemuck::cast_slice(&moved));
             }
         }
-        let data: Vec<[f32; 16]> = nodes.iter().map(Mat4::to_cols_array).collect();
-        queue.write_buffer(&self.nodes, 0, bytemuck::cast_slice(&data));
+        write_nodes(queue, &self.nodes, &nodes);
     }
 
     /// Picks what view `slot` (0 the camera, 1 on each sun cascade) can

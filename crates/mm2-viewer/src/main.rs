@@ -2781,6 +2781,11 @@ async fn gpu_from(
             ..Default::default()
         })
         .await?;
+    // The enhanced drawing reads depth textures, which OpenGL cannot.
+    if adapter.get_info().backend == wgpu::Backend::Gl && graphics::enhanced().is_some() {
+        eprintln!("enhanced graphics need Vulkan, Metal or DirectX 12: drawing the original look on OpenGL");
+        graphics::not_drawable();
+    }
     // Anti-aliasing with 2 or 8 samples, where the GPU has them.
     let specific = adapter.features() & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
     let (device, queue) = adapter
