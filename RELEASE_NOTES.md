@@ -23,6 +23,13 @@
   effects to turn on.
 * **No shadow from the signs:** the "You" and "IT" signs over the
   riders no longer cast a shadow.
+* **Four new Enhanced effects, kept soft:** sky light (dips, the foot
+  of banks and gullies are a little dimmer, as under a real sky),
+  contact shadows (a thin shadow where tyres, boots and props meet the
+  ground), better ambient occlusion (soft shading in creases) and
+  reflections in puddles in the rain. Each one can be turned off. In the
+  browser only sky light and contact shadows run: the other two are too
+  heavy there.
 * **Every option explains itself:** point at any effect or setting in
   the launcher or on the browser page to see what it does.
 

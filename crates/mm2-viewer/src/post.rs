@@ -7,7 +7,8 @@ use crate::renderer::DEPTH_FORMAT;
 use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 
-const AO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+/// The occlusion (r) and the contact shadows (g).
+const AO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg8Unorm;
 /// The moving models' motion on screen (objects.rs fs_motion): pixels
 /// back to where each was a frame ago, how far it is, and 1 where drawn.
 pub const MOTION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -66,6 +67,29 @@ struct PostGlobals {
     /// and its colour.
     rain: [f32; 4],
     rain_colour: [f32; 4],
+    /// From the camera's space to the screen.
+    proj: [[f32; 4]; 4],
+    /// The way to the sun in the camera's space, and how dark the contact
+    /// shadows are (0 for none).
+    view_sun: [f32; 4],
+    /// The way up in the camera's space, and how wet the ground is for its
+    /// reflections (0 for none).
+    view_up: [f32; 4],
+    /// x 1 for the horizon-based occlusion (GTAO).
+    extra: [f32; 4],
+}
+
+/// What the screen-space effects need of the scene beyond the projection.
+#[derive(Clone, Copy)]
+pub struct Screen {
+    /// From the drawing to the camera's space.
+    pub view: Mat4,
+    /// The way to the sun (drawing coordinates).
+    pub to_sun: glam::Vec3,
+    /// How dark the contact shadows are, 0 for none.
+    pub contact: f32,
+    /// How wet the ground is for its reflections, 0 for none.
+    pub wet: f32,
 }
 
 /// What the scene is drawn into, at one size.
@@ -81,6 +105,10 @@ struct Targets {
     ao: wgpu::TextureView,
     blur_group: wgpu::BindGroup,
     blurred: wgpu::TextureView,
+    /// The reflections in wet ground, at half size, and the group making
+    /// them from the scene.
+    ssr: wgpu::TextureView,
+    ssr_group: wgpu::BindGroup,
     bloom: Vec<wgpu::TextureView>,
     /// Bloom's first step, then each step down (from the one above), then
     /// each step up (from the one below).
@@ -114,6 +142,7 @@ pub struct Post {
     sampler: wgpu::Sampler,
     ao: wgpu::RenderPipeline,
     ao_blur: wgpu::RenderPipeline,
+    ssr: wgpu::RenderPipeline,
     bloom_first: wgpu::RenderPipeline,
     bloom_down: wgpu::RenderPipeline,
     bloom_up: wgpu::RenderPipeline,
@@ -203,6 +232,7 @@ impl Post {
             }),
             ao: pipeline(device, &shader, "fs_ao", AO_FORMAT, None),
             ao_blur: pipeline(device, &shader, "fs_ao_blur", AO_FORMAT, None),
+            ssr: pipeline(device, &shader, "fs_ssr", HDR_FORMAT, None),
             bloom_first: pipeline(device, &shader, "fs_bloom_first", HDR_FORMAT, None),
             bloom_down: pipeline(device, &shader, "fs_bloom_down", HDR_FORMAT, None),
             bloom_up: pipeline(device, &shader, "fs_bloom_up", HDR_FORMAT, Some(add)),
@@ -286,6 +316,7 @@ impl Post {
         let half = (size.0.div_ceil(2), size.1.div_ceil(2));
         let ao = view(Self::texture(device, "ao", half, AO_FORMAT, 1, draw));
         let blurred = view(Self::texture(device, "ao blurred", half, AO_FORMAT, 1, draw));
+        let ssr = view(Self::texture(device, "reflections", half, HDR_FORMAT, 1, draw));
         let mut bloom = Vec::new();
         let mut s = size;
         for _ in 0..BLOOM_STEPS {
@@ -294,6 +325,7 @@ impl Post {
         }
         let ao_group = self.group(device, &self.ao, &[(1, &depth_only)], true, false);
         let blur_group = self.group(device, &self.ao_blur, &[(3, &ao)], true, true);
+        let ssr_group = self.group(device, &self.ssr, &[(1, &depth_only), (2, &hdr)], true, false);
         let bloom_first = self.group(device, &self.bloom_first, &[(2, &hdr)], false, true);
         let bloom_down = (1..BLOOM_STEPS)
             .map(|i| self.group(device, &self.bloom_down, &[(4, &bloom[i - 1])], false, true))
@@ -302,7 +334,7 @@ impl Post {
             .map(|i| self.group(device, &self.bloom_up, &[(4, &bloom[i])], false, true))
             .collect();
         let shafts = self.traced_shafts.clone().unwrap_or_else(|| self.blank.clone());
-        let composite = self.group(device, &self.composite, &[(1, &depth_only), (2, &hdr), (3, &blurred), (6, &bloom[0]), (7, &shafts)], true, true);
+        let composite = self.group(device, &self.composite, &[(1, &depth_only), (2, &hdr), (3, &blurred), (6, &bloom[0]), (7, &shafts), (9, &ssr)], true, true);
         let motion = view(Self::texture(device, "motion", size, MOTION_FORMAT, 1, draw));
         let motion_depth = view(Self::texture(device, "motion depth", size, MOTION_DEPTH, 1, wgpu::TextureUsages::RENDER_ATTACHMENT));
         // At the screen's size: drawn smaller, the scene is rebuilt from the
@@ -312,7 +344,7 @@ impl Post {
         let taa = [0, 1].map(|i| self.group(device, &self.taa, &[(1, &depth_only), (2, &hdr), (4, &history[1 - i]), (7, &shafts), (8, &motion)], true, true));
         let taa_bloom = [0, 1].map(|i| self.group(device, &self.bloom_first, &[(2, &history[i])], false, true));
         let taa_composite =
-            [0, 1].map(|i| self.group(device, &self.composite, &[(1, &depth_only), (2, &history[i]), (3, &blurred), (6, &bloom[0]), (7, &shafts)], true, true));
+            [0, 1].map(|i| self.group(device, &self.composite, &[(1, &depth_only), (2, &history[i]), (3, &blurred), (6, &bloom[0]), (7, &shafts), (9, &ssr)], true, true));
         self.taa_valid.set(false);
         self.targets = Some(Targets {
             output,
@@ -330,6 +362,8 @@ impl Post {
             ao,
             blur_group,
             blurred,
+            ssr,
+            ssr_group,
             bloom,
             bloom_first,
             bloom_down,
@@ -377,6 +411,7 @@ impl Post {
         screen: (u32, u32),
         taa: Option<Taa>,
         rain: Option<([f32; 4], [f32; 3])>,
+        screen_fx: Screen,
         mut timer: Option<&mut crate::gpu_time::GpuTimer>,
     ) {
         let Some(t) = &self.targets else { return };
@@ -386,6 +421,9 @@ impl Post {
         let (w, h) = (t.size.0 as f32, t.size.1 as f32);
         let ao = showing.is_some_and(|e| e.ao);
         let bloom = showing.is_some_and(|e| e.bloom);
+        let contact = showing.map_or(0.0, |e| if e.contact { screen_fx.contact } else { 0.0 });
+        let wet = showing.map_or(0.0, |e| if e.ssr && !e.raytracing { screen_fx.wet } else { 0.0 });
+        let to_view = |v: glam::Vec3| (screen_fx.view * v.extend(0.0)).truncate().normalize_or_zero();
         let globals = PostGlobals {
             inv_proj: proj.inverse().to_cols_array_2d(),
             size: [w, h, 1.0 / w, 1.0 / h],
@@ -417,6 +455,10 @@ impl Post {
                 [w, h, 1.0 / w, 1.0 / h]
             },
             taa: [self.taa_valid.get() as u32 as f32, if taa.is_some() { TAA_SHARPEN } else { 0.0 }, taa.map_or(0.0, |a| a.shift[0]), taa.map_or(0.0, |a| a.shift[1])],
+            proj: proj.to_cols_array_2d(),
+            view_sun: to_view(screen_fx.to_sun).extend(contact).into(),
+            view_up: to_view(glam::Vec3::Y).extend(wet).into(),
+            extra: [showing.is_some_and(|e| e.gtao) as u32 as f32, 0.0, 0.0, 0.0],
         };
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         let mut mark = |encoder: &mut wgpu::CommandEncoder, label: &'static str| {
@@ -457,7 +499,11 @@ impl Post {
             }
             None => (&t.bloom_first, &t.composite),
         };
-        if ao {
+        if wet > 0.0 {
+            pass(encoder, &t.ssr, false, &self.ssr, &t.ssr_group);
+            mark(encoder, "post: reflections");
+        }
+        if ao || contact > 0.0 {
             pass(encoder, &t.ao, false, &self.ao, &t.ao_group);
             pass(encoder, &t.blurred, false, &self.ao_blur, &t.blur_group);
             mark(encoder, "post: ao");

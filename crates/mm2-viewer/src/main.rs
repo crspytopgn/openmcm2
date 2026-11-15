@@ -113,6 +113,7 @@ mod display;
 mod screens;
 mod share;
 mod sky;
+mod skylight;
 mod sound;
 mod sprites;
 mod tag;

@@ -493,7 +493,7 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         facing = mix(facing, dot(bumped, l) * 0.5 + 0.5, soft);
         // Ambient a little brighter from the sky above than the ground below.
         let sky = mix(0.95, 1.15, bumped.y * 0.5 + 0.5);
-        let game = globals.ambient.rgb * sky + globals.sun.rgb * facing * lit;
+        let game = globals.ambient.rgb * sky * sky_seen(in.world) + globals.sun.rgb * facing * lit;
         // A soft highlight where the sun glints off it.
         let v = normalize(globals.camera.xyz - in.world);
         let h = normalize(l + v);

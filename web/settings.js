@@ -26,6 +26,10 @@ export const UPGRADES = [
   ["ruts", "Lasting tyre ruts", false, "Tyre ruts that stay for the race."],
   ["scenery", "Trackside props and crowd", false, "Props along the course, a paddock and a crowd."],
   ["grade", "Colour grade", false, "A bolder look: colour, contrast, a vignette."],
+  ["gtao", "Better ambient occlusion (GTAO)", true, "A truer ambient occlusion: deeper in creases and corners. Not in a browser: too heavy."],
+  ["contact", "Contact shadows", true, "A thin, soft shadow where tyres, boots and props touch the ground."],
+  ["ssr", "Reflections in puddles", true, "In the rain, puddles mirror the bikes and trees on screen. Not in a browser: too heavy."],
+  ["skylight", "Sky light", true, "The sky's light worked out when a track loads: dimmer in dips and under banks."],
 ];
 
 // In a browser, Ultra draws as High does (the game caps both: see
@@ -34,7 +38,7 @@ export const UPGRADES = [
 const QUALITIES = [["low", "Low"], ["medium", "Medium (recommended)"], ["high", "High (a fast computer)"]];
 // Whether a quality preset keeps an upgrade on (Quality::has).
 function presetHas(quality, name) {
-  const off = { low: ["ao", "shafts", "smooth", "cinematic", "grass"], medium: ["shafts", "smooth"] }[quality] || [];
+  const off = { low: ["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr"], medium: ["shafts", "smooth", "gtao", "ssr"] }[quality] || [];
   return !off.includes(name) && UPGRADES.some(([n, , on]) => n === name && on);
 }
 

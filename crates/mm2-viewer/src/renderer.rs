@@ -189,6 +189,9 @@ pub struct TerrainRenderer {
     /// Their light over the ground at night, baked the first night frame
     /// (crate::flood).
     flood: Option<crate::flood::FloodMap>,
+    /// The sky's light baked over the land (crate::skylight): samples a
+    /// side, ft between them, the lowest height and the range over them.
+    sky_light: Option<[f32; 4]>,
     /// Each part of the frame timed on the GPU, when asked (gpu_time).
     gpu_timer: Option<crate::gpu_time::GpuTimer>,
 }
@@ -418,8 +421,14 @@ impl TerrainRenderer {
             }
             crate::rt::Scene::new(device, queue, terrain, images, &geometry, &floodlights)
         });
+        let mut sky_light = None;
         let enhanced = upgrades.map(|_| {
-            let shared = crate::enhance::Shared::new(device, queue, upgrades.is_some_and(|e| e.ruts || e.wear), rt.as_ref());
+            let mut shared = crate::enhance::Shared::new(device, queue, upgrades.is_some_and(|e| e.ruts || e.wear), rt.as_ref());
+            if upgrades.is_some_and(|e| e.skylight) {
+                let baked = crate::skylight::SkyLight::bake(terrain);
+                shared.set_sky(device, queue, &baked, rt.as_ref());
+                sky_light = Some([baked.side as f32, baked.spacing, baked.low, baked.range]);
+            }
             use crate::enhance::{sampler, texture, uniform};
             use wgpu::{ShaderStages as S, TextureSampleType as T, TextureViewDimension as D};
             let float = T::Float { filterable: true };
@@ -638,6 +647,7 @@ impl TerrainRenderer {
             enhanced,
             headlights: Vec::new(),
             flood,
+            sky_light,
             pole_lamps: objects_pole_lamps,
         }
     }
@@ -1107,6 +1117,15 @@ impl TerrainRenderer {
                 dust_view: dust_view.map_or(Mat4::IDENTITY, |(m, _)| m).to_cols_array_2d(),
                 dust: dust_view.map_or([0.0; 4], |(_, least)| [1.0, least, 0.0, 0.0]),
                 flood: self.flood.as_ref().map_or([0.0; 4], |f| f.area()),
+                sky_light: {
+                    let [side, spacing, ..] = self.sky_light.unwrap_or([1.0, 1.0, 0.0, 1.0]);
+                    let strength = if on.skylight && self.sky_light.is_some() { 1.0 } else { 0.0 };
+                    [side, spacing, strength, flag(on.ssr && !traced && day.as_ref().is_some_and(|d| d.wet > 0.0))]
+                },
+                sky_height: {
+                    let [.., low, range] = self.sky_light.unwrap_or([1.0, 1.0, 0.0, 1.0]);
+                    [low, range, 0.0, 0.0]
+                },
             };
             queue.write_buffer(&e.shared.buffer, 0, bytemuck::bytes_of(&enh));
         }
@@ -1480,7 +1499,20 @@ impl TerrainRenderer {
                 let c = d.horizon * 0.9 + Vec3::new(a[0], a[1], a[2]) * 0.3;
                 ([time, d.rain, aspect, camera.position.x], c.into())
             });
-            e.post.finish(queue, &mut encoder, target, proj, showing, sun, cinematic, (width, height), taa_frame, rain, self.gpu_timer.as_mut());
+            // The contact shadows by day, as the sun's own show; the
+            // reflections as wet as the ground is.
+            let screen_fx = crate::post::Screen {
+                view: camera.view(),
+                to_sun: lights.to_sun,
+                contact: if showing.is_some_and(|s| s.shadows) {
+                    let high = ((lights.to_sun.y - 0.03) / 0.15).clamp(0.0, 1.0);
+                    0.5 * high * day.as_ref().map_or(1.0, |d| (1.0 - d.night) * (1.0 - d.cover * 0.7))
+                } else {
+                    0.0
+                },
+                wet: day.as_ref().map_or(0.0, |d| d.wet),
+            };
+            e.post.finish(queue, &mut encoder, target, proj, showing, sun, cinematic, (width, height), taa_frame, rain, screen_fx, self.gpu_timer.as_mut());
         }
         if let Some(t) = &mut self.gpu_timer {
             t.end(&mut encoder);

@@ -38,6 +38,16 @@ struct Post {
     // (0 for none here), the screen's shape and the camera's x; its colour.
     rain: vec4<f32>,
     rain_colour: vec4<f32>,
+    // From the camera's space to the screen.
+    proj: mat4x4<f32>,
+    // The way to the sun in the camera's space, and w how dark the
+    // contact shadows are (0 for none).
+    view_sun: vec4<f32>,
+    // The way up in the camera's space, and w how wet the ground is for
+    // its reflections (0 for none).
+    view_up: vec4<f32>,
+    // x 1 for the horizon-based occlusion (GTAO) in place of the plain one.
+    extra: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> post: Post;
@@ -51,6 +61,9 @@ struct Post {
 @group(0) @binding(7) var shaft_tex: texture_2d<f32>;
 // The moving models' motion on screen (objects.wgsl fs_motion).
 @group(0) @binding(8) var motion_tex: texture_2d<f32>;
+// The reflections in wet ground (fs_ssr): what they show, premultiplied
+// by how much.
+@group(0) @binding(9) var ssr_tex: texture_2d<f32>;
 
 struct Out {
     @builtin(position) position: vec4<f32>,
@@ -80,17 +93,9 @@ fn view_at(p: vec2<i32>) -> vec3<f32> {
     return v.xyz / v.w;
 }
 
-// Ambient occlusion (the Alchemy estimate, McGuire 2011): how much of the
-// open sky round each pixel the nearby surfaces hide.
-@fragment
-fn fs_ao(in: Out) -> @location(0) vec4<f32> {
-    // Worked out at half the scene's size, then blurred and stretched.
-    let p = vec2<i32>(in.position.xy) * 2;
-    if (depth_at(p) >= 1.0) {
-        return vec4<f32>(1.0);
-    }
-    let c = view_at(p);
-    // The surface's normal, from the nearer neighbours each way.
+// The surface's normal at `p` (camera's space), from the nearer neighbours
+// each way, so an edge's far side does not bend it.
+fn normal_at(p: vec2<i32>, c: vec3<f32>) -> vec3<f32> {
     let l = view_at(p - vec2<i32>(1, 0));
     let r = view_at(p + vec2<i32>(1, 0));
     let u = view_at(p - vec2<i32>(0, 1));
@@ -101,10 +106,22 @@ fn fs_ao(in: Out) -> @location(0) vec4<f32> {
     if (dot(n, c) > 0.0) {
         n = -n;
     }
+    return n;
+}
+
+// Where `v` (camera's space) falls on the scene's screen, in pixels, and
+// its depth there.
+fn screen_of(v: vec3<f32>) -> vec3<f32> {
+    let clip = post.proj * vec4<f32>(v, 1.0);
+    let ndc = clip.xyz / clip.w;
+    return vec3<f32>((ndc.x * 0.5 + 0.5) * post.size.x, (0.5 - ndc.y * 0.5) * post.size.y, ndc.z);
+}
+
+// Ambient occlusion (the Alchemy estimate, McGuire 2011): how much of the
+// open sky round each pixel the nearby surfaces hide.
+fn alchemy(p: vec2<i32>, c: vec3<f32>, n: vec3<f32>, noise: f32) -> f32 {
     let radius = post.params.x;
     let reach = clamp(radius * post.params.w / max(-c.z, 0.1), 2.0, 80.0);
-    // A different turn each pixel; the blur after evens it out.
-    let noise = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));
     var sum = 0.0;
     let count = 12;
     for (var i = 0; i < count; i++) {
@@ -116,21 +133,132 @@ fn fs_ao(in: Out) -> @location(0) vec4<f32> {
         let near = 1.0 - smoothstep(radius * radius * 0.5, radius * radius, vv);
         sum += max(dot(v, n) - 0.01 * -c.z, 0.0) / (vv + 0.05) * near;
     }
-    let ao = max(1.0 - 2.0 * post.params.y * sum / f32(count), 0.0);
-    return vec4<f32>(ao, ao, ao, 1.0);
+    return max(1.0 - 2.0 * post.params.y * sum / f32(count), 0.0);
+}
+
+// Ambient occlusion from the horizons (GTAO, Jimenez et al. 2016): across
+// a few slices of the view round each pixel, how high the surfaces round
+// it rise each way, and so how much of the sky's light, as a surface
+// facing `n` takes it, they leave.
+fn gtao(p: vec2<i32>, c: vec3<f32>, n: vec3<f32>, noise: f32, jitter: f32) -> f32 {
+    let radius = post.params.x;
+    let reach = clamp(radius * post.params.w / max(-c.z, 0.1), 3.0, 64.0);
+    let eye = normalize(-c);
+    let slices = 3;
+    let steps = 6;
+    var seen = 0.0;
+    for (var s = 0; s < slices; s++) {
+        let phi = (f32(s) + noise) * 3.14159 / f32(slices);
+        let way = vec2<f32>(cos(phi), sin(phi));
+        // The slice's way in the camera's space (the screen's y is down).
+        let dir = vec3<f32>(way.x, -way.y, 0.0);
+        let ortho = dir - dot(dir, eye) * eye;
+        let axis = normalize(cross(ortho, eye));
+        let projected = n - axis * dot(n, axis);
+        let length_n = max(length(projected), 1e-4);
+        let cos_n = clamp(dot(projected, eye) / length_n, -1.0, 1.0);
+        let angle_n = sign(dot(ortho, projected)) * acos(cos_n);
+        var h = vec2<f32>(-1.0);
+        for (var i = 0; i < steps; i++) {
+            let t = (f32(i) + jitter) / f32(steps);
+            let off = way * max(reach * t * t, 1.0 + f32(i));
+            for (var side = 0; side < 2; side++) {
+                let q = p + vec2<i32>(select(-off, off, side == 1));
+                let v = view_at(q) - c;
+                let len = length(v);
+                // Past the radius a surface counts for less and less, so
+                // a far wall does not shade the ground before it.
+                let fade = clamp(len * len / (radius * radius * 2.0), 0.0, 1.0);
+                let rise = mix(dot(v, eye) / max(len, 1e-4), -1.0, fade);
+                h[side] = max(h[side], rise);
+            }
+        }
+        let h0 = angle_n + clamp(-acos(h.x) - angle_n, -1.5708, 1.5708);
+        let h1 = angle_n + clamp(acos(h.y) - angle_n, -1.5708, 1.5708);
+        let sin_n = sin(angle_n);
+        let arc0 = (cos_n + 2.0 * h0 * sin_n - cos(2.0 * h0 - angle_n)) * 0.25;
+        let arc1 = (cos_n + 2.0 * h1 * sin_n - cos(2.0 * h1 - angle_n)) * 0.25;
+        seen += length_n * (arc0 + arc1);
+    }
+    // The depth's own small errors read as a little shade everywhere:
+    // most of the sky open counts as open.
+    let visible = clamp(seen / f32(slices) / 0.85, 0.0, 1.0);
+    // As strong as the plain one, softened toward full light: a crease is
+    // darker, open ground no darker than it was.
+    return mix(1.0, visible, 0.55 * post.params.y / 1.5);
+}
+
+// Contact shadows: from `c` a short way toward the sun, across the
+// screen's depth, whether anything just in front stands in the way: the
+// fine shadow where a tyre or a boot meets the ground, which the shadow
+// maps are too coarse for. 1 lit, 0 in its shadow.
+fn contact(c: vec3<f32>, n: vec3<f32>, jitter: f32) -> f32 {
+    let far = -c.z;
+    if (post.view_sun.w <= 0.0 || far > 90.0 || dot(n, post.view_sun.xyz) <= 0.0) {
+        return 1.0;
+    }
+    // Longer further off, where a pixel covers more.
+    let length_ft = clamp(far * 0.03, 0.8, 2.5);
+    let steps = 12;
+    let start = c + n * (0.02 + far * 0.002);
+    var shade = 0.0;
+    for (var i = 0; i < steps; i++) {
+        let t = (f32(i) + jitter) / f32(steps);
+        let at = start + post.view_sun.xyz * length_ft * t;
+        let q = screen_of(at);
+        if (any(q.xy < vec2<f32>(0.0)) || any(q.xy >= post.size.xy)) {
+            break;
+        }
+        let scene = view_at(vec2<i32>(q.xy));
+        // In front of the ray, by a little, but not so much it is
+        // something far in front (a rider before a wall).
+        let gap = scene.z - at.z;
+        let thick = 0.6 + far * 0.01;
+        if (gap > 0.03 + far * 0.002 && gap < thick) {
+            shade = max(shade, 1.0 - t);
+        }
+    }
+    // Fading out with distance and toward the end of the ray.
+    return 1.0 - shade * (1.0 - smoothstep(50.0, 90.0, far));
+}
+
+@fragment
+fn fs_ao(in: Out) -> @location(0) vec4<f32> {
+    // Worked out at half the scene's size, then blurred and stretched.
+    let p = vec2<i32>(in.position.xy) * 2;
+    if (depth_at(p) >= 1.0) {
+        return vec4<f32>(1.0);
+    }
+    let c = view_at(p);
+    let n = normal_at(p, c);
+    // Lifted off the surface a little, so its own bumps hide nothing.
+    let lifted = c + n * (0.03 + -c.z * 0.004);
+    // A different turn each pixel; the blur after evens it out.
+    let noise = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));
+    let jitter = fract(noise * 7.31 + 0.5);
+    var ao = 1.0;
+    if (post.flags.x > 0.5) {
+        if (post.extra.x > 0.5) {
+            ao = gtao(p, lifted, n, noise, jitter);
+        } else {
+            ao = alchemy(p, c, n, noise);
+        }
+    }
+    let lit = contact(c, n, jitter);
+    return vec4<f32>(ao, lit, 0.0, 1.0);
 }
 
 // The occlusion blurred over 4×4 pixels, in four filtered taps.
 @fragment
 fn fs_ao_blur(in: Out) -> @location(0) vec4<f32> {
     let t = post.size.zw;
-    var sum = 0.0;
-    sum += textureSampleLevel(ao_tex, smooth_sampler, in.uv + vec2<f32>(-1.0, -1.0) * t, 0.0).r;
-    sum += textureSampleLevel(ao_tex, smooth_sampler, in.uv + vec2<f32>(1.0, -1.0) * t, 0.0).r;
-    sum += textureSampleLevel(ao_tex, smooth_sampler, in.uv + vec2<f32>(-1.0, 1.0) * t, 0.0).r;
-    sum += textureSampleLevel(ao_tex, smooth_sampler, in.uv + vec2<f32>(1.0, 1.0) * t, 0.0).r;
+    var sum = vec2<f32>(0.0);
+    sum += textureSampleLevel(ao_tex, smooth_sampler, in.uv + vec2<f32>(-1.0, -1.0) * t, 0.0).rg;
+    sum += textureSampleLevel(ao_tex, smooth_sampler, in.uv + vec2<f32>(1.0, -1.0) * t, 0.0).rg;
+    sum += textureSampleLevel(ao_tex, smooth_sampler, in.uv + vec2<f32>(-1.0, 1.0) * t, 0.0).rg;
+    sum += textureSampleLevel(ao_tex, smooth_sampler, in.uv + vec2<f32>(1.0, 1.0) * t, 0.0).rg;
     let ao = sum * 0.25;
-    return vec4<f32>(ao, ao, ao, 1.0);
+    return vec4<f32>(ao, 0.0, 1.0);
 }
 
 // `c` with any channel that is not a number, or is infinite, as 0, and
@@ -359,8 +487,16 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
         c = cinematic(in.uv, p);
     }
     c = finite(c);
-    if (post.flags.x > 0.5) {
-        c *= textureSampleLevel(ao_tex, smooth_sampler, in.uv, 0.0).r;
+    if (post.view_up.w > 0.0) {
+        let r = textureSampleLevel(ssr_tex, smooth_sampler, in.uv, 0.0);
+        c = c * (1.0 - r.a) + r.rgb;
+    }
+    if (post.flags.x > 0.5 || post.view_sun.w > 0.0) {
+        let a = textureSampleLevel(ao_tex, smooth_sampler, in.uv, 0.0).rg;
+        if (post.flags.x > 0.5) {
+            c *= a.r;
+        }
+        c *= mix(1.0, a.g, post.view_sun.w);
     }
     if (post.rain.y > 0.0) {
         let a = rain_cover(in.uv);
@@ -385,6 +521,98 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
         c = grade(c, in.uv);
     }
     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+}
+
+// Reflections in wet ground (screen space): where the scene marks its
+// ground wet (the ground's alpha, terrain.wgsl: 2 and up, 3 for still
+// water), the ray off the water followed across the screen's depth
+// to what it meets, and that pixel's colour shown, as strongly as the
+// water's angle reflects. Worked out at half size. Premultiplied: what it
+// shows times how much, and how much.
+@fragment
+fn fs_ssr(in: Out) -> @location(0) vec4<f32> {
+    let p = vec2<i32>(in.position.xy) * 2;
+    if (depth_at(p) >= 1.0) {
+        return vec4<f32>(0.0);
+    }
+    let water = clamp(textureLoad(hdr_tex, p, 0).a - 2.0, 0.0, 1.0);
+    if (water < 0.02) {
+        return vec4<f32>(0.0);
+    }
+    let c = view_at(p);
+    let n = normal_at(p, c);
+    let up = post.view_up.xyz;
+    // Only level ground holds water; its normal is the way up, not the
+    // depth's own, so the reflection does not shiver.
+    if (dot(n, up) < 0.9) {
+        return vec4<f32>(0.0);
+    }
+    let eye = normalize(c);
+    let r = reflect(eye, up);
+    let fresnel = 0.02 + 0.98 * pow(1.0 - max(dot(-eye, up), 0.0), 5.0);
+    // A little over what the ground's own sky in the water takes (its
+    // fresnel, terrain.wgsl), so what stands round it shows.
+    let amount = fresnel * water * post.view_up.w * 1.5;
+    if (amount < 0.01) {
+        return vec4<f32>(0.0);
+    }
+    let far = -c.z;
+    // Steps that grow, near the water fine, far off coarse.
+    let steps = 24;
+    let reach = clamp(far * 5.0, 60.0, 600.0);
+    let noise = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));
+    var before = 0.0;
+    var hit = -1.0;
+    for (var i = 1; i <= steps; i++) {
+        let t = (f32(i) - 0.5 + noise) / f32(steps);
+        let d = reach * t * t;
+        let at = c + r * d;
+        if (at.z > -0.5) {
+            break;
+        }
+        let q = screen_of(at);
+        if (any(q.xy < vec2<f32>(0.0)) || any(q.xy >= post.size.xy)) {
+            break;
+        }
+        let scene = view_at(vec2<i32>(q.xy));
+        let gap = scene.z - at.z;
+        // Behind what the screen shows there, and not far behind (else it
+        // passed behind something, which the screen cannot show).
+        if (gap > 0.0 && gap < max(d - before, 1.0) * 1.5 + 0.5) {
+            // Narrowed down between the last step and this one.
+            var lo = before;
+            var hi = d;
+            for (var k = 0; k < 4; k++) {
+                let mid = (lo + hi) * 0.5;
+                let m = c + r * mid;
+                let mq = screen_of(m);
+                if (view_at(vec2<i32>(mq.xy)).z - m.z > 0.0) {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            hit = hi;
+            break;
+        }
+        before = d;
+    }
+    if (hit < 0.0) {
+        return vec4<f32>(0.0);
+    }
+    let q = screen_of(c + r * hit);
+    // What is there must itself not be the sky, and fades toward the
+    // screen's edges and the end of the ray, where what it would show
+    // leaves the screen.
+    if (depth_at(vec2<i32>(q.xy)) >= 1.0) {
+        return vec4<f32>(0.0);
+    }
+    let uv = q.xy * post.size.zw;
+    let edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+    let fade = smoothstep(0.0, 0.08, edge) * (1.0 - smoothstep(0.6, 1.0, hit / reach));
+    let shown = finite(textureLoad(hdr_tex, vec2<i32>(q.xy), 0).rgb);
+    let a = clamp(amount * fade, 0.0, 0.85);
+    return vec4<f32>(shown * a, a);
 }
 
 // ---- Temporal anti-aliasing. ----

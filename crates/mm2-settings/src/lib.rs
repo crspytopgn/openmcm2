@@ -145,8 +145,8 @@ impl Quality {
     /// as `--enhanced=quality=` sets it.
     pub fn has(self, name: &str) -> bool {
         let off: &[&str] = match self {
-            Quality::Low => &["ao", "shafts", "smooth", "cinematic", "grass"],
-            Quality::Medium => &["shafts", "smooth"],
+            Quality::Low => &["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr"],
+            Quality::Medium => &["shafts", "smooth", "gtao", "ssr"],
             _ => &[],
         };
         // On with this preset though off unless asked. The trackside
@@ -222,7 +222,7 @@ pub fn parse_difficulty(text: &str) -> Option<[[u32; 3]; 4]> {
     (n.len() == 12 && n.iter().all(|v| (1..=MOST_STEP).contains(v))).then_some(t)
 }
 
-pub const UPGRADES: [(&str, &str, bool); 17] = [
+pub const UPGRADES: [(&str, &str, bool); 21] = [
     ("lighting", "Per-pixel lighting", true),
     ("shadows", "Sun shadows", true),
     ("distance", "Far draw distance and haze", true),
@@ -239,6 +239,10 @@ pub const UPGRADES: [(&str, &str, bool); 17] = [
     ("ruts", "Lasting tyre ruts", false),
     ("scenery", "Trackside props and crowd", false),
     ("grade", "Colour grade", false),
+    ("gtao", "Better ambient occlusion (GTAO)", true),
+    ("contact", "Contact shadows", true),
+    ("ssr", "Reflections in puddles", true),
+    ("skylight", "Sky light", true),
     // Only on a GPU that can trace rays; elsewhere the shadow maps stay.
     ("raytracing", "Ray tracing: shadows and reflections", false),
 ];

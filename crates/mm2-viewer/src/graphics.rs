@@ -69,6 +69,18 @@ pub struct Enhanced {
     pub round: bool,
     /// Supercross stadiums lit by their lamps from above.
     pub floodlights: bool,
+    /// Ambient occlusion worked out from the horizons round each pixel
+    /// (GTAO), truer in creases and corners than the plain estimate.
+    pub gtao: bool,
+    /// A short, sharp shadow where tyres, boots and props meet the ground,
+    /// finer than the shadow maps can draw (screen space).
+    pub contact: bool,
+    /// Puddles and wet ground reflecting what is on screen (screen space);
+    /// off when ray tracing draws the reflections.
+    pub ssr: bool,
+    /// The sky's light baked over the land once a race: dimmer in dips,
+    /// under banks and between hills.
+    pub skylight: bool,
     /// The sun's shadows traced as rays through the scene, in place of
     /// the shadow maps, and reflections in wet ground and glossy paint,
     /// where the GPU can (crate::rt); off unless asked.
@@ -130,6 +142,10 @@ impl Default for Enhanced {
             wear: true,
             round: true,
             floodlights: true,
+            gtao: true,
+            contact: true,
+            ssr: true,
+            skylight: true,
             raytracing: false,
             taa: false,
             mud_start: 0.0,
@@ -156,6 +172,9 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             e.smooth = false;
             e.cinematic = false;
             e.grass = false;
+            e.gtao = false;
+            e.contact = false;
+            e.ssr = false;
             e.pixels = Some(1280 * 720);
         }
         // Temporal anti-aliasing in place of MSAA: about as cheap as 2x, and
@@ -165,6 +184,8 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             e.taa = true;
             e.shafts = false;
             e.smooth = false;
+            e.gtao = false;
+            e.ssr = false;
             e.pixels = Some(1920 * 1080);
         }
         // Every effect that is on unless turned off. (The trackside props
@@ -322,11 +343,15 @@ impl Enhanced {
                 "wear" => e.wear = on,
                 "round" => e.round = on,
                 "floodlights" | "lamps" => e.floodlights = on,
+                "gtao" => e.gtao = on,
+                "contact" | "contact-shadows" => e.contact = on,
+                "ssr" | "reflections" => e.ssr = on,
+                "skylight" | "sky-light" => e.skylight = on,
                 "raytracing" | "rt" => e.raytracing = on,
                 "taa" | "temporal" => e.taa = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, raytracing, taa, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra, resolution=1080p or 85%, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-gtao, no-contact, no-ssr, no-skylight, raytracing, taa, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra, resolution=1080p or 85%, weather=rain or time=dusk"
                     ))
                 }
             }
@@ -438,6 +463,10 @@ impl Enhanced {
         }
         self.shafts = false;
         self.cinematic = false;
+        // Screen-space reflections march far across the screen per pixel,
+        // and the horizon-based occlusion many taps a pixel: too heavy here.
+        self.ssr = false;
+        self.gtao = false;
         self
     }
 }

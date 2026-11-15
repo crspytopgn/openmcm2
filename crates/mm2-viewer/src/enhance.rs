@@ -4,6 +4,7 @@
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3, Vec4Swizzles};
+use wgpu::util::DeviceExt as _;
 
 /// The cascades' depth, as the sun sees the objects.
 pub const SHADOW_DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -80,6 +81,12 @@ pub struct EnhGlobals {
     /// The light poles' baked light (crate::flood): its map's corner (x,
     /// z) and the ft it spans across and down; 0 for none.
     pub flood: [f32; 4],
+    /// The sky's light baked over the land (crate::skylight): samples a
+    /// side, ft between them, how strongly it shows (0 off), and x whether
+    /// the ground marks its water for the screen's reflections (w).
+    pub sky_light: [f32; 4],
+    /// The baked map's heights: the lowest (ft) and the range over them.
+    pub sky_height: [f32; 4],
 }
 
 /// What the shared group is made of, kept to make it again.
@@ -96,6 +103,8 @@ pub struct Parts {
     dust: wgpu::TextureView,
     /// The light poles' baked light (crate::flood), or a blank.
     flood: wgpu::TextureView,
+    /// The sky's light over the land (crate::skylight), or a blank.
+    sky: wgpu::TextureView,
 }
 
 /// Texels a side of the dust's shadow map.
@@ -107,6 +116,8 @@ pub const DUST_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const DUST_BINDING: u32 = 30;
 /// The light poles' baked light's binding, and its sampler's.
 const FLOOD_BINDING: u32 = 32;
+/// The sky's light over the land's binding (read with the flood's sampler).
+const SKY_BINDING: u32 = 34;
 
 impl Parts {
     /// The shared group, with the ray-traced scene `traced` if drawn.
@@ -143,6 +154,10 @@ impl Parts {
         entries.push(wgpu::BindGroupEntry {
             binding: FLOOD_BINDING + 1,
             resource: R::Sampler(&self.clamp),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: SKY_BINDING,
+            resource: R::TextureView(&self.sky),
         });
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("enhanced"),
@@ -184,6 +199,39 @@ impl Shared {
     /// (crate::flood), and the ray-traced scene `traced` if drawn.
     pub fn set_flood(&mut self, device: &wgpu::Device, map: &wgpu::TextureView, traced: Option<&crate::rt::Scene>) {
         self.parts.flood = map.clone();
+        self.group = self.parts.group(device, &self.layout, traced);
+    }
+
+    /// Makes the group again with the sky's light over the land `sky`
+    /// (crate::skylight), and the ray-traced scene `traced` if drawn.
+    pub fn set_sky(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        sky: &crate::skylight::SkyLight,
+        traced: Option<&crate::rt::Scene>,
+    ) {
+        self.parts.sky = device
+            .create_texture_with_data(
+                queue,
+                &wgpu::TextureDescriptor {
+                    label: Some("sky light"),
+                    size: wgpu::Extent3d {
+                        width: sky.side,
+                        height: sky.side,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                },
+                wgpu::util::TextureDataOrder::LayerMajor,
+                bytemuck::cast_slice(&sky.texels),
+            )
+            .create_view(&Default::default());
         self.group = self.parts.group(device, &self.layout, traced);
     }
 
@@ -305,6 +353,15 @@ impl Shared {
             ty: sampler(),
             count: None,
         });
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: SKY_BINDING,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: texture(
+                wgpu::TextureViewDimension::D2,
+                wgpu::TextureSampleType::Float { filterable: true },
+            ),
+            count: None,
+        });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("enhanced"),
             entries: &entries,
@@ -411,8 +468,30 @@ impl Shared {
                 view_formats: &[],
             })
             .create_view(&Default::default());
+        let sky = device
+            .create_texture_with_data(
+                queue,
+                &wgpu::TextureDescriptor {
+                    label: Some("no sky light"),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                },
+                wgpu::util::TextureDataOrder::LayerMajor,
+                &[255, 0, 0, 255],
+            )
+            .create_view(&Default::default());
         let parts = Parts {
             flood,
+            sky,
             dust: dust.clone(),
             buffer: buffer.clone(),
             shadows: map.create_view(&wgpu::TextureViewDescriptor {
@@ -570,7 +649,7 @@ fn flooded(source: &str) -> String {
         .and_then(|r| r.split(')').next())
         .unwrap_or("1");
     let bindings = format!(
-        "{line}\n@group({group}) @binding({FLOOD_BINDING}) var flood_map: texture_2d<f32>;\n@group({group}) @binding({}) var flood_sampler: sampler;",
+        "{line}\n@group({group}) @binding({FLOOD_BINDING}) var flood_map: texture_2d<f32>;\n@group({group}) @binding({}) var flood_sampler: sampler;\n@group({group}) @binding({SKY_BINDING}) var sky_map: texture_2d<f32>;",
         FLOOD_BINDING + 1
     );
     source.replacen(line, &bindings, 1)

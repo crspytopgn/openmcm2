@@ -55,4 +55,10 @@ struct Enh {
     // The light poles' baked light (flood.rs): its map's corner (x, z)
     // and the ft it spans across and down; 0 for none.
     flood: vec4<f32>,
+    // The sky's light baked over the land (skylight.rs): samples a side,
+    // ft between them, how strongly it shows (0 off), and w 1 when the
+    // ground marks its water for the screen's reflections (post.wgsl).
+    sky_light: vec4<f32>,
+    // The baked map's heights: the lowest (ft) and the range over them.
+    sky_height: vec4<f32>,
 };

@@ -241,6 +241,16 @@ fn real_light(n: vec3<f32>, sun: f32) -> vec3<f32> {
     return globals.ambient.rgb * sky + globals.sun.rgb * max(dot(n, globals.to_sun.xyz), 0.0) * sun;
 }
 
+// The same where only `seen` of the sky's light gets past the hills.
+fn real_light_seen(n: vec3<f32>, sun: f32, seen: f32) -> vec3<f32> {
+    let sky = mix(0.95, 1.3, n.y * 0.5 + 0.5) * seen;
+    return globals.ambient.rgb * sky + globals.sun.rgb * max(dot(n, globals.to_sun.xyz), 0.0) * sun;
+}
+
+// How much still water the ground drawn last holds, for the screen's
+// reflections (post.wgsl fs_ssr): 0 dry.
+var<private> water_here: f32 = 0.0;
+
 // The new ground: the painted colour with its light taken out, the photo
 // materials' detail laid over it by what each part of the ground is, and
 // then lit by the sun as it really falls, bumps, ruts and shadows and all.
@@ -392,7 +402,7 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     let sun = sun_visible(in.world, n, dist, 0.4);
     // At night, against the track's own light, so the ground goes dark.
     let against = mix(flat_light, enh.night.yzw, enh.night.x);
-    let light = real_light(bent, sun) / max(against, vec3<f32>(0.05));
+    let light = real_light_seen(bent, sun, sky_seen(in.world)) / max(against, vec3<f32>(0.05));
     var lit = albedo * pow(max(light, vec3<f32>(0.0)), vec3<f32>(2.2)) * 1.05;
     // The bikes' headlights, as they light the ground's own colour.
     lit += albedo * headlight_at(in.world, n, dist);
@@ -406,6 +416,11 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
             sky = reflection(in.world + n * 0.1, r, sky);
         }
         lit = mix(lit, sky, fresnel * puddle * 0.85);
+    }
+    // For the screen's reflections: the puddles' still water, and the rest
+    // of the wet ground a dim mirror.
+    if (enh.sky_light.w > 0.5 && enh.world.y > 0.0) {
+        water_here = clamp(puddle * 0.85 + enh.world.y * 0.2 * (1.0 - puddle), 0.0, 1.0) * (1.0 - haze_amount(dist));
     }
     // Ray traced, the rest of the wet ground is a dim, rippled mirror
     // too, as water's glancing angles make it: the far track shines with
@@ -490,7 +505,8 @@ fn enhanced_ground(in: VertexOut) -> vec4<f32> {
     if (enh.more.x > 0.5) {
         lit = new_ground(in, colour, n, dist);
     }
-    return vec4<f32>(apply_haze(lit, in.world, dist), 1.0);
+    // Water marked past 2 in the alpha, which nothing else writes there.
+    return vec4<f32>(apply_haze(lit, in.world, dist), select(1.0, 2.0 + water_here, water_here > 0.0));
 }
 
 // ---- The smooth ground round the eye (smooth.rs), only drawn. ----
