@@ -9,6 +9,12 @@ Fixes for the browser version:
 * **Original or Enhanced:** pick the look on the start page (it's
   remembered). While playing, the button in the top-left corner shows
   which look is on and switches it.
+* **The launcher's settings on the start page:** the enhanced look's
+  quality, time of day, weather, ground detail and single effects, and
+  the Extras, under "Settings and extras". They stay in your browser.
+* **Your own tracks:** download a track's .zip from MDX Racing, then add
+  it under "Your own tracks" with the event it's for. It joins that
+  event's track list and stays in your browser.
 
 The desktop version is unchanged in this release.
 

@@ -37,6 +37,12 @@ function unindex(path) {
   dirs.get(parent)?.delete(name + "/");
 }
 
+/// The paths of the files in memory under `prefix`.
+export function paths(prefix) {
+  const p = norm(prefix).toLowerCase();
+  return [...files.values()].filter((f) => f.path.toLowerCase().startsWith(p + "/")).map((f) => f.path);
+}
+
 export function put(path, data) {
   path = norm(path);
   files.set(path.toLowerCase(), { path, data });
@@ -94,6 +100,24 @@ export async function keepGame(list) {
     s.transaction.oncomplete = ok;
     s.transaction.onerror = () => fail(s.transaction.error);
   });
+}
+
+/// Saved files under `prefix` (a /user path), by path.
+export async function userFiles(prefix) {
+  await open();
+  const keys = await request(store("user", "readonly").getAllKeys());
+  return keys.filter((k) => k.toLowerCase().startsWith(prefix.toLowerCase()));
+}
+
+/// Keeps a file among the saves, before or while the game runs.
+export async function keepUser(path, data) {
+  await open();
+  write(path, data);
+}
+
+export async function forgetUser(path) {
+  await open();
+  remove(path);
 }
 
 export async function forgetGame() {
