@@ -102,7 +102,7 @@ fn array(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, layers: &[Vec<
         size: wgpu::Extent3d {
             width: SIDE,
             height: SIDE,
-            depth_or_array_layers: layers.len() as u32,
+            depth_or_array_layers: crate::renderer::array_layers(layers.len() as u32, SIDE, SIDE),
         },
         mip_level_count: mips,
         sample_count: 1,

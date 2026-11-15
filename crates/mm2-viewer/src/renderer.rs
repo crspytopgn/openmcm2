@@ -1243,7 +1243,7 @@ fn upload_textures(
     textures: &[Image],
 ) -> wgpu::Texture {
     let size = textures.iter().map(|t| t.size).max().unwrap_or(1);
-    let layers = textures.len().max(1) as u32;
+    let layers = array_layers(textures.len().max(1) as u32, size, size);
     let mip_count = size.trailing_zeros() + 1;
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("terrain textures"),
@@ -1290,6 +1290,20 @@ fn upload_textures(
         }
     }
     texture
+}
+
+/// The layer count to give a 2D array texture of `layers` images,
+/// `width` by `height`. wgpu's OpenGL backend takes any square array
+/// whose layer count is a multiple of six for a cube map (or cube map
+/// array), and then a `D2Array` view of it samples nothing usable: the
+/// sky showed the land's textures and some tracks' ground went black
+/// (openmcm2 issue #15). One unused extra layer keeps it a plain array.
+pub fn array_layers(layers: u32, width: u32, height: u32) -> u32 {
+    if width == height && layers > 1 && layers % 6 == 0 {
+        layers + 1
+    } else {
+        layers
+    }
 }
 
 /// Converts game coordinates (left-handed, +z north) to the viewer's

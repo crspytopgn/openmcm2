@@ -1,4 +1,13 @@
-# OpenMCM2 0.3.2
+# OpenMCM2 0.3.3
+
+## New in 0.3.3
+
+* **OpenGL: the sky and the ground draw properly:** on OpenGL the sky
+  showed the wrong picture, and some tracks' ground (such as the
+  Munchberry Farms enduro) was black (#15). Vulkan, Metal and DirectX 12
+  were not affected and look the same as before.
+
+If you're on 0.1.6 or later, the launcher will offer this update itself.
 
 ## New in 0.3.2
 
