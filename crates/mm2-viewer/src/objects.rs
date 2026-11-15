@@ -834,9 +834,8 @@ impl ObjectMesh {
                 uv: [u, v],
                 color: [255; 4],
                 node: PLANT,
-                smooth: [0.0; 3],
-                sway: [0.0; 2],
             });
+            self.extras.push(Extra { smooth: [0.0; 3], sway: [0.0; 2] });
         }
         batches.entry(format!("{}{FAR_TAG}", b.texture)).or_default().extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
     }
