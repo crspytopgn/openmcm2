@@ -3493,6 +3493,9 @@ struct App {
     pointer: (f32, f32),
     /// The pad's A and B last frame, to click and go back in the menus.
     pad_click: (bool, bool),
+    /// The stick's smoothed steering and when it was last read (the pad
+    /// smoothing extra).
+    pad_smooth: (f32, Option<Instant>),
     /// The race going on tape, and a tape playing (with the track it
     /// waits for while that loads).
     recording: Option<replay::Recording>,
@@ -3629,6 +3632,7 @@ impl App {
             sounds,
             pointer: (0.0, 0.0),
             pad_click: (false, false),
+            pad_smooth: (0.0, None),
             recording: None,
             ghost: None,
             replay: None,
@@ -4501,8 +4505,28 @@ impl App {
                 _ => 0.0,
             }
         };
-        let steer = pull(input::STEER_RIGHT, 1.0, pad::STEER_DEAD)
-            - pull(input::STEER_LEFT, -1.0, pad::STEER_DEAD);
+        // The pad tuning extra: its dead zone, sensitivity and smoothing,
+        // the game's own (0.04, as it reads, unsmoothed) unless changed.
+        let tune = crate::tweaks::more();
+        let dead = tune.pad_dead_zone as f32 / 100.0;
+        let mut steer = pull(input::STEER_RIGHT, 1.0, dead) - pull(input::STEER_LEFT, -1.0, dead);
+        if tune.pad_dead_zone != mm2_settings::PAD_DEAD_ZONE && steer != 0.0 {
+            // A bigger dead zone still reaches full lock at the edge.
+            steer = steer.signum() * ((steer.abs() - dead) / (1.0 - dead).max(0.05)).clamp(0.0, 1.0);
+        }
+        if tune.pad_sensitivity != 100 {
+            steer = (steer * tune.pad_sensitivity as f32 / 100.0).clamp(-1.0, 1.0);
+        }
+        if tune.pad_smoothing > 0 {
+            let now = Instant::now();
+            let dt = self.pad_smooth.1.map_or(0.0, |t| now.duration_since(t).as_secs_f32()).min(0.1);
+            // Up to a quarter of a second to follow the stick.
+            let tau = 0.25 * tune.pad_smoothing as f32 / 100.0;
+            let k = 1.0 - (-dt / tau).exp();
+            let s = self.pad_smooth.0 + (steer - self.pad_smooth.0) * k;
+            self.pad_smooth = (if s.abs() < 1e-3 && steer == 0.0 { 0.0 } else { s }, Some(now));
+            steer = self.pad_smooth.0;
+        }
         let lean = pull(input::LEAN_FORWARD, -1.0, 0.0) - pull(input::LEAN_BACK, 1.0, 0.0);
         if self.analog {
             if steer != 0.0 {
