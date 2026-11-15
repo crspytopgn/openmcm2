@@ -69,6 +69,7 @@ mod crowd;
 mod cull;
 mod materials;
 mod graphics;
+mod polish;
 mod post;
 mod finish;
 mod podium;
@@ -3001,7 +3002,17 @@ async fn screenshot(
         eprintln!("bench: {:.2} ms a frame ({:.3} ms recording)", start.elapsed().as_secs_f64() * 1000.0 / n, record * 1000.0 / n);
         renderer.report_gpu_times(&device);
     }
-    let draw = renderer.render(&device, &queue, view, (width, height), camera, time);
+    // The picture extras, as on screen.
+    let mut polish = (between_bars.is_none() && polish::wanted()).then(|| polish::Polish::new(&device, format));
+    let polish_view = polish.as_mut().map(|p| p.target(&device, format, (width, height)));
+    let draw = renderer.render(&device, &queue, polish_view.as_ref().unwrap_or(view), (width, height), camera, time);
+    let draw = match polish.as_ref().and_then(|p| p.finish(&device, &queue, view)) {
+        Some(finish) => {
+            queue.submit([draw]);
+            finish
+        }
+        None => draw,
+    };
     // The in-race display over the race.
     let mut encoder = device.create_command_encoder(&Default::default());
     if let (Some(race), Some((mut ui, mut hud))) = (race, track.hud()) {
@@ -3555,6 +3566,9 @@ struct State {
     sprites: sprites::Sprites,
     /// The race between black bars on a window wider than 21:9.
     bars: bars::Bars,
+    /// The picture extras' pass (edge smoothing, sharpening), made when
+    /// first wanted.
+    polish: Option<polish::Polish>,
     camera: Camera,
     /// The Bike & Rider page's turning models, and `RES/BIKE.RES` for them.
     preview: Option<preview::Preview>,
@@ -3750,6 +3764,7 @@ impl App {
             renderer: None,
             sprites,
             bars: bars::Bars::default(),
+            polish: None,
             camera: Camera::looking_at(Vec3::ZERO, Vec3::Z),
             preview: None,
             bike_res: None,
@@ -4865,9 +4880,20 @@ impl App {
         let between_bars = (racing && s.config.usage.contains(wgpu::TextureUsages::COPY_DST))
             .then(|| s.bars.target(&s.device, s.config.format.add_srgb_suffix(), window_size))
             .flatten();
-        let (view, size) = match &between_bars {
-            Some((view, size)) => (view, *size),
-            None => (&window_view, window_size),
+        // The picture extras draw the race into a picture of their own and
+        // put it on the window smoothed and sharpened.
+        let polishing = racing
+            && between_bars.is_none()
+            && polish::wanted();
+        let polish_view = polishing.then(|| {
+            let format = s.config.format;
+            let device = &s.device;
+            s.polish.get_or_insert_with(|| polish::Polish::new(device, format)).target(device, format, window_size)
+        });
+        let (view, size) = match (&between_bars, &polish_view) {
+            (Some((view, size)), _) => (view, *size),
+            (None, Some(view)) => (view, window_size),
+            (None, None) => (&window_view, window_size),
         };
         // Text is drawn at the window's own resolution, Retina included.
         s.sprites.scale = (size.0 as f32 / 640.0).min(size.1 as f32 / 480.0);
@@ -4895,6 +4921,16 @@ impl App {
                 .filter(|_| self.replay.is_some())
                 .map(|r| renderer::from_game(r.racers[r.player].bike.position()).distance(s.camera.position));
             commands.push(renderer.render(&s.device, &s.queue, view, size, &s.camera, time));
+            // The race's display goes over the polished picture, on the window.
+            let view = match (&polish_view, &s.polish) {
+                (Some(_), Some(p)) => {
+                    if let Some(c) = p.finish(&s.device, &s.queue, &window_view) {
+                        commands.push(c);
+                    }
+                    &window_view
+                }
+                _ => view,
+            };
             if let (Some((ui, hud)), Some(race)) = (&mut self.hud, &self.race) {
                 let mut gfx = ui::Gfx {
                     sprites: &mut s.sprites,
@@ -5408,6 +5444,19 @@ impl ApplicationHandler for App {
                         eprintln!("{text}");
                         self.fps_shown = Some((*frames as f32 / span).round() as u32);
                         self.fps = Some((Instant::now(), 0, 0.0));
+                    }
+                }
+                // The frame cap extra: a frame no sooner than its share of a
+                // second after the last began.
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let cap = tweaks::more().fps_cap;
+                    if cap > 0 {
+                        let next = now + std::time::Duration::from_secs_f64(1.0 / cap as f64);
+                        let left = next.saturating_duration_since(Instant::now());
+                        if !left.is_zero() {
+                            std::thread::sleep(left);
+                        }
                     }
                 }
                 if let Some(s) = &self.state {
