@@ -83,6 +83,10 @@ pub struct Chase {
     /// The frozen camera's spot (mode 5, Numpad 0, 0x4679e0): the eye
     /// stays where it was and turns to watch the bike.
     frozen: Option<Vec3>,
+    /// The Helmet Cam (an extra), after User Cam in the cycle.
+    pub helmet: bool,
+    /// The Helmet Cam's eye, its height softened apart from its place.
+    head: Vec3,
 }
 
 /// What the player holds for the camera this frame: the Thrill Cam and
@@ -159,6 +163,8 @@ impl Chase {
             was_airborne: false,
             thrill: None,
             frozen: None,
+            helmet: false,
+            head: position + Vec3::Y * Self::HEAD,
         }
     }
 
@@ -166,6 +172,7 @@ impl Chase {
     pub fn restart(&self, position: Vec3, forward: Vec3) -> Self {
         Chase {
             view: self.view,
+            helmet: self.helmet,
             fov: self.want_fov,
             want_fov: self.want_fov,
             frozen: self.frozen,
@@ -178,7 +185,14 @@ impl Chase {
     /// and the replay's camera button, 0x489c20).
     pub fn next_view(&mut self) -> &'static str {
         if self.frozen.take().is_some() {
-            return self.view.name();
+            return if self.helmet { HELMET_CAM } else { self.view.name() };
+        }
+        // The Helmet Cam extra comes after the game's last view.
+        if self.helmet {
+            self.helmet = false;
+        } else if self.view == View::User && crate::tweaks::more().helmet_cam {
+            self.helmet = true;
+            return HELMET_CAM;
         }
         self.view = self.view.next();
         if let Some(fov) = self.view.preset().and_then(|p| p.fov) {
@@ -288,6 +302,9 @@ impl Chase {
         } else {
             self.view.preset()
         };
+        if self.helmet && !keys.reverse && !crashed {
+            return self.helmet_view(bike, terrain, dt);
+        }
         let (ride_eye, ride_target) = match (self.view, preset) {
             (View::Rider, _) if !keys.reverse => {
                 let head = position + bike.up * Self::HEAD;
@@ -333,6 +350,54 @@ impl Chase {
         self.target += (target - self.target) * (1.0 - (-dt / lag).exp());
         let floor = ground(terrain, self.eye.x, self.eye.z) + Self::CLEARANCE;
         self.eye.y = self.eye.y.max(floor);
+        (self.eye, self.target)
+    }
+}
+
+/// The name the Helmet Cam flashes.
+pub const HELMET_CAM: &str = "Helmet Cam";
+
+impl Chase {
+    /// The rider's eyes above and ahead of the bike's centre, ft.
+    const HELMET_UP: f32 = 4.2;
+    const HELMET_AHEAD: f32 = 0.3;
+    /// How long the neck takes to follow the bike's bumps, s, up and down
+    /// apart from along the ground.
+    const NECK_RISE: f32 = 0.09;
+    const NECK_ALONG: f32 = 0.015;
+    /// How much the look leans from where the bike points to where it is
+    /// going (into a slide or a corner).
+    const INTO_TURN: f32 = 0.3;
+    /// How far the look dips below level, so the bars sit low in view.
+    const LOOK_DOWN: f32 = 0.22;
+
+    /// The Helmet Cam: from the rider's helmet, the head held as a neck
+    /// holds it (bumps softened, the horizon level), looking where the
+    /// bike points and a little where it is going. Only the camera
+    /// changes, never the riding.
+    fn helmet_view(&mut self, bike: &Followed, terrain: &Terrain, dt: f32) -> (Vec3, Vec3) {
+        let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z).normalize_or(self.yaw);
+        let forward = flat(bike.forward);
+        let want = bike.position + bike.up * Self::HELMET_UP + forward * Self::HELMET_AHEAD;
+        let along = 1.0 - (-dt / Self::NECK_ALONG).exp();
+        let rise = 1.0 - (-dt / Self::NECK_RISE).exp();
+        // A long way off (a restart, a reset): straight there.
+        if self.head.distance(want) > 20.0 {
+            self.head = want;
+        }
+        self.head.x += (want.x - self.head.x) * along;
+        self.head.z += (want.z - self.head.z) * along;
+        self.head.y += (want.y - self.head.y) * rise;
+        let floor = ground(terrain, self.head.x, self.head.z) + 0.5;
+        self.head.y = self.head.y.max(floor);
+        let going = if bike.speed > 5.0 { flat(bike.velocity) } else { forward };
+        let look = forward.lerp(going, Self::INTO_TURN).normalize_or(forward);
+        // The pitch follows the bike's, halved, so the view tips over
+        // crests and dips without the horizon swinging about.
+        let pitch = bike.forward.y.clamp(-0.9, 0.9) * 0.5 - Self::LOOK_DOWN;
+        let dir = (look + Vec3::Y * pitch).normalize_or(look);
+        self.eye = self.head;
+        self.target = self.head + dir * 30.0;
         (self.eye, self.target)
     }
 }

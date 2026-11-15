@@ -268,6 +268,10 @@ fn main() -> Result<(), BoxError> {
             // practice uses the second).
             let slot = flag("--slot").and_then(|t| t.parse().ok()).unwrap_or(PLAYER);
             let mut r = make_race_as(&track, laps, slot).ok_or("this track has no bike to ride")?;
+            // `--view N`: presses the camera button N times first.
+            for _ in 0..flag("--view").and_then(|t| t.parse::<usize>().ok()).unwrap_or(0) {
+                r.next_view();
+            }
             // Scripted: the game's own steps, frame by frame; `--live-steps`
             // steps as live play does instead, to try frame rates.
             let live = args.iter().any(|a| a == "--live-steps");
