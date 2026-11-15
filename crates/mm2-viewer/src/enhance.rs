@@ -57,10 +57,106 @@ pub struct EnhGlobals {
     /// x the objects' photo materials, y swaying trees, z round bikes and
     /// riders, w a stadium's floodlights.
     pub surfaces: [f32; 4],
+    /// x whether the shadows are ray traced.
+    pub traced: [f32; 4],
+    /// From the drawing to the screen, for the ray-traced shadows.
+    pub view_proj: [[f32; 4]; 4],
+    /// The ambient light's colour, for what the reflections see.
+    pub ambient: [f32; 4],
+    /// From the drawing to the dust's shadow map (crate::dust), and x
+    /// whether it is drawn, y the least spread of a cloud's depth in it.
+    pub dust_view: [[f32; 4]; 4],
+    pub dust: [f32; 4],
+    /// The terrain for the reflections: ft a terrain unit, and terrain
+    /// units the ground's colour map spans.
+    pub terrain: [f32; 4],
+    /// x how much it is night; yzw the track's own light on level ground.
+    pub night: [f32; 4],
+    /// x whether the bikes' headlights are traced, y how many glow.
+    pub headlights: [f32; 4],
+    /// Each glowing headlight: its place and how strongly (drawing
+    /// coordinates).
+    pub lamps: [[f32; 4]; LAMPS],
+    /// The light poles' baked light (crate::flood): its map's corner (x,
+    /// z) and the ft it spans across and down; 0 for none.
+    pub flood: [f32; 4],
+}
+
+/// What the shared group is made of, kept to make it again.
+pub struct Parts {
+    buffer: wgpu::Buffer,
+    shadows: wgpu::TextureView,
+    shadow_sampler: wgpu::Sampler,
+    albedo: wgpu::TextureView,
+    normal: wgpu::TextureView,
+    repeat: wgpu::Sampler,
+    ruts: wgpu::TextureView,
+    clamp: wgpu::Sampler,
+    /// The dust clouds' shadows, as the sun sees them.
+    dust: wgpu::TextureView,
+    /// The light poles' baked light (crate::flood), or a blank.
+    flood: wgpu::TextureView,
+}
+
+/// Texels a side of the dust's shadow map.
+pub const DUST_SIDE: u32 = 512;
+/// What the dust's shadow map holds: how thick, and how deep (its sum and
+/// its square's), added up.
+pub const DUST_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+/// The dust's shadow map's binding in the shared group, and its sampler's.
+const DUST_BINDING: u32 = 30;
+/// The light poles' baked light's binding, and its sampler's.
+const FLOOD_BINDING: u32 = 32;
+
+impl Parts {
+    /// The shared group, with the ray-traced scene `traced` if drawn.
+    fn group(&self, device: &wgpu::Device, layout: &wgpu::BindGroupLayout, traced: Option<&crate::rt::Scene>) -> wgpu::BindGroup {
+        use wgpu::BindingResource as R;
+        let mut resources = vec![
+            self.buffer.as_entire_binding(),
+            R::TextureView(&self.shadows),
+            R::Sampler(&self.shadow_sampler),
+            R::TextureView(&self.albedo),
+            R::TextureView(&self.normal),
+            R::Sampler(&self.repeat),
+            R::TextureView(&self.ruts),
+            R::Sampler(&self.clamp),
+        ];
+        resources.extend(traced.into_iter().flat_map(|t| t.bindings()));
+        let mut entries: Vec<wgpu::BindGroupEntry> = resources
+            .into_iter()
+            .zip(0..)
+            .map(|(resource, binding)| wgpu::BindGroupEntry { binding, resource })
+            .collect();
+        entries.push(wgpu::BindGroupEntry {
+            binding: DUST_BINDING,
+            resource: R::TextureView(&self.dust),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: DUST_BINDING + 1,
+            resource: R::Sampler(&self.clamp),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: FLOOD_BINDING,
+            resource: R::TextureView(&self.flood),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: FLOOD_BINDING + 1,
+            resource: R::Sampler(&self.clamp),
+        });
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("enhanced"),
+            layout,
+            entries: &entries,
+        })
+    }
 }
 
 /// The enhanced drawing's shared parts.
 pub struct Shared {
+    /// The dust's shadow map, to draw the puffs into from the sun.
+    pub dust: wgpu::TextureView,
+    parts: Parts,
     pub layout: wgpu::BindGroupLayout,
     pub buffer: wgpu::Buffer,
     pub group: wgpu::BindGroup,
@@ -71,16 +167,30 @@ pub struct Shared {
     pub ruts: (wgpu::TextureView, u32),
 }
 
+/// The most headlights that glow on the bikes.
+pub const LAMPS: usize = 64;
+
 /// Texels a side of the ruts' map, over the whole terrain.
 pub const RUT_SIDE: u32 = 8192;
 pub const RUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 
 impl Shared {
-    /// With `ruts`, a map of tyre ruts over the terrain.
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, ruts: bool) -> Shared {
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("enhanced"),
-            entries: &[
+    /// Makes the group again for the ray-traced scene as it is now.
+    pub fn set_traced(&mut self, device: &wgpu::Device, traced: &crate::rt::Scene) {
+        self.group = self.parts.group(device, &self.layout, Some(traced));
+    }
+
+    /// Makes the group again with the light poles' baked light `map`
+    /// (crate::flood), and the ray-traced scene `traced` if drawn.
+    pub fn set_flood(&mut self, device: &wgpu::Device, map: &wgpu::TextureView, traced: Option<&crate::rt::Scene>) {
+        self.parts.flood = map.clone();
+        self.group = self.parts.group(device, &self.layout, traced);
+    }
+
+    /// With `ruts`, a map of tyre ruts over the terrain; with `rt`, the
+    /// scene for the ray-traced shadows.
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, ruts: bool, rt: Option<&crate::rt::Scene>) -> Shared {
+        let mut entries = vec![
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -137,7 +247,67 @@ impl Shared {
                     ty: sampler(),
                     count: None,
                 },
-            ],
+        ];
+        if rt.is_some() {
+            use wgpu::{TextureSampleType as T, TextureViewDimension as D};
+            let storage = wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            };
+            let float = T::Float { filterable: true };
+            // As rt::Scene::bindings gives them.
+            let types = [
+                texture(D::D2, T::Float { filterable: false }),
+                wgpu::BindingType::AccelerationStructure { vertex_return: false },
+                storage,
+                texture(D::D2Array, float),
+                sampler(),
+                storage,
+                storage,
+                storage,
+                texture(D::D2Array, float),
+                texture(D::D2, float),
+                storage,
+                storage,
+                texture(D::D2, T::Float { filterable: false }),
+            ];
+            entries.extend(types.into_iter().zip(8..).map(|(ty, binding)| wgpu::BindGroupLayoutEntry {
+                binding,
+                // The scene also for the dust's vertices, to ask whether
+                // each puff is in the sun.
+                visibility: if binding == 9 { wgpu::ShaderStages::VERTEX_FRAGMENT } else { wgpu::ShaderStages::FRAGMENT },
+                ty,
+                count: None,
+            }));
+        }
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: DUST_BINDING,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: texture(wgpu::TextureViewDimension::D2, wgpu::TextureSampleType::Float { filterable: true }),
+            count: None,
+        });
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: DUST_BINDING + 1,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: sampler(),
+            count: None,
+        });
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: FLOOD_BINDING,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: texture(wgpu::TextureViewDimension::D2, wgpu::TextureSampleType::Float { filterable: true }),
+            count: None,
+        });
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: FLOOD_BINDING + 1,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: sampler(),
+            count: None,
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("enhanced"),
+            entries: &entries,
         });
         let materials = crate::materials::Materials::new(device, queue);
         let rut_side = if ruts { RUT_SIDE } else { 1 };
@@ -209,50 +379,57 @@ impl Shared {
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
-        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("enhanced"),
-            layout: &layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: buffer.as_entire_binding(),
+        let dust = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("dust shadows"),
+                size: wgpu::Extent3d {
+                    width: DUST_SIDE,
+                    height: DUST_SIDE,
+                    depth_or_array_layers: 1,
                 },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&map.create_view(
-                        &wgpu::TextureViewDescriptor {
-                            dimension: Some(wgpu::TextureViewDimension::D2Array),
-                            ..Default::default()
-                        },
-                    )),
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DUST_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&Default::default());
+        let flood = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("no flood"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
                 },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&materials.albedo),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::TextureView(&materials.normal),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::Sampler(&repeat),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::TextureView(&rut_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::Sampler(&clamp),
-                },
-            ],
-        });
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&Default::default());
+        let parts = Parts {
+            flood,
+            dust: dust.clone(),
+            buffer: buffer.clone(),
+            shadows: map.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                ..Default::default()
+            }),
+            shadow_sampler: sampler,
+            albedo: materials.albedo.clone(),
+            normal: materials.normal.clone(),
+            repeat,
+            ruts: rut_view.clone(),
+            clamp,
+        };
+        let group = parts.group(device, &layout, rt);
         Shared {
+            dust,
+            parts,
             layout,
             buffer,
             group,
@@ -309,16 +486,114 @@ pub fn splits() -> [f32; 4] {
     [SPLITS[0], SPLITS[1], SPLITS[2], SPLITS[2]]
 }
 
+/// `source` with the enhanced drawing's shared declarations put in where
+/// it asks for them, ray traced (`traced`) or not: what [`shader`] makes.
+pub fn full_source(source: &str, traced: bool) -> String {
+    let mut source = source
+        .replace("#include \"enhanced.wgsl\"", include_str!("enhanced.wgsl"))
+        .replace("#include \"enhanced_fns.wgsl\"", include_str!("enhanced_fns.wgsl"));
+    if traced {
+        source = ray_traced(&source);
+    }
+    source = dusty(&source);
+    flooded(&source)
+}
+
 /// Makes a shader from `source`, with the enhanced drawing's shared
 /// declarations put in where it asks for them.
 pub fn shader(device: &wgpu::Device, label: &str, source: &str) -> wgpu::ShaderModule {
-    let source = source
-        .replace("#include \"enhanced.wgsl\"", include_str!("enhanced.wgsl"))
-        .replace("#include \"enhanced_fns.wgsl\"", include_str!("enhanced_fns.wgsl"));
+    let source = full_source(source, crate::graphics::ray_traced());
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),
         source: wgpu::ShaderSource::Wgsl(source.into()),
     })
+}
+
+/// `source` with the sun's shadows ray traced (crate::rt), where it reads
+/// the shadow maps: the traced shadows bound beside them in the same
+/// group, and `sun_visible` reading them, the maps' own kept as
+/// `sun_mapped`.
+fn ray_traced(source: &str) -> String {
+    let Some(line) = source.lines().find(|l| l.contains("var sun_map: texture_depth_2d_array")) else {
+        return source.to_string();
+    };
+    let group = line
+        .split("@group(")
+        .nth(1)
+        .and_then(|r| r.split(')').next())
+        .unwrap_or("1");
+    let declared = [
+        "rt_shadows: texture_2d<f32>",
+        "rt_scene: acceleration_structure",
+        "<storage, read> rt_cutouts: array<vec4<f32>>",
+        "rt_masks: texture_2d_array<f32>",
+        "rt_sampler: sampler",
+        "<storage, read> rt_vertices: array<u32>",
+        "<storage, read> rt_nodes: array<mat4x4<f32>>",
+        "<storage, read> rt_hits: array<vec4<u32>>",
+        "rt_colours: texture_2d_array<f32>",
+        "rt_ground: texture_2d<f32>",
+        "<storage, read> rt_points: array<f32>",
+        "<storage, read> rt_terrain: array<u32>",
+        "rt_lamps: texture_2d<f32>",
+    ];
+    let mut bindings = line.to_string();
+    for (d, binding) in declared.iter().zip(8..) {
+        let (space, rest) = match d.strip_prefix('<') {
+            Some(r) => {
+                let (s, rest) = r.split_once("> ").unwrap();
+                (format!("<{s}>"), rest)
+            }
+            None => (String::new(), *d),
+        };
+        bindings.push_str(&format!("\n@group({group}) @binding({binding}) var{space} {rest};"));
+    }
+    let source = source
+        .replacen(line, &bindings, 1)
+        .replacen("fn sun_visible(", "fn sun_mapped(", 1)
+        .replacen("fn reflection(", "fn reflection_sky(", 1)
+        .replacen("fn sun_point(", "fn sun_point_mapped(", 1)
+        .replacen("fn headlight_at(", "fn headlight_none(", 1)
+        .replacen("fn headlight_soft(", "fn headlight_soft_none(", 1);
+    format!("enable wgpu_ray_query;\n{source}\n{}", include_str!("enhanced_rt.wgsl"))
+}
+
+/// `source` with the light poles' baked light (crate::flood) bound beside
+/// the sun's shadows, for `headlight_at` without ray tracing.
+fn flooded(source: &str) -> String {
+    let Some(line) = source.lines().find(|l| l.contains("var sun_map: texture_depth_2d_array")) else {
+        return source.to_string();
+    };
+    let group = line
+        .split("@group(")
+        .nth(1)
+        .and_then(|r| r.split(')').next())
+        .unwrap_or("1");
+    let bindings = format!(
+        "{line}\n@group({group}) @binding({FLOOD_BINDING}) var flood_map: texture_2d<f32>;\n@group({group}) @binding({}) var flood_sampler: sampler;",
+        FLOOD_BINDING + 1
+    );
+    source.replacen(line, &bindings, 1)
+}
+
+/// `source` with the dust clouds' shadows over the sun's, where it reads
+/// the sun's shadows: the dust's map bound beside them, and `sun_visible`
+/// the sun's own (kept as `sun_solid`) through the dust.
+fn dusty(source: &str) -> String {
+    let Some(line) = source.lines().find(|l| l.contains("var sun_map: texture_depth_2d_array")) else {
+        return source.to_string();
+    };
+    let group = line
+        .split("@group(")
+        .nth(1)
+        .and_then(|r| r.split(')').next())
+        .unwrap_or("1");
+    let bindings = format!(
+        "{line}\n@group({group}) @binding({DUST_BINDING}) var dust_map: texture_2d<f32>;\n@group({group}) @binding({}) var dust_sampler: sampler;",
+        DUST_BINDING + 1
+    );
+    let source = source.replacen(line, &bindings, 1).replacen("fn sun_visible(", "fn sun_solid(", 1);
+    format!("{source}\n{}", include_str!("enhanced_dust.wgsl"))
 }
 
 /// A bind group layout of `entries`: each binding, where it is seen, and
@@ -372,6 +647,8 @@ pub struct Daylight {
     pub cover: f32,
     pub wet: f32,
     pub rain: f32,
+    /// How much it is night, 0 to 1: the sun down and the moon up.
+    pub night: f32,
 }
 
 /// The light and sky from the scene's own `lights` at `time` (an hour,
@@ -399,6 +676,22 @@ pub fn daylight(lights: &crate::renderer::SceneLights, time: Option<f32>, weathe
         let tint = Vec3::new(0.75, 0.8, 1.0).lerp(Vec3::ONE, smoothstep(0.05, 0.4, up));
         l.ambient = (tint * ambient * (0.5 + 0.5 * smoothstep(-0.1, 0.3, up))).into();
     }
+    // After dusk and before dawn the moon lights the scene: high and to
+    // the side away from where the sun set, faint and blue, and the sky's
+    // light round about fainter still.
+    // The sky's colour goes by where the sun is, not the moon.
+    let sun_up = l.to_sun.y;
+    let night = smoothstep(-0.02, -0.15, sun_up);
+    if night > 0.0 {
+        let flat = Vec3::new(lights.to_sun.x, 0.0, lights.to_sun.z).normalize_or(Vec3::X);
+        let moon = (Vec3::new(-flat.z, 0.0, flat.x) * 0.7 + Vec3::Y * 0.75).normalize();
+        l.to_sun = moon.lerp(l.to_sun, 1.0 - night).normalize();
+        // Without ray tracing there are no headlights: the moon brighter,
+        // so the track still shows.
+        let lift = if crate::graphics::ray_traced() { 1.0 } else { 2.5 };
+        l.sun = (Vec3::from(l.sun).lerp(MOON * lift, night)).into();
+        l.ambient = (Vec3::from(l.ambient).lerp(NIGHT_AMBIENT * lift, night)).into();
+    }
     let (cover, wet, rain) = match weather {
         Weather::Clear => (0.42, 0.0, 0.0),
         Weather::Overcast => (0.85, 0.15, 0.0),
@@ -409,7 +702,7 @@ pub fn daylight(lights: &crate::renderer::SceneLights, time: Option<f32>, weathe
     let sun = Vec3::from(l.sun);
     l.sun = (sun * dim).into();
     l.ambient = (Vec3::from(l.ambient) + sun * (1.0 - dim) * 0.35).into();
-    let up = l.to_sun.y;
+    let up = sun_up;
     let day = smoothstep(-0.08, 0.25, up);
     let dusk = smoothstep(0.35, 0.02, up) * smoothstep(-0.12, 0.0, up);
     let zenith = Vec3::new(0.02, 0.025, 0.06).lerp(Vec3::new(0.13, 0.27, 0.62), day);
@@ -423,8 +716,13 @@ pub fn daylight(lights: &crate::renderer::SceneLights, time: Option<f32>, weathe
         cover,
         wet,
         rain,
+        night,
     }
 }
+
+/// The moon's light and the night sky's, linear (0..1 of the game's).
+const MOON: Vec3 = Vec3::new(0.09, 0.11, 0.17);
+const NIGHT_AMBIENT: Vec3 = Vec3::new(0.035, 0.04, 0.065);
 
 fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
     let t = ((x - a) / (b - a)).clamp(0.0, 1.0);

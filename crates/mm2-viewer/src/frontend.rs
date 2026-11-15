@@ -263,6 +263,69 @@ const ENGINE_SIZES: [(u32, &str); 5] = [
 /// Where the single player screen's tab pages go (`0x44e600`).
 const PAGE: (f32, f32) = (16.0, 41.0);
 
+/// How far up the event page's preview, track and difficulty move to
+/// make room for the time and weather row (the fork's), px.
+const SKY_ROOM: i32 = 26;
+
+/// Adds the time of day and weather row (the fork's, for the enhanced
+/// graphics) to the event page, under the difficulty: the preview a row
+/// shorter and what was under it moved up, then a drop-down list for each,
+/// like the Event Type's.
+fn sky_row(page: &mut Dlg) {
+    for c in &mut page.dialog.controls {
+        if c.anchor.is_some() {
+            continue;
+        }
+        match c.name.as_str() {
+            "PictureBox" => c.rect[3] -= SKY_ROOM,
+            "CornerLL" | "CornerLR" | "DDLTextBox" | "TrackLeft" | "TrackRight" | "GhostBox" | "rbwLabel2" | "RadLODEasy" | "RadLODMedium" | "RadLODHard" => {
+                c.rect[1] -= SKY_ROOM
+            }
+            _ => {}
+        }
+    }
+    // The Event Type box's own look: a box with its arrow, a list under it.
+    let y = 272;
+    page.add_copy("rbwLabel2", "TimeLabel", [24, y + 1, 100, 18]);
+    page.add_copy("EventTypeDropDown", "TimeList", [126, y - 3, 129, 27]);
+    page.add_copy("rbwLabel2", "WeatherLabel", [262, y + 1, 66, 18]);
+    page.add_copy("EventTypeDropDown", "WeatherList", [330, y - 3, 129, 27]);
+    page.set_text("TimeLabel", "Time of Day:");
+    page.set_text("WeatherLabel", "Weather:");
+}
+
+/// The time of day and weather now, as places in mm2_settings::TIMES and
+/// WEATHERS.
+fn sky_now() -> (usize, usize) {
+    let Some(e) = crate::graphics::enhanced() else {
+        return (0, 0);
+    };
+    let time = mm2_settings::TIMES
+        .iter()
+        .position(|t| e.time.is_some_and(|h| crate::graphics::hour(t.0) == Some(h)))
+        .unwrap_or(0);
+    let weather = mm2_settings::WEATHERS.iter().position(|w| crate::graphics::weather(w.0) == Some(e.weather)).unwrap_or(0);
+    (time, weather)
+}
+
+/// Picks the time of day and weather (mm2_settings::TIMES and WEATHERS'
+/// keys) from the next race on, and saves them for the launcher and the
+/// next start, if they changed.
+fn set_sky(time: &str, weather: &str) {
+    let hour = crate::graphics::hour(time);
+    let w = crate::graphics::weather(weather).unwrap_or(crate::graphics::Weather::Clear);
+    if crate::graphics::enhanced().is_none_or(|e| e.time == hour && e.weather == w) {
+        return;
+    }
+    crate::graphics::set_sky(hour, w);
+    let mut s = mm2_settings::Settings::load();
+    s.time = time.to_string();
+    s.weather = weather.to_string();
+    if let Err(e) = s.save() {
+        eprintln!("couldn't save the time and weather to {}: {e}", mm2_settings::Settings::path().display());
+    }
+}
+
 /// The menus' rows of tabs, for the pad's shoulder buttons (the fork's):
 /// single player and the lobby, the options, the career, the records'
 /// events, and the ghosts and replays.
@@ -1172,6 +1235,10 @@ impl Frontend {
         let Some(page) = Dlg::open(&mut self.ui, "SPEVENT", PAGE) else {
             return;
         };
+        let mut page = page;
+        if crate::graphics::enhanced().is_some() {
+            sky_row(&mut page);
+        }
         self.screen = Screen::Single { base, page };
         self.fill_event_page();
     }
@@ -1286,6 +1353,11 @@ impl Frontend {
         }
         self.track = page.selected("DDLTextBox");
         self.ghost = page.selected("DDLGhostRaces");
+        if page.index("TimeList").is_some() {
+            let time = mm2_settings::TIMES[page.selected("TimeList").min(mm2_settings::TIMES.len() - 1)].0;
+            let weather = mm2_settings::WEATHERS[page.selected("WeatherList").min(mm2_settings::WEATHERS.len() - 1)].0;
+            set_sky(time, weather);
+        }
     }
 
     /// The ghost race list (`0x44fa20`): "Record a new ghost race", then
@@ -1415,6 +1487,11 @@ impl Frontend {
         for (i, name) in LEVELS.iter().enumerate() {
             page.set_on(name, i == self.level);
         }
+        if page.index("TimeList").is_some() {
+            let (time, weather) = sky_now();
+            page.set_items("TimeList", mm2_settings::TIMES.iter().map(|t| t.1.to_string()).collect(), time);
+            page.set_items("WeatherList", mm2_settings::WEATHERS.iter().map(|w| w.1.to_string()).collect(), weather);
+        }
     }
 
     /// The tracks of an event, in the order the game lists them (by file
@@ -1535,11 +1612,18 @@ impl Frontend {
                 if let (Some(t), Some(r)) = (preview, page.rect_of("PictureBox")) {
                     let key = format!("{}#{}", t.path.display(), t.preview);
                     if let Some(tex) = ui.picture(gfx, &key, || preview_image(&t)) {
+                        // Its middle, as much as the box holds (shorter
+                        // than the game's when the time and weather row
+                        // is there).
                         let (w, h) = gfx.sprites.size(tex);
-                        gfx.sprites.image(
+                        let (w, h) = (w as f32, h as f32);
+                        let (cw, ch) = (w.min(r[2]), h.min(r[3]));
+                        let (u, v) = ((w - cw) / 2.0 / w, (h - ch) / 2.0 / h);
+                        gfx.sprites.quad(
                             tex,
-                            (r[0] + (r[2] - w as f32) / 2.0).round(),
-                            (r[1] + (r[3] - h as f32) / 2.0).round(),
+                            [u, v, 1.0 - u, 1.0 - v],
+                            [(r[0] + (r[2] - cw) / 2.0).round(), (r[1] + (r[3] - ch) / 2.0).round(), cw, ch],
+                            [1.0; 4],
                         );
                     }
                 }

@@ -43,6 +43,9 @@ pub struct Tweaks {
     pub one_lap: bool,
     /// The speedometer in km/h (`--kmh`).
     pub kmh: bool,
+    /// Hard landings level on both wheels don't crash
+    /// (`--forgiving-landings`).
+    pub forgiving_landings: bool,
     /// Quiet while the window is in the background (`--mute-in-background`).
     pub mute_in_background: bool,
     /// Ctrl+P saves a screenshot (`--screenshot-key`).
@@ -83,6 +86,7 @@ impl Tweaks {
             clean_starts: has("--clean-starts"),
             one_lap: has("--one-lap"),
             kmh: has("--kmh"),
+            forgiving_landings: has("--forgiving-landings"),
             mute_in_background: has("--mute-in-background"),
             screenshot_key: has("--screenshot-key"),
         }
@@ -104,6 +108,7 @@ impl Tweaks {
         s.clean_starts = self.clean_starts;
         s.one_lap = self.one_lap;
         s.kmh = self.kmh;
+        s.forgiving_landings = self.forgiving_landings;
         s.mute_in_background = self.mute_in_background;
         s.screenshot_key = self.screenshot_key;
         match self.vibration {

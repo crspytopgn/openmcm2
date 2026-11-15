@@ -8,8 +8,9 @@ use mm2_formats::scn::{Lighting, Placement};
 use mm2_formats::trn::Terrain;
 use mm2_physics::collision::Trunk;
 
-/// Each object as a model placement, and the trunks.
-pub fn place(eco: &EcoSystem, models: &rs2::Archive, terrain: &Terrain) -> (Vec<Placement>, Vec<Trunk>) {
+/// Each object as a model placement, and the trunks; and each placement's
+/// far billboard, when its species has one.
+pub fn place(eco: &EcoSystem, models: &rs2::Archive, terrain: &Terrain) -> (Vec<Placement>, Vec<Trunk>, Vec<Option<crate::objects::Billboard>>) {
     // Positions count in the world's larger side over 65536 (0x45a290):
     // the collision grid's extent (0x4e39f5), which is the terrain's span,
     // one sample short of its size.
@@ -30,6 +31,7 @@ pub fn place(eco: &EcoSystem, models: &rs2::Archive, terrain: &Terrain) -> (Vec<
         })
         .collect();
     let mut placements = Vec::with_capacity(eco.objects.len());
+    let mut billboards = Vec::with_capacity(eco.objects.len());
     let mut trunks = Vec::new();
     for o in &eco.objects {
         let Some(i) = eco.species.iter().position(|s| s.slot == o.species) else {
@@ -49,6 +51,17 @@ pub fn place(eco: &EcoSystem, models: &rs2::Archive, terrain: &Terrain) -> (Vec<
                 scale: [out, up, out],
                 lighting: Lighting::Plant,
             });
+            // Far off, its picture in the eco-system's LOD3 picture, as the
+            // game drew far trees: as tall, as much wider or narrower than
+            // the species' own as this one is.
+            let r = species.billboard_rect;
+            let shape = (width / species.width[0].max(0.01)) / (height / species.height[0].max(0.01));
+            billboards.push((!species.billboard.is_empty() && r[1] > r[0] && r[2] > r[3]).then(|| crate::objects::Billboard {
+                texture: species.billboard.to_ascii_lowercase(),
+                rect: r,
+                height,
+                shape,
+            }));
         }
         // A trunk is a mesh, only moved to the object (0x457e60): the
         // object's size doesn't scale it.
@@ -62,5 +75,5 @@ pub fn place(eco: &EcoSystem, models: &rs2::Archive, terrain: &Terrain) -> (Vec<
             }
         }
     }
-    (placements, trunks)
+    (placements, trunks, billboards)
 }

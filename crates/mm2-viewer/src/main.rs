@@ -13,6 +13,7 @@
 //!                                       // for you unless you steer
 //! mm2-viewer <TRACK.ENV> --hires <dir>   // with upscaled textures
 //! mm2-viewer ... --enhanced[=no-bloom,no-ao,...]  // modern graphics (F3 compares)
+//! mm2-viewer ... --enhanced=raytracing     // ray-traced shadows and reflections, where the GPU can
 //! mm2-viewer ... --fullscreen [--no-vsync]  // or Alt+Enter while playing
 //! mm2-viewer ... --opengl                  // draw with OpenGL, for GPUs without Vulkan
 //! mm2-viewer ... --show-fps                // or F2: the frame rate in the title and terminal
@@ -52,6 +53,11 @@
 mod bars;
 mod eco;
 mod enhance;
+mod rt;
+mod flood;
+#[cfg(test)]
+mod shader_tests;
+mod gpu_time;
 mod grass;
 mod ruts;
 mod dust;
@@ -1242,12 +1248,29 @@ fn feel_wrecks(race: &mut Race, renderer: &TerrainRenderer) {
     }
 }
 
+/// Where a bike's headlight is: how far ahead of the bike's middle and how
+/// high, ft.
+const HEADLIGHT_AHEAD: f32 = 2.6;
+const HEADLIGHT_UP: f32 = 3.2;
+
 fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, view: Option<cues::Eye>) {
     // The player's shadow: the bike and rider, seen from the sun.
     {
         let me = &race.racers[race.player];
         renderer.set_shadow([me.object, me.object + 1], me.bike.position() + Vec3::Y * 1.5, track.sun);
     }
+    // Each bike's headlight: up front, about at the bars.
+    let lamps: Vec<(Vec3, Vec3)> = race
+        .racers
+        .iter()
+        .map(|r| {
+            let ahead = r.bike.forward().normalize_or(Vec3::Z);
+            let up = r.bike.place().transform_vector3(Vec3::Y).normalize_or(Vec3::Y);
+            // Aimed a little down, at the track ahead.
+            (r.bike.position() + ahead * HEADLIGHT_AHEAD + up * HEADLIGHT_UP, (ahead - up * 0.12).normalize())
+        })
+        .collect();
+    renderer.set_headlights(&lamps);
     for (i, r) in race.racers.iter().enumerate() {
         // A ghost race's ghost is see-through.
         let ghost = race.ghost == Some(i);
@@ -1758,6 +1781,10 @@ fn load_track(
                 })
                 .collect();
             let mut trunks = Vec::new();
+            // The eco-system's trees among the statics, and each one's far
+            // billboard.
+            let mut trees = 0..0;
+            let mut billboards = Vec::new();
             if let Some(eco) = find(".esb").and_then(|e| {
                 mm2_formats::esb::parse(archive.data(e))
                     .map_err(|err| eprintln!("{}: {err}", e.name))
@@ -1765,9 +1792,11 @@ fn load_track(
             }) {
                 match read_archive(&res.join("ECO.RES")) {
                     Ok(bytes) => {
-                        let (placed, solid) =
+                        let (placed, solid, far) =
                             eco::place(&eco, &rs2::Archive::parse(&bytes)?, &terrain);
                         eprintln!("{} trees and bushes, {} trunks", placed.len(), solid.len());
+                        trees = statics.len()..statics.len() + placed.len();
+                        billboards = far;
                         statics.extend(placed);
                         trunks = solid;
                         model_files.push(bytes.clone());
@@ -1844,6 +1873,7 @@ fn load_track(
             };
             let mut objects = ObjectMesh::build(
                 &statics,
+                (trees, &billboards),
                 &extras,
                 &movable,
                 &animations,
@@ -2824,11 +2854,24 @@ async fn gpu_from(
     }
     // Anti-aliasing with 2 or 8 samples, where the GPU has them.
     let specific = adapter.features() & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+    // Ray queries for the ray-traced shadows, only when they are asked
+    // for and the GPU has them: wgpu still calls them experimental.
+    let rays = graphics::wants_ray_tracing() && adapter.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+    graphics::set_ray_queries(rays);
+    if graphics::wants_ray_tracing() && !rays {
+        eprintln!("ray tracing: this GPU cannot trace rays, so the shadow maps are drawn and nothing is reflected");
+    }
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
             label: Some("mm2"),
-            required_features: specific,
+            required_features: specific
+                | if rays { wgpu::Features::EXPERIMENTAL_RAY_QUERY } else { wgpu::Features::empty() }
+                // MM2_GPU_TIMES: each part of the frame timed (gpu_time).
+                | if gpu_time::wanted() { adapter.features() & gpu_time::features() } else { wgpu::Features::empty() },
             required_limits: adapter.limits(),
+            // SAFETY: only ray queries are used of the experimental
+            // features, and only on a GPU that says it has them.
+            experimental_features: if rays { unsafe { wgpu::ExperimentalFeatures::enabled() } } else { wgpu::ExperimentalFeatures::disabled() },
             ..Default::default()
         })
         .await?;
@@ -2904,7 +2947,9 @@ async fn screenshot(
     height: u32,
 ) -> Result<(), BoxError> {
     let (adapter, device, queue) = gpu(None).await?;
-    eprintln!("rendering on {} ({:?})", adapter.get_info().name, adapter.get_info().backend);
+    let info = adapter.get_info();
+    let rt = adapter.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+    eprintln!("rendering on {} ({:?}, ray queries: {rt})", info.name, info.backend);
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let mut renderer = track_renderer(track, &device, &queue, format);
     if let Some((d, tyres)) = dirt {
@@ -2952,6 +2997,7 @@ async fn screenshot(
         }
         let n = n.max(1) as f64;
         eprintln!("bench: {:.2} ms a frame ({:.3} ms recording)", start.elapsed().as_secs_f64() * 1000.0 / n, record * 1000.0 / n);
+        renderer.report_gpu_times(&device);
     }
     let draw = renderer.render(&device, &queue, view, (width, height), camera, time);
     // The in-race display over the race.
@@ -3006,6 +3052,7 @@ fn track_renderer(track: &Track, device: &wgpu::Device, queue: &wgpu::Queue, for
     }
     renderer.set_lights(track.lights);
     renderer.set_desert(track.desert);
+    renderer.set_stadium(track.supercross);
     renderer.set_crowd(device, &track.spectators);
     if let Some(detail) = &track.detail {
         renderer.set_detail(device, queue, detail);
@@ -3737,6 +3784,7 @@ impl App {
         }
         renderer.set_lights(track.lights);
         renderer.set_desert(track.desert);
+    renderer.set_stadium(track.supercross);
         renderer.set_crowd(&state.device, &track.spectators);
         if let Some(detail) = &track.detail {
             renderer.set_detail(&state.device, &state.queue, detail);

@@ -53,9 +53,37 @@ type Block = (Vec3, Vec3, std::ops::Range<u32>);
 /// The still objects' blocks are this many ft a side.
 const BLOCK: f32 = 160.0;
 
+/// How far off the eco-system's trees give way to their billboards, ft,
+/// and over how deep a band they blend, dithered (objects.wgsl's too).
+pub const TREE_FAR: f32 = 450.0;
+pub const TREE_BAND: f32 = 60.0;
+
+/// What a draw is, for the trees' distance: a draw of anything else, of
+/// the eco-system's full trees (near), or of their billboards (far); its
+/// texture name ends with the tag.
+const NEAR_TAG: &str = "\u{1}near";
+const FAR_TAG: &str = "\u{1}far";
+
+/// A tree's far billboard: its picture in the eco-system's LOD3 picture
+/// (`rect`: left, right, base and top, and the trunk's place across), how
+/// tall the tree is, ft, and how much wider than its picture it is for its
+/// height.
+#[derive(Clone, Debug)]
+pub struct Billboard {
+    pub texture: String,
+    pub rect: [f32; 5],
+    pub height: f32,
+    pub shape: f32,
+}
+
 /// All of a track's objects, ready to upload.
 #[derive(Default)]
 pub struct ObjectMesh {
+    /// Each draw's kind for the trees' distance: 0 anything else, 1 the
+    /// eco-system's full trees, 2 their billboards.
+    lods: Vec<u8>,
+    /// While a tree is added, the tag its draws' names take.
+    tag: Option<&'static str>,
     vertices: Vec<Vertex>,
     /// Each vertex's [`Extra`].
     extras: Vec<Extra>,
@@ -80,6 +108,9 @@ pub struct ObjectMesh {
     extra_node: Option<u32>,
     pub placed: usize,
     pub missing_models: Vec<String>,
+    /// The track's light poles' lamp heads: the top of each, drawing
+    /// coordinates, lit at night with ray tracing.
+    pub pole_lamps: Vec<(Vec3, Vec3)>,
 }
 
 /// An animated model on the track and the motion it plays.
@@ -260,12 +291,185 @@ impl AnimatedModel {
 }
 
 impl ObjectMesh {
+    /// The objects as the ray-traced shadows see them (crate::rt): the
+    /// still triangles where they are drawn, the moving ones to be posed
+    /// each frame, and the cut-out textures' masks, at most `layers` of
+    /// them (past that a texture is taken as solid). A triangle whose
+    /// colour is see-through casts nothing.
+    pub fn rt_geometry(&self, layers: u32) -> crate::rt::Geometry {
+        let mut g = crate::rt::Geometry {
+            positions: self.vertices.iter().map(|v| v.position).collect(),
+            ..Default::default()
+        };
+        let mut moving_cutouts = Vec::new();
+        let mut moved: HashMap<u32, u32> = HashMap::new();
+        for (d, (range, image)) in self.draws.iter().enumerate() {
+            // The rays see the full trees, not their billboards.
+            if self.lods.get(d) == Some(&2) {
+                continue;
+            }
+            // The texture's colours, for what the reflections see.
+            let colour = match image.as_ref().and_then(|img| Some((img.levels.first()?, img.size))) {
+                Some((top, size)) if (g.colours.len() as u32) < layers => {
+                    g.colours.push(crate::rt::colours(top, size));
+                    (g.colours.len() - 1) as u32
+                }
+                _ => crate::rt::NO_COLOUR,
+            };
+            let layer = image.as_ref().and_then(|img| {
+                let top = img.levels.first()?;
+                let cut = top.chunks_exact(4).any(|p| p[3] < 128);
+                (cut && (g.masks.len() as u32) < layers).then(|| {
+                    let mask = crate::rt::mask(top, img.size);
+                    let pooled = crate::rt::Pooled::new(&mask);
+                    g.masks.push(mask);
+                    ((g.masks.len() - 1) as f32, pooled)
+                })
+            });
+            for tri in self.indices[range.start as usize..range.end as usize].chunks_exact(3) {
+                let v = [0, 1, 2].map(|k| &self.vertices[tri[k] as usize]);
+                if v.iter().all(|v| v.color[3] < 128) {
+                    continue;
+                }
+                let moving = v[0].node & NODE != 0;
+                // Only the triangles with both clear and solid texels need
+                // the rays to look at their mask; the clear ones cast
+                // nothing.
+                let layer = match &layer {
+                    Some((layer, pooled)) => match pooled.cover(v.map(|v| v.uv)) {
+                        crate::rt::Cover::Clear => continue,
+                        crate::rt::Cover::Solid => None,
+                        crate::rt::Cover::Mixed => Some(*layer),
+                    },
+                    None => None,
+                };
+                let cut = layer.is_some() as usize;
+                if let Some(layer) = layer {
+                    // How many of the mask's texels fall in a ft of the
+                    // triangle, for the rays to pick how blurred a mask
+                    // to look through.
+                    let [a, b, c] = v.map(|v| Vec3::from(v.position));
+                    let area = (b - a).cross(c - a).length();
+                    let [ua, ub, uc] = v.map(|v| glam::Vec2::from(v.uv));
+                    let uv_area = (ub - ua).perp_dot(uc - ua).abs() * (crate::rt::MASK_SIDE * crate::rt::MASK_SIDE) as f32;
+                    let density = if area > 1e-6 { (uv_area / area).sqrt() } else { 0.0 };
+                    let record = [v[0].uv[0], v[0].uv[1], v[1].uv[0], v[1].uv[1], v[2].uv[0], v[2].uv[1], layer, density];
+                    if moving {
+                        moving_cutouts.push(record);
+                    } else {
+                        g.cutouts.push(record);
+                    }
+                }
+                // What a reflection that meets it sees: its object
+                // vertices and texture.
+                g.hits[2 * moving as usize + cut].push([tri[0], tri[1], tri[2], colour]);
+                if moving {
+                    for &i in tri {
+                        let next = moved.len() as u32;
+                        let at = *moved.entry(i).or_insert_with(|| {
+                            g.sources.push(i);
+                            next
+                        });
+                        g.moving[cut].push(at);
+                    }
+                } else {
+                    g.still[cut].extend_from_slice(tri);
+                }
+            }
+        }
+        g.cutouts.extend(moving_cutouts);
+        g
+    }
+
+    /// The stadium's floodlights, where its textures paint them: the
+    /// near-white glowing texels high on the still objects, gathered into
+    /// banks. Each bank's middle (drawing coordinates), how far it spreads
+    /// (ft) and how many lamp texels it holds.
+    pub fn floodlights(&self, above: f32) -> Vec<(Vec3, f32, f32)> {
+        const CELL: f32 = 40.0;
+        // Lamps this near one another are one bank, and the most banks.
+        const BANK: f32 = 160.0;
+        const MOST_BANKS: usize = 16;
+        let mut cells: HashMap<(i32, i32, i32), (Vec3, f32, Vec3, Vec3)> = HashMap::new();
+        for ((range, image), name) in self.draws.iter().zip(&self.names) {
+            // The domed stadium's walls and roof are its texture panels;
+            // nothing else paints lamps.
+            if !name.to_lowercase().starts_with("texturepanel") {
+                continue;
+            }
+            let Some(img) = image else { continue };
+            let Some(top) = img.levels.first() else { continue };
+            let side = img.size as f32;
+            for tri in self.indices[range.start as usize..range.end as usize].chunks_exact(3) {
+                let v = [0, 1, 2].map(|k| &self.vertices[tri[k] as usize]);
+                if v[0].node & NODE != 0 {
+                    continue;
+                }
+                let p = v.map(|v| Vec3::from(v.position));
+                if p.iter().all(|p| p.y < above) {
+                    continue;
+                }
+                let uv = v.map(|v| glam::Vec2::from(v.uv));
+                // Sampled about once a texel.
+                let span = ((uv[1] - uv[0]).length().max((uv[2] - uv[0]).length()) * side).ceil().clamp(1.0, 512.0) as u32;
+                for a in 0..=span {
+                    for b in 0..=(span - a) {
+                        let (wa, wb) = (a as f32 / span as f32, b as f32 / span as f32);
+                        let t = uv[0] * (1.0 - wa - wb) + uv[1] * wa + uv[2] * wb;
+                        let (x, y) = ((t.x.rem_euclid(1.0) * side) as u32, (t.y.rem_euclid(1.0) * side) as u32);
+                        let px = &top[((y.min(img.size - 1) * img.size + x.min(img.size - 1)) * 4) as usize..][..4];
+                        let (r, g, bl) = (px[0] as f32, px[1] as f32, px[2] as f32);
+                        let (hi, lo) = (r.max(g).max(bl), r.min(g).min(bl));
+                        // A lamp: very bright and nearly white.
+                        if hi < 235.0 || lo < 170.0 || hi - lo > 85.0 {
+                            continue;
+                        }
+                        let w = p[0] * (1.0 - wa - wb) + p[1] * wa + p[2] * wb;
+                        if w.y < above {
+                            continue;
+                        }
+                        let key = ((w.x / CELL).floor() as i32, (w.y / CELL).floor() as i32, (w.z / CELL).floor() as i32);
+                        let c = cells.entry(key).or_insert((Vec3::ZERO, 0.0, Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)));
+                        c.0 += w;
+                        c.1 += 1.0;
+                        c.2 = c.2.min(w);
+                        c.3 = c.3.max(w);
+                    }
+                }
+            }
+        }
+        // The cells, then near ones gathered into banks, the biggest first.
+        let mut parts: Vec<(Vec3, f32, Vec3, Vec3)> = cells.into_values().filter(|c| c.1 >= 4.0).collect();
+        parts.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let mut banks: Vec<(Vec3, f32, Vec3, Vec3)> = Vec::new();
+        for (sum, n, lo, hi) in parts {
+            let at = sum / n;
+            match banks.iter_mut().find(|b| (b.0 / b.1).distance(at) < BANK) {
+                Some(b) => {
+                    b.0 += sum;
+                    b.1 += n;
+                    b.2 = b.2.min(lo);
+                    b.3 = b.3.max(hi);
+                }
+                None => banks.push((sum, n, lo, hi)),
+            }
+        }
+        let mut out: Vec<(Vec3, f32, f32)> = banks
+            .iter()
+            .map(|b| (b.0 / b.1, ((b.3 - b.2).length() * 0.5).max(2.0), b.1))
+            .collect();
+        out.sort_by(|a, b| b.2.total_cmp(&a.2));
+        out.truncate(MOST_BANKS);
+        out
+    }
+
     /// Bakes every placement whose model is in `models` and sets up every
     /// animation whose `.mcf` is in `objects`, with textures from the first
     /// of `textures` (named by their archive file) that has them, or their
     /// replacements in `hires`.
     pub fn build(
         placements: &[Placement],
+        (trees, billboards): (std::ops::Range<usize>, &[Option<Billboard>]),
         extras: &[Placement],
         movable: &[Placement],
         animations: &[Animation],
@@ -298,25 +502,46 @@ impl ObjectMesh {
                     if let Some(data) = models.iter().find_map(|m| m.get(&text)) {
                         return mm2_formats::slt::parse(data)
                             .map_err(|err| eprintln!("{name}: {err}"))
-                            .ok();
+                            .ok()
+                            .map(lift_decals);
                     }
                     let data = models.iter().find_map(|m| m.get(&key))?;
                     slb::parse(data)
                         .map_err(|err| eprintln!("{name}: {err}"))
                         .ok()
+                        .map(lift_decals)
                 })
                 .clone()
         };
         // Indices for each texture name, merged across every model.
         let mut batches: HashMap<String, Vec<u32>> = HashMap::new();
 
-        for p in placements {
+        for (i, p) in placements.iter().enumerate() {
             let Some(model) = load(&p.model) else {
                 mesh.missing(&p.model);
                 continue;
             };
+            let first = mesh.vertices.len();
+            // The eco-system's trees: drawn whole near, as billboards far.
+            let tree = trees.contains(&i);
+            mesh.tag = tree.then_some(NEAR_TAG);
             mesh.add(&model, Some(placement_matrix(p)), 0, None, p.lighting, &mut batches);
+            mesh.tag = None;
+            if let Some(Some(b)) = tree.then(|| billboards.get(i - trees.start)).flatten() {
+                mesh.add_billboard(p, b, &mut batches);
+            }
             mesh.placed += 1;
+            // A light pole: its lamps are the bars at its top.
+            if bare(&p.model).eq_ignore_ascii_case("lightpole.slt") {
+                let v = &mesh.vertices[first..];
+                let top = v.iter().map(|v| v.position[1]).fold(f32::MIN, f32::max);
+                let head: Vec<Vec3> = v.iter().map(|v| Vec3::from(v.position)).filter(|p| p.y > top - 3.0).collect();
+                if !head.is_empty() {
+                    let look = from_game(Vec3::from(p.look));
+                    let flat = Vec3::new(look.x, 0.0, look.z).normalize_or(Vec3::X);
+                    mesh.pole_lamps.push((head.iter().copied().sum::<Vec3>() / head.len() as f32, flat));
+                }
+            }
         }
 
         // The enhanced drawing's dressing (scenery.rs): placed like the
@@ -454,9 +679,12 @@ impl ObjectMesh {
 
         let mut names: Vec<_> = batches.keys().cloned().collect();
         names.sort();
-        for name in names {
+        for tagged in names {
             let start = mesh.indices.len() as u32;
-            mesh.add_blocks(&batches[&name]);
+            mesh.add_blocks(&batches[&tagged]);
+            // The texture's own name, and what the draw is for the trees.
+            let name = tagged.split('\u{1}').next().unwrap_or_default().to_string();
+            mesh.lods.push(if tagged.ends_with(FAR_TAG) { 2 } else if tagged.ends_with(NEAR_TAG) { 1 } else { 0 });
             let tex = match name.strip_prefix(PLATE) {
                 // Plates are painted from the digits texture, so they stay
                 // the game's own.
@@ -589,6 +817,29 @@ impl ObjectMesh {
         self.blocks.push(blocks);
     }
 
+    /// A tree's far billboard: a quad standing at its foot, its corners
+    /// as if facing along z (the vertex shader turns it to the camera),
+    /// each corner's offset from the foot in its normal.
+    fn add_billboard(&mut self, p: &Placement, b: &Billboard, batches: &mut HashMap<String, Vec<u32>>) {
+        let foot = from_game(Vec3::from(p.position));
+        let [u0, u1, v_base, v_top, trunk] = b.rect;
+        let width = b.height * (u1 - u0) / (v_base - v_top) * b.shape;
+        let left = (trunk - u0) / (u1 - u0) * width;
+        let right = width - left;
+        let base = self.vertices.len() as u32;
+        for (x, y, u, v) in [(-left, 0.0, u0, v_base), (right, 0.0, u1, v_base), (right, b.height, u1, v_top), (-left, b.height, u0, v_top)] {
+            self.vertices.push(Vertex {
+                position: (foot + Vec3::new(x, y, 0.0)).into(),
+                normal: [x, y, 0.0],
+                uv: [u, v],
+                color: [255; 4],
+                node: PLANT,
+            });
+            self.extras.push(Extra { smooth: [0.0; 3], sway: [0.0; 2] });
+        }
+        batches.entry(format!("{}{FAR_TAG}", b.texture)).or_default().extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
+    }
+
     fn missing(&mut self, name: &str) {
         if !self.missing_models.iter().any(|m| m == name) {
             self.missing_models.push(name.to_string());
@@ -695,10 +946,11 @@ impl ObjectMesh {
             if place.is_none() && mode == 0 {
                 smooth_normals(&self.vertices[base as usize..], &mut self.extras[base as usize..]);
             }
-            batches
-                .entry(texture)
-                .or_default()
-                .extend(s.faces.iter().flatten().map(|&i| base + i as u32));
+            let key = match self.tag {
+                Some(tag) => format!("{texture}{tag}"),
+                None => texture,
+            };
+            batches.entry(key).or_default().extend(s.faces.iter().flatten().map(|&i| base + i as u32));
         }
     }
 }
@@ -759,6 +1011,8 @@ pub struct ObjectRenderer {
     cpu_indices: Vec<u32>,
     vertex_nodes: Vec<u32>,
     draw_ranges: Vec<std::ops::Range<u32>>,
+    /// Each draw's kind for the trees' distance (ObjectMesh::lods).
+    lods: Vec<u8>,
     vertices: wgpu::Buffer,
     /// The enhanced drawing's [`Extra`]s, when it draws.
     extras: Option<wgpu::Buffer>,
@@ -771,6 +1025,15 @@ pub struct ObjectRenderer {
     /// their draw, for the camera and each sun cascade.
     seen: Vec<Vec<(std::ops::Range<u32>, usize)>>,
     nodes: wgpu::Texture,
+    /// The nodes again as a buffer, and as they were a frame ago, for the
+    /// enhanced drawing only: the ray-traced scene poses the moving models
+    /// from them (crate::rt), and their motion on screen is drawn for
+    /// temporal anti-aliasing. (The texture serves every drawing, as older
+    /// graphics cards' OpenGL has no storage buffers in vertex shaders.)
+    node_buffers: Option<(wgpu::Buffer, wgpu::Buffer)>,
+    last_nodes: std::cell::RefCell<Vec<[f32; 16]>>,
+    /// Draws the moving models' motion (fs_motion), with its views.
+    motion: Option<(wgpu::RenderPipeline, wgpu::Buffer, wgpu::BindGroup)>,
     animated: Vec<AnimatedModel>,
     node_count: usize,
     /// The dressing's node, and whether it shows.
@@ -778,6 +1041,16 @@ pub struct ObjectRenderer {
     pub extras_shown: bool,
     /// The enhanced drawing ([`crate::graphics`]), when on.
     enhanced: Option<Enhanced>,
+}
+
+/// The views the moving models' motion is drawn with (fs_motion).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct MotionViews {
+    now: [[f32; 4]; 4],
+    before: [[f32; 4]; 4],
+    camera: [f32; 4],
+    size: [f32; 4],
 }
 
 /// The objects' part of the enhanced drawing: lit per pixel and shadowed,
@@ -845,7 +1118,10 @@ impl ObjectRenderer {
         let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("object vertices"),
             contents: bytemuck::cast_slice(&mesh.vertices),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            // The ray-traced shadows pose the moving models from them.
+            usage: wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | if crate::graphics::ray_traced() { wgpu::BufferUsages::STORAGE } else { wgpu::BufferUsages::empty() },
         });
         let extras = enhanced.map(|_| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -909,7 +1185,8 @@ impl ObjectRenderer {
                 // The enhanced drawing's photo material for the texture.
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    // The vertex stage too: a billboard is turned there.
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -1097,7 +1374,9 @@ impl ObjectRenderer {
                 multiview_mask: None,
                 cache: None,
             });
-            let cascades = (0..crate::enhance::CASCADES)
+            // One more view than the cascades: the camera's, for the
+            // ray-traced shadows' depth pass.
+            let cascades = (0..crate::enhance::CASCADES + 1)
                 .map(|_| {
                     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                         label: Some("sun cascade"),
@@ -1152,6 +1431,87 @@ impl ObjectRenderer {
         });
         write_nodes(queue, &nodes, &vec![Mat4::IDENTITY; node_count]);
         let nodes_view = nodes.create_view(&Default::default());
+        let node_buffers = enhanced.is_some().then(|| {
+            let buffer = |label| {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents: bytemuck::cast_slice(&vec![Mat4::IDENTITY.to_cols_array(); node_count]),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                })
+            };
+            (buffer("object nodes"), buffer("object nodes before"))
+        });
+        // The moving models' motion on screen, for temporal anti-aliasing:
+        // where each pixel of theirs was a frame ago, and how far it is.
+        let motion = node_buffers.as_ref().map(|(_, nodes_before)| {
+            let entry = |binding: u32, ty: wgpu::BufferBindingType| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: visible,
+                ty: wgpu::BindingType::Buffer {
+                    ty,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            };
+            let motion_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("object motion"),
+                entries: &[entry(1, wgpu::BufferBindingType::Uniform), entry(2, wgpu::BufferBindingType::Storage { read_only: true })],
+            });
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("object motion"),
+                bind_group_layouts: &[Some(&globals_layout), Some(&texture_layout), Some(&motion_layout)],
+                immediate_size: 0,
+            });
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("object motion"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_motion"),
+                    compilation_options: Default::default(),
+                    buffers: &vertex_layout,
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_motion"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(crate::post::MOTION_FORMAT.into())],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: crate::post::MOTION_DEPTH,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            });
+            let views = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("object motion"),
+                size: std::mem::size_of::<MotionViews>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("object motion"),
+                layout: &motion_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: views.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: nodes_before.as_entire_binding(),
+                    },
+                ],
+            });
+            (pipeline, views, group)
+        });
         let globals = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("object globals"),
             layout: &globals_layout,
@@ -1185,13 +1545,14 @@ impl ObjectRenderer {
             .draws
             .iter()
             .zip(&mesh.names)
-            .map(|((range, tex), name)| {
+            .zip(&mesh.lods)
+            .map(|(((range, tex), name), &lod)| {
                 let tex = upload(device, queue, tex.as_ref().unwrap_or(&white));
                 // Its photo material's layer, or -1 for none.
                 let surface = mesh.surfaced.then(|| crate::materials::surface(name)).flatten();
                 let surface = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("object surface"),
-                    contents: bytemuck::cast_slice(&[surface.map_or(-1.0, |m| m as f32), 0.0, 0.0, 0.0]),
+                    contents: bytemuck::cast_slice(&[surface.map_or(-1.0, |m| m as f32), crate::materials::backlit(name) as u32 as f32, lod as f32, 0.0]),
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
                 let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1226,6 +1587,7 @@ impl ObjectRenderer {
             cpu_indices: mesh.indices.clone(),
             vertex_nodes: mesh.vertices.iter().map(|v| v.node).collect(),
             draw_ranges: mesh.draws.iter().map(|(r, _)| r.clone()).collect(),
+            lods: mesh.lods.clone(),
             vertices,
             extras,
             indices,
@@ -1235,6 +1597,9 @@ impl ObjectRenderer {
             draws,
             blocks: mesh.blocks.clone(),
             nodes,
+            node_buffers,
+            last_nodes: std::cell::RefCell::new(Vec::new()),
+            motion,
             animated: mesh.animated.clone(),
             node_count,
             extra_node: mesh.extra_node.map(|n| n as usize),
@@ -1399,16 +1764,61 @@ impl ObjectRenderer {
             }
         }
         write_nodes(queue, &self.nodes, &nodes);
+        let Some((now, nodes_before)) = &self.node_buffers else { return };
+        let data: Vec<[f32; 16]> = nodes.iter().map(Mat4::to_cols_array).collect();
+        queue.write_buffer(now, 0, bytemuck::cast_slice(&data));
+        // Last frame's, for the moving models' motion on screen.
+        let mut last = self.last_nodes.borrow_mut();
+        let before = if last.len() == data.len() { &last[..] } else { &data[..] };
+        queue.write_buffer(nodes_before, 0, bytemuck::cast_slice(before));
+        *last = data;
+    }
+
+    /// Draws the moving models' motion on screen (temporal anti-aliasing,
+    /// crate::post): seen through `now` this frame and `before` the frame
+    /// before (neither shifted for the anti-aliasing), from `camera`, on
+    /// a scene `size` pixels.
+    pub fn draw_motion(&self, queue: &wgpu::Queue, pass: &mut wgpu::RenderPass<'_>, now: Mat4, before: Mat4, camera: Vec3, size: (u32, u32)) {
+        let (Some((pipeline, views, group)), Some(e)) = (&self.motion, &self.enhanced) else { return };
+        let Some((indices, draws)) = &e.moving else { return };
+        let v = MotionViews {
+            now: now.to_cols_array_2d(),
+            before: before.to_cols_array_2d(),
+            camera: [camera.x, camera.y, camera.z, 0.0],
+            size: [size.0 as f32, size.1 as f32, 0.0, 0.0],
+        };
+        queue.write_buffer(views, 0, bytemuck::bytes_of(&v));
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &self.globals, &[]);
+        pass.set_bind_group(2, group, &[]);
+        pass.set_vertex_buffer(0, self.vertices.slice(..));
+        pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+        for (range, d) in draws {
+            pass.set_bind_group(1, &self.draws[*d].1, &[]);
+            pass.draw_indexed(range.clone(), 0, 0..1);
+        }
     }
 
     /// Picks what view `slot` (0 the camera, 1 on each sun cascade) can
     /// see through `frustum`, for the draws after.
-    pub fn cull(&mut self, slot: usize, frustum: &crate::cull::Frustum) {
+    /// The eco-system's full trees only as far as their billboards' band,
+    /// and those only from it on, by how far each block is from `camera`.
+    pub fn cull(&mut self, slot: usize, frustum: &crate::cull::Frustum, camera: Vec3) {
         let Some(seen) = self.seen.get_mut(slot) else { return };
         seen.clear();
         let mut runs = Vec::new();
         for (d, blocks) in self.blocks.iter().enumerate() {
-            crate::cull::runs(blocks.iter().filter(|b| frustum.sees(b.0, b.1)).map(|b| b.2.clone()), &mut runs);
+            let kind = self.lods.get(d).copied().unwrap_or(0);
+            let wanted = |b: &&Block| {
+                let near = camera.clamp(b.0, b.1).distance(camera);
+                let far = (camera - b.0).abs().max((camera - b.1).abs()).length();
+                match kind {
+                    1 => near <= TREE_FAR + TREE_BAND,
+                    2 => far >= TREE_FAR - TREE_BAND,
+                    _ => true,
+                }
+            };
+            crate::cull::runs(blocks.iter().filter(|b| wanted(b) && frustum.sees(b.0, b.1)).map(|b| b.2.clone()), &mut runs);
             seen.extend(runs.drain(..).map(|r| (r, d)));
         }
     }
@@ -1479,6 +1889,26 @@ impl ObjectRenderer {
         }
     }
 
+    /// The vertices and the nodes that move them, for the ray-traced
+    /// shadows to pose the moving models from (crate::rt::Scene::attach).
+    pub fn posing(&self) -> Option<(&wgpu::Buffer, &wgpu::Buffer)> {
+        Some((&self.vertices, &self.node_buffers.as_ref()?.0))
+    }
+
+    /// Draws what the camera sees through `view_proj` into the ray-traced
+    /// shadows' depth pass (crate::rt), cut-outs cut out.
+    pub fn draw_camera_depth(&self, queue: &wgpu::Queue, pass: &mut wgpu::RenderPass<'_>, view_proj: Mat4) {
+        let Some(e) = &self.enhanced else { return };
+        let (buffer, group) = &e.cascades[crate::enhance::CASCADES];
+        queue.write_buffer(buffer, 0, bytemuck::bytes_of(&view_proj.to_cols_array()));
+        pass.set_pipeline(&e.depth);
+        pass.set_bind_group(0, &self.globals, &[]);
+        pass.set_bind_group(2, group, &[]);
+        pass.set_vertex_buffer(0, self.vertices.slice(..));
+        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+        self.draw_seen(pass, 0);
+    }
+
     /// Draws every object, or with `moving_only` only the moving models,
     /// into sun cascade `cascade`'s depth.
     pub fn draw_sun_depth(&self, pass: &mut wgpu::RenderPass<'_>, cascade: usize, moving_only: bool) {
@@ -1537,6 +1967,89 @@ impl ObjectRenderer {
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
         self.draw_seen(pass, 0);
     }
+}
+
+/// How far a decal is lifted off the face it lies on, and each side of a
+/// thin wall moved out, ft: enough that the depth buffer tells them apart
+/// far off, little enough that the ray-traced shadows' rays starting by a
+/// thin roof's edge find no gap to slip through.
+const DECAL_LIFT: f32 = 0.03;
+/// How thin a wall's two sides are parted from, ft.
+const THIN_WALL: f32 = 0.1;
+
+/// Parts a model's faces that lie in the very same plane, over one
+/// another: a depth buffer cannot tell which is in front, and far off
+/// they flicker through one another (the game drew them in order, and
+/// only the side facing the eye). Two kinds:
+///
+/// * A wall with an outside and an inside, back to back and in one
+///   plane or a hair apart (a tent's sides, a fifth of an inch thick):
+///   each moves a little the way it faces, so each is in front from its
+///   own side.
+/// * A decal on a face (a logo, a sign), facing the same way: the smaller
+///   of the two is lifted off the bigger.
+fn lift_decals(mut model: slb::Model) -> slb::Model {
+    let Some(lod) = model.lods.first_mut() else { return model };
+    struct Tri {
+        surface: usize,
+        corners: [u16; 3],
+        points: [Vec3; 3],
+        normal: Vec3,
+        area: f32,
+    }
+    let mut tris = Vec::new();
+    for (surface, s) in lod.surfaces.iter().enumerate() {
+        for f in &s.faces {
+            let p = f.map(|i| s.positions.get(i as usize).copied().map_or(Vec3::ZERO, Vec3::from));
+            let cross = (p[1] - p[0]).cross(p[2] - p[0]);
+            let area = cross.length() * 0.5;
+            if area > 1e-6 {
+                // Facing as its corners' normals say (the game lights by
+                // them): the windings are not to be trusted.
+                let lit: Vec3 = f.iter().filter_map(|&i| s.normals.get(i as usize)).map(|n| Vec3::from(*n)).sum();
+                let normal = cross.normalize() * if cross.dot(lit) < 0.0 { -1.0 } else { 1.0 };
+                tris.push(Tri { surface, corners: *f, points: p, normal, area });
+            }
+        }
+    }
+    // Whether `p` is over triangle `t`, in its plane.
+    let over = |t: &Tri, p: Vec3| {
+        (0..3).all(|k| {
+            let (a, b) = (t.points[k], t.points[(k + 1) % 3]);
+            let wound = (t.points[1] - t.points[0]).cross(t.points[2] - t.points[0]);
+            (b - a).cross(p - a).dot(wound) >= -1e-6
+        })
+    };
+    let middle_of = |t: &Tri| (t.points[0] + t.points[1] + t.points[2]) / 3.0;
+    let mut lifts: Vec<(usize, u16, Vec3)> = Vec::new();
+    for a in &tris {
+        let middle = middle_of(a);
+        let flat = |b: &Tri| a.points.iter().all(|p| (*p - b.points[0]).dot(b.normal).abs() < 0.01);
+        let lift = tris.iter().any(|b| {
+            let facing = a.normal.dot(b.normal);
+            // Back to back, one over the other; or a decal on a bigger
+            // face.
+            (facing < -0.999
+                && a.points.iter().all(|p| {
+                    let behind = (b.points[0] - *p).dot(b.normal);
+                    (-0.01..THIN_WALL).contains(&behind)
+                })
+                && (over(b, middle) || over(a, middle_of(b))))
+                || (facing > 0.999 && b.area > a.area * 1.5 && flat(b) && over(b, middle))
+        });
+        if lift {
+            lifts.extend(a.corners.iter().map(|&i| (a.surface, i, a.normal * DECAL_LIFT)));
+        }
+    }
+    // Each corner once, however many of its triangles are decals.
+    lifts.sort_by_key(|l| (l.0, l.1));
+    lifts.dedup_by_key(|l| (l.0, l.1));
+    for (surface, i, lift) in lifts {
+        if let Some(p) = lod.surfaces[surface].positions.get_mut(i as usize) {
+            *p = (Vec3::from(*p) + lift).into();
+        }
+    }
+    model
 }
 
 /// A skin of `#m1:<texture>` gives a model's second material that texture

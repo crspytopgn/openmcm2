@@ -15,6 +15,8 @@ const REACH: f32 = 220.0;
 
 pub struct SmoothGround {
     pipeline: wgpu::RenderPipeline,
+    /// For the ray-traced shadows' depth pass (crate::rt), when drawn.
+    depth: Option<wgpu::RenderPipeline>,
     group: wgpu::BindGroup,
     indices: wgpu::Buffer,
     /// The patch in blocks (fine points from the corner: x, z from and
@@ -125,6 +127,30 @@ impl SmoothGround {
             multiview_mask: None,
             cache: None,
         });
+        let depth = crate::graphics::ray_traced().then(|| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("rt smooth depth"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: Some("vs_smooth"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: None,
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: crate::rt::DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        });
         let cells = ((2.0 * REACH / terrain.scale).round() as u32).clamp(8, n.saturating_sub(1).max(8));
         let side = cells * SPLIT + 1;
         // In blocks of the patch, so those out of view can be left out.
@@ -152,6 +178,7 @@ impl SmoothGround {
         });
         SmoothGround {
             pipeline,
+            depth,
             group,
             indices,
             runs: blocks.iter().map(|b| b.1.clone()).collect(),
@@ -190,6 +217,19 @@ impl SmoothGround {
     }
 
     /// Draws the patch, with the terrain's own group and the shared one.
+    /// Draws the patch into the ray-traced shadows' depth pass.
+    pub fn draw_depth(&self, pass: &mut wgpu::RenderPass<'_>, terrain: &wgpu::BindGroup, shared: &wgpu::BindGroup) {
+        let Some(depth) = &self.depth else { return };
+        pass.set_pipeline(depth);
+        pass.set_bind_group(0, terrain, &[]);
+        pass.set_bind_group(1, shared, &[]);
+        pass.set_bind_group(2, &self.group, &[]);
+        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+        for run in &self.runs {
+            pass.draw_indexed(run.clone(), 0, 0..1);
+        }
+    }
+
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>, terrain: &wgpu::BindGroup, shared: &wgpu::BindGroup) {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, terrain, &[]);

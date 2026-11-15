@@ -6,12 +6,44 @@
 //! low, drift with the wind and thin away (`dust.wgsl`). They stand in for
 //! the game's own dust trail; its dirt chunks still fly. On wet ground the
 //! tyres throw up spray instead: drops of muddy water that fall back.
+//!
+//! The puffs are also drawn from the sun into a shadow map of the dust
+//! (enhanced_dust.wgsl): how thick it is along each of the sun's rays and
+//! how deep into it, so the clouds shade themselves and what lies past
+//! them.
 
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 
 /// Puffs in the air at most.
 const MOST: usize = 2400;
+/// How far from the eye the dust casts shadows, ft.
+const SHADOWED: f32 = 250.0;
+
+/// The dust's shadow map's view for the box from `low` to `high`, lit from
+/// `to_sun`: from the drawing to the map, looking along the light, and the
+/// least spread of a cloud's depth in it (a ft and a half).
+pub fn sun_view(low: Vec3, high: Vec3, to_sun: Vec3) -> (glam::Mat4, f32) {
+    use glam::Mat4;
+    let up = if to_sun.y.abs() > 0.99 { Vec3::Z } else { Vec3::Y };
+    let light = Mat4::look_at_rh(Vec3::ZERO, -to_sun, up);
+    let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+    for i in 0..8 {
+        let corner = Vec3::new(
+            if i & 1 == 0 { low.x } else { high.x },
+            if i & 2 == 0 { low.y } else { high.y },
+            if i & 4 == 0 { low.z } else { high.z },
+        );
+        let p = light.transform_point3(corner);
+        lo = lo.min(p);
+        hi = hi.max(p);
+    }
+    // Looking along -z: the nearest to the sun has the highest z.
+    let (near, far) = (-hi.z - 2.0, -lo.z + 2.0);
+    let proj = Mat4::orthographic_rh(lo.x - 1.0, hi.x + 1.0, lo.y - 1.0, hi.y + 1.0, near, far);
+    (proj * light, 1.5 / (far - near).max(1.0))
+}
+
 /// The wind the dust drifts on, ft/s, drawing coordinates.
 const WIND: Vec3 = Vec3::new(2.0, 0.0, 1.2);
 
@@ -67,6 +99,10 @@ struct Puff {
 
 pub struct DustRenderer {
     pipeline: wgpu::RenderPipeline,
+    /// The puffs drawn from the sun into the dust's shadow map, with only
+    /// the enhanced drawing's settings (the shared group holds the map).
+    shadow: wgpu::RenderPipeline,
+    shadow_group: wgpu::BindGroup,
     instances: wgpu::Buffer,
     count: u32,
     puffs: Vec<Puff>,
@@ -84,6 +120,7 @@ impl DustRenderer {
         format: wgpu::TextureFormat,
         samples: u32,
         depth_format: wgpu::TextureFormat,
+        settings: &wgpu::Buffer,
     ) -> DustRenderer {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("dust"),
@@ -129,6 +166,60 @@ impl DustRenderer {
             multiview_mask: None,
             cache: None,
         });
+        let settings_layout = crate::enhance::layout(
+            device,
+            "dust shadows",
+            &[(0, wgpu::ShaderStages::VERTEX_FRAGMENT, crate::enhance::uniform())],
+        );
+        let shadow_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("dust shadows"),
+            layout: &settings_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: settings.as_entire_binding(),
+            }],
+        });
+        let shadow_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("dust shadows"),
+            bind_group_layouts: &[Some(terrain_layout), Some(&settings_layout)],
+            immediate_size: 0,
+        });
+        let shadow = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("dust shadows"),
+            layout: Some(&shadow_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_shadow"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Instance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
+                })],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_shadow"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: crate::enhance::DUST_FORMAT,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent::OVER,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
         let instances = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("dust"),
             size: (MOST * std::mem::size_of::<Instance>()) as u64,
@@ -137,6 +228,8 @@ impl DustRenderer {
         });
         DustRenderer {
             pipeline,
+            shadow,
+            shadow_group,
             instances,
             count: 0,
             puffs: Vec::new(),
@@ -344,6 +437,32 @@ impl DustRenderer {
         if !instances.is_empty() {
             queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&instances));
         }
+    }
+
+    /// The box round the puffs within [`SHADOWED`] ft of `eye` (drawing
+    /// coordinates), if any: what the dust's shadow map spans.
+    pub fn bounds(&self, eye: Vec3) -> Option<(Vec3, Vec3)> {
+        let mut out: Option<(Vec3, Vec3)> = None;
+        for p in self.puffs.iter().filter(|p| !p.drop && p.at.distance_squared(eye) < SHADOWED * SHADOWED) {
+            // As prepare draws it: swollen, and raised by half its size.
+            let size = p.size + p.swell + p.age * 0.25;
+            let r = Vec3::splat(size * 1.2);
+            let c = p.at + Vec3::Y * size * 0.45;
+            out = Some(out.map_or((c - r, c + r), |(lo, hi)| (lo.min(c - r), hi.max(c + r))));
+        }
+        out
+    }
+
+    /// Draws the puffs from the sun into the dust's shadow map.
+    pub fn draw_shadow(&self, pass: &mut wgpu::RenderPass<'_>, terrain: &wgpu::BindGroup) {
+        if self.count == 0 {
+            return;
+        }
+        pass.set_pipeline(&self.shadow);
+        pass.set_bind_group(0, terrain, &[]);
+        pass.set_bind_group(1, &self.shadow_group, &[]);
+        pass.set_vertex_buffer(0, self.instances.slice(..));
+        pass.draw(0..6, 0..self.count);
     }
 
     /// Draws the dust, with the terrain's own group and the shared one.

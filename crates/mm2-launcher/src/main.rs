@@ -8,6 +8,7 @@
 
 mod game;
 mod iso;
+mod look;
 mod settings;
 mod shortcut;
 mod tracks;
@@ -15,17 +16,13 @@ mod update;
 
 use eframe::egui;
 use game::Source;
-use settings::{Quality, Settings, SHAPES, UPGRADES};
+use settings::{Quality, Settings, ANTIALIASING, SHAPES, UPGRADES};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const TIMES: [(&str, &str); 6] =
-    [("", "Track's own"), ("dawn", "Dawn"), ("morning", "Morning"), ("noon", "Noon"), ("afternoon", "Afternoon"), ("dusk", "Dusk")];
-const WEATHERS: [(&str, &str); 3] = [("clear", "Clear"), ("overcast", "Overcast"), ("rain", "Rain")];
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(232, 120, 32);
 /// The window icon and the logo at the top (drawn from `assets/icon/*.svg`).
 const ICON_PNG: &[u8] = include_bytes!("../../../assets/icon/icon-256.png");
 const LOGO_PNG: &[u8] = include_bytes!("../../../assets/icon/logo-dark.png");
@@ -39,8 +36,8 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("OpenMCM2")
-            .with_inner_size([560.0, 760.0])
-            .with_min_inner_size([480.0, 480.0])
+            .with_inner_size([1000.0, 760.0])
+            .with_min_inner_size([760.0, 520.0])
             .with_icon(eframe::icon_data::from_png_bytes(ICON_PNG).expect("built-in icon")),
         ..Default::default()
     };
@@ -92,16 +89,17 @@ struct Launcher {
     install: Result<update::Install, String>,
     update: Update,
     tracks: Tracks,
-    logo: egui::TextureHandle,
+    /// Loaded at the first frame.
+    logo: Option<egui::TextureHandle>,
+    page: Page,
 }
 
 /// A listing page being fetched, until it arrives.
 type Fetch = Arc<Mutex<Option<Result<tracks::Listing, String>>>>;
 
-/// The "Get tracks" window.
+/// The Tracks page's browser.
 #[derive(Default)]
 struct Tracks {
-    open: bool,
     site: usize,
     /// The category shown, or `None` while showing a search.
     kind: Option<usize>,
@@ -187,13 +185,7 @@ enum Update {
 
 impl Launcher {
     fn new(cc: &eframe::CreationContext) -> Launcher {
-        let mut style = (*cc.egui_ctx.global_style()).clone();
-        style.visuals = egui::Visuals::dark();
-        style.visuals.selection.bg_fill = ACCENT;
-        style.visuals.hyperlink_color = ACCENT;
-        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-        cc.egui_ctx.set_global_style(style);
-        let settings = Settings::load();
+        look::apply(&cc.egui_ctx);
         let install = match update::current() {
             Some(_) => update::Install::here(),
             None => Err("this copy was built from source, so it doesn't update itself".into()),
@@ -201,21 +193,7 @@ impl Launcher {
         if let Ok(i) = &install {
             i.tidy();
         }
-        let mut l = Launcher {
-            saved: settings.clone(),
-            settings,
-            import: None,
-            running: None,
-            note: None,
-            install,
-            update: Update::Idle,
-            tracks: Tracks { added: tracks::Added::load(), ..Default::default() },
-            logo: {
-                let png = eframe::icon_data::from_png_bytes(LOGO_PNG).expect("built-in logo");
-                let image = egui::ColorImage::from_rgba_unmultiplied([png.width as usize, png.height as usize], &png.rgba);
-                cc.egui_ctx.load_texture("logo", image, egui::TextureOptions::LINEAR)
-            },
-        };
+        let mut l = Launcher::with(Settings::load(), install);
         if l.settings.check_updates && l.install.is_ok() {
             l.check_updates();
         }
@@ -227,6 +205,22 @@ impl Launcher {
             }
         }
         l
+    }
+
+    /// The launcher with `settings`, before anything is checked.
+    fn with(settings: Settings, install: Result<update::Install, String>) -> Launcher {
+        Launcher {
+            saved: settings.clone(),
+            settings,
+            import: None,
+            running: None,
+            note: None,
+            install,
+            update: Update::Idle,
+            tracks: Tracks { added: tracks::Added::load(), ..Default::default() },
+            logo: None,
+            page: Page::Play,
+        }
     }
 
     fn pick(&mut self, path: PathBuf) {
@@ -368,7 +362,8 @@ impl Launcher {
                         self.note = Some((format!("The game stopped with an error: {last}\n(full log: {})", log.display()), true));
                     }
                     self.running = None;
-                    // The game's Tweaks box may have changed them.
+                    // The game's Tweaks box, or its event page's time and
+                    // weather, may have changed them.
                     let game = Settings::load();
                     if game != self.saved {
                         self.settings = game.clone();
@@ -384,14 +379,14 @@ impl Launcher {
     }
 }
 
-fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
-    egui::Frame::group(ui.style()).inner_margin(12.0).corner_radius(6.0).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.label(egui::RichText::new(title).strong().size(16.0).color(ACCENT));
-        ui.add_space(4.0);
-        body(ui);
-    });
-    ui.add_space(8.0);
+/// The launcher's pages, picked in the sidebar.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Page {
+    Play,
+    Graphics,
+    Extras,
+    Tracks,
+    Updates,
 }
 
 impl eframe::App for Launcher {
@@ -401,65 +396,8 @@ impl eframe::App for Launcher {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
-        let busy = self.import.is_some();
-        egui::Panel::bottom("play").show(ui, |ui| {
-            ui.add_space(8.0);
-            if let Some((text, bad)) = &self.note {
-                let colour = if *bad { egui::Color32::from_rgb(240, 90, 80) } else { egui::Color32::from_rgb(120, 200, 120) };
-                ui.label(egui::RichText::new(text).color(colour));
-            }
-            let ready = self.settings.game.is_some() && !busy && self.running.is_none();
-            let label = if self.running.is_some() { "Running…" } else { "PLAY" };
-            let button = egui::Button::new(egui::RichText::new(label).size(22.0).strong().color(egui::Color32::WHITE))
-                .fill(if ready { ACCENT } else { egui::Color32::from_gray(60) })
-                .min_size(egui::vec2(ui.available_width(), 48.0));
-            let clicked = ui.vertical_centered_justified(|ui| ui.add_enabled(ready, button).clicked()).inner;
-            if clicked {
-                let _ = self.settings.save();
-                self.saved = self.settings.clone();
-                self.play(&ctx);
-            }
-            ui.add_space(4.0);
-            let can = self.settings.game.is_some() && !busy;
-            let made = ui
-                .vertical_centered(|ui| {
-                    ui.add_enabled(can, egui::Button::new("Make a desktop shortcut"))
-                        .on_hover_text("Starts the game straight away, skipping the launcher, with the settings here. Change them here and the shortcut follows.")
-                        .clicked()
-                })
-                .inner;
-            if made {
-                self.make_shortcut();
-            }
-            ui.add_space(8.0);
-        });
-        egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.add_space(4.0);
-                // Drawn at half its pixel size, so it stays sharp on Retina screens.
-                ui.add(egui::Image::new(&self.logo).fit_to_exact_size(self.logo.size_vec2() * 0.5))
-                    .on_hover_text("OpenMCM2");
-                ui.label("Motocross Madness 2, rebuilt to run natively.");
-                ui.add_space(10.0);
-                self.update_banner(ui, busy);
-                self.game_ui(ui, busy);
-                self.more_tracks_ui(ui, busy);
-                self.display_ui(ui);
-                self.graphics_ui(ui);
-                self.extras_ui(ui);
-                self.updates_ui(ui);
-                ui.collapsing("Command line", |ui| {
-                    let line = std::iter::once("mm2-viewer".to_string())
-                        .chain(self.settings.args().into_iter().map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a }))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    ui.add(egui::Label::new(egui::RichText::new(line).monospace()).wrap());
-                });
-            });
-        });
-        self.tracks_window(&ctx);
-        if self.settings != self.saved && !busy {
+        self.draw(ui);
+        if self.settings != self.saved && self.import.is_none() {
             let _ = self.settings.save();
             self.saved = self.settings.clone();
         }
@@ -467,32 +405,124 @@ impl eframe::App for Launcher {
 }
 
 impl Launcher {
-    fn game_ui(&mut self, ui: &mut egui::Ui, busy: bool) {
-        section(ui, "Game data", |ui| {
-            ui.label(
-                "OpenMCM2 doesn't include the game. Point it at your own Motocross Madness 2: \
-                 the CD, a CD image of it (.iso, .bin/.cue, .mdf/.mds, .img), a .zip of either, \
-                 or the folder it's installed in.",
-            );
+    /// The whole window: the sidebar with the pages and the Play button,
+    /// and the page picked.
+    fn draw(&mut self, ui: &mut egui::Ui) {
+        if self.logo.is_none() {
+            let png = eframe::icon_data::from_png_bytes(LOGO_PNG).expect("built-in logo");
+            let image = egui::ColorImage::from_rgba_unmultiplied([png.width as usize, png.height as usize], &png.rgba);
+            self.logo = Some(ui.ctx().load_texture("logo", image, egui::TextureOptions::LINEAR));
+        }
+        let busy = self.import.is_some();
+        egui::Panel::left("nav")
+            .exact_size(236.0)
+            .resizable(false)
+            .frame(egui::Frame::new().fill(look::SIDEBAR).inner_margin(16).stroke(egui::Stroke::new(1.0, look::LINE)))
+            .show(ui, |ui| self.sidebar(ui, busy));
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(look::BG).inner_margin(egui::Margin { left: 28, right: 20, top: 18, bottom: 8 }))
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    ui.set_max_width(ui.available_width().min(820.0));
+                    match self.page {
+                        Page::Play => self.play_page(ui, busy),
+                        Page::Graphics => self.graphics_page(ui),
+                        Page::Extras => self.extras_page(ui),
+                        Page::Tracks => self.tracks_page(ui, busy),
+                        Page::Updates => self.updates_page(ui),
+                    }
+                    ui.add_space(12.0);
+                });
+            });
+    }
+
+    fn sidebar(&mut self, ui: &mut egui::Ui, busy: bool) {
+        if let Some(logo) = &self.logo {
+            let w = ui.available_width();
+            let size = logo.size_vec2() * (w / logo.size_vec2().x).min(0.5);
+            ui.add(egui::Image::new(logo).fit_to_exact_size(size)).on_hover_text("OpenMCM2");
+        }
+        ui.add_space(18.0);
+        let update = matches!(self.update, Update::Found(_));
+        for (page, i, name) in [
+            (Page::Play, look::icon::ICON_SPORTS_MOTORSPORTS, "Play"),
+            (Page::Graphics, look::icon::ICON_TUNE, "Graphics"),
+            (Page::Extras, look::icon::ICON_EXTENSION, "Extras"),
+            (Page::Tracks, look::icon::ICON_ROUTE, "Tracks"),
+            (Page::Updates, look::icon::ICON_UPDATE, if update { "Updates  •" } else { "Updates" }),
+        ] {
+            if look::nav(ui, self.page == page, i, name) {
+                self.page = page;
+            }
+        }
+        // From the bottom up: the version, the shortcut, Play, and the
+        // last thing to tell the player.
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+            ui.add_space(2.0);
+            let version = update::current().map_or("Built from source".to_string(), |v| format!("OpenMCM2 {v}"));
+            ui.label(look::weak(version));
+            ui.add_space(6.0);
+            let can = self.settings.game.is_some() && !busy;
+            if ui
+                .add_enabled(can, egui::Button::new(look::with(look::icon::ICON_SHORTCUT, "Desktop shortcut")).min_size(egui::vec2(ui.available_width(), 32.0)))
+                .on_hover_text("Starts the game straight away, skipping the launcher, with the settings here. Change them here and the shortcut follows.")
+                .clicked()
+            {
+                self.make_shortcut();
+            }
             ui.add_space(4.0);
+            let ready = self.settings.game.is_some() && !busy && self.running.is_none();
+            let label = if self.running.is_some() { "Running…".to_string() } else { look::with(look::icon::ICON_PLAY_CIRCLE, "PLAY") };
+            if look::big_button(ui, &label, 54.0, ready).clicked() {
+                let _ = self.settings.save();
+                self.saved = self.settings.clone();
+                let ctx = ui.ctx().clone();
+                self.play(&ctx);
+            }
+            if self.settings.game.is_none() && !busy {
+                ui.label(look::weak("Set up the game data first."));
+            }
+            if let Some((text, bad)) = &self.note {
+                ui.add_space(4.0);
+                ui.add(egui::Label::new(egui::RichText::new(text).color(if *bad { look::BAD } else { look::GOOD }).size(13.0)).wrap());
+            }
+        });
+    }
+
+    // ---- Play ----
+
+    fn play_page(&mut self, ui: &mut egui::Ui, busy: bool) {
+        look::page_title(ui, "Ready to ride", "Motocross Madness 2, rebuilt to run natively.");
+        self.update_banner(ui, busy);
+        self.game_card(ui, busy);
+        self.summary_card(ui);
+        self.display_card(ui);
+    }
+
+    fn game_card(&mut self, ui: &mut egui::Ui, busy: bool) {
+        look::card(ui, look::icon::ICON_DISC_FULL, "Game data", |ui| {
             match &self.settings.game {
-                Some(g) => ui.label(egui::RichText::new(format!("Ready: {}", g.display())).color(egui::Color32::from_rgb(120, 200, 120))),
-                None => ui.label(egui::RichText::new("Not set up yet").color(egui::Color32::from_rgb(240, 90, 80))),
-            };
+                Some(g) => look::status(ui, true, &format!("Ready: {}", g.display())),
+                None => look::status(ui, false, "Not set up yet"),
+            }
+            ui.label(look::weak(
+                "OpenMCM2 doesn't include the game. Point it at your own Motocross Madness 2: the CD, a CD image of it (.iso, .bin/.cue, .mdf/.mds, .img), a .zip of either, or the folder it's installed in.",
+            ));
             if let Some(p) = &self.import {
                 let total = p.total.load(Ordering::Relaxed).max(1);
                 let done = p.done.load(Ordering::Relaxed);
                 ui.horizontal(|ui| {
-                    ui.add(egui::ProgressBar::new(done as f32 / total as f32).show_percentage().desired_width(ui.available_width() - 80.0));
+                    ui.add(egui::ProgressBar::new(done as f32 / total as f32).show_percentage().desired_width(ui.available_width() - 90.0));
                     if ui.button("Cancel").clicked() {
                         p.cancel.store(true, Ordering::Relaxed);
                     }
                 });
-                ui.label(format!("Copying game data… {} of {} MB", done >> 20, total >> 20));
+                ui.label(look::weak(format!("Copying game data… {} of {} MB", done >> 20, total >> 20)));
             }
-            ui.horizontal(|ui| {
+            ui.add_space(2.0);
+            ui.horizontal_wrapped(|ui| {
                 ui.add_enabled_ui(!busy, |ui| {
-                    if ui.button("Choose CD image or zip…").clicked() {
+                    if ui.button(look::with(look::icon::ICON_DISC_FULL, "Choose CD image or zip…")).clicked() {
                         if let Some(f) = rfd::FileDialog::new()
                             .set_title("Your Motocross Madness 2 CD image or zip")
                             .add_filter("CD image or zip", &["iso", "bin", "cue", "img", "mdf", "mds", "nrg", "zip"])
@@ -502,7 +532,7 @@ impl Launcher {
                             self.pick(f);
                         }
                     }
-                    if ui.button("Choose CD or install folder…").clicked() {
+                    if ui.button(look::with(look::icon::ICON_DRIVE_FOLDER_UPLOAD, "Choose CD or install folder…")).clicked() {
                         if let Some(d) = rfd::FileDialog::new().set_title("Your Motocross Madness 2 CD or install folder").pick_folder() {
                             self.pick(d);
                         }
@@ -512,85 +542,263 @@ impl Launcher {
         });
     }
 
+    /// The graphics as set, at a glance, and a way to change them.
+    fn summary_card(&mut self, ui: &mut egui::Ui) {
+        let s = &self.settings;
+        let mut go = false;
+        look::card(ui, look::icon::ICON_PALETTE, "Look", |ui| {
+            let mut parts: Vec<String> = Vec::new();
+            if s.enhanced {
+                let preset = preset_of(s);
+                parts.push(preset.map_or("Custom preset".to_string(), |q| format!("{} preset", q.label())));
+                let traced = UPGRADES.iter().zip(&s.upgrades).any(|(u, on)| u.0 == "raytracing" && *on);
+                if traced && preset != Some(Quality::RayTraced) {
+                    parts.push("Ray tracing".into());
+                }
+                if let Some(a) = ANTIALIASING.iter().find(|a| a.0 == s.antialiasing) {
+                    parts.push(if a.0 == "taa" { "TAA".into() } else { a.1.to_string() });
+                }
+                parts.push(if s.resolution == "auto" { "Auto resolution".into() } else { format!("{} resolution", s.resolution) });
+            } else {
+                parts.push("The original look, as the game drew it".into());
+            }
+            ui.horizontal_wrapped(|ui| {
+                for p in &parts {
+                    look::chip(ui, p);
+                }
+            });
+            ui.add_space(4.0);
+            go = ui.button(look::with(look::icon::ICON_TUNE, "Change graphics")).clicked();
+        });
+        if go {
+            self.page = Page::Graphics;
+        }
+    }
+
     /// How the game starts: full screen or a window, chosen in the game
     /// (Options, Graphics, Display Resolution) and saved here.
-    fn display_ui(&mut self, ui: &mut egui::Ui) {
-        let s = &mut self.settings;
-        section(ui, "Display", |ui| {
+    fn display_card(&mut self, ui: &mut egui::Ui) {
+        let s = &self.settings;
+        look::card(ui, look::icon::ICON_MONITOR, "Display", |ui| {
             let now = match s.fullscreen {
                 true => "The game starts full screen.".to_string(),
                 false => format!("The game starts in a {} window.", size_text(s.window)),
             };
             ui.label(now);
-            ui.label(
-                egui::RichText::new(
-                    "Change it in the game: Options, Graphics, Display Resolution. Alt+Enter switches to full screen and back while playing.",
-                )
-                .weak(),
-            );
+            ui.add(egui::Label::new(look::weak(
+                "Change it in the game: Options, Graphics, Display Resolution. Alt+Enter switches to full screen and back while playing.",
+            )).wrap());
         });
     }
 
-    fn graphics_ui(&mut self, ui: &mut egui::Ui) {
+    // ---- Extras ----
+
+    /// The extras the original game didn't have, all off unless turned
+    /// on. Most of them come from Daniel's fork (github.com/dwolp/MCM2).
+    fn extras_page(&mut self, ui: &mut egui::Ui) {
+        use look::icon;
+        look::page_title(
+            ui,
+            "Extras",
+            "Things the original game didn't have. They all start off, so the game plays as it did. Most of them are also in the game: Options, then Tweaks... at the bottom.",
+        );
         let s = &mut self.settings;
-        section(ui, "Graphics", |ui| {
+        let original = s.is_original();
+        if ui
+            .add_enabled(!original, egui::Button::new(look::with(icon::ICON_HISTORY, "Back to the original")))
+            .on_hover_text("Turns every extra here off, and the difficulty table back to the game's.")
+            .clicked()
+        {
+            s.original();
+        }
+        ui.add_space(6.0);
+        let tile = |ui: &mut egui::Ui, on: &mut bool, name: &str, about: &str| {
+            let w = ui.available_width();
+            look::switch_tile(ui, on, name, about, w);
+        };
+        let slider = |ui: &mut egui::Ui, name: &str, about: &str, value: &mut u32, range: std::ops::RangeInclusive<u32>, step: f64, suffix: &str| {
             ui.horizontal(|ui| {
-                ui.radio_value(&mut s.enhanced, false, "Original look");
-                ui.radio_value(&mut s.enhanced, true, "Enhanced look");
+                ui.label(egui::RichText::new(name).family(look::bold_family()));
+                ui.add(egui::Slider::new(value, range).step_by(step).suffix(suffix)).on_hover_text(about);
             });
-            ui.label(egui::RichText::new("F3 switches between the two while racing. The riding is the same either way.").weak());
-            if s.enhanced {
-                ui.add_space(4.0);
-                egui::Grid::new("enhanced").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                    ui.label("Quality");
-                    let before = s.quality;
-                    egui::ComboBox::from_id_salt("quality").selected_text(title(s.quality.name())).show_ui(ui, |ui| {
-                        for q in Quality::ALL {
-                            ui.selectable_value(&mut s.quality, q, title(q.name()));
-                        }
-                    });
-                    if s.quality != before {
-                        for (u, on) in UPGRADES.iter().zip(s.upgrades.iter_mut()) {
-                            *on = s.quality.has(u.0);
-                        }
+            ui.label(look::weak(about));
+        };
+        look::card(ui, icon::ICON_SPORTS_MOTORSPORTS, "Riding", |ui| {
+            tile(ui, &mut s.quick_get_up, "Quick get-up", "After a crash, G or a pad's Back puts you straight back on the bike. Not in network races.");
+            tile(ui, &mut s.forgiving_landings, "Forgiving landings", "Fewer crashes from landing a little crooked. The original game is strict.");
+            slider(ui, "Air steering", "How much steering in the air bends your flight. 0% is the original game.", &mut s.air_steer, 0..=mm2_settings::AIR_MOST, 10.0, "%");
+            slider(ui, "Air braking", "How much braking in the air shortens your flight. 0% is the original game.", &mut s.air_brake, 0..=mm2_settings::AIR_MOST, 10.0, "%");
+            tile(ui, &mut s.clean_starts, "Cleaner starts", "The computer riders keep their order across the gate off the start, so fewer pile into each other.");
+            tile(ui, &mut s.one_lap, "One-lap races", "National and Supercross races can be 1 lap long (the original starts at 2).");
+            ui.label(look::weak("The difficulty table is in the game: Options, Tweaks..., Difficulty..."));
+        });
+        look::card(ui, icon::ICON_SPEED, "Race display and camera", |ui| {
+            tile(ui, &mut s.sharp_display, "Modernised HUD", "Crisp see-through race panel, radar and speedometer at your screen's resolution.");
+            tile(ui, &mut s.kmh, "Speedometer in km/h", "The speed in kilometres an hour instead of miles an hour.");
+            tile(ui, &mut s.lap_gap, "Live gap to your best lap", "Under the race panel: how far ahead or behind your best lap you are.");
+            tile(ui, &mut s.centred_display, "Race display nearer the middle", "On screens wider than 16:9, the race display where it sits on a 16:9 screen.");
+            tile(ui, &mut s.steady_camera, "Steadier camera", "The chase camera rises and dips with the bike more gently.");
+            slider(ui, "Field of view", "How wide the riding cameras see. 85° is the original game's.", &mut s.fov, 60..=120, 1.0, "°");
+        });
+        look::card(ui, icon::ICON_SPORTS_ESPORTS, "Controllers, sound and screen", |ui| {
+            tile(ui, &mut s.vibration, "Controller vibration", "The pad thumps on landings, knocks over bumps and jolts in crashes.");
+            ui.add_enabled_ui(s.vibration, |ui| {
+                slider(ui, "Vibration strength", "How strongly the pad shakes.", &mut s.vibration_strength, 0..=100, 1.0, "%");
+            });
+            tile(ui, &mut s.mute_in_background, "Mute in the background", "The game goes quiet while its window isn't the one in front.");
+            tile(ui, &mut s.screenshot_key, "Screenshot key (Ctrl+P)", "Ctrl+P in a race saves a picture to the Screenshots folder beside your saves.");
+            tile(ui, &mut s.vsync, "VSync", "A picture each time the screen refreshes, with no tearing.");
+            tile(ui, &mut s.show_fps, "Show frame rate", "The frames a second at the bottom left (F2 too).");
+        });
+        ui.label(look::weak("Thanks to Daniel (github.com/dwolp) for most of these, the new launcher, the ray tracing and night races, and the fixes that came with them."));
+    }
+
+    // ---- Graphics ----
+
+    fn graphics_page(&mut self, ui: &mut egui::Ui) {
+        use look::{icon, Choice};
+        look::page_title(ui, "Graphics", "How the game looks. F3 switches between the original look and the enhanced one while racing.");
+        let s = &mut self.settings;
+        look::card(ui, icon::ICON_PALETTE, "Look", |ui| {
+            let choices = [
+                Choice::new(false, "Original").icon(icon::ICON_HISTORY).hover("As the game drew it in 2000."),
+                Choice::new(true, "Enhanced").icon(icon::ICON_AUTO_AWESOME).hover("Per-pixel light, real shadows, haze, bloom, dust and more."),
+            ];
+            if let Some(v) = look::segmented(ui, s.enhanced, &choices) {
+                s.enhanced = v;
+            }
+            ui.label(look::weak("The riding is the same either way."));
+        });
+        if s.enhanced {
+            look::card(ui, icon::ICON_SPEED, "Presets", |ui| {
+                // The preset the settings are (another one, if changed to
+                // just what it sets, which then stands for them), or none:
+                // Custom.
+                let shown = preset_of(s);
+                if let Some(q) = shown {
+                    s.quality = q;
+                }
+                let mut choices: Vec<_> = Quality::ALL.iter().map(|&q| Choice::new(Some(q), q.label()).hover(preset_text(q))).collect();
+                if shown.is_none() {
+                    choices.push(
+                        Choice::new(None, "Custom")
+                            .icon(icon::ICON_TUNE)
+                            .hover(format!("Your own mix, changed from the {} preset. Pick a preset to go back to its settings.", s.quality.label())),
+                    );
+                }
+                if let Some(Some(q)) = look::segmented(ui, shown, &choices) {
+                    // A preset sets the effects, the anti-aliasing and the
+                    // resolution; any can be changed after.
+                    s.quality = q;
+                    for (u, on) in UPGRADES.iter().zip(s.upgrades.iter_mut()) {
+                        *on = q.has(u.0);
                     }
-                    ui.end_row();
-                    ui.label("Time of day");
-                    pick(ui, "time", &mut s.time, &TIMES);
-                    ui.end_row();
-                    ui.label("Weather");
-                    pick(ui, "weather", &mut s.weather, &WEATHERS);
-                    ui.end_row();
-                    ui.label("Ground detail");
-                    ui.add(egui::Slider::new(&mut s.detail, 0.0..=1.0).fixed_decimals(2));
-                    ui.end_row();
+                    s.antialiasing = q.antialiasing().into();
+                    s.resolution = "auto".into();
+                }
+                let about = match preset_of(s) {
+                    Some(q) => format!("{} Change any of the settings below and it becomes Custom.", preset_text(q)),
+                    None => format!(
+                        "Custom: your own mix of the settings below, changed from the {} preset. Pick a preset to go back to its settings.",
+                        s.quality.label()
+                    ),
+                };
+                ui.add(egui::Label::new(look::weak(about)).wrap());
+            });
+            look::card(ui, icon::ICON_IMAGE, "Picture", |ui| {
+                look::label(
+                    ui,
+                    "Anti-aliasing",
+                    "MSAA smooths the edges of models and ground. TAA blends each frame with the ones before, so billboards, leaves and fences hold still too, and sharpens a scene drawn below 100%.",
+                );
+                let current = ANTIALIASING.iter().find(|a| a.0 == s.antialiasing).map_or("msaa4", |a| a.0);
+                let choices: Vec<_> = ANTIALIASING
+                    .iter()
+                    .map(|a| Choice::new(a.0, if a.0 == "taa" { "TAA" } else { a.1 }).hover(match a.0 {
+                        "off" => "None: the fastest, the roughest edges.",
+                        "taa" => "Temporal: steadier and about as fast as MSAA 2×; a little softer.",
+                        _ => "Each step up costs frame rate, most with ray tracing.",
+                    }))
+                    .collect();
+                if let Some(a) = look::segmented(ui, current, &choices) {
+                    s.antialiasing = a.into();
+                }
+                ui.add_space(6.0);
+                let named = look::label(
+                    ui,
+                    "Scene resolution",
+                    "How big the 3D scene is drawn, as a share of the screen; the menus and race display stay sharp. The biggest cost to frame rate, ray tracing most of all.",
+                );
+                let mut auto = s.resolution == "auto";
+                let mut pct = s.resolution.trim_end_matches('%').parse::<u32>().unwrap_or(100);
+                ui.horizontal(|ui| {
+                    if look::switch(ui, &mut auto).changed() {
+                        s.resolution = if auto { "auto".into() } else { format!("{pct}%") };
+                    }
+                    ui.label(egui::RichText::new("Auto").family(look::bold_family()));
+                    ui.label(look::weak(format!("the preset's own: {}", s.quality.most_pixels())));
                 });
-                ui.collapsing("Individual effects", |ui| {
-                    egui::Grid::new("upgrades").num_columns(2).show(ui, |ui| {
-                        for (i, (u, on)) in UPGRADES.iter().zip(s.upgrades.iter_mut()).enumerate() {
-                            ui.checkbox(on, u.1);
-                            if i % 2 == 1 {
-                                ui.end_row();
-                            }
+                ui.add_enabled_ui(!auto, |ui| {
+                    if ui.add(egui::Slider::new(&mut pct, 50..=100).suffix("%").trailing_fill(true)).labelled_by(named).changed() {
+                        s.resolution = format!("{pct}%");
+                    }
+                });
+                ui.add_space(6.0);
+                let named = look::label(ui, "Ground detail", "How strongly the grain of the photo ground shows.");
+                let mut detail = (s.detail * 100.0).round() as u32;
+                if ui.add(egui::Slider::new(&mut detail, 0..=100).suffix("%").trailing_fill(true)).labelled_by(named).changed() {
+                    s.detail = detail as f32 / 100.0;
+                }
+            });
+            look::card(ui, icon::ICON_AUTO_FIX_HIGH, "Effects", |ui| {
+                ui.label(look::weak("Each on its own. The preset sets them; change any and it becomes Custom."));
+                ui.add_space(4.0);
+                // Ray tracing takes the place of the sun's shadows, so it
+                // needs those on.
+                let shadows = UPGRADES.iter().zip(&s.upgrades).any(|(u, on)| u.0 == "shadows" && *on);
+                let width = ((ui.available_width() - 8.0) / 2.0).floor();
+                // Ray tracing first, the biggest change; then as listed.
+                let order: Vec<usize> = (0..UPGRADES.len()).filter(|&i| UPGRADES[i].0 == "raytracing").chain((0..UPGRADES.len()).filter(|&i| UPGRADES[i].0 != "raytracing")).collect();
+                for pair in order.chunks(2) {
+                    ui.horizontal_top(|ui| {
+                        for &i in pair {
+                            let u = UPGRADES[i];
+                            let enabled = u.0 != "raytracing" || shadows;
+                            ui.add_enabled_ui(enabled, |ui| {
+                                let r = look::switch_tile(ui, &mut s.upgrades[i], u.1, effect_about(u.0), width);
+                                if u.0 == "raytracing" {
+                                    r.on_hover_text("Needs Sun shadows on, and a graphics card that can trace rays (NVIDIA RTX, AMD RX 6000 or newer); on others the usual look shows.");
+                                }
+                            });
                         }
                     });
-                });
-            }
-            if !cfg!(target_os = "macos") {
-                ui.checkbox(&mut s.opengl, "Use OpenGL (for older graphics cards)").on_hover_text(
-                    "Draws with OpenGL instead of Vulkan or DirectX. Try it if the game won't start or shows a black window on an older graphics card.",
+                }
+            });
+        }
+        if !cfg!(target_os = "macos") {
+            look::card(ui, icon::ICON_MEMORY, "Graphics card", |ui| {
+                look::switch_tile(
+                    ui,
+                    &mut s.opengl,
+                    "Use OpenGL",
+                    "For older graphics cards: draws with OpenGL instead of Vulkan or DirectX. Try it if the game won't start or shows a black window. The enhanced look needs Vulkan or DirectX.",
+                    ui.available_width(),
                 );
-            }
-            ui.add_space(6.0);
-            ui.separator();
-            ui.checkbox(&mut s.use_hires, "High-res textures");
+            });
+        }
+        look::card(ui, icon::ICON_TEXTURE, "Textures", |ui| {
+            ui.horizontal(|ui| {
+                look::switch(ui, &mut s.use_hires);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.label(egui::RichText::new("High-res textures").family(look::bold_family()));
+                    let text = s.hires.as_ref().map_or("No folder chosen".to_string(), |h| h.display().to_string());
+                    ui.add(egui::Label::new(look::weak(text)).truncate());
+                });
+            });
             ui.add_enabled_ui(s.use_hires, |ui| {
                 ui.horizontal(|ui| {
-                    let text = s.hires.as_ref().map_or("No folder chosen".to_string(), |h| h.display().to_string());
-                    ui.add(egui::Label::new(egui::RichText::new(text).weak()).truncate());
-                });
-                ui.horizontal(|ui| {
-                    if ui.button("Choose texture folder…").clicked() {
+                    if ui.button(look::with(look::icon::ICON_DRIVE_FOLDER_UPLOAD, "Choose texture folder…")).clicked() {
                         if let Some(d) = rfd::FileDialog::new().set_title("High-res texture folder").pick_folder() {
                             s.hires = Some(d);
                         }
@@ -602,91 +810,25 @@ impl Launcher {
             });
         });
     }
-}
 
-impl Launcher {
-    /// The extras the original game didn't have, all off unless turned
-    /// on. Most of them come from Daniel's fork (github.com/dwolp/MCM2).
-    fn extras_ui(&mut self, ui: &mut egui::Ui) {
-        let s = &mut self.settings;
-        section(ui, "Extras", |ui| {
-            ui.label(
-                egui::RichText::new(
-                    "Things the original game didn't have. They all start off, so the game plays as it did. Most of them are also in the game: Options, then Tweaks... at the bottom.",
-                )
-                .weak(),
-            );
-            ui.add_space(4.0);
-            let original = s.is_original();
-            if ui
-                .add_enabled(!original, egui::Button::new("Back to the original"))
-                .on_hover_text("Turns every extra here off, and the difficulty table back to the game's.")
-                .clicked()
-            {
-                s.original();
-            }
-            let check = |ui: &mut egui::Ui, on: &mut bool, text: &str, about: &str| {
-                ui.checkbox(on, text).on_hover_text(about);
-            };
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new("Riding").strong());
-            check(ui, &mut s.quick_get_up, "Quick get-up", "After a crash, G or a pad's Back puts you straight back on the bike. Not in network races.");
-            ui.horizontal(|ui| {
-                ui.label("Air steering");
-                ui.add(egui::Slider::new(&mut s.air_steer, 0..=mm2_settings::AIR_MOST).step_by(10.0).suffix("%"))
-                    .on_hover_text("How much steering in the air bends your flight. 0% is the original game.");
-            });
-            ui.horizontal(|ui| {
-                ui.label("Air braking");
-                ui.add(egui::Slider::new(&mut s.air_brake, 0..=mm2_settings::AIR_MOST).step_by(10.0).suffix("%"))
-                    .on_hover_text("How much braking in the air shortens your flight. 0% is the original game.");
-            });
-            check(ui, &mut s.clean_starts, "Cleaner starts", "The computer riders keep their order across the gate off the start, so fewer pile into each other.");
-            check(ui, &mut s.one_lap, "One-lap races", "National and Supercross races can be 1 lap long (the original starts at 2).");
-            ui.label(egui::RichText::new("The difficulty table is in the game: Options, Tweaks..., Difficulty...").weak());
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new("Race display and camera").strong());
-            check(ui, &mut s.sharp_display, "Modernised HUD", "Crisp see-through race panel, radar and speedometer at your screen's resolution.");
-            check(ui, &mut s.kmh, "Speedometer in km/h", "The speed in kilometres an hour instead of miles an hour.");
-            check(ui, &mut s.lap_gap, "Live gap to your best lap", "Under the race panel: how far ahead or behind your best lap you are.");
-            check(ui, &mut s.centred_display, "Race display nearer the middle", "On screens wider than 16:9, the race display where it sits on a 16:9 screen.");
-            check(ui, &mut s.steady_camera, "Steadier camera", "The chase camera rises and dips with the bike more gently.");
-            ui.horizontal(|ui| {
-                ui.label("Field of view");
-                ui.add(egui::Slider::new(&mut s.fov, 60..=120).suffix("°"))
-                    .on_hover_text("How wide the riding cameras see. 85° is the original game's.");
-            });
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new("Controllers, sound and screen").strong());
-            ui.horizontal(|ui| {
-                check(ui, &mut s.vibration, "Controller vibration", "The pad thumps on landings, knocks over bumps and jolts in crashes.");
-                ui.add_enabled(s.vibration, egui::Slider::new(&mut s.vibration_strength, 0..=100).suffix("%"));
-            });
-            check(ui, &mut s.mute_in_background, "Mute in the background", "The game goes quiet while its window isn't the one in front.");
-            check(ui, &mut s.screenshot_key, "Screenshot key (Ctrl+P)", "Ctrl+P in a race saves a picture to the Screenshots folder beside your saves.");
-            ui.add_space(4.0);
-            ui.separator();
-            check(ui, &mut s.vsync, "VSync", "A picture each time the screen refreshes, with no tearing.");
-            check(ui, &mut s.show_fps, "Show frame rate", "The frames a second at the bottom left (F2 too).");
-            ui.label(egui::RichText::new("Thanks to Daniel (github.com/dwolp) for most of these, and for the fixes that came with them.").weak());
-        });
-    }
+    // ---- Updates ----
 
-    /// The notice at the top when a newer release is out, and the
-    /// download's progress once the player says yes.
+    /// The notice when a newer release is out, and the download's progress
+    /// once the player says yes.
     fn update_banner(&mut self, ui: &mut egui::Ui, busy: bool) {
         let mut act = None;
         match &self.update {
             Update::Found(r) => {
-                section(ui, "Update available", |ui| {
-                    ui.label(format!(
+                look::card(ui, look::icon::ICON_DOWNLOAD, "Update available", |ui| {
+                    ui.add(egui::Label::new(format!(
                         "OpenMCM2 {} is out. You have {}. Updating replaces only the program; your game data and settings stay as they are.",
                         r.tag,
                         update::current().unwrap_or("?")
-                    ));
+                    )).wrap());
                     ui.horizontal(|ui| {
                         let can = !busy && self.running.is_none();
-                        if ui.add_enabled(can, egui::Button::new("Update and restart")).clicked() {
+                        let b = egui::Button::new(egui::RichText::new("Update and restart").color(egui::Color32::WHITE)).fill(look::ACCENT);
+                        if ui.add_enabled(can, b).clicked() {
                             act = Some(true);
                         }
                         ui.hyperlink_to("What's new", &r.page);
@@ -695,21 +837,21 @@ impl Launcher {
                         }
                     });
                     if self.running.is_some() {
-                        ui.label(egui::RichText::new("Close the game first.").weak());
+                        ui.label(look::weak("Close the game first."));
                     }
                 });
             }
             Update::Installing(r, p) => {
-                section(ui, &format!("Updating to {}", r.tag), |ui| {
+                look::card(ui, look::icon::ICON_DOWNLOADING, &format!("Updating to {}", r.tag), |ui| {
                     let total = p.total.load(Ordering::Relaxed).max(1);
                     let done = p.done.load(Ordering::Relaxed);
                     ui.horizontal(|ui| {
-                        ui.add(egui::ProgressBar::new(done as f32 / total as f32).show_percentage().desired_width(ui.available_width() - 80.0));
+                        ui.add(egui::ProgressBar::new(done as f32 / total as f32).show_percentage().desired_width(ui.available_width() - 90.0));
                         if ui.button("Cancel").clicked() {
                             p.cancel.store(true, Ordering::Relaxed);
                         }
                     });
-                    ui.label(p.stage.lock().unwrap().clone());
+                    ui.label(look::weak(p.stage.lock().unwrap().clone()));
                 });
             }
             _ => {}
@@ -721,23 +863,29 @@ impl Launcher {
         }
     }
 
-    fn updates_ui(&mut self, ui: &mut egui::Ui) {
+    fn updates_page(&mut self, ui: &mut egui::Ui) {
+        look::page_title(ui, "Updates", "OpenMCM2 can update itself from its releases on GitHub.");
+        let busy = self.import.is_some();
+        self.update_banner(ui, busy);
         let mut check = false;
         let mut install = None;
-        section(ui, "Updates", |ui| {
+        look::card(ui, look::icon::ICON_UPDATE, "This copy", |ui| {
             match update::current() {
                 Some(v) => ui.label(format!("This is OpenMCM2 {v}.")),
                 None => ui.label("This copy of OpenMCM2 was built from source."),
             };
             if let Err(e) = &self.install {
-                ui.label(egui::RichText::new(format!("It can't update itself: {e}.")).weak());
+                ui.label(look::weak(format!("It can't update itself: {e}.")));
                 return;
             }
-            ui.checkbox(&mut self.settings.check_updates, "Check for updates when the launcher opens");
+            ui.horizontal(|ui| {
+                look::switch(ui, &mut self.settings.check_updates);
+                ui.label("Check for updates when the launcher opens");
+            });
             let can = self.import.is_none() && self.running.is_none();
             ui.horizontal(|ui| {
                 let idle = !matches!(self.update, Update::Checking(_) | Update::Installing(..));
-                if ui.add_enabled(idle, egui::Button::new("Check now")).clicked() {
+                if ui.add_enabled(idle, egui::Button::new(look::with(look::icon::ICON_REFRESH, "Check now"))).clicked() {
                     check = true;
                 }
                 match &self.update {
@@ -745,20 +893,27 @@ impl Launcher {
                         ui.spinner();
                         ui.label("Checking…");
                     }
-                    Update::UpToDate => {
-                        ui.label(egui::RichText::new("You have the latest version.").color(egui::Color32::from_rgb(120, 200, 120)));
-                    }
+                    Update::UpToDate => look::status(ui, true, "You have the latest version."),
                     Update::Found(r) | Update::Dismissed(r) => {
                         ui.label(format!("{} is out.", r.tag));
                         if ui.add_enabled(can, egui::Button::new("Update and restart")).clicked() {
                             install = Some(r.clone());
                         }
                     }
-                    Update::Failed(e) => {
-                        ui.add(egui::Label::new(egui::RichText::new(format!("Update: {e}")).color(egui::Color32::from_rgb(240, 90, 80))).wrap());
-                    }
+                    Update::Failed(e) => look::status(ui, false, &format!("Update: {e}")),
                     _ => {}
                 }
+            });
+        });
+        look::card(ui, look::icon::ICON_INFO, "Command line", |ui| {
+            ui.label(look::weak("What the Play button starts, for a shortcut of your own or to report a problem."));
+            let line = std::iter::once("mm2-viewer".to_string())
+                .chain(self.settings.args().into_iter().map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a }))
+                .collect::<Vec<_>>()
+                .join(" ");
+            egui::Frame::new().fill(look::SUNKEN).corner_radius(8).inner_margin(10).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.add(egui::Label::new(egui::RichText::new(line).monospace()).wrap());
             });
         });
         if check {
@@ -768,145 +923,125 @@ impl Launcher {
             self.install_update(r);
         }
     }
-}
 
-impl Launcher {
-    fn more_tracks_ui(&mut self, ui: &mut egui::Ui, busy: bool) {
+    // ---- Tracks ----
+
+    fn tracks_page(&mut self, ui: &mut egui::Ui, busy: bool) {
         let site = &tracks::SITES[self.tracks.site];
-        section(ui, "More tracks", |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                ui.label("Thousands of tracks made by players are on ");
-                ui.hyperlink_to(site.name, site.home);
-                ui.label(". Each one is downloaded from there only when you pick it, and belongs to the player who made it.");
-            });
-            ui.horizontal(|ui| {
-                let ready = self.settings.game.is_some() && !busy;
-                if ui.add_enabled(ready, egui::Button::new("Get tracks…")).clicked() {
-                    self.tracks.open = true;
-                    if self.tracks.listing.is_none() && self.tracks.fetching.is_none() {
-                        self.tracks.kind = Some(0);
-                        self.tracks.fetch(1);
-                    }
-                }
-                match &self.settings.game {
-                    None => {
-                        ui.label(egui::RichText::new("Set up the game data first.").weak());
-                    }
-                    Some(g) => {
-                        let n = self.tracks.added.count(g);
-                        if n > 0 {
-                            ui.label(format!("{n} added"));
-                        }
-                    }
-                }
-            });
+        look::page_title(ui, "Tracks", "Thousands of tracks made by players, added to the game's own.");
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.label(look::weak("Each one is downloaded from "));
+            ui.hyperlink_to(site.name, site.home);
+            ui.label(look::weak(" only when you pick it, and belongs to the player who made it. Added tracks show up in the game's track list for their event."));
         });
-    }
-
-    fn tracks_window(&mut self, ctx: &egui::Context) {
-        let Some(game) = self.settings.game.clone() else { return };
-        let mut open = self.tracks.open;
+        ui.add_space(8.0);
+        let Some(game) = self.settings.game.clone() else {
+            look::card(ui, look::icon::ICON_DISC_FULL, "Set up the game data first", |ui| {
+                ui.label(look::weak("Tracks are added to your copy of the game: choose it on the Play page."));
+            });
+            return;
+        };
+        if busy {
+            ui.label(look::weak("Waiting for the game data to finish copying…"));
+            return;
+        }
         let t = &mut self.tracks;
-        let site = &tracks::SITES[t.site];
+        if t.listing.is_none() && t.fetching.is_none() && t.error.is_none() {
+            t.kind = Some(0);
+            t.fetch(1);
+        }
         let mut fetch = None;
         let mut add = None;
         let mut remove = None;
-        egui::Window::new(format!("Get tracks from {}", site.name))
-            .open(&mut open)
-            .default_size([520.0, 560.0])
-            .collapsible(false)
-            .show(ctx, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    for (i, k) in site.kinds.iter().enumerate() {
-                        if ui.selectable_label(t.kind == Some(i), k.label).clicked() {
-                            t.kind = Some(i);
-                            fetch = Some(1);
-                        }
-                    }
-                });
-                ui.horizontal(|ui| {
-                    let edit = ui.add(egui::TextEdit::singleline(&mut t.search).hint_text("Search by name").desired_width(ui.available_width() - 80.0));
-                    let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if (ui.button("Search").clicked() || enter) && !t.search.trim().is_empty() {
-                        t.kind = None;
-                        fetch = Some(1);
-                    }
-                });
-                ui.separator();
-                let pages = t.listing.as_ref().map_or(1, |l| l.pages.max(1));
-                egui::Panel::bottom("pages").show(ui, |ui| {
-                    ui.add_space(4.0);
+        look::card(ui, look::icon::ICON_SEARCH, &format!("Browse {}", site.name), |ui| {
+            let kinds: Vec<_> = site.kinds.iter().enumerate().map(|(i, k)| look::Choice::new(Some(i), k.label)).collect();
+            if let Some(k) = look::segmented(ui, t.kind, &kinds) {
+                t.kind = k;
+                fetch = Some(1);
+            }
+            ui.horizontal(|ui| {
+                let edit = ui.add(egui::TextEdit::singleline(&mut t.search).hint_text("Search by name").desired_width(ui.available_width() - 110.0));
+                let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if (ui.button(look::with(look::icon::ICON_SEARCH, "Search")).clicked() || enter) && !t.search.trim().is_empty() {
+                    t.kind = None;
+                    fetch = Some(1);
+                }
+            });
+            let n = t.added.count(&game);
+            if n > 0 {
+                ui.label(look::weak(format!("{n} added so far.")));
+            }
+        });
+        if t.fetching.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(format!("Asking {}…", site.name));
+            });
+        }
+        if let Some(e) = &t.error {
+            look::status(ui, false, e);
+        }
+        if let Some(listing) = &t.listing {
+            if listing.tracks.is_empty() && t.fetching.is_none() {
+                ui.label("No tracks found.");
+            }
+            for track in &listing.tracks {
+                egui::Frame::new().fill(look::CARD).stroke(egui::Stroke::new(1.0, look::LINE)).corner_radius(10).inner_margin(12).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
-                        if ui.add_enabled(t.page > 1 && t.fetching.is_none(), egui::Button::new("Previous")).clicked() {
-                            fetch = Some(t.page - 1);
-                        }
-                        ui.label(format!("Page {} of {pages}", t.page.max(1)));
-                        if ui.add_enabled(t.page < pages && t.fetching.is_none(), egui::Button::new("Next")).clicked() {
-                            fetch = Some(t.page + 1);
-                        }
-                    });
-                    ui.label(egui::RichText::new("Added tracks show up in the game's track list for their event.").weak());
-                });
-                if t.fetching.is_some() {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(format!("Asking {}…", site.name));
-                    });
-                }
-                if let Some(e) = &t.error {
-                    ui.label(egui::RichText::new(e).color(egui::Color32::from_rgb(240, 90, 80)));
-                }
-                let Some(listing) = &t.listing else { return };
-                if listing.tracks.is_empty() && t.fetching.is_none() {
-                    ui.label("No tracks found.");
-                }
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    for track in &listing.tracks {
-                        ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(&track.name).strong());
-                                ui.horizontal(|ui| {
-                                    let kind = site.kinds.iter().find(|k| k.folder == track.folder).map_or("", |k| k.label);
-                                    let by = if track.author.is_empty() { kind.to_string() } else { format!("{kind} · by {}", track.author) };
-                                    ui.label(egui::RichText::new(by).weak());
-                                    if let Some(p) = &track.picture {
-                                        ui.hyperlink_to("picture", p);
-                                    }
-                                });
-                            });
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if let Some(job) = t.jobs.get(&track.url) {
-                                    if ui.button("Cancel").clicked() {
-                                        job.cancel.store(true, Ordering::Relaxed);
-                                    }
-                                    let total = job.total.load(Ordering::Relaxed).max(1);
-                                    let done = job.done.load(Ordering::Relaxed);
-                                    ui.add(egui::ProgressBar::new(done as f32 / total as f32).desired_width(100.0));
-                                } else if t.added.has(&game, &track.url) {
-                                    if ui.button("Remove").clicked() {
-                                        remove = Some(track.url.clone());
-                                    }
-                                    ui.label(egui::RichText::new("Added").color(egui::Color32::from_rgb(120, 200, 120)));
-                                } else if track.can_add() {
-                                    if ui.button("Get").clicked() {
-                                        add = Some(track.clone());
-                                    }
-                                } else {
-                                    ui.hyperlink_to("Download page", site.home)
-                                        .on_hover_text("This one is a .rar archive, which the launcher can't unpack.");
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            ui.label(egui::RichText::new(&track.name).family(look::bold_family()).size(15.0));
+                            ui.horizontal(|ui| {
+                                let kind = site.kinds.iter().find(|k| k.folder == track.folder).map_or("", |k| k.label);
+                                let by = if track.author.is_empty() { kind.to_string() } else { format!("{kind} · by {}", track.author) };
+                                ui.label(look::weak(by));
+                                if let Some(p) = &track.picture {
+                                    ui.hyperlink_to("picture", p);
                                 }
                             });
                         });
-                        if let Some(e) = t.failed.get(&track.url) {
-                            ui.label(egui::RichText::new(format!("Couldn't add it: {e}")).color(egui::Color32::from_rgb(240, 90, 80)));
-                        }
-                        ui.separator();
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if let Some(job) = t.jobs.get(&track.url) {
+                                if ui.button("Cancel").clicked() {
+                                    job.cancel.store(true, Ordering::Relaxed);
+                                }
+                                let total = job.total.load(Ordering::Relaxed).max(1);
+                                let done = job.done.load(Ordering::Relaxed);
+                                ui.add(egui::ProgressBar::new(done as f32 / total as f32).desired_width(110.0));
+                            } else if t.added.has(&game, &track.url) {
+                                if ui.button(look::with(look::icon::ICON_DELETE, "Remove")).clicked() {
+                                    remove = Some(track.url.clone());
+                                }
+                                ui.label(egui::RichText::new(look::with(look::icon::ICON_CHECK_CIRCLE, "Added")).color(look::GOOD));
+                            } else if track.can_add() {
+                                let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_DOWNLOAD, "Get")).color(egui::Color32::WHITE)).fill(look::ACCENT);
+                                if ui.add(b).clicked() {
+                                    add = Some(track.clone());
+                                }
+                            } else {
+                                ui.hyperlink_to("Download page", site.home).on_hover_text("This one is a .rar archive, which the launcher can't unpack.");
+                            }
+                        });
+                    });
+                    if let Some(e) = t.failed.get(&track.url) {
+                        look::status(ui, false, &format!("Couldn't add it: {e}"));
                     }
                 });
+                ui.add_space(6.0);
+            }
+            let pages = listing.pages.max(1);
+            ui.horizontal(|ui| {
+                if ui.add_enabled(t.page > 1 && t.fetching.is_none(), egui::Button::new("Previous")).clicked() {
+                    fetch = Some(t.page - 1);
+                }
+                ui.label(format!("Page {} of {pages}", t.page.max(1)));
+                if ui.add_enabled(t.page < pages && t.fetching.is_none(), egui::Button::new("Next")).clicked() {
+                    fetch = Some(t.page + 1);
+                }
             });
-        let t = &mut self.tracks;
-        t.open = open;
+        }
         if let Some(page) = fetch {
             t.fetch(page);
         }
@@ -922,6 +1057,45 @@ impl Launcher {
     }
 }
 
+/// Whether the effects, anti-aliasing and scene resolution in `s` are just
+/// what preset `q` sets.
+fn is_preset(s: &Settings, q: Quality) -> bool {
+    s.antialiasing == q.antialiasing() && s.resolution == "auto" && UPGRADES.iter().zip(&s.upgrades).all(|(u, on)| *on == q.has(u.0))
+}
+
+/// The preset `s` is: the one picked, or another it was changed to match;
+/// none when it is the player's own mix (Custom).
+fn preset_of(s: &Settings) -> Option<Quality> {
+    if is_preset(s, s.quality) {
+        return Some(s.quality);
+    }
+    Quality::ALL.into_iter().find(|&q| is_preset(s, q))
+}
+
+/// A line on what each effect ([`UPGRADES`]) does, for its switch.
+fn effect_about(name: &str) -> &'static str {
+    match name {
+        "lighting" => "Light worked out for every pixel, with bumps and highlights.",
+        "shadows" => "Every object casts a shadow from the sun.",
+        "distance" => "The whole track drawn, fading into haze.",
+        "bloom" => "Bright lights and the sun glow softly.",
+        "ao" => "Corners and contacts darkened, as ambient light is.",
+        "ground" => "The ground re-made from photo materials.",
+        "grass" => "Grass growing on the grassy ground near you.",
+        "smooth" => "The hills round you smoothed, not faceted.",
+        "dust" => "Clouds of dust behind the bikes, casting shadows.",
+        "mud" => "Mud and spray caking bikes and riders.",
+        "bikes" => "Shiny paint and metal, and smoother riders.",
+        "shafts" => "Beams of sunlight past hills, trees and riders.",
+        "cinematic" => "Replays filmed as through a lens.",
+        "ruts" => "Tyre ruts that stay for the race.",
+        "scenery" => "Props along the course, a paddock and a crowd.",
+        "grade" => "A bolder look: colour, contrast, a vignette.",
+        "raytracing" => "Truer shadows, light shafts and reflections, traced as rays.",
+        _ => "",
+    }
+}
+
 /// "1920 × 1080 (Full HD 1080p)", or just the size when it has no name.
 fn size_text((w, h): (u32, u32)) -> String {
     let name = SHAPES.iter().flat_map(|s| s.2).find(|z| (z.0, z.1) == (w, h)).map_or("", |z| z.2);
@@ -931,18 +1105,71 @@ fn size_text((w, h): (u32, u32)) -> String {
     }
 }
 
-fn title(s: &str) -> String {
-    let mut c = s.chars();
-    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+/// What a quality preset sets, for its hover text.
+fn preset_text(q: Quality) -> String {
+    let effects = match q {
+        Quality::Low => "without ambient occlusion, light shafts, smooth hills, replay blur or 3D grass",
+        Quality::Medium => "without light shafts or smooth hills, with TAA rebuilding the scene at the screen's sharpness",
+        Quality::RayTraced => "High's effects with ray tracing (needs a graphics card that can trace rays)",
+        Quality::High => "every effect that's on unless changed",
+        _ => "every effect but ray tracing, with lasting ruts",
+    };
+    let msaa = ANTIALIASING.iter().find(|a| a.0 == q.antialiasing()).map_or("", |a| a.1);
+    format!("{}: {effects}; anti-aliasing {msaa}; scene resolution {}.", q.label(), q.most_pixels())
 }
 
-fn pick(ui: &mut egui::Ui, id: &str, value: &mut String, choices: &[(&str, &str)]) {
-    let shown = choices.iter().find(|c| c.0 == value).map_or(value.as_str(), |c| c.1).to_string();
-    egui::ComboBox::from_id_salt(id).selected_text(shown).show_ui(ui, |ui| {
-        for (key, label) in choices {
-            if ui.selectable_label(value == key, *label).clicked() {
-                *value = key.to_string();
+#[cfg(test)]
+mod shots {
+    use super::*;
+
+    /// Draws each page into the folder `MM2_SHOTS`, to look at:
+    /// `MM2_SHOTS=dir cargo test -p mm2-launcher shots -- --ignored`.
+    #[test]
+    #[ignore]
+    fn shots() {
+        let dir = std::env::var("MM2_SHOTS").expect("MM2_SHOTS: where to draw the pages");
+        for (name, page, enhanced, height) in [
+            ("play", Page::Play, true, 760.0),
+            ("graphics", Page::Graphics, true, 1900.0),
+            ("graphics_original", Page::Graphics, false, 760.0),
+            ("tracks", Page::Tracks, true, 760.0),
+            ("updates", Page::Updates, true, 760.0),
+            ("graphics_small", Page::Graphics, true, 520.0),
+            ("graphics_custom", Page::Graphics, true, 520.0),
+        ] {
+            let width = if name.ends_with("small") { 760.0 } else { 1000.0 };
+            let custom = name.ends_with("custom");
+            let mut s = Settings::default();
+            s.enhanced = enhanced;
+            s.game = Some("C:/Games/Motocross Madness 2/GAME".into());
+            s.quality = Quality::RayTraced;
+            s.antialiasing = "taa".into();
+            s.resolution = "75%".into();
+            s.time = "night".into();
+            for (u, on) in UPGRADES.iter().zip(s.upgrades.iter_mut()) {
+                *on = Quality::RayTraced.has(u.0);
             }
+            if custom {
+                // Changed from the preset: Custom.
+                s.antialiasing = "msaa4".into();
+            }
+            let mut l = Launcher::with(s, Err("built from source".into()));
+            l.page = page;
+            // No listing fetched from the net.
+            l.tracks.error = Some("(not fetched in this picture)".into());
+            // The harness draws in a frame with an 8 px margin round it:
+            // 16 px more each way, cut off after, is the window's own.
+            let mut h = egui_kittest::Harness::builder()
+                .with_size([width + 16.0, height + 16.0])
+                // As on a Windows set to light mode, where the launcher
+                // must look the same.
+                .with_theme(egui::Theme::Light)
+                .with_context_setup(|ctx| look::apply(ctx))
+                .build_ui_state(|ui, l: &mut Launcher| l.draw(ui), l);
+            h.run();
+            let image = h.render().expect("render");
+            let image = image::imageops::crop_imm(&image, 8, 8, width as u32, height as u32).to_image();
+            image.save(format!("{dir}/{name}.png")).expect("save");
         }
-    });
+    }
 }

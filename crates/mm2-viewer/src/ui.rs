@@ -1882,9 +1882,19 @@ impl Dlg {
                     .anim("AnimTextBack")
                     .and_then(|n| ui.image(gfx, self.pack_of(i), n))
                 {
-                    let (w, h) = gfx.sprites.size(t);
-                    gfx.sprites.image(t, rect[0], rect[1]);
-                    text_rect = [rect[0], rect[1], w as f32, h as f32];
+                    let (w, h) = (gfx.sprites.size(t).0 as f32, gfx.sprites.size(t).1 as f32);
+                    if w > rect[2] + 0.5 {
+                        // Narrower than its picture (the fork's copies):
+                        // the picture's left part, then its right edge.
+                        let edge = 4.0_f32.min(rect[2] / 2.0);
+                        let left = rect[2] - edge;
+                        gfx.sprites.quad(t, [0.0, 0.0, left / w, 1.0], [rect[0], rect[1], left, h], [1.0; 4]);
+                        gfx.sprites.quad(t, [1.0 - edge / w, 0.0, 1.0, 1.0], [rect[0] + left, rect[1], edge, h], [1.0; 4]);
+                        text_rect = [rect[0], rect[1], rect[2], h];
+                    } else {
+                        gfx.sprites.image(t, rect[0], rect[1]);
+                        text_rect = [rect[0], rect[1], w, h];
+                    }
                 }
                 if let Some(t) = self
                     .image_for(i, now)

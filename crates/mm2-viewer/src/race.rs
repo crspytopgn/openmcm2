@@ -1020,6 +1020,8 @@ impl Racer {
                 bike.racing = false;
                 bike.hull = HULL.get().cloned();
                 bike.cross_up = CROSS_UP.get().cloned();
+                // The launcher's Forgiving landings (not the game's).
+                bike.forgiving_landings = crate::tweaks::get().forgiving_landings;
                 Bike::Player(Box::new(bike))
             } else {
                 // A lane of ±7 ft from the line (±3 in the Baja and

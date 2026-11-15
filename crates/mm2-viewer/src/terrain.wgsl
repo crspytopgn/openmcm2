@@ -196,18 +196,23 @@ fn sample_material(m: i32, uv: vec2<f32>, ddx: vec2<f32>, ddy: vec2<f32>) -> Sam
 // Material `m` on the level, seen from above, twice at different sizes
 // and turns so its repeats do not show; `dx`, `dy` are the derivatives of
 // the level's x, z, taken before any branch.
-fn material_level(m: i32, world: vec3<f32>, dx: vec2<f32>, dy: vec2<f32>) -> Sample {
+// Far off (`single` 1), where its repeats are too small to see, the
+// second look is left out: each is the texture's own on average.
+fn material_level(m: i32, world: vec3<f32>, dx: vec2<f32>, dy: vec2<f32>, single: f32) -> Sample {
     let s = material_scale(m);
     let uv = world.xz / s;
+    let a = sample_material(m, uv, dx / s, dy / s);
+    if (single >= 1.0) {
+        return a;
+    }
     let turn = mat2x2<f32>(0.8 * 0.37, 0.6 * 0.37, -0.6 * 0.37, 0.8 * 0.37);
     let uv2 = turn * uv + 0.31;
-    let a = sample_material(m, uv, dx / s, dy / s);
     let b = sample_material(m, uv2, turn * (dx / s), turn * (dy / s));
     var out: Sample;
-    out.colour = a.colour * mix(vec3<f32>(1.0), b.colour, 0.45);
-    out.rough = mix(a.rough, b.rough, 0.3);
-    out.normal = normalize(vec3<f32>(a.normal.xy + b.normal.xy * 0.5, a.normal.z));
-    out.height = mix(a.height, b.height, 0.35);
+    out.colour = mix(a.colour * mix(vec3<f32>(1.0), b.colour, 0.45), a.colour, single);
+    out.rough = mix(mix(a.rough, b.rough, 0.3), a.rough, single);
+    out.normal = normalize(mix(vec3<f32>(a.normal.xy + b.normal.xy * 0.5, a.normal.z), a.normal, single));
+    out.height = mix(mix(a.height, b.height, 0.35), a.height, single);
     return out;
 }
 
@@ -250,13 +255,23 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
         w.y,
         w.z,
     );
-    // Only the materials that are here are looked up.
+    // How near the detail shows (see below), and where only one look of
+    // each material is needed.
+    let detail = enh.haze.w;
+    let reach = 0.5 + detail;
+    let near = 1.0 - smoothstep(180.0 * reach, 450.0 * reach, dist);
+    let single = smoothstep(80.0, 120.0, dist);
+    // Only the materials that are here are looked up, and only where their
+    // detail shows; past it, only their sheen and the puddles' hollows
+    // would use them, and an average does.
     let dx = dpdx(in.world.xz);
     let dy = dpdy(in.world.xz);
     var level: array<Sample, 5>;
     for (var m = 0; m < 5; m++) {
-        if (weights[m] > 0.0) {
-            level[m] = material_level(m, in.world, dx, dy);
+        if (near > 0.0 && weights[m] > 0.0) {
+            level[m] = material_level(m, in.world, dx, dy, single);
+        } else {
+            level[m] = Sample(vec3<f32>(1.0), 0.6, vec3<f32>(0.0, 0.0, 1.0), 0.4);
         }
     }
     // Rock is seen from three sides, so cliffs are not smeared.
@@ -267,9 +282,12 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     let dxy2 = dpdy(in.world.xy) / rs;
     var side_x: Sample;
     var side_z: Sample;
-    if (weights[ROCK] > 0.0) {
+    if (weights[ROCK] > 0.0 && near > 0.0) {
         side_x = sample_material(ROCK, in.world.zy / rs, dzy, dzy2);
         side_z = sample_material(ROCK, in.world.xy / rs, dxy, dxy2);
+    } else {
+        side_x = level[ROCK];
+        side_z = level[ROCK];
     }
     var best = 0.0;
     for (var m = 0; m < 5; m++) {
@@ -305,9 +323,6 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     // The detail fades with distance, where the painted colour suffices;
     // mostly its light and dark, a little of its own colour.
     // `detail=` (enh.haze.w, 0 to 1) sets how strongly, and how far.
-    let detail = enh.haze.w;
-    let reach = 0.5 + detail;
-    let near = 1.0 - smoothstep(180.0 * reach, 450.0 * reach, dist);
     colour = mix(vec3<f32>(luminance(colour)), colour, 0.35);
     // Gently: the painted ground stays what the eye reads.
     colour = mix(vec3<f32>(1.0), colour, near * (0.35 + 0.5 * detail));
@@ -375,14 +390,37 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
         albedo *= 1.0 - puddle * 0.4;
     }
     let sun = sun_visible(in.world, n, dist, 0.4);
-    let light = real_light(bent, sun) / max(flat_light, vec3<f32>(0.05));
+    // At night, against the track's own light, so the ground goes dark.
+    let against = mix(flat_light, enh.night.yzw, enh.night.x);
+    let light = real_light(bent, sun) / max(against, vec3<f32>(0.05));
     var lit = albedo * pow(max(light, vec3<f32>(0.0)), vec3<f32>(2.2)) * 1.05;
+    // The bikes' headlights, as they light the ground's own colour.
+    lit += albedo * headlight_at(in.world, n, dist);
     if (puddle > 0.0) {
         let eye = normalize(globals.camera.xyz - in.world);
         let r = reflect(-eye, n);
-        let sky = mix(enh.horizon.rgb, enh.zenith.rgb, clamp(r.y, 0.0, 1.0));
+        var sky = mix(enh.horizon.rgb, enh.zenith.rgb, clamp(r.y, 0.0, 1.0));
         let fresnel = 0.02 + 0.98 * pow(1.0 - max(dot(eye, n), 0.0), 5.0);
+        // Ray traced, what stands round the water shows in it too.
+        if (fresnel * puddle > 0.02) {
+            sky = reflection(in.world + n * 0.1, r, sky);
+        }
         lit = mix(lit, sky, fresnel * puddle * 0.85);
+    }
+    // Ray traced, the rest of the wet ground is a dim, rippled mirror
+    // too, as water's glancing angles make it: the far track shines with
+    // the sky and what stands by it, the ground at the wheels hardly.
+    if (enh.world.y > 0.0 && enh.traced.x > 0.5) {
+        let eye = normalize(globals.camera.xyz - in.world);
+        let rn = normalize(mix(bent, n, 0.8));
+        let r = reflect(-eye, rn);
+        let fresnel = 0.02 + 0.98 * pow(1.0 - max(dot(eye, rn), 0.0), 5.0);
+        // Dirt is no lake: at most a sixth of what it shows is reflected.
+        let wet = min(fresnel * enh.world.y * (1.0 - puddle) * 0.35, 0.16);
+        if (wet > 0.03 && r.y > 0.0) {
+            let sky = mix(enh.horizon.rgb, enh.zenith.rgb, r.y);
+            lit = mix(lit, reflection(in.world + n * 0.1, r, sky), wet);
+        }
     }
     // A sheen off the smoother and the wet ground.
     let v = normalize(globals.camera.xyz - in.world);
@@ -411,6 +449,18 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     return enhanced_ground(in);
 }
 
+// The ray-traced shadows' depth pass (rt.rs): the game's mesh where it is
+// drawn, giving way to the smooth ground as fs_enhanced does, so the depth
+// is of the very ground the scene shows.
+@fragment
+fn fs_rt_depth(in: VertexOut) {
+    let p = in.terrain_xz - enh.fine_ground.xy;
+    let inside = vec2<f32>(SMOOTH_OVERLAP);
+    if (enh.fine_ground.w > 0.5 && all(p > inside) && all(p < vec2<f32>(enh.fine_ground.z) - inside)) {
+        discard;
+    }
+}
+
 @fragment
 fn fs_smooth(in: VertexOut) -> @location(0) vec4<f32> {
     return enhanced_ground(in);
@@ -425,7 +475,8 @@ fn enhanced_ground(in: VertexOut) -> vec4<f32> {
     // small bumps the texture suggests, and the objects' shadows, change
     // it, as they change the light the game would give the ground here.
     var light = vec3<f32>(1.0 - shadow_at(in.world));
-    let plain = max(game_light(n, 1.0), vec3<f32>(0.05));
+    // At night against the track's own light, so the ground goes dark.
+    let plain = max(mix(game_light(n, 1.0), enh.night.yzw, enh.night.x), vec3<f32>(0.05));
     if (enh.flags.y > 0.5) {
         let sun = sun_visible(in.world, n, dist, 0.4);
         light = game_light(n, sun) / plain;
@@ -435,6 +486,7 @@ fn enhanced_ground(in: VertexOut) -> vec4<f32> {
         light = game_light(bumped, sun) / plain;
     }
     var lit = colour * pow(max(light, vec3<f32>(0.0)), vec3<f32>(2.2));
+    lit += colour * headlight_at(in.world, n, dist);
     if (enh.more.x > 0.5) {
         lit = new_ground(in, colour, n, dist);
     }
