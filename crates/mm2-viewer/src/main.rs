@@ -3672,6 +3672,11 @@ impl App {
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(config.format);
+        // A browser's canvas has no sRGB format: the game draws through an
+        // sRGB view of it instead, or every colour comes out too dark.
+        if !config.format.is_srgb() {
+            config.view_formats = vec![config.format.add_srgb_suffix()];
+        }
         config.present_mode = present_mode();
         // The race is copied in between black bars on a window wider than 21:9.
         if caps.usages.contains(wgpu::TextureUsages::COPY_DST) {
@@ -3682,7 +3687,7 @@ impl App {
             config.usage |= wgpu::TextureUsages::COPY_SRC;
         }
         surface.configure(&device, &config);
-        let sprites = sprites::Sprites::new(&device, config.format);
+        let sprites = sprites::Sprites::new(&device, config.format.add_srgb_suffix());
         let mut state = State {
             window,
             surface,
@@ -3719,7 +3724,7 @@ impl App {
             &track.terrain,
             &track.terrain_textures,
             &track.objects,
-            state.config.format,
+            state.config.format.add_srgb_suffix(),
         );
         if let Some((cube, images)) = &track.sky {
             renderer.set_sky(
@@ -3727,7 +3732,7 @@ impl App {
                 &state.queue,
                 cube,
                 images,
-                state.config.format,
+                state.config.format.add_srgb_suffix(),
             );
         }
         renderer.set_lights(track.lights);
@@ -3743,7 +3748,7 @@ impl App {
             renderer.set_visibility(quality, visibility, haziness);
         }
         if let Some(sheet) = &track.particle_sheet {
-            renderer.set_dirt(&state.device, &state.queue, &sheet, state.config.format);
+            renderer.set_dirt(&state.device, &state.queue, &sheet, state.config.format.add_srgb_suffix());
         }
         state.renderer = Some(renderer);
         state.camera = renderer::start_camera(&track.terrain);
@@ -4775,13 +4780,16 @@ impl App {
                 return;
             }
         };
-        let window_view = frame.texture.create_view(&Default::default());
+        let window_view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(s.config.format.add_srgb_suffix()),
+            ..Default::default()
+        });
         let window_size = (s.config.width, s.config.height);
         let mut commands = Vec::new();
         let racing = self.track.is_some() && self.loading.is_none();
         // Wider than 21:9, the race is drawn 21:9 and goes between black bars.
         let between_bars = (racing && s.config.usage.contains(wgpu::TextureUsages::COPY_DST))
-            .then(|| s.bars.target(&s.device, s.config.format, window_size))
+            .then(|| s.bars.target(&s.device, s.config.format.add_srgb_suffix(), window_size))
             .flatten();
         let (view, size) = match &between_bars {
             Some((view, size)) => (view, *size),
@@ -4879,7 +4887,7 @@ impl App {
                                     &s.queue,
                                     &res,
                                     &ride,
-                                    s.config.format,
+                                    s.config.format.add_srgb_suffix(),
                                 )
                             });
                     }

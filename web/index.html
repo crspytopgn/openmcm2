@@ -36,6 +36,15 @@
   #update { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); padding: .4rem .5rem .4rem 1rem;
     background: rgba(0,0,0,.8); border: 1px solid var(--accent); border-radius: 8px; font-size: .9rem; }
   #update button { padding: .3rem .7rem; }
+  #look { position: fixed; top: 8px; left: 8px; padding: .3rem .8rem; border-radius: 999px;
+    background: rgba(0,0,0,.6); color: var(--fg); font-size: .85rem; font-weight: 500;
+    opacity: .9; transition: opacity .6s; }
+  #look.faded { opacity: 0; }
+  #look:hover, #look:focus-visible { opacity: 1; }
+  fieldset { border: 1px solid #333; border-radius: 8px; margin: 1rem 0 0; padding: .6rem 1rem .8rem; }
+  legend { color: var(--fg); font-weight: 600; padding: 0 .3rem; }
+  fieldset label { display: block; color: var(--dim); margin: .3rem 0; }
+  fieldset b { color: var(--fg); font-weight: 600; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -60,6 +69,11 @@
     <button id="play">Play</button>
     <button id="forget" class="plain">Use another folder</button>
   </div>
+  <fieldset>
+    <legend>Look</legend>
+    <label><input type="radio" name="look" value="original"> <b>Original</b>: the game as it looked in 2000</label>
+    <label><input type="radio" name="look" value="enhanced"> <b>Enhanced</b>: modern lighting, shadows and materials</label>
+  </fieldset>
   <progress id="bar" hidden></progress>
   <p id="status"></p>
   <p id="why"></p>
@@ -73,6 +87,7 @@
 </div></div>
 <div id="update" hidden>A new version of OpenMCM2 is out. <button id="reload">Reload to update</button>
   <button id="later" class="plain">Later</button></div>
+<button id="look" hidden title="Switch between the original look and the enhanced one (F3)"></button>
 <a id="heart" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener" hidden><span aria-hidden="true">♥</span> Enjoying it? Support OpenMCM2</a>
 <script type="module">
 // This build's version: everything below is fetched for it, so a new
@@ -93,6 +108,80 @@ const net = await import(fresh("./net.js"));
 
 const $ = (id) => document.getElementById(id);
 const status = (t) => ($("status").textContent = t);
+
+// Browsers keep sound off until the player clicks or presses a key, and
+// Safari keeps it off even then unless asked again: every sound context
+// the game opens is woken on the next tap or key.
+const sounds = [];
+const NativeAudio = globalThis.AudioContext || globalThis.webkitAudioContext;
+if (NativeAudio) {
+  globalThis.AudioContext = class extends NativeAudio {
+    constructor(...a) {
+      super(...a);
+      sounds.push(this);
+    }
+  };
+  const wake = () => sounds.forEach((c) => c.state !== "running" && c.resume().catch(() => {}));
+  for (const e of ["pointerdown", "keydown", "touchend"]) addEventListener(e, wake, true);
+}
+
+// The look: original or enhanced, picked on this page and remembered.
+// "?enhanced" in the address still works and wins.
+const params = new URLSearchParams(location.search);
+const stored = (() => {
+  try {
+    return localStorage.getItem("mm2look");
+  } catch {
+    return null;
+  }
+})();
+let look = [...params.keys()].some((k) => k.startsWith("enhanced")) ? "enhanced" : stored || "original";
+for (const r of document.querySelectorAll("input[name=look]")) {
+  r.checked = r.value === look;
+  r.addEventListener("change", () => {
+    look = r.value;
+    try {
+      localStorage.setItem("mm2look", look);
+    } catch {}
+  });
+}
+// The game reads its options from the address.
+function setLookInAddress() {
+  const q = new URLSearchParams(location.search);
+  const hadEnhanced = [...q.keys()].some((k) => k.startsWith("enhanced"));
+  if (look === "enhanced" && !hadEnhanced) q.set("enhanced", "");
+  if (look === "original") for (const k of [...q.keys()]) if (k.startsWith("enhanced")) q.delete(k);
+  const query = q.toString().replace(/=(&|$)/g, "$1");
+  history.replaceState(null, "", location.pathname + (query ? "?" + query : "") + location.hash);
+}
+// While playing: which look shows, and a switch. With the enhanced look
+// it flips at once (as F3 does); from the original it restarts the game.
+let showing = null;
+function lookLabel() {
+  $("look").textContent = showing === "enhanced" ? "Look: Enhanced ⇄ Original" : "Look: Original ⇄ Enhanced";
+}
+$("look").addEventListener("click", () => {
+  if (look === "enhanced") {
+    for (const type of ["keydown", "keyup"]) {
+      $("mm2").dispatchEvent(new KeyboardEvent(type, { key: "F3", code: "F3", bubbles: true }));
+    }
+  } else {
+    try {
+      localStorage.setItem("mm2look", "enhanced");
+      sessionStorage.setItem("mm2autoplay", "1");
+    } catch {}
+    look = "enhanced";
+    setLookInAddress();
+    location.reload();
+  }
+  $("mm2").focus();
+});
+$("mm2").addEventListener("keydown", (e) => {
+  if (e.code === "F3" && look === "enhanced") {
+    showing = showing === "enhanced" ? "original" : "enhanced";
+    lookLabel();
+  }
+});
 globalThis.mm2page = {
   started() {
     $("setup").hidden = true;
@@ -101,7 +190,13 @@ globalThis.mm2page = {
     net.invite();
     // Shown for a moment, then only when the pointer is on it.
     $("heart").hidden = false;
-    setTimeout(() => $("heart").classList.add("faded"), 8000);
+    showing = look;
+    lookLabel();
+    $("look").hidden = false;
+    setTimeout(() => {
+      $("heart").classList.add("faded");
+      $("look").classList.add("faded");
+    }, 8000);
   },
   fail(why) {
     $("setup").hidden = false;
@@ -165,6 +260,7 @@ async function start(list) {
   await readAll(list);
   await fs.loadUser().catch((e) => console.warn("saves not read", e));
   status("Starting…");
+  setLookInAddress();
   const game = await import(fresh("./pkg/mm2-viewer.js"));
   await game.default({ module_or_path: fresh("./pkg/mm2-viewer_bg.wasm") });
 }
@@ -312,6 +408,13 @@ if (kept) {
   $("kept").hidden = false;
   status("Your game folder is remembered in this browser.");
   $("play").addEventListener("click", () => start(kept));
+  // Back from switching the look: straight into the game again.
+  let again = false;
+  try {
+    again = sessionStorage.getItem("mm2autoplay") === "1";
+    sessionStorage.removeItem("mm2autoplay");
+  } catch {}
+  if (again) start(kept);
 }
 </script>
 </body>
