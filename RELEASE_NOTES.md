@@ -16,7 +16,18 @@ Fixes for the browser version:
   it under "Your own tracks" with the event it's for. It joins that
   event's track list and stays in your browser.
 
-The desktop version is unchanged in this release.
+Fixes for the desktop version:
+
+* **Intel HD 3000 on OpenGL (#19):** races froze on "Get ready" on big
+  tracks such as Beaver County since 0.4.0. The original look now loads
+  the same amount of object data as 0.3.3; the Enhanced extras load
+  only when Enhanced is on.
+* **Multiplayer Ready button (#20):** it had no text. Like the original,
+  it now says "Ready"; the host sees "Remove" on the other players'
+  buttons, and it now sends that player out of the race.
+* **Riding over the border hills (#21):** the throw back toward the
+  middle of the map now plays out in full, as in the original, and you
+  get up where you land instead of back at the edge.
 
 ## New in 0.4.2
 

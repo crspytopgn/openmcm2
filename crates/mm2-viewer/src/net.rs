@@ -660,6 +660,20 @@ impl Session {
         }
     }
 
+    /// The host sends player `id` away: they hear the session end.
+    pub fn remove(&mut self, id: u8) {
+        if !self.host || id == self.me {
+            return;
+        }
+        if let Some((_, link)) = self.peers.iter_mut().find(|(p, _)| *p == id) {
+            let _ = send(link, &Msg::Leave);
+        }
+        self.peers.retain(|(p, _)| *p != id);
+        self.players.retain(|p| p.id != id);
+        let ps = Msg::Players(self.players.clone());
+        self.broadcast(&ps, None);
+    }
+
     /// Whether every player has pressed Ready.
     pub fn all_ready(&self) -> bool {
         self.players.iter().all(|p| p.ready)
@@ -913,6 +927,15 @@ mod tests {
         wait(&mut || {
             host.poll();
             host.players.iter().any(|p| p.name == "Guest" && p.ready)
+        });
+        // The host's Remove button: the guest hears the session end.
+        let id = host.players.iter().find(|p| p.name == "Guest").unwrap().id;
+        host.remove(id);
+        assert!(host.players.iter().all(|p| p.name != "Guest"));
+        let mut gone = Vec::new();
+        wait(&mut || {
+            gone.extend(guest.poll());
+            gone.contains(&Heard::Lost)
         });
     }
 }

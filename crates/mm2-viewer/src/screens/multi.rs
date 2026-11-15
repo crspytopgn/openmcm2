@@ -289,6 +289,7 @@ impl Multi {
             return;
         };
         let (me, players) = net::with(|s| (s.me, s.players.clone())).unwrap_or((0, Vec::new()));
+        let host = net::with(|s| s.host).unwrap_or(false);
         let others: Vec<&Player> = players.iter().filter(|p| p.id != me).collect();
         for i in 2..=8 {
             let p = others.get(i - 2);
@@ -297,7 +298,8 @@ impl Multi {
                 p.map_or(String::new(), |p| p.name.clone()),
             );
             let rdy = format!("ButRdyPlayer{i}");
-            base.enable(&rdy, false);
+            // The host's Remove buttons send that player away.
+            base.enable(&rdy, host && p.is_some());
             base.show(&rdy, p.is_some());
             base.set_color(
                 &rdy,
@@ -411,6 +413,16 @@ impl Multi {
             base.set_color(&format!("ButRdyPlayer{i}"), NOT_READY);
         }
         base.set_color("ButRdyUser", if self.ready { READY } else { NOT_READY });
+        // The buttons' words (`0x4f8510`): "Ready" on this player's, and
+        // on the others' "Remove" for the host, "Ready" for a guest, all
+        // at 18 points (`0x4f9400`).
+        base.set_text("ButRdyUser", cx.ui.lang(1552));
+        base.set_font("ButRdyUser", 18.0);
+        let others = cx.ui.lang(if Self::guest() { 1552 } else { 2341 });
+        for i in 2..=8 {
+            base.set_text(&format!("ButRdyPlayer{i}"), others.clone());
+            base.set_font(&format!("ButRdyPlayer{i}"), 18.0);
+        }
         if let Some(c) = base.ctl("EditChat") {
             c.max_len = 60;
         }
@@ -950,6 +962,26 @@ impl Multi {
                         if self.ready {
                             let line = cx.ui.lang(5331).replace("%s", &Self::player(cx));
                             self.say(line);
+                        }
+                    }
+                    _ if lower.starts_with("butrdyplayer") => {
+                        // The host removes that player (`0x4f8510`'s
+                        // Remove buttons, in the others' order).
+                        let slot = lower["butrdyplayer".len()..].parse::<usize>().ok();
+                        if let Some(slot) = slot.filter(|s| (2..=8).contains(s)) {
+                            net::with(|s| {
+                                let me = s.me;
+                                let id = s
+                                    .players
+                                    .iter()
+                                    .filter(|p| p.id != me)
+                                    .nth(slot - 2)
+                                    .map(|p| p.id);
+                                if let Some(id) = id {
+                                    s.remove(id);
+                                }
+                            });
+                            self.fill_players();
                         }
                     }
                     "butchatsend" => self.send(cx),

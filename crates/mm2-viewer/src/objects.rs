@@ -26,10 +26,17 @@ pub struct Vertex {
     /// identity used by static objects. The top two bits say how it is
     /// lit: [`UNLIT`] or [`PLANT`].
     node: u32,
-    /// For the enhanced drawing only (the game's own shaders skip it): a
-    /// moving model's normal smoothed over its neighbours' (zero for
-    /// others), and a plant's height above its foot and a phase of its
-    /// own, for swaying in the wind.
+}
+
+/// A vertex's extras for the enhanced drawing only, in a buffer of their
+/// own so the game's look uploads no more than it did: a moving model's
+/// normal smoothed over its neighbours' (zero for others), and a plant's
+/// height above its foot and a phase of its own, for swaying in the wind.
+/// (In the one buffer they took a big track's objects past 256 MB, which
+/// hung older Intel graphics on OpenGL, openmcm2 #19.)
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct Extra {
     smooth: [f32; 3],
     sway: [f32; 2],
 }
@@ -50,6 +57,8 @@ const BLOCK: f32 = 160.0;
 #[derive(Default)]
 pub struct ObjectMesh {
     vertices: Vec<Vertex>,
+    /// Each vertex's [`Extra`].
+    extras: Vec<Extra>,
     indices: Vec<u32>,
     /// One draw per texture: its index range and the texture (if found).
     draws: Vec<(std::ops::Range<u32>, Option<Image>)>,
@@ -670,6 +679,8 @@ impl ObjectMesh {
                         [c[2], c[1], c[0], 255]
                     },
                     node: node | mode,
+                });
+                self.extras.push(Extra {
                     smooth: [0.0; 3],
                     sway: match place {
                         Some(place) if mode == PLANT => {
@@ -682,7 +693,7 @@ impl ObjectMesh {
                 });
             }
             if place.is_none() && mode == 0 {
-                smooth_normals(&mut self.vertices[base as usize..]);
+                smooth_normals(&self.vertices[base as usize..], &mut self.extras[base as usize..]);
             }
             batches
                 .entry(texture)
@@ -696,7 +707,7 @@ impl ObjectMesh {
 /// place on the same part that face within about 80° of it, so a moving
 /// model's facets (tyres, tanks, helmets, arms) shade as round; sharper
 /// edges stay sharp.
-fn smooth_normals(vertices: &mut [Vertex]) {
+fn smooth_normals(vertices: &[Vertex], extras: &mut [Extra]) {
     let key = |v: &Vertex| {
         let q = |x: f32| (x * 512.0).round() as i32;
         (v.node, q(v.position[0]), q(v.position[1]), q(v.position[2]))
@@ -706,10 +717,10 @@ fn smooth_normals(vertices: &mut [Vertex]) {
         at.entry(key(v)).or_default().push(i);
     }
     let normals: Vec<Vec3> = vertices.iter().map(|v| Vec3::from(v.normal)).collect();
-    for (i, v) in vertices.iter_mut().enumerate() {
+    for (i, (v, e)) in vertices.iter().zip(extras.iter_mut()).enumerate() {
         let n = normals[i];
         let sum: Vec3 = at[&key(v)].iter().map(|&j| normals[j]).filter(|m| m.dot(n) > 0.17).sum();
-        v.smooth = sum.normalize_or(n).into();
+        e.smooth = sum.normalize_or(n).into();
     }
 }
 
@@ -749,6 +760,8 @@ pub struct ObjectRenderer {
     vertex_nodes: Vec<u32>,
     draw_ranges: Vec<std::ops::Range<u32>>,
     vertices: wgpu::Buffer,
+    /// The enhanced drawing's [`Extra`]s, when it draws.
+    extras: Option<wgpu::Buffer>,
     indices: wgpu::Buffer,
     globals: wgpu::BindGroup,
     draws: Vec<(std::ops::Range<u32>, wgpu::BindGroup)>,
@@ -833,6 +846,13 @@ impl ObjectRenderer {
             label: Some("object vertices"),
             contents: bytemuck::cast_slice(&mesh.vertices),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+        let extras = enhanced.map(|_| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("object vertex extras"),
+                contents: bytemuck::cast_slice(&mesh.extras),
+                usage: wgpu::BufferUsages::VERTEX,
+            })
         });
         let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("object indices"),
@@ -927,9 +947,17 @@ impl ObjectRenderer {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &wgpu::vertex_attr_array![
                 0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Unorm8x4,
-                4 => Uint32, 5 => Float32x3, 6 => Float32x2
+                4 => Uint32
             ],
         })];
+        let enhanced_layout = [
+            vertex_layout[0].clone(),
+            Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<Extra>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![5 => Float32x3, 6 => Float32x2],
+            }),
+        ];
         let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("shadow casters"),
             layout: Some(&shadow_pipeline_layout),
@@ -976,14 +1004,7 @@ impl ObjectRenderer {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<Vertex>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Unorm8x4,
-                        4 => Uint32, 5 => Float32x3, 6 => Float32x2
-                    ],
-                })],
+                buffers: &vertex_layout,
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -1020,7 +1041,7 @@ impl ObjectRenderer {
                     module: &shader,
                     entry_point: Some("vs_enhanced"),
                     compilation_options: Default::default(),
-                    buffers: &vertex_layout,
+                    buffers: &enhanced_layout,
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
@@ -1206,6 +1227,7 @@ impl ObjectRenderer {
             vertex_nodes: mesh.vertices.iter().map(|v| v.node).collect(),
             draw_ranges: mesh.draws.iter().map(|(r, _)| r.clone()).collect(),
             vertices,
+            extras,
             indices,
             globals,
             // Everything, till culled.
@@ -1498,6 +1520,9 @@ impl ObjectRenderer {
         };
         pass.set_pipeline(&e.lit);
         pass.set_bind_group(3, shared, &[]);
+        if let Some(extras) = &self.extras {
+            pass.set_vertex_buffer(1, extras.slice(..));
+        }
         self.draw_with(pass);
     }
 
