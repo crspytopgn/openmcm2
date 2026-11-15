@@ -13,6 +13,18 @@
   "Add my time to everyone's" on its Play page. In the browser, tick
   "Keep my laps off the leaderboards" or "Don't add my time to
   everyone's" in the settings.
+* **Easier on the browser:** the browser version's Enhanced look draws
+  the scene at no more than 1080p, with a lighter anti-aliasing and
+  without the light shafts, replay blur and ray tracing. It starts on
+  Medium quality, and if a race keeps running slowly it offers Low
+  quality or the original look.
+* **Calmer Enhanced look:** HDR bloom and the glossy bikes and riders
+  now start off, on desktop and in the browser. Both are still there as
+  effects to turn on.
+* **No shadow from the signs:** the "You" and "IT" signs over the
+  riders no longer cast a shadow.
+* **Every option explains itself:** point at any effect or setting in
+  the launcher or on the browser page to see what it does.
 
 ## New in 0.5.1
 
