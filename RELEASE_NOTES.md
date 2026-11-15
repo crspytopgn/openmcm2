@@ -1,4 +1,16 @@
-# OpenMCM2 0.4.1
+# OpenMCM2 0.4.2
+
+## New in 0.4.2
+
+* **Network races in the browser:** the browser version can now host
+  and join races. Players connect straight to each other (WebRTC), and
+  the free public PeerJS server only introduces them, so nobody needs an
+  account or a server. The host gets a race code and a "Copy invite
+  link" button; whoever opens the link finds the race in the
+  Multiplayer list, or the code can be typed in the TCP/IP box. Browser
+  and desktop players can't race each other.
+
+The desktop version is unchanged in this release.
 
 ## New in 0.4.1
 

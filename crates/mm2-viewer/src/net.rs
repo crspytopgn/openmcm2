@@ -9,13 +9,25 @@
 //!
 //! There is one session at a time, kept here for the lobby and the race
 //! to share.
+//!
+//! In a browser, which has no sockets, the connections are WebRTC data
+//! channels the page makes (`web/net.js`), straight between the players'
+//! browsers. A host is found by its race code instead of its address; the
+//! page shows the code and a link with it to share.
 
-use std::io::{self, Read, Write};
+use std::io;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{Read, Write};
+#[cfg(not(target_arch = "wasm32"))]
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use web_time::Instant;
 
 /// The host's TCP port, and the UDP port sessions are found on.
@@ -286,7 +298,20 @@ impl Msg {
     }
 }
 
+/// Where a host is: its address, or in a browser, its race code.
+#[cfg(not(target_arch = "wasm32"))]
+pub type Addr = SocketAddr;
+#[cfg(target_arch = "wasm32")]
+pub type Addr = String;
+
+/// One connection: to a player, or to the host.
+#[cfg(not(target_arch = "wasm32"))]
+type Link = TcpStream;
+#[cfg(target_arch = "wasm32")]
+use web::Link;
+
 /// Sends one message: its length, then it.
+#[cfg(not(target_arch = "wasm32"))]
 fn send(stream: &mut TcpStream, m: &Msg) -> io::Result<()> {
     let body = m.encode();
     let mut frame = (body.len() as u32).to_le_bytes().to_vec();
@@ -294,6 +319,12 @@ fn send(stream: &mut TcpStream, m: &Msg) -> io::Result<()> {
     stream.write_all(&frame)
 }
 
+#[cfg(target_arch = "wasm32")]
+fn send(link: &mut Link, m: &Msg) -> io::Result<()> {
+    link.send(m)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn receive(stream: &mut TcpStream) -> io::Result<Msg> {
     let mut len = [0u8; 4];
     stream.read_exact(&mut len)?;
@@ -311,12 +342,13 @@ fn receive(stream: &mut TcpStream) -> io::Result<Msg> {
 
 /// What the connections' threads tell the session.
 enum In {
-    Joined(u8, TcpStream),
+    Joined(u8, Link),
     Got(u8, Msg),
     Gone(u8),
 }
 
 /// Reads a connection until it closes.
+#[cfg(not(target_arch = "wasm32"))]
 fn reader(id: u8, mut stream: TcpStream, tx: Sender<In>) {
     std::thread::spawn(move || {
         while let Ok(m) = receive(&mut stream) {
@@ -361,14 +393,25 @@ pub struct Session {
     pub game: Option<GameInfo>,
     /// The connections: the host's to each player, a player's to the host
     /// (as 0).
-    peers: Vec<(u8, TcpStream)>,
+    peers: Vec<(u8, Link)>,
     rx: Receiver<In>,
     stop: Arc<AtomicBool>,
+    /// In a browser: where the page's news goes, and the next player's
+    /// number.
+    #[cfg(target_arch = "wasm32")]
+    tx: Sender<In>,
+    #[cfg(target_arch = "wasm32")]
+    next: u8,
+    /// The page's connections and the players they are, as soon as the
+    /// page tells of them (before the queue reaches `peers`).
+    #[cfg(target_arch = "wasm32")]
+    ids: Vec<(u32, u8)>,
 }
 
 impl Session {
     /// Hosts a session called `name` on [`PORT`] (or the next free port),
     /// answering finders on the local network.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn host(name: &str, me: Player) -> io::Result<Session> {
         let listener = (0..8)
             .find_map(|k| TcpListener::bind(("0.0.0.0", PORT + k)).ok())
@@ -410,6 +453,7 @@ impl Session {
     }
 
     /// Joins the session at `addr` as `me`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn join(addr: SocketAddr, me: Player) -> io::Result<Session> {
         let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(3))?;
         stream.set_nodelay(true)?;
@@ -476,6 +520,8 @@ impl Session {
     /// Everything heard since last time; the host also answers and passes
     /// messages on.
     pub fn poll(&mut self) -> Vec<Heard> {
+        #[cfg(target_arch = "wasm32")]
+        self.pump();
         let mut out = Vec::new();
         while let Ok(i) = self.rx.try_recv() {
             match i {
@@ -623,6 +669,8 @@ impl Session {
         self.broadcast(&Msg::Leave, None);
         self.stop.store(true, Ordering::Relaxed);
         self.peers.clear();
+        #[cfg(target_arch = "wasm32")]
+        web::stop();
     }
 }
 
@@ -633,6 +681,7 @@ impl Drop for Session {
 }
 
 /// Answers finders' broadcasts with the session's name and port.
+#[cfg(not(target_arch = "wasm32"))]
 fn answer_finders(name: String, port: u16, stop: Arc<AtomicBool>) {
     let Ok(sock) = UdpSocket::bind(("0.0.0.0", PORT)) else {
         eprintln!("cannot answer on UDP {PORT}; players must join by address");
@@ -658,11 +707,12 @@ fn answer_finders(name: String, port: u16, stop: Arc<AtomicBool>) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Found {
     pub name: String,
-    pub addr: SocketAddr,
+    pub addr: Addr,
 }
 
 /// Looks for sessions: asks the local network, and any addresses in
 /// `MM2_JOIN` (comma separated), every second.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Finder {
     sock: Option<UdpSocket>,
     asked: Option<Instant>,
@@ -672,6 +722,7 @@ pub struct Finder {
     pub hosts: Vec<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Finder {
     pub fn new() -> Finder {
         let sock = UdpSocket::bind(("0.0.0.0", 0)).ok();
@@ -863,5 +914,162 @@ mod tests {
             host.poll();
             host.players.iter().any(|p| p.name == "Guest" && p.ready)
         });
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub use web::Finder;
+
+/// Network play in a browser, through the page's WebRTC (`web/net.js`).
+#[cfg(target_arch = "wasm32")]
+mod web {
+    use super::*;
+    use wasm_bindgen::prelude::*;
+
+    #[wasm_bindgen(js_namespace = mm2net)]
+    extern "C" {
+        /// Starts hosting `name`; the page shows the race code.
+        fn host(name: &str);
+        /// Connects to the host with race `code`: the connection's number.
+        fn join(code: &str) -> u32;
+        fn send(link: u32, data: &[u8]);
+        /// Ends hosting or the connection to the host.
+        #[wasm_bindgen(js_name = stop)]
+        fn js_stop();
+        /// What happened since last asked: `[kind, link, data]` arrays,
+        /// kind "join", "data" or "gone".
+        fn poll() -> js_sys::Array;
+        /// Asks the host with race `code` for its session's name.
+        fn find(code: &str);
+        /// The hosts that answered: `[code, name]` arrays.
+        fn found() -> js_sys::Array;
+    }
+
+    /// A data channel, by the page's number for it.
+    pub struct Link(pub u32);
+
+    impl Link {
+        /// Each message whole: a data channel keeps messages apart.
+        pub fn send(&mut self, m: &Msg) -> io::Result<()> {
+            send(self.0, &m.encode());
+            Ok(())
+        }
+    }
+
+    pub fn stop() {
+        js_stop();
+    }
+
+    impl Session {
+        pub fn host(name: &str, me: Player) -> io::Result<Session> {
+            host(name);
+            let (tx, rx) = channel();
+            Ok(Session {
+                host: true,
+                me: 0,
+                players: vec![Player { id: 0, ..me }],
+                game: None,
+                peers: Vec::new(),
+                rx,
+                stop: Arc::new(AtomicBool::new(false)),
+                tx,
+                next: 1,
+                ids: Vec::new(),
+            })
+        }
+
+        pub fn join(code: Addr, me: Player) -> io::Result<Session> {
+            let n = join(code.trim());
+            let mut link = Link(n);
+            link.send(&Msg::Hello {
+                name: me.name.clone(),
+                ride: me.ride.clone(),
+            })?;
+            let (tx, rx) = channel();
+            Ok(Session {
+                host: false,
+                me: u8::MAX,
+                players: Vec::new(),
+                game: None,
+                peers: vec![(0, link)],
+                rx,
+                stop: Arc::new(AtomicBool::new(false)),
+                tx,
+                next: 1,
+                ids: vec![(n, 0)],
+            })
+        }
+
+        /// Takes the page's news into the session's queue.
+        pub(super) fn pump(&mut self) {
+            for e in poll().iter() {
+                let e = js_sys::Array::from(&e);
+                let kind = e.get(0).as_string().unwrap_or_default();
+                let link = e.get(1).as_f64().unwrap_or(-1.0) as u32;
+                // The player's number for the page's connection; a player
+                // only has the host, 0.
+                let id = |s: &Session| s.ids.iter().find(|(l, _)| *l == link).map(|(_, id)| *id);
+                let news = match kind.as_str() {
+                    "join" if self.host => {
+                        let id = self.next;
+                        self.next = self.next.wrapping_add(1).max(1);
+                        self.ids.push((link, id));
+                        Some(In::Joined(id, Link(link)))
+                    }
+                    "data" => {
+                        let bytes = js_sys::Uint8Array::new(&e.get(2)).to_vec();
+                        match (id(self), Msg::decode(&bytes)) {
+                            (Some(id), Ok(m)) => Some(In::Got(id, m)),
+                            _ => None,
+                        }
+                    }
+                    "gone" => id(self).map(In::Gone),
+                    _ => None,
+                };
+                if let Some(n) = news {
+                    let _ = self.tx.send(n);
+                }
+            }
+        }
+    }
+
+    /// Looks for the hosts whose race codes were typed in the TCP/IP box
+    /// or came in the page address (`?join=CODE`).
+    pub struct Finder {
+        pub found: Vec<Found>,
+        pub hosts: Vec<String>,
+        asked: Vec<String>,
+    }
+
+    impl Finder {
+        pub fn new() -> Finder {
+            let hosts = crate::args()
+                .filter_map(|a| a.strip_prefix("--join=").map(str::to_string))
+                .flat_map(|a| a.split(',').map(|c| c.trim().to_string()).collect::<Vec<_>>())
+                .filter(|a| !a.is_empty())
+                .collect();
+            Finder { found: Vec::new(), hosts, asked: Vec::new() }
+        }
+
+        pub fn tick(&mut self) -> bool {
+            for h in &self.hosts {
+                if !self.asked.contains(h) {
+                    find(h);
+                    self.asked.push(h.clone());
+                }
+            }
+            let mut changed = false;
+            for f in found().iter() {
+                let f = js_sys::Array::from(&f);
+                let (Some(addr), Some(name)) = (f.get(0).as_string(), f.get(1).as_string()) else {
+                    continue;
+                };
+                if !self.found.iter().any(|x| x.addr == addr) {
+                    self.found.push(Found { name, addr });
+                    changed = true;
+                }
+            }
+            changed
+        }
     }
 }
