@@ -3530,6 +3530,10 @@ struct App {
     /// The lap leaderboard this race's laps go on (the extra), and the
     /// player's rider name for it.
     lap_board: Option<mm2_settings::laps::Board>,
+    /// The playtime tracker: when the time open was last written down,
+    /// and when this race began with the keys it adds to.
+    play_mark: Instant,
+    race_began: Option<(Instant, Vec<String>)>,
     /// A network race: whose bikes are whose, the other machines' bikes
     /// as they arrive, and the wait to send ours again.
     net: Option<frontend::NetRace>,
@@ -3666,6 +3670,8 @@ impl App {
             event: None,
             records: None,
             lap_board: None,
+            play_mark: Instant::now(),
+            race_began: None,
             net: None,
             remote: Vec::new(),
             send_wait: 0.0,
@@ -3896,6 +3902,10 @@ impl App {
                 let t = tweaks::get();
                 let fair = t.air_steer == 0 && t.air_brake == 0 && !t.quick_get_up && !t.forgiving_landings;
                 let lap_event = matches!(setup.event, frontend::EventKind::Baja | frontend::EventKind::Nationals | frontend::EventKind::Supercross | frontend::EventKind::Enduro);
+                self.race_began = self.tape.is_none().then(|| {
+                    let cc = setup.ride.as_ref().map_or(250, |r| r.bike.cc);
+                    (Instant::now(), mm2_settings::playtime::race_keys(setup.event as u32, &setup.track, cc))
+                });
                 self.lap_board = (counts && fair && lap_event && tweaks::more().leaderboards).then(|| {
                     let cc = setup.ride.as_ref().map_or(250, |r| r.bike.cc);
                     mm2_settings::laps::Board::new(&setup.track, setup.event as u32, setup.course as u32, cc)
@@ -4094,7 +4104,30 @@ impl App {
 
     /// Leaves the race: for the Race Info page with its results, or the
     /// main menu when the track did not load.
+    /// Writes down the time played since last time: the game open, and
+    /// the race just left.
+    fn note_playtime(&mut self) {
+        let Some(f) = &self.front else { return };
+        let now = Instant::now();
+        // Whole seconds; the part of a second left over counts next time.
+        let open = now.duration_since(self.play_mark);
+        let mut more = vec![("total".to_string(), open.as_secs())];
+        self.play_mark = now - (open - std::time::Duration::from_secs(open.as_secs()));
+        if let Some((began, keys)) = self.race_began.take() {
+            let secs = now.duration_since(began).as_secs();
+            more.extend(keys.into_iter().map(|k| (k, secs)));
+            more.push(("count".into(), 1));
+        }
+        let path = f.user().store.dir.join(mm2_settings::playtime::FILE);
+        let old = crate::fs::read_to_string(&path).unwrap_or_default();
+        let _ = crate::fs::create_dir_all(&f.user().store.dir);
+        if let Err(e) = crate::fs::write(&path, mm2_settings::playtime::add(&old, &more)) {
+            eprintln!("playtime: {e}");
+        }
+    }
+
     fn back_to_menu(&mut self) {
+        self.note_playtime();
         self.net = None;
         self.remote.clear();
         // The player's best lap (stunt) and whole race go in the track's
@@ -5097,6 +5130,10 @@ impl App {
 }
 
 impl ApplicationHandler for App {
+    fn exiting(&mut self, _: &ActiveEventLoop) {
+        self.note_playtime();
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.state.is_some() {
             return;

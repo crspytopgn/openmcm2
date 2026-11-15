@@ -355,6 +355,10 @@ pub struct More {
     /// The lobby offers to fetch a host's track or a rider's own skins the
     /// player is missing (`--lobby-downloads`).
     pub lobby_downloads: bool,
+    /// The playtime tracker sends anonymous totals (no name) to the
+    /// leaderboard server; on unless turned off. The launcher's, not the
+    /// game's.
+    pub share_playtime: bool,
 }
 
 /// The game's own pad dead zone, %.
@@ -362,8 +366,7 @@ pub const PAD_DEAD_ZONE: u32 = 4;
 /// The most riders on the gate the extra allows.
 pub const RIDERS_MOST: u32 = 30;
 /// The shared leaderboard server the game uses unless told otherwise.
-/// Empty: laps are only kept on this computer until one is set up.
-pub const LEADERBOARD_URL: &str = "";
+pub const LEADERBOARD_URL: &str = "https://openmcm2-laps.openmcm2-laps.workers.dev";
 
 impl Default for More {
     fn default() -> Self {
@@ -382,6 +385,7 @@ impl Default for More {
             leaderboards: false,
             leaderboard_url: LEADERBOARD_URL.into(),
             lobby_downloads: false,
+            share_playtime: true,
         }
     }
 }
@@ -404,7 +408,9 @@ impl More {
             "helmet_cam" => self.helmet_cam = yes,
             "riders" => self.riders = n(RIDERS_MOST, 0),
             "leaderboards" => self.leaderboards = yes,
-            "leaderboard_url" => self.leaderboard_url = v.to_string(),
+            // Empty (as an early 0.5.0 build saved it) is the default.
+            "leaderboard_url" => self.leaderboard_url = if v.trim().is_empty() { LEADERBOARD_URL.into() } else { v.trim().to_string() },
+            "share_playtime" => self.share_playtime = yes,
             "lobby_downloads" => self.lobby_downloads = yes,
             _ => return false,
         }
@@ -414,7 +420,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\nfps_cap={}\nfxaa={}\nsharpen={}\nhelmet_cam={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\nfps_cap={}\nfxaa={}\nsharpen={}\nhelmet_cam={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nshare_playtime={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -429,6 +435,7 @@ impl More {
             b(self.leaderboards),
             self.leaderboard_url,
             b(self.lobby_downloads),
+            b(self.share_playtime),
         )
     }
 
@@ -584,8 +591,9 @@ impl Settings {
         self.mute_in_background = d.mute_in_background;
         self.screenshot_key = d.screenshot_key;
         // The leaderboard's address is where to send laps, not an extra.
+        // Nor is sharing playtime.
         let url = std::mem::take(&mut self.more.leaderboard_url);
-        self.more = More { leaderboard_url: url, ..More::default() };
+        self.more = More { leaderboard_url: url, share_playtime: self.more.share_playtime, ..More::default() };
     }
 
     pub fn load() -> Settings {
@@ -817,6 +825,7 @@ impl Settings {
 }
 
 pub mod laps;
+pub mod playtime;
 
 #[cfg(test)]
 mod tests {
@@ -931,15 +940,19 @@ mod tests {
             leaderboards: true,
             leaderboard_url: "https://example.org/mm2".into(),
             lobby_downloads: true,
+            share_playtime: false,
         };
         assert_eq!(Settings::parse(&s.text()), s);
         let mut args = vec!["mm2-viewer".to_string()];
         args.extend(s.args());
-        assert_eq!(More::from_args(&args), s.more);
+        // Sharing playtime is the launcher's, so not on the game's line.
+        assert_eq!(More { share_playtime: false, ..More::from_args(&args) }, s.more);
         assert!(!s.is_original());
         s.original();
         assert!(s.is_original());
         assert_eq!(s.more.leaderboard_url, "https://example.org/mm2");
+        assert!(!s.more.share_playtime);
+        assert_eq!(Settings::parse("leaderboard_url=\n").more.leaderboard_url, LEADERBOARD_URL);
         assert_eq!(More::from_args(&[]), More::default());
         assert!(More::default().args().is_empty());
     }

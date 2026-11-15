@@ -72,6 +72,42 @@ fn parse_board(text: &str) -> Vec<(String, u32)> {
     rows
 }
 
+/// Sends the playtime added since the last send, as anonymous totals
+/// (`POST <address>/playtime`; see `mm2_settings::playtime`). A first send
+/// counts the player once, with no name or number to tell who.
+pub fn send_playtime(url: &str, dir: &Path) -> Result<(), String> {
+    use mm2_settings::playtime;
+    let now = playtime::read(dir, playtime::FILE);
+    let sent = playtime::read(dir, playtime::SENT);
+    let mut new = playtime::new_since(&now, &sent);
+    if new.is_empty() {
+        return Ok(());
+    }
+    if sent.is_empty() {
+        new.insert("players".into(), 1);
+    }
+    agent()
+        .post(format!("{}/playtime", base(url)))
+        .content_type("text/plain; charset=utf-8")
+        .send(playtime::text(&new))
+        .map_err(|e| format!("the leaderboard server: {e}"))?;
+    std::fs::write(dir.join(playtime::SENT), playtime::text(&now)).map_err(|e| e.to_string())
+}
+
+/// Everyone's playtime, added up.
+pub fn fetch_playtime(url: &str) -> Result<mm2_settings::playtime::Times, String> {
+    let text = agent()
+        .get(format!("{}/playtime", base(url)))
+        .call()
+        .map_err(|e| format!("the leaderboard server: {e}"))?
+        .body_mut()
+        .with_config()
+        .limit(1 << 20)
+        .read_to_string()
+        .map_err(|e| format!("the leaderboard server: {e}"))?;
+    Ok(mm2_settings::playtime::parse(&text))
+}
+
 /// A lap time as the game shows one: `1:23.45`.
 pub fn time(ms: u32) -> String {
     format!("{}:{:02}.{:02}", ms / 60_000, ms / 1000 % 60, ms % 1000 / 10)
@@ -79,14 +115,20 @@ pub fn time(ms: u32) -> String {
 
 /// A board's name for a person: `farm, Nationals, course 1, 250cc`.
 pub fn name(b: &Board) -> String {
-    let event = match b.event {
+    format!("{}, {}, course {}, {}cc", b.track, event_name(b.event), b.course + 1, b.class)
+}
+
+/// The game's event numbers' names.
+pub fn event_name(event: u32) -> &'static str {
+    match event {
+        0 => "Stunt Quarry",
         1 => "Baja",
         2 => "Nationals",
         3 => "Supercross",
+        4 => "Moto-Tag",
         5 => "Enduro",
         _ => "Race",
-    };
-    format!("{}, {event}, course {}, {}cc", b.track, b.course + 1, b.class)
+    }
 }
 
 #[cfg(test)]

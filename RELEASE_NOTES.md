@@ -76,9 +76,15 @@ it on, so the game still plays and looks as the original did:
 * **Lap leaderboards:** your best lap on each track, event, course and
   bike class, from lap 2 on and only with the riding extras off. In
   Nationals and Supercross, a lap with more than 2 seconds off the course
-  doesn't count. The launcher shows them. Sharing them needs a
-  leaderboard server address in the launcher; `tools/leaderboard` has a
-  small one anyone can run.
+  doesn't count. They go on the OpenMCM2 leaderboard under your rider
+  name, and the launcher shows everyone's best laps (Extras, Lap
+  leaderboards, Board). `tools/leaderboard` is the server, if you'd
+  rather run your own.
+* **Playtime:** the launcher's Play page shows how long you've played,
+  how many races, and your most played events, tracks and bikes. Unless
+  you turn off "Add my time to everyone's" there, the launcher also sends
+  those times to the OpenMCM2 server, added to everyone's, with no name
+  or anything else that says who you are.
 * **Lobby downloads:** in a network race, the host's track and other
   riders' own paints and outfits are sent to the players who don't have
   them. Everyone in the race needs 0.5.0 or newer with it on.

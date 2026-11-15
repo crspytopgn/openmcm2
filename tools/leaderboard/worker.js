@@ -3,6 +3,8 @@
 //
 //   POST /laps   lines of track<TAB>event<TAB>course<TAB>class<TAB>rider<TAB>ms
 //   GET  /board?track=&event=&course=&class=   lines of rider<TAB>ms, fastest first
+//   POST /playtime   anonymous playtime: lines of key<TAB>seconds to add
+//   GET  /playtime   everyone's playtime added up, as key<TAB>seconds lines
 //
 // Each board keeps one lap per rider (their best), at most KEEP of them.
 
@@ -67,11 +69,41 @@ async function board(url, env) {
   return text(rows.map(([rider, ms]) => `${rider}\t${ms}\n`).join(""));
 }
 
+// The playtime keys a player may send (mm2_settings::playtime), and the
+// most one send may add to a key (a week; count and players are numbers).
+const PLAY_KEY = /^(total|races|count|players|event:[0-9]{1,2}|track:[^\t\n]{1,24}|bike:[0-9]{1,4})$/;
+const MOST_PLAY = 7 * 24 * 3600;
+
+async function addPlaytime(request, env) {
+  const body = await request.text();
+  if (body.length > 16 * 1024) return text("too much\n", 413);
+  const totals = (await env.LAPS.get("playtime", "json")) ?? {};
+  let added = 0;
+  for (const line of body.split("\n").slice(0, MOST_LINES)) {
+    const [k, v] = line.replace(/\r$/, "").split("\t");
+    const key = clean(k).toLowerCase();
+    const n = Number.parseInt(v, 10);
+    if (!PLAY_KEY.test(key) || !(n > 0)) continue;
+    const most = key === "players" ? 1 : MOST_PLAY;
+    totals[key] = (totals[key] ?? 0) + Math.min(n, most);
+    added++;
+  }
+  if (added) await env.LAPS.put("playtime", JSON.stringify(totals));
+  return text(`ok ${added}\n`);
+}
+
+async function playtime(env) {
+  const totals = (await env.LAPS.get("playtime", "json")) ?? {};
+  return text(Object.entries(totals).map(([k, v]) => `${k}\t${v}\n`).join(""));
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === "POST" && url.pathname === "/laps") return addLaps(request, env);
     if (request.method === "GET" && url.pathname === "/board") return board(url, env);
+    if (request.method === "POST" && url.pathname === "/playtime") return addPlaytime(request, env);
+    if (request.method === "GET" && url.pathname === "/playtime") return playtime(env);
     if (request.method === "OPTIONS") return text("", 204);
     return text("OpenMCM2 lap leaderboards\n", url.pathname === "/" ? 200 : 404);
   },
