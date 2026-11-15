@@ -6,6 +6,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod boards;
 mod game;
 mod iso;
 mod look;
@@ -89,9 +90,74 @@ struct Launcher {
     install: Result<update::Install, String>,
     update: Update,
     tracks: Tracks,
+    boards: Boards,
     /// Loaded at the first frame.
     logo: Option<egui::TextureHandle>,
     page: Page,
+}
+
+/// What a background job gives back, once it has.
+type Slot<T> = Arc<Mutex<Option<Result<T, String>>>>;
+
+/// The lap leaderboards' sending and the board shown.
+#[derive(Default)]
+struct Boards {
+    sending: Option<Slot<usize>>,
+    fetching: Option<Slot<Vec<(String, u32)>>>,
+    shown: Option<(mm2_settings::laps::Board, Option<Result<Vec<(String, u32)>, String>>)>,
+    note: Option<String>,
+}
+
+impl Boards {
+    /// Sends the laps the game kept, if the extra is on with a server.
+    fn send(&mut self, s: &Settings) {
+        let url = s.more.leaderboard_url.trim().to_string();
+        if !s.more.leaderboards || url.is_empty() || self.sending.is_some() {
+            return;
+        }
+        let slot: Slot<usize> = Arc::default();
+        let out = slot.clone();
+        std::thread::spawn(move || *out.lock().unwrap() = Some(boards::send_pending(&url, &settings::user_dir())));
+        self.sending = Some(slot);
+    }
+
+    fn show(&mut self, url: &str, board: mm2_settings::laps::Board) {
+        let slot: Slot<Vec<(String, u32)>> = Arc::default();
+        let (out, url, b) = (slot.clone(), url.to_string(), board.clone());
+        std::thread::spawn(move || *out.lock().unwrap() = Some(boards::fetch(&url, &b)));
+        self.fetching = Some(slot);
+        self.shown = Some((board, None));
+    }
+
+    fn poll(&mut self, ctx: &egui::Context) {
+        if let Some(s) = &self.sending {
+            let got = s.lock().unwrap().take();
+            match got {
+                Some(Ok(0)) => self.sending = None,
+                Some(Ok(n)) => {
+                    self.note = Some(format!("{n} new best lap{} sent to the leaderboard server.", if n == 1 { "" } else { "s" }));
+                    self.sending = None;
+                }
+                Some(Err(e)) => {
+                    self.note = Some(format!("Laps not sent yet ({e}). They'll go next time."));
+                    self.sending = None;
+                }
+                None => ctx.request_repaint_after(Duration::from_millis(250)),
+            }
+        }
+        if let Some(f) = &self.fetching {
+            let got = f.lock().unwrap().take();
+            match got {
+                Some(r) => {
+                    if let Some((_, rows)) = &mut self.shown {
+                        *rows = Some(r);
+                    }
+                    self.fetching = None;
+                }
+                None => ctx.request_repaint_after(Duration::from_millis(250)),
+            }
+        }
+    }
 }
 
 /// A listing page being fetched, until it arrives.
@@ -194,6 +260,7 @@ impl Launcher {
             i.tidy();
         }
         let mut l = Launcher::with(Settings::load(), install);
+        l.boards.send(&l.settings);
         if l.settings.check_updates && l.install.is_ok() {
             l.check_updates();
         }
@@ -218,6 +285,7 @@ impl Launcher {
             install,
             update: Update::Idle,
             tracks: Tracks { added: tracks::Added::load(), ..Default::default() },
+            boards: Boards::default(),
             logo: None,
             page: Page::Play,
         }
@@ -332,6 +400,7 @@ impl Launcher {
     fn poll(&mut self, ctx: &egui::Context) {
         self.poll_update(ctx);
         self.tracks.poll(ctx);
+        self.boards.poll(ctx);
         if let Some(p) = self.import.clone() {
             let r = p.result.lock().unwrap().take();
             if let Some(r) = r {
@@ -362,6 +431,8 @@ impl Launcher {
                         self.note = Some((format!("The game stopped with an error: {last}\n(full log: {})", log.display()), true));
                     }
                     self.running = None;
+                    // Laps from the race just run.
+                    self.boards.send(&self.settings);
                     // The game's Tweaks box, or its event page's time and
                     // weather, may have changed them.
                     let game = Settings::load();
@@ -639,18 +710,102 @@ impl Launcher {
             tile(ui, &mut s.centred_display, "Race display nearer the middle", "On screens wider than 16:9, the race display where it sits on a 16:9 screen.");
             tile(ui, &mut s.steady_camera, "Steadier camera", "The chase camera rises and dips with the bike more gently.");
             slider(ui, "Field of view", "How wide the riding cameras see. 85° is the original game's.", &mut s.fov, 60..=120, 1.0, "°");
+            tile(ui, &mut s.more.helmet_cam, "Helmet Cam", "A camera from the rider's helmet, after User Cam when you change the view (F1).");
         });
         look::card(ui, icon::ICON_SPORTS_ESPORTS, "Controllers, sound and screen", |ui| {
             tile(ui, &mut s.vibration, "Controller vibration", "The pad thumps on landings, knocks over bumps and jolts in crashes.");
             ui.add_enabled_ui(s.vibration, |ui| {
                 slider(ui, "Vibration strength", "How strongly the pad shakes.", &mut s.vibration_strength, 0..=100, 1.0, "%");
             });
+            slider(ui, "Stick dead zone", "How far a stick moves before it steers. 4% is the original game's.", &mut s.more.pad_dead_zone, 0..=50, 1.0, "%");
+            slider(ui, "Stick sensitivity", "How far a stick steers for how far it is pushed. 100% is the original game's.", &mut s.more.pad_sensitivity, 25..=200, 5.0, "%");
+            slider(ui, "Stick smoothing", "Evens out a twitchy stick's steering. 0% is the original game's.", &mut s.more.pad_smoothing, 0..=90, 5.0, "%");
             tile(ui, &mut s.mute_in_background, "Mute in the background", "The game goes quiet while its window isn't the one in front.");
             tile(ui, &mut s.screenshot_key, "Screenshot key (Ctrl+P)", "Ctrl+P in a race saves a picture to the Screenshots folder beside your saves.");
             tile(ui, &mut s.vsync, "VSync", "A picture each time the screen refreshes, with no tearing.");
             tile(ui, &mut s.show_fps, "Show frame rate", "The frames a second at the bottom left (F2 too).");
+            slider(ui, "Frame cap", "The most pictures a second, to keep a laptop cool. 0 is no cap.", &mut s.more.fps_cap, 0..=240, 10.0, " fps");
+            tile(ui, &mut s.more.fxaa, "Smoother edges", "Softens jagged edges over the race picture, in either look.");
+            slider(ui, "Sharpening", "Brings out detail in the race picture, in either look. 0% is the original game's.", &mut s.more.sharpen, 0..=100, 5.0, "%");
         });
-        ui.label(look::weak("Thanks to Daniel (github.com/dwolp) for most of these, the new launcher, the ray tracing and night races, and the fixes that came with them."));
+        look::card(ui, icon::ICON_TWO_WHEELER, "Tracks, bikes and riders", |ui| {
+            tile(ui, &mut s.more.own_skins, "Your own paints and outfits", "Every .tga picture in the game's BIKES and RIDERS folders is a bike paint or outfit to pick, named after its file. Bike paints follow BIKE01.TGA's layout.");
+            tile(ui, &mut s.more.all_gear, "All gear in every event", "The bikes and outfits the Pro Circuit gives out, in single races too.");
+            tile(ui, &mut s.more.track_filter, "Track filter", "All tracks, the base game's or only the ones you added, on the event page.");
+            slider(ui, "Riders on the gate", "Up to 30 riders in a single race. 0 is the original game's count.", &mut s.more.riders, 0..=mm2_settings::RIDERS_MOST, 1.0, "");
+            tile(ui, &mut s.more.lobby_downloads, "Lobby downloads", "In a network race, the host's track and other riders' own paints and outfits come over if you don't have them. Everyone needs 0.5.0 or newer.");
+            ui.label(look::weak("Extra art for added tracks goes in the game's RES/ADDONS folder; it never replaces the game's own."));
+        });
+        self.leaderboard_card(ui);
+        ui.label(look::weak("Thanks to Daniel (github.com/dwolp) for many of these, the new launcher, the ray tracing and night races, and the fixes that came with them."));
+    }
+
+    fn leaderboard_card(&mut self, ui: &mut egui::Ui) {
+        use look::icon;
+        let dir = settings::user_dir();
+        look::card(ui, icon::ICON_EMOJI_EVENTS, "Lap leaderboards", |ui| {
+            let m = &mut self.settings.more;
+            look::switch_tile(
+                ui,
+                &mut m.leaderboards,
+                "Lap leaderboards",
+                "Keeps your best laps in each race from lap 2 on, with the riding extras off. In Nationals and Supercross, a lap with more than 2 seconds off the course doesn't count.",
+                ui.available_width(),
+            );
+            if !m.leaderboards {
+                return;
+            }
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Leaderboard server").family(look::bold_family()));
+                ui.add(egui::TextEdit::singleline(&mut m.leaderboard_url).hint_text("https://…").desired_width(360.0));
+            });
+            ui.label(look::weak("With a server, your best laps are shared and you can see everyone's. Without one, they stay on this computer."));
+            let url = m.leaderboard_url.trim().to_string();
+            if let Some(note) = &self.boards.note {
+                ui.label(look::weak(note));
+            }
+            let mine = mm2_settings::laps::read(&dir.join(mm2_settings::laps::BEST));
+            if mine.is_empty() {
+                ui.label(look::weak("No laps yet. Race a lap race and finish a lap after the first."));
+                return;
+            }
+            egui::Grid::new("my laps").striped(true).num_columns(4).show(ui, |ui| {
+                for lap in &mine {
+                    ui.label(boards::name(&lap.board));
+                    ui.label(&lap.rider);
+                    ui.label(boards::time(lap.ms));
+                    if ui.add_enabled(!url.is_empty(), egui::Button::new("Board")).on_hover_text("The best laps on the server for this one.").clicked() {
+                        self.boards.show(&url, lap.board.clone());
+                    }
+                    ui.end_row();
+                }
+            });
+            if let Some((board, rows)) = &self.boards.shown {
+                ui.add_space(6.0);
+                ui.label(egui::RichText::new(boards::name(board)).family(look::bold_family()));
+                match rows {
+                    None => {
+                        ui.label(look::weak("Fetching…"));
+                    }
+                    Some(Err(e)) => {
+                        ui.label(look::weak(e));
+                    }
+                    Some(Ok(rows)) if rows.is_empty() => {
+                        ui.label(look::weak("No laps on this board yet."));
+                    }
+                    Some(Ok(rows)) => {
+                        egui::Grid::new("board").striped(true).num_columns(3).show(ui, |ui| {
+                            for (i, (rider, ms)) in rows.iter().enumerate().take(50) {
+                                ui.label(format!("{}.", i + 1));
+                                ui.label(rider);
+                                ui.label(boards::time(*ms));
+                                ui.end_row();
+                            }
+                        });
+                    }
+                }
+            }
+        });
     }
 
     // ---- Graphics ----
@@ -1134,6 +1289,7 @@ mod shots {
             ("graphics_original", Page::Graphics, false, 760.0),
             ("tracks", Page::Tracks, true, 760.0),
             ("updates", Page::Updates, true, 760.0),
+            ("extras", Page::Extras, true, 3100.0),
             ("graphics_small", Page::Graphics, true, 520.0),
             ("graphics_custom", Page::Graphics, true, 520.0),
         ] {
@@ -1148,6 +1304,11 @@ mod shots {
             s.time = "night".into();
             for (u, on) in UPGRADES.iter().zip(s.upgrades.iter_mut()) {
                 *on = Quality::RayTraced.has(u.0);
+            }
+            if page == Page::Extras {
+                s.more.leaderboards = true;
+                s.more.leaderboard_url = "https://laps.example.org".into();
+                s.more.helmet_cam = true;
             }
             if custom {
                 // Changed from the preset: Custom.

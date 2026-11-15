@@ -816,6 +816,8 @@ impl Settings {
     }
 }
 
+pub mod laps;
+
 #[cfg(test)]
 mod tests {
     use super::*;

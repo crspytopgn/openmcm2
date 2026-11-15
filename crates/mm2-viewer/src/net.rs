@@ -459,8 +459,9 @@ pub struct Session {
     /// page tells of them (before the queue reaches `peers`).
     #[cfg(target_arch = "wasm32")]
     ids: Vec<(u32, u8)>,
-    /// The host's port.
+    /// The host's port (the tests join it).
     #[cfg(not(target_arch = "wasm32"))]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub port: u16,
 }
 

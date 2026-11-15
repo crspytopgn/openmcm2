@@ -3527,6 +3527,9 @@ struct App {
     /// Where the race's result goes in the track records, unless it is
     /// practice, a ghost race, a replay or over the network.
     records: Option<screens::records::Entry>,
+    /// The lap leaderboard this race's laps go on (the extra), and the
+    /// player's rider name for it.
+    lap_board: Option<mm2_settings::laps::Board>,
     /// A network race: whose bikes are whose, the other machines' bikes
     /// as they arrive, and the wait to send ours again.
     net: Option<frontend::NetRace>,
@@ -3662,6 +3665,7 @@ impl App {
             tape: None,
             event: None,
             records: None,
+            lap_board: None,
             net: None,
             remote: Vec::new(),
             send_wait: 0.0,
@@ -3887,6 +3891,15 @@ impl App {
                     title: setup.name.clone(),
                     length: setup.laps,
                 });
+                // Laps go on the leaderboards in the lap races, only as
+                // the original rides: with the riding extras off.
+                let t = tweaks::get();
+                let fair = t.air_steer == 0 && t.air_brake == 0 && !t.quick_get_up && !t.forgiving_landings;
+                let lap_event = matches!(setup.event, frontend::EventKind::Baja | frontend::EventKind::Nationals | frontend::EventKind::Supercross | frontend::EventKind::Enduro);
+                self.lap_board = (counts && fair && lap_event && tweaks::more().leaderboards).then(|| {
+                    let cc = setup.ride.as_ref().map_or(250, |r| r.bike.cc);
+                    mm2_settings::laps::Board::new(&setup.track, setup.event as u32, setup.course as u32, cc)
+                });
                 self.race = make_race_as(&track, laps, setup.net.map_or(PLAYER, |n| n.me));
                 self.replay = self.tape.take();
                 self.remote.clear();
@@ -4102,6 +4115,34 @@ impl App {
             let name = rider_name(race, ui, race.player);
             if let Err(e) = screens::records::enter(&f.user().store.dir, &entry, &name, result) {
                 eprintln!("the track records: {e}");
+            }
+        }
+        // The laps that count go on the lap leaderboards: from the second
+        // (the first starts from the gate), and in the lap races not with
+        // much of it off the course.
+        if let (Some(board), Some(race), Some((ui, _)), Some(f)) = (self.lap_board.take(), &self.race, &self.hud, &self.front) {
+            let me = &race.racers[race.player];
+            let rider = rider_name(race, ui, race.player);
+            let laps: Vec<_> = me
+                .lap_times
+                .iter()
+                .enumerate()
+                .skip(1)
+                .filter(|&(i, _)| me.lap_off.get(i).is_none_or(|&off| off <= mm2_settings::laps::MOST_OFF_COURSE))
+                .map(|(_, &t)| mm2_settings::laps::Lap { board: board.clone(), rider: rider.clone(), ms: (t * 1000.0).round() as u32 })
+                .filter(|l| l.ms >= mm2_settings::laps::SHORTEST)
+                .collect();
+            if !laps.is_empty() {
+                let dir = &f.user().store.dir;
+                let old = |n: &str| crate::fs::read_to_string(dir.join(n)).unwrap_or_default();
+                if let Some((best, pending)) = mm2_settings::laps::enter(&old(mm2_settings::laps::BEST), &old(mm2_settings::laps::PENDING), &laps) {
+                    let _ = crate::fs::create_dir_all(dir);
+                    for (n, t) in [(mm2_settings::laps::BEST, best), (mm2_settings::laps::PENDING, pending)] {
+                        if let Err(e) = crate::fs::write(dir.join(n), t) {
+                            eprintln!("the lap leaderboards: {e}");
+                        }
+                    }
+                }
             }
         }
         let mut results = match (&self.race, &self.hud) {
@@ -4532,7 +4573,11 @@ impl App {
         // The pad tuning extra: its dead zone, sensitivity and smoothing,
         // the game's own (0.04, as it reads, unsmoothed) unless changed.
         let tune = crate::tweaks::more();
-        let dead = tune.pad_dead_zone as f32 / 100.0;
+        let dead = if tune.pad_dead_zone == mm2_settings::PAD_DEAD_ZONE {
+            pad::STEER_DEAD
+        } else {
+            tune.pad_dead_zone as f32 / 100.0
+        };
         let mut steer = pull(input::STEER_RIGHT, 1.0, dead) - pull(input::STEER_LEFT, -1.0, dead);
         if tune.pad_dead_zone != mm2_settings::PAD_DEAD_ZONE && steer != 0.0 {
             // A bigger dead zone still reaches full lock at the edge.
