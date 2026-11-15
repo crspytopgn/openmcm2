@@ -226,14 +226,14 @@ pub const UPGRADES: [(&str, &str, bool); 17] = [
     ("lighting", "Per-pixel lighting", true),
     ("shadows", "Sun shadows", true),
     ("distance", "Far draw distance and haze", true),
-    ("bloom", "HDR bloom", true),
+    ("bloom", "HDR bloom", false),
     ("ao", "Ambient occlusion", true),
     ("ground", "Detailed ground", true),
     ("grass", "3D grass", true),
     ("smooth", "Smooth hills", true),
     ("dust", "Dust clouds", true),
     ("mud", "Mud and spray", true),
-    ("bikes", "Glossier bikes", true),
+    ("bikes", "Glossier bikes", false),
     ("shafts", "Light shafts", true),
     ("cinematic", "Replay blur and depth of field", false),
     ("ruts", "Lasting tyre ruts", false),
@@ -664,7 +664,10 @@ impl Settings {
                 k if s.more.read(k, v) => {}
                 // Files from before version 2 kept the replay blur on by
                 // default; it starts off now, so their setting is dropped.
-                "upgrade.cinematic" if !text.lines().any(|l| l.trim() == "version=2") => {}
+                "upgrade.cinematic" if !text.lines().any(|l| l.trim() == "version=2" || l.trim() == "version=3") => {}
+                // Before version 3 the bloom and glossy bikes were on by
+                // default; they start off now, so those files' are dropped.
+                "upgrade.bloom" | "upgrade.bikes" if !text.lines().any(|l| l.trim() == "version=3") => {}
                 k => {
                     if let Some(i) = UPGRADES.iter().position(|u| k == format!("upgrade.{}", u.0)) {
                         s.upgrades[i] = yes(v);
@@ -681,7 +684,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=2\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\nantialiasing={}\nresolution={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\nopengl={}\nforgiving_landings={}\n",
+            "version=3\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\nantialiasing={}\nresolution={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\nopengl={}\nforgiving_landings={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),

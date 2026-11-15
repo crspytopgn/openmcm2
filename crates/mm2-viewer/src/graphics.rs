@@ -108,7 +108,8 @@ impl Default for Enhanced {
             lighting: true,
             shadows: true,
             distance: true,
-            bloom: true,
+            // Off unless asked: a matter of taste (Michael's, for one).
+            bloom: false,
             ao: true,
             sky: true,
             grade: false,
@@ -117,7 +118,7 @@ impl Default for Enhanced {
             clouds: false,
             ruts: false,
             dust: true,
-            bikes: true,
+            bikes: false,
             shafts: true,
             cinematic: false,
             smooth: true,
@@ -410,7 +411,35 @@ static SHOWING: AtomicBool = AtomicBool::new(true);
 
 /// Turns the upgrades on, before anything is drawn.
 pub fn enable(e: Enhanced) {
+    #[cfg(target_arch = "wasm32")]
+    let e = e.for_browser();
     let _ = ENHANCED.set(e);
+}
+
+impl Enhanced {
+    /// What a browser can carry: a browser's GPU work goes through more
+    /// layers, a frame that takes too long can stall the whole computer,
+    /// and there are no ray queries. So the scene is drawn at most 1080p's
+    /// worth (then stretched, the menus and race display still sharp),
+    /// with temporal anti-aliasing in place of 4x or 8x MSAA, and
+    /// without the light shafts and replay blur, the costliest passes.
+    pub fn for_browser(mut self) -> Enhanced {
+        const FULL_HD: u32 = 1920 * 1080;
+        self.raytracing = false;
+        if self.msaa > 1 {
+            self.msaa = 1;
+            self.taa = true;
+        }
+        self.pixels = Some(self.pixels.map_or(FULL_HD, |p| p.min(FULL_HD)));
+        if let Some(k) = self.scale {
+            // A share of the screen still keeps under 1080p.
+            self.scale = None;
+            self.pixels = Some(((FULL_HD as f32) * k * k) as u32);
+        }
+        self.shafts = false;
+        self.cinematic = false;
+        self
+    }
 }
 
 /// False once the GPU turned out unable to draw the upgrades (OpenGL).
@@ -461,6 +490,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_browser_draws_at_most_1080p_without_the_heaviest_passes() {
+        let e = Enhanced::parse("quality=ultra,raytracing").unwrap().for_browser();
+        assert!(!e.raytracing && !e.shafts && e.msaa == 1 && e.taa);
+        assert_eq!(e.scene_size((3840, 2160)), (1920, 1080));
+        let e = Enhanced::parse("quality=low").unwrap().for_browser();
+        assert_eq!(e.scene_size((3840, 2160)), (1280, 720));
+    }
+
+    #[test]
     fn scene_size() {
         let e = Enhanced::default();
         assert_eq!(e.scene_size((1920, 1080)), (1920, 1080));
@@ -492,7 +530,11 @@ mod tests {
     fn upgrades_parse() {
         let all = Enhanced::parse("").unwrap();
         assert_eq!(all.msaa, 4);
-        assert!(all.lighting && all.shadows && all.distance && all.bloom && all.ao && all.sky);
+        assert!(all.lighting && all.shadows && all.distance && all.ao && all.sky);
+        // Bloom and the glossy bikes are there when asked for.
+        assert!(!all.bloom && !all.bikes);
+        let asked = Enhanced::parse("bloom,bikes").unwrap();
+        assert!(asked.bloom && asked.bikes);
         let some = Enhanced::parse("no-bloom, no-ao,msaa=8").unwrap();
         assert!(!some.bloom && !some.ao && some.shadows);
         assert_eq!(some.msaa, 8);

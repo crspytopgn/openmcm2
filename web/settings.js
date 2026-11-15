@@ -10,31 +10,38 @@
 // The enhanced look's switches: the name --enhanced knows, what it is,
 // and whether it's on unless turned off (mm2_settings::UPGRADES).
 export const UPGRADES = [
-  ["lighting", "Per-pixel lighting", true],
-  ["shadows", "Sun shadows", true],
-  ["distance", "Far draw distance and haze", true],
-  ["bloom", "HDR bloom", true],
-  ["ao", "Ambient occlusion", true],
-  ["ground", "Detailed ground", true],
-  ["grass", "3D grass", true],
-  ["smooth", "Smooth hills", true],
-  ["dust", "Dust clouds", true],
-  ["mud", "Mud and spray", true],
-  ["bikes", "Glossier bikes", true],
-  ["shafts", "Light shafts", true],
-  ["cinematic", "Replay blur and depth of field", false],
-  ["ruts", "Lasting tyre ruts", false],
-  ["scenery", "Trackside props and crowd", false],
-  ["grade", "Colour grade", false],
+  ["lighting", "Per-pixel lighting", true, "Light worked out for every pixel, with bumps and highlights."],
+  ["shadows", "Sun shadows", true, "Every object casts a shadow from the sun."],
+  ["distance", "Far draw distance and haze", true, "The whole track drawn, fading into haze."],
+  ["bloom", "HDR bloom", false, "Bright lights and the sun glow softly."],
+  ["ao", "Ambient occlusion", true, "Corners and contacts darkened, as ambient light is."],
+  ["ground", "Detailed ground", true, "The ground re-made from photo materials."],
+  ["grass", "3D grass", true, "Grass growing on the grassy ground near you."],
+  ["smooth", "Smooth hills", true, "The hills round you smoothed, not faceted."],
+  ["dust", "Dust clouds", true, "Clouds of dust behind the bikes, casting shadows."],
+  ["mud", "Mud and spray", true, "Mud and spray caking bikes and riders."],
+  ["bikes", "Glossier bikes", false, "Shiny paint and metal, and smoother riders."],
+  ["shafts", "Light shafts", true, "Beams of sunlight past hills, trees and riders. Not in a browser: too heavy."],
+  ["cinematic", "Replay blur and depth of field", false, "Replays filmed as through a lens. Not in a browser: too heavy."],
+  ["ruts", "Lasting tyre ruts", false, "Tyre ruts that stay for the race."],
+  ["scenery", "Trackside props and crowd", false, "Props along the course, a paddock and a crowd."],
+  ["grade", "Colour grade", false, "A bolder look: colour, contrast, a vignette."],
 ];
 
-const QUALITIES = ["low", "medium", "high", "ultra"];
+// In a browser, Ultra draws as High does (the game caps both: see
+// graphics::Enhanced::for_browser), so it isn't offered. Medium is the
+// default: High has stalled a whole Mac in Safari.
+const QUALITIES = [["low", "Low"], ["medium", "Medium (recommended)"], ["high", "High (a fast computer)"]];
 // Whether a quality preset keeps an upgrade on (Quality::has).
 function presetHas(quality, name) {
   const off = { low: ["ao", "shafts", "smooth", "cinematic", "grass"], medium: ["shafts", "smooth"] }[quality] || [];
   return !off.includes(name) && UPGRADES.some(([n, , on]) => n === name && on);
 }
 
+const ABOUT_QUALITY = "A preset for the effects below. Medium suits most computers in a browser; High needs a fast one. You can change any effect after.";
+const ABOUT_TIME = "Where the sun is: the track's own, or an hour of your choice.";
+const ABOUT_WEATHER = "Clear, overcast or rain, for looks only: the riding is the same.";
+const ABOUT_DETAIL = "How strongly the grain of the photo ground shows.";
 const TIMES = [["", "Track's own"], ["dawn", "Dawn"], ["morning", "Morning"], ["noon", "Noon"], ["afternoon", "Afternoon"], ["dusk", "Dusk"]];
 const WEATHERS = [["clear", "Clear"], ["overcast", "Overcast"], ["rain", "Rain"]];
 
@@ -75,14 +82,20 @@ export const EXTRAS = [
   ]],
 ];
 
+/// Picks a quality preset, its effects with it.
+export function setQuality(s, q) {
+  s.quality = q;
+  for (const [n] of UPGRADES) s.upgrades[n] = presetHas(q, n);
+}
+
 export function defaults() {
   const s = {
     enhanced: false,
-    quality: "high",
+    quality: "medium",
     time: "",
     weather: "clear",
     detail: 0.5,
-    upgrades: Object.fromEntries(UPGRADES.map(([n, , on]) => [n, on])),
+    upgrades: Object.fromEntries(UPGRADES.map(([n]) => [n, presetHas("medium", n)])),
     show_fps: false,
   };
   for (const [, list] of EXTRAS) for (const e of list) s[e.key] = e.range ? e.off : false;
@@ -96,6 +109,11 @@ export function load() {
     const kept = JSON.parse(localStorage.getItem(KEY) || "null");
     if (kept) {
       Object.assign(s, kept, { upgrades: { ...s.upgrades, ...(kept.upgrades || {}) } });
+      // Settings from before Medium was the browser's default go to it.
+      if (!kept.v && s.quality !== "low") {
+        s.quality = "medium";
+        for (const [n] of UPGRADES) s.upgrades[n] = presetHas("medium", n);
+      }
     } else if (localStorage.getItem("mm2look") === "enhanced") {
       s.enhanced = true; // the look picked before the settings came here
     }
@@ -104,6 +122,7 @@ export function load() {
 }
 
 export function save(s) {
+  s.v = 2;
   try {
     localStorage.setItem(KEY, JSON.stringify(s));
   } catch {}
@@ -157,16 +176,16 @@ function checkbox(label, about, checked, change) {
   return el("label", { className: "check", title: about || "" }, box, " " + label);
 }
 
-function select(choices, value, change) {
-  const s = el("select");
+function select(choices, value, change, about = "") {
+  const s = el("select", { title: about });
   for (const [v, text] of choices) s.append(el("option", { value: v, textContent: text, selected: v === value }));
   s.addEventListener("change", () => change(s.value));
   return s;
 }
 
-function slider(min, max, step, unit, value, change) {
+function slider(min, max, step, unit, value, change, about = "") {
   const out = el("span", { className: "value", textContent: value + unit });
-  const r = el("input", { type: "range", min, max, step, value });
+  const r = el("input", { type: "range", min, max, step, value, title: about });
   r.addEventListener("input", () => {
     out.textContent = r.value + unit;
     change(Number(r.value));
@@ -189,35 +208,35 @@ export function render(lookBox, box, s, changed) {
 
   // The look.
   const look = el("fieldset", {}, el("legend", { textContent: "Look" }));
-  for (const [v, b, text] of [
-    [false, "Original", ": the game as it looked in 2000"],
-    [true, "Enhanced", ": modern lighting, shadows and materials"],
+  for (const [v, b, text, about] of [
+    [false, "Original", ": the game as it looked in 2000", "The game drawn as it was in 2000. The lightest on your computer."],
+    [true, "Enhanced", ": modern lighting, shadows and materials", "Per-pixel light, real shadows, haze, dust and more, each of which you can turn on or off."],
   ]) {
     const r = el("input", { type: "radio", name: "look", checked: s.enhanced === v });
     r.addEventListener("change", () => set("enhanced", v, true));
-    look.append(el("label", {}, r, " ", el("b", { textContent: b }), text));
+    look.append(el("label", { title: about }, r, " ", el("b", { textContent: b }), text));
   }
   look.append(el("p", { className: "hint", textContent: "While racing, the button at the top left (or F3) switches between the two. The riding is the same either way." }));
   if (s.enhanced) {
     const grid = el("div", { className: "grid" });
     grid.append(
-      el("span", { textContent: "Quality" }),
-      select(QUALITIES.map((q) => [q, q[0].toUpperCase() + q.slice(1)]), s.quality, (q) => {
+      el("span", { textContent: "Quality", title: ABOUT_QUALITY }),
+      select(QUALITIES, s.quality, (q) => {
         s.quality = q;
         for (const [n] of UPGRADES) s.upgrades[n] = presetHas(q, n);
         set("quality", q, true);
-      }),
-      el("span", { textContent: "Time of day" }),
-      select(TIMES, s.time, (v) => set("time", v)),
-      el("span", { textContent: "Weather" }),
-      select(WEATHERS, s.weather, (v) => set("weather", v)),
-      el("span", { textContent: "Ground detail" }),
-      el("span", {}, ...slider(0, 1, 0.05, "", s.detail, (v) => set("detail", v))),
+      }, ABOUT_QUALITY),
+      el("span", { textContent: "Time of day", title: ABOUT_TIME }),
+      select(TIMES, s.time, (v) => set("time", v), ABOUT_TIME),
+      el("span", { textContent: "Weather", title: ABOUT_WEATHER }),
+      select(WEATHERS, s.weather, (v) => set("weather", v), ABOUT_WEATHER),
+      el("span", { textContent: "Ground detail", title: ABOUT_DETAIL }),
+      el("span", { title: ABOUT_DETAIL }, ...slider(0, 1, 0.05, "", s.detail, (v) => set("detail", v), ABOUT_DETAIL)),
     );
-    const effects = el("details", {}, el("summary", { textContent: "Individual effects" }));
+    const effects = el("details", {}, el("summary", { textContent: "Individual effects", title: "Each effect on its own. Point at one to see what it does." }));
     const list = el("div", { className: "two" });
-    for (const [n, text] of UPGRADES) {
-      list.append(checkbox(text, "", !!s.upgrades[n], (on) => {
+    for (const [n, text, , about] of UPGRADES) {
+      list.append(checkbox(text, about, !!s.upgrades[n], (on) => {
         s.upgrades[n] = on;
         set("upgrades", s.upgrades);
       }));
@@ -245,7 +264,7 @@ export function render(lookBox, box, s, changed) {
           save(s);
           changed(s);
           back.disabled = isOriginal(s);
-        });
+        }, e.about);
         extras.append(el("label", { className: "range", title: e.about }, e.label + " ", r, out));
       } else {
         extras.append(checkbox(e.label, e.about, !!s[e.key], (on) => set(e.key, on, true)));

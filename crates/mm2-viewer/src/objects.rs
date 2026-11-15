@@ -1010,6 +1010,10 @@ pub struct ObjectRenderer {
     /// The mesh's indices and each vertex's node, to pick casters from.
     cpu_indices: Vec<u32>,
     vertex_nodes: Vec<u32>,
+    /// The sun's casters: the object indices with the models that cast no
+    /// shadow (signs over a rider) left as empty triangles, so the
+    /// cascades' runs still match (see [`Objects::set_shadowless`]).
+    cast_indices: Option<wgpu::Buffer>,
     draw_ranges: Vec<std::ops::Range<u32>>,
     /// Each draw's kind for the trees' distance (ObjectMesh::lods).
     lods: Vec<u8>,
@@ -1585,6 +1589,7 @@ impl ObjectRenderer {
             shadow_uniform,
             shadow: None,
             cpu_indices: mesh.indices.clone(),
+            cast_indices: None,
             vertex_nodes: mesh.vertices.iter().map(|v| v.node).collect(),
             draw_ranges: mesh.draws.iter().map(|(r, _)| r.clone()).collect(),
             lods: mesh.lods.clone(),
@@ -1880,6 +1885,55 @@ impl ObjectRenderer {
         }
     }
 
+    /// Animated `models` that cast no shadow from the sun: signs over a
+    /// rider's head, which aren't there to stand in its light.
+    pub fn set_shadowless(&mut self, device: &wgpu::Device, models: &[usize]) {
+        let nodes: Vec<std::ops::Range<u32>> = models
+            .iter()
+            .filter_map(|&m| self.animated.get(m))
+            .map(|a| a.first_node..a.first_node + a.frames.len() as u32)
+            .collect();
+        let casts = |i: u32| {
+            let n = self.vertex_nodes[i as usize] & NODE;
+            !nodes.iter().any(|r| r.contains(&n))
+        };
+        let mut all = self.cpu_indices.clone();
+        for tri in all.chunks_mut(3) {
+            if tri.len() == 3 && !casts(tri[0]) {
+                tri.fill(0);
+            }
+        }
+        self.cast_indices = Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("object casters"),
+            contents: bytemuck::cast_slice(&all),
+            usage: wgpu::BufferUsages::INDEX,
+        }));
+        // And indoors, where only the moving models cast.
+        if let Some(e) = &mut self.enhanced {
+            let mut moving = Vec::new();
+            let mut draws = Vec::new();
+            for (d, range) in self.draw_ranges.iter().enumerate() {
+                let start = moving.len() as u32;
+                for tri in self.cpu_indices[range.start as usize..range.end as usize].chunks(3) {
+                    if tri.len() == 3 && self.vertex_nodes[tri[0] as usize] & NODE != 0 && casts(tri[0]) {
+                        moving.extend_from_slice(tri);
+                    }
+                }
+                if moving.len() as u32 > start {
+                    draws.push((start..moving.len() as u32, d));
+                }
+            }
+            e.moving = (!moving.is_empty()).then(|| {
+                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("moving casters"),
+                    contents: bytemuck::cast_slice(&moving),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+                (buffer, draws)
+            });
+        }
+    }
+
     /// Sets each sun cascade's view, drawing coordinates.
     pub fn set_cascades(&self, queue: &wgpu::Queue, views: &[Mat4]) {
         if let Some(e) = &self.enhanced {
@@ -1926,7 +1980,7 @@ impl ObjectRenderer {
             }
             return;
         }
-        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+        pass.set_index_buffer(self.cast_indices.as_ref().unwrap_or(&self.indices).slice(..), wgpu::IndexFormat::Uint32);
         self.draw_seen(pass, 1 + cascade);
     }
 

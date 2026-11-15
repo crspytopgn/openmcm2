@@ -36,6 +36,9 @@
   #update { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); padding: .4rem .5rem .4rem 1rem;
     background: rgba(0,0,0,.8); border: 1px solid var(--accent); border-radius: 8px; font-size: .9rem; }
   #update button { padding: .3rem .7rem; }
+  #slow { position: fixed; top: 44px; left: 50%; transform: translateX(-50%); padding: .4rem .5rem .4rem 1rem; z-index: 6;
+    background: rgba(0,0,0,.85); border: 1px solid var(--accent); border-radius: 8px; font-size: .9rem; max-width: calc(100vw - 32px); }
+  #slow button { padding: .3rem .7rem; }
   #look { position: fixed; top: 8px; left: 8px; padding: .3rem .8rem; border-radius: 999px;
     background: rgba(0,0,0,.6); color: var(--fg); font-size: .85rem; font-weight: 500;
     opacity: .9; transition: opacity .6s; }
@@ -79,7 +82,7 @@
     <label class="button" for="file">Choose a CD image or .zip</label>
     <input id="folder" type="file" webkitdirectory multiple>
     <input id="file" type="file" multiple accept=".zip,.iso,.bin,.img,.mdf,.mds,.nrg,.cue,application/zip">
-    <p><label><input id="keep" type="checkbox" checked> Remember it in this browser</label></p>
+    <p><label><input id="keep" type="checkbox" checked title="Keeps your game in this browser, so next time Play starts it straight away."> Remember it in this browser</label></p>
   </div>
   <div id="kept" hidden>
     <button id="play">Play</button>
@@ -100,7 +103,7 @@
         event it's for. It shows up in the game's track list for that event, and stays in this browser.</p>
       <div class="grid">
         <span>Event</span>
-        <select id="trackkind">
+        <select id="trackkind" title="The event the track is for: it shows up in that event's track list.">
           <option value="NATIONAL">Nationals</option>
           <option value="SX">Supercross</option>
           <option value="BAJA">Baja</option>
@@ -108,7 +111,7 @@
           <option value="QUARRIES">Stunt</option>
         </select>
       </div>
-      <label class="button" for="trackfile">Add a track .zip</label>
+      <label class="button" for="trackfile" title="A track's .zip (or its .env) downloaded from MDX Racing.">Add a track .zip</label>
       <input id="trackfile" type="file" multiple accept=".zip,.env,application/zip">
       <p id="trackstatus" class="hint"></p>
       <ul id="tracklist"></ul>
@@ -125,6 +128,9 @@
     <a class="button" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener"><span aria-hidden="true">♥</span> Donate on GitHub Sponsors</a>
   </div>
 </div></div>
+<div id="slow" class="banner" hidden>The game is running slowly on this computer.
+  <button id="slowlow">Use Low quality</button> <button id="sloworig">Use the original look</button>
+  <button id="slowkeep" class="plain">Keep going</button></div>
 <div id="update" hidden>A new version of OpenMCM2 is out. <button id="reload">Reload to update</button>
   <button id="later" class="plain">Later</button></div>
 <button id="look" hidden title="Switch between the original look and the enhanced one (F3)"></button>
@@ -218,6 +224,46 @@ $("mm2").addEventListener("keydown", (e) => {
     lookLabel();
   }
 });
+// A guard for computers the enhanced look is too much for: frames that
+// keep taking over 1/15 s in a race bring an offer of something lighter,
+// which restarts the game with it.
+let racingNow = false;
+let slowOffered = false;
+{
+  let last = performance.now();
+  const times = [];
+  const tick = (now) => {
+    const dt = now - last;
+    last = now;
+    if (racingNow && look === "enhanced" && !document.hidden && !slowOffered) {
+      // The last 6 seconds' frames.
+      times.push(dt);
+      let span = times.reduce((a, b) => a + b, 0);
+      while (span - times[0] > 6000) span -= times.shift();
+      const sorted = [...times].sort((a, b) => a - b);
+      if (span > 6000 && sorted[sorted.length >> 1] > 66) {
+        slowOffered = true;
+        $("slow").hidden = false;
+      }
+    } else times.length = 0;
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+function restartWith(change) {
+  change();
+  settings.save(s);
+  try {
+    sessionStorage.setItem("mm2autoplay", "1");
+  } catch {}
+  look = s.enhanced ? "enhanced" : "original";
+  setLookInAddress();
+  location.reload();
+}
+$("slowlow").addEventListener("click", () => restartWith(() => settings.setQuality(s, "low")));
+$("sloworig").addEventListener("click", () => restartWith(() => (s.enhanced = false)));
+$("slowkeep").addEventListener("click", () => ($("slow").hidden = true));
+
 globalThis.mm2page = {
   started() {
     $("setup").hidden = true;
@@ -242,6 +288,7 @@ globalThis.mm2page = {
   },
   // A race started or ended: the touch buttons come and go with it.
   racing(on) {
+    racingNow = on;
     pad?.show(on);
   },
 };

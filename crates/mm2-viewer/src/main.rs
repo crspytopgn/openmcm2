@@ -1390,6 +1390,8 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
     // race with more than one rider the player's own sign stands over
     // their bike (0x418cd0, 0x41e0b0) when Player Indicator is on.
     if let Some(models) = track.tag {
+        // The signs over the riders cast no shadow; the ball does.
+        renderer.set_shadowless(&[models[0], models[2]]);
         let hidden = Mat4::from_cols(Vec4::ZERO, Vec4::ZERO, Vec4::ZERO, Vec4::W);
         let mut places = match &race.tag {
             Some(t) => {
