@@ -169,7 +169,11 @@ pub fn page_title(ui: &mut Ui, title: &str, about: &str) {
 /// id, to name the control after it (`labelled_by`).
 pub fn label(ui: &mut Ui, name: &str, about: &str) -> egui::Id {
     ui.add_space(4.0);
-    let id = ui.label(RichText::new(name).color(TEXT).size(15.5).family(bold_family())).id;
+    let mut named = ui.label(RichText::new(name).color(TEXT).size(15.5).family(bold_family()));
+    if !about.is_empty() {
+        named = named.on_hover_text(about);
+    }
+    let id = named.id;
     if !about.is_empty() {
         ui.add(egui::Label::new(RichText::new(about).color(WEAK).size(13.5)).wrap());
     }
@@ -270,7 +274,8 @@ fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
 /// A switch with its name and a line on what it does beside it, in a
 /// tile; whether it was flipped.
 pub fn switch_tile(ui: &mut Ui, on: &mut bool, name: &str, about: &str, width: f32) -> egui::Response {
-    egui::Frame::new()
+    // The whole tile says what it does when the pointer is on it.
+    let tile = egui::Frame::new()
         .fill(SUNKEN)
         .corner_radius(10)
         .inner_margin(egui::Margin::symmetric(12, 10))
@@ -288,8 +293,11 @@ pub fn switch_tile(ui: &mut Ui, on: &mut bool, name: &str, about: &str, width: f
                 r
             })
             .inner
-        })
-        .inner
+        });
+    if !about.is_empty() {
+        tile.response.on_hover_text(about);
+    }
+    tile.inner.on_hover_text(about)
 }
 
 /// A page in the sidebar: its icon and name, filled when it shows.

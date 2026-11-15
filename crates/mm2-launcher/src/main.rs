@@ -902,7 +902,7 @@ impl Launcher {
         look::card(ui, icon::ICON_PALETTE, "Look", |ui| {
             let choices = [
                 Choice::new(false, "Original").icon(icon::ICON_HISTORY).hover("As the game drew it in 2000."),
-                Choice::new(true, "Enhanced").icon(icon::ICON_AUTO_AWESOME).hover("Per-pixel light, real shadows, haze, bloom, dust and more."),
+                Choice::new(true, "Enhanced").icon(icon::ICON_AUTO_AWESOME).hover("Per-pixel light, real shadows, haze, dust and more. Each effect can be turned on or off on its own."),
             ];
             if let Some(v) = look::segmented(ui, s.enhanced, &choices) {
                 s.enhanced = v;
@@ -972,21 +972,31 @@ impl Launcher {
                 let mut auto = s.resolution == "auto";
                 let mut pct = s.resolution.trim_end_matches('%').parse::<u32>().unwrap_or(100);
                 ui.horizontal(|ui| {
-                    if look::switch(ui, &mut auto).changed() {
+                    if look::switch(ui, &mut auto).on_hover_text("The preset's own scene size. Turn it off to pick a share of the screen.").changed() {
                         s.resolution = if auto { "auto".into() } else { format!("{pct}%") };
                     }
                     ui.label(egui::RichText::new("Auto").family(look::bold_family()));
                     ui.label(look::weak(format!("the preset's own: {}", s.quality.most_pixels())));
                 });
                 ui.add_enabled_ui(!auto, |ui| {
-                    if ui.add(egui::Slider::new(&mut pct, 50..=100).suffix("%").trailing_fill(true)).labelled_by(named).changed() {
+                    if ui
+                        .add(egui::Slider::new(&mut pct, 50..=100).suffix("%").trailing_fill(true))
+                        .labelled_by(named)
+                        .on_hover_text("How big the 3D scene is drawn, as a share of the screen. Lower is faster.")
+                        .changed()
+                    {
                         s.resolution = format!("{pct}%");
                     }
                 });
                 ui.add_space(6.0);
                 let named = look::label(ui, "Ground detail", "How strongly the grain of the photo ground shows.");
                 let mut detail = (s.detail * 100.0).round() as u32;
-                if ui.add(egui::Slider::new(&mut detail, 0..=100).suffix("%").trailing_fill(true)).labelled_by(named).changed() {
+                if ui
+                    .add(egui::Slider::new(&mut detail, 0..=100).suffix("%").trailing_fill(true))
+                    .labelled_by(named)
+                    .on_hover_text("How strongly the grain of the photo ground shows.")
+                    .changed()
+                {
                     s.detail = detail as f32 / 100.0;
                 }
             });
@@ -1028,7 +1038,8 @@ impl Launcher {
         }
         look::card(ui, icon::ICON_TEXTURE, "Textures", |ui| {
             ui.horizontal(|ui| {
-                look::switch(ui, &mut s.use_hires);
+                look::switch(ui, &mut s.use_hires)
+                    .on_hover_text("Draws the game with a pack of sharper textures from a folder you choose, in place of the game's own.");
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     ui.label(egui::RichText::new("High-res textures").family(look::bold_family()));

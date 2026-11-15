@@ -157,6 +157,8 @@ pub struct TerrainRenderer {
     pub shadows_on: bool,
     shadow: Option<([usize; 2], Vec3, Vec3)>,
     shadow_casters: Option<[usize; 2]>,
+    /// The models that cast no sun shadow, and whether the objects know.
+    shadowless: (Vec<usize>, bool),
     /// A desert track, for the enhanced drawing's weather.
     desert: bool,
     /// A stadium track (Supercross).
@@ -622,6 +624,7 @@ impl TerrainRenderer {
             shadows_on: true,
             shadow: None,
             shadow_casters: None,
+            shadowless: (Vec::new(), true),
             desert: false,
             stadium: false,
             cinematic: None,
@@ -747,6 +750,13 @@ impl TerrainRenderer {
     /// coordinates; lit at night with ray tracing.
     pub fn set_headlights(&mut self, lamps: &[(Vec3, Vec3)]) {
         self.headlights = lamps.iter().map(|(at, way)| (from_game(*at), from_game(*way).normalize_or(Vec3::Z))).collect();
+    }
+
+    /// Animated objects that cast no sun shadow (the signs over riders).
+    pub fn set_shadowless(&mut self, models: &[usize]) {
+        if self.shadowless.0 != models {
+            self.shadowless = (models.to_vec(), false);
+        }
     }
 
     /// The player's shadow: the objects that cast it, the middle of
@@ -1106,6 +1116,10 @@ impl TerrainRenderer {
         if let Some(objects) = &mut self.objects {
             objects.extras_shown = showing.is_some_and(|e| e.scenery);
             objects.update(queue, time);
+            if !self.shadowless.1 {
+                objects.set_shadowless(device, &self.shadowless.0);
+                self.shadowless.1 = true;
+            }
             objects.cull(0, &seen, camera.position);
             if let Some((casters, ..)) = shadow {
                 if self.shadow_casters != Some(casters) {
