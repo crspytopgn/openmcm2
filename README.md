@@ -200,7 +200,8 @@ MM2_DATA="/path/to/Motocross Madness 2" cargo test
 * Many fixes and most of the Extras came from Daniel's fork,
   [dwolp/MCM2](https://github.com/dwolp/MCM2): ultrawide support, saved
   track records, gates in either direction, the single-event difficulty,
-  the terrain line and grass fixes, display settings in the game, and
+  the terrain line and grass fixes, display settings in the game, the
+  launcher's look, ray tracing, night races, TAA, forgiving landings and
   more. Thank you, Daniel.
 
 * The Indeo 5 decoder in `crates/mm2-indeo` is a port of

@@ -29,6 +29,28 @@ Fixes for the desktop version:
   middle of the map now plays out in full, as in the original, and you
   get up where you land instead of back at the edge.
 
+The desktop version also brings in **Daniel's fork 1.2**
+([dwolp/MCM2](https://github.com/dwolp/MCM2)). Thank you again, Daniel.
+As before, everything the original game didn't have is off until you
+turn it on.
+
+* **A new launcher:** pages down the side (Play, Graphics, Extras,
+  Tracks, Updates), quality presets, and every graphics setting
+  explained.
+* **Ray tracing** with the Enhanced look, on cards that can (NVIDIA RTX,
+  AMD RX 6000 or newer): real sun shadows from everything, light shafts
+  through the trees, and reflections in puddles, wet ground and paint.
+  Pick the **Ray traced** preset.
+* **Night races and the weather:** the Enhanced look adds a Time of Day
+  and Weather choice to the Event page. At night the Nationals' light
+  poles are lit and the bikes have headlights.
+* **TAA anti-aliasing** (the Medium preset uses it): no more shimmering
+  fences, leaves and billboards. Far trees are drawn as flat pictures,
+  as the original did, so forests are faster.
+* **Dust clouds that cast shadows**, and steadier lights at night.
+* **Forgiving landings** (in Extras): a hard landing level on both
+  wheels no longer throws you off. The original is strict about this.
+
 ## New in 0.4.2
 
 * **Network races in the browser:** the browser version can now host
