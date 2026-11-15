@@ -50,6 +50,7 @@
 // keeps stderr in last-run.log.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod addons;
 mod bars;
 mod eco;
 mod enhance;
@@ -2078,8 +2079,7 @@ fn detail_texture(res: &std::path::Path, scene: Option<&scn::Scene>) -> Option<m
 
 /// A texture in `RES/GLOBAL.RES`.
 fn global_texture(res: &std::path::Path, name: &str) -> Option<mm2_formats::tga::Image> {
-    let raw = crate::fs::read(res.join("GLOBAL.RES")).ok()?;
-    let bytes = mm2_formats::faoe::decode(&raw, "GLOBAL.RES").unwrap_or(raw);
+    let bytes = read_archive(&res.join("GLOBAL.RES")).ok()?;
     let archive = mm2_formats::rs2::Archive::parse(&bytes).ok()?;
     let data = archive
         .entries()
@@ -2090,8 +2090,7 @@ fn global_texture(res: &std::path::Path, name: &str) -> Option<mm2_formats::tga:
 }
 
 fn dirt_sheet(res: &std::path::Path) -> Option<mm2_formats::tga::Image> {
-    let raw = crate::fs::read(res.join("GLOBAL.RES")).ok()?;
-    let bytes = mm2_formats::faoe::decode(&raw, "GLOBAL.RES").unwrap_or(raw);
+    let bytes = read_archive(&res.join("GLOBAL.RES")).ok()?;
     let archive = mm2_formats::rs2::Archive::parse(&bytes).ok()?;
     let data = archive
         .entries()
@@ -2821,11 +2820,13 @@ fn read_archive(path: &Path) -> Result<Vec<u8>, BoxError> {
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or_default();
-    match Container::detect(&raw) {
-        Container::Faoe => Ok(faoe::decode(&raw, name)?),
-        Container::Rs2 => Ok(raw),
-        Container::Unknown => Err(format!("{}: not an RS2 or FAOE archive", path.display()).into()),
-    }
+    let plain = match Container::detect(&raw) {
+        Container::Faoe => faoe::decode(&raw, name)?,
+        Container::Rs2 => raw,
+        Container::Unknown => return Err(format!("{}: not an RS2 or FAOE archive", path.display()).into()),
+    };
+    // Player-made packs in `RES/ADDONS` add what custom tracks need.
+    Ok(addons::with_addons(path, plain))
 }
 
 async fn gpu(

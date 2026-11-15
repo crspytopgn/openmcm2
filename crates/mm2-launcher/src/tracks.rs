@@ -331,10 +331,22 @@ fn install(bytes: &[u8], track: &Track, game: &Path) -> Result<Vec<String>, Stri
     let ours = Added::load();
     let ours: Vec<&String> = ours.0.values().flatten().collect();
     let mut files = Vec::new();
+    let mut addons = Vec::new();
     for i in 0..zip.len() {
         let mut f = zip.by_index(i).map_err(|e| format!("the track's zip is broken: {e}"))?;
         let Some(name) = f.enclosed_name().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())) else { continue };
-        if f.is_dir() || !name.to_ascii_lowercase().ends_with(".env") || f.size() > MAX_DOWNLOAD {
+        if f.is_dir() || f.size() > MAX_DOWNLOAD {
+            continue;
+        }
+        if name.to_ascii_lowercase().ends_with(".res") {
+            // The track's own resource archives (its GLOBAL.RES, ECO.RES)
+            // go in as add-ons, which only add what the game's lack.
+            let mut data = Vec::new();
+            f.read_to_end(&mut data).map_err(|e| format!("couldn't unpack {name}: {e}"))?;
+            addons.push((name, data));
+            continue;
+        }
+        if !name.to_ascii_lowercase().ends_with(".env") {
             continue;
         }
         let out = dir.join(&name);
@@ -356,7 +368,29 @@ fn install(bytes: &[u8], track: &Track, game: &Path) -> Result<Vec<String>, Stri
     if files.is_empty() {
         return Err("there's no track (.env) in the download".into());
     }
+    if !addons.is_empty() {
+        let res = find_ci(game, "RES").unwrap_or_else(|| game.join("RES"));
+        let dir = find_ci(&res, "ADDONS").unwrap_or_else(|| res.join("ADDONS"));
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let tag = addon_tag(&track.name);
+        for (name, data) in addons {
+            let out = dir.join(format!("{tag}-{}", name.to_ascii_uppercase()));
+            std::fs::write(&out, &data).map_err(|e| format!("{}: {e}", out.display()))?;
+            files.push(out.strip_prefix(game).unwrap_or(&out).to_string_lossy().replace('\\', "/"));
+        }
+    }
     Ok(files)
+}
+
+/// The track's name made safe for a file name, to keep its add-ons apart
+/// from another track's.
+fn addon_tag(name: &str) -> String {
+    let t: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == ' ' { c } else { '_' })
+        .collect();
+    let t = t.trim().to_string();
+    if t.is_empty() { "track".into() } else { t }
 }
 
 #[cfg(test)]
@@ -411,6 +445,9 @@ mod tests {
         let err = install(&zip_of(&[("farm.ENV", b"mdx")]), &track("ENDURO"), &game).unwrap_err();
         assert!(err.contains("already have"), "{err}");
         assert_eq!(std::fs::read(game.join("TERAFORM/ENDURO/FARM.env")).unwrap(), b"stock");
+        let files = install(&zip_of(&[("t.env", b"track"), ("Eco.res", b"RS2\0")]), &track("SX"), &game).unwrap();
+        assert_eq!(files, ["TERAFORM/SX/t.env", "RES/ADDONS/x-ECO.RES"]);
+        assert_eq!(std::fs::read(game.join("RES/ADDONS/x-ECO.RES")).unwrap(), b"RS2\0");
         assert!(install(b"<html>404</html>", &track("SX"), &game).unwrap_err().contains("taken down"));
         assert!(install(&zip_of(&[("a.txt", b"")]), &track("SX"), &game).unwrap_err().contains("no track"));
         let _ = std::fs::remove_dir_all(&game);
