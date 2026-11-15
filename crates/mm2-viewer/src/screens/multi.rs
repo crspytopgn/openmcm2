@@ -873,7 +873,7 @@ impl Multi {
                 .picked
                 .and_then(|i| self.finder.as_ref()?.found.get(i).cloned());
             if let Some(f) = found {
-                match net::Session::join(f.addr, self.me(cx)) {
+                match net::Session::join(f.addr.clone(), self.me(cx)) {
                     Ok(s) => {
                         net::set(Some(s));
                         self.session = f.name;

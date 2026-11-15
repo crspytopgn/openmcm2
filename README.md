@@ -9,12 +9,6 @@ An open-source engine for Motocross Madness 2 (Rainbow Studios, 2000),
 rebuilt from scratch in Rust from a study of the original game. It runs
 natively on macOS (Metal), Windows (DX12/Vulkan) and Linux (Vulkan).
 
-**Built with AI.** OpenMCM2 is entirely vibe coded: one fan directing
-Claude Code (Anthropic's AI coding agent), which did the reverse
-engineering, wrote the code and docs, and checked the result against the
-original game. Every line was written by AI under human direction and
-testing. Bug reports, reviews and human contributions are very welcome.
-
 **This repository contains no game files.** Like OpenMW, the engine reads the
 tracks, models, textures, sounds and menus from a copy of the game that you
 own. Point it at the folder of your install (or the CD's `GAME` folder).
@@ -25,11 +19,17 @@ Project page: https://crspytopgn.github.io/openmcm2/
 
 Watch the showcase video: https://youtu.be/rP0TEnWLzNo
 
+## How it's made
+
+OpenMCM2 is one fan's project, written with the help of an AI coding
+assistant (Claude Code) and tested ride by ride against the original game.
+Bug reports, reviews and contributions are very welcome.
+
 ## Support the project
 
-OpenMCM2 is free and always will be. It's made with paid AI tools, though,
-and those cost real money every month. If you enjoy it, a small donation
-helps cover that and pays for future updates.
+OpenMCM2 is free and always will be. Making it has real monthly costs,
+though. If you enjoy it, a small donation helps cover them and pays for
+future updates.
 
 **[♥ Donate on GitHub Sponsors](https://github.com/sponsors/crspytopgn)**
 
@@ -82,7 +82,9 @@ image (`.iso`, `.bin`, `.img`, `.mdf`, `.nrg`) or a `.zip`, or drop it on
 the page. The files are read on your computer and never uploaded, and the
 page holds no game data. It can remember your game in that browser, saves
 stay there too, and phones and tablets get touch controls. Network races
-aren't in the browser version yet. To build it yourself:
+work between browsers: the host gets a race code and an invite link to
+share (browser and desktop players can't race each other). To build it
+yourself:
 
 ```sh
 rustup target add wasm32-unknown-unknown

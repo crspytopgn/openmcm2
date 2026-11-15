@@ -65,8 +65,8 @@
   <p id="why"></p>
   <div class="support">
     <h2>Enjoying it? Help keep it going</h2>
-    <p>OpenMCM2 is free and always will be. It's made with paid AI tools, though, and those cost
-      real money every month. If you enjoy it, a small donation helps cover that and pays for
+    <p>OpenMCM2 is free and always will be. Making it has real monthly costs,
+      though. If you enjoy it, a small donation helps cover them and pays for
       future updates: more fixes, more tracks and more of the original game brought back.</p>
     <a class="button" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener"><span aria-hidden="true">♥</span> Donate on GitHub Sponsors</a>
   </div>
@@ -89,6 +89,7 @@ const fs = await import(fresh("./mm2fs.js"));
 const zip = await import(fresh("./zip.js"));
 const iso = await import(fresh("./iso.js"));
 const touch = await import(fresh("./touch.js"));
+const net = await import(fresh("./net.js"));
 
 const $ = (id) => document.getElementById(id);
 const status = (t) => ($("status").textContent = t);
@@ -97,6 +98,7 @@ globalThis.mm2page = {
     $("setup").hidden = true;
     $("mm2").focus();
     pad?.show(false);
+    net.invite();
     // Shown for a moment, then only when the pointer is on it.
     $("heart").hidden = false;
     setTimeout(() => $("heart").classList.add("faded"), 8000);
