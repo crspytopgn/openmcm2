@@ -205,7 +205,7 @@ fn main() -> Result<(), BoxError> {
         .and_then(|n| n.parse().ok())
         .or(tape.as_ref().map(|t| t.tape.riders.len()))
         .unwrap_or(RIDERS)
-        .clamp(1, 11);
+        .clamp(1, mm2_settings::RIDERS_MOST as usize);
     if let Some(v) = flag("--spawn") {
         let n: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
         if let [x, z, h] = n[..] {
@@ -2316,7 +2316,11 @@ fn results(race: &Race, ui: &ui::Ui) -> frontend::RaceResults {
 /// the profile (EditPlateNumber) and the computer riders' from their
 /// records; these are our picks until those are read.
 fn plate_number(rider: usize) -> u32 {
-    [7, 22, 4, 13, 31, 2, 18, 9, 45, 11, 26][rider % 11]
+    // Past the game's 11 (the more riders extra), numbers of their own.
+    match rider {
+        0..=10 => [7, 22, 4, 13, 31, 2, 18, 9, 45, 11, 26][rider],
+        _ => [33, 15, 27, 5, 41, 19, 8, 36, 24, 12, 48, 3, 29, 17, 38, 6, 21, 44, 14][(rider - 11) % 19],
+    }
 }
 
 /// Which of them the player rides.

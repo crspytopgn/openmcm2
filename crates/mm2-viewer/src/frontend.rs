@@ -1493,10 +1493,16 @@ impl Frontend {
             modes.into_iter().map(|m| m.1).collect(),
             mode_at,
         );
+        // The more riders extra: up to its count on the gate in a single
+        // event or practice; a series keeps the game's 11, as its points do.
+        let most = match crate::tweaks::more().riders {
+            n if n > 11 && self.mode != 2 => n - 1,
+            _ => 10,
+        };
         page.set_items(
             "OpponentsListBox",
-            (0..=10).map(|n| n.to_string()).collect(),
-            self.opponents.min(10) as usize,
+            (0..=most).map(|n| n.to_string()).collect(),
+            self.opponents.min(most) as usize,
         );
         let (from, to) = if event == EventKind::Stunt {
             (2, 30)
@@ -1606,6 +1612,8 @@ impl Frontend {
             laps: if self.mode == 0 { 99 } else { self.laps },
             opponents: if self.mode == GHOST {
                 0
+            } else if self.mode == 2 {
+                self.opponents.min(10)
             } else {
                 self.opponents
             },
