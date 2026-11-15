@@ -21,7 +21,9 @@
   * rounder bikes and riders (`no-round`)
   * floodlights in the supercross stadiums (`no-floodlights`)
 
-  The Original look is unchanged, and so are the physics.
+  The Original look is unchanged.
+* **Physics:** glancing hits on bales and barriers no longer spin the
+  bike round; wall crashes now happen when the original's do.
 
 If you're on 0.1.6 or later, the launcher will offer this update itself.
 
