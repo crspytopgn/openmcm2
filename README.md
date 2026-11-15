@@ -72,6 +72,26 @@ cargo build --release -p mm2-viewer -p mm2-launcher
 
 On a Mac, `sh tools/make-mac-app.sh` builds `target/release/OpenMCM2.app`.
 
+### In a browser
+
+OpenMCM2 also runs in a browser with WebGPU (a recent Chrome or Edge, or
+Safari 26): **https://crspytopgn.github.io/openmcm2/play/**. It plays
+from your own copy too: pick your installed game folder, your CD, a CD
+image (`.iso`, `.bin`, `.img`, `.mdf`, `.nrg`) or a `.zip`, or drop it on
+the page. The files are read on your computer and never uploaded, and the
+page holds no game data. It can remember your game in that browser, saves
+stay there too, and phones and tablets get touch controls. Network races
+aren't in the browser version yet. To build it yourself:
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.129   # the wasm-bindgen in Cargo.lock
+sh tools/build-web.sh
+python3 -m http.server -d web 8000                 # then open http://localhost:8000
+```
+
+Options go in the address: `?enhanced` for the enhanced look.
+
 It opens the original front end: profiles, the main menu, single player and
 its event screens, Bike & Rider, options, the Pro Circuit career, replays and
 network races between copies of OpenMCM2. Every event the original has is

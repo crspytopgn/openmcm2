@@ -2,14 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>OpenMCM2</title>
 <style>
   :root { --bg: #111; --fg: #eee; --dim: #999; --accent: #e8a33a; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
-    font: 16px/1.5 system-ui, sans-serif; overflow: hidden; }
-  #mm2 { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; }
-  #setup { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); padding: 16px; }
+    font: 16px/1.5 system-ui, sans-serif; overflow: hidden; overscroll-behavior: none; }
+  #mm2 { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; touch-action: none; }
+  #setup { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); padding: 16px;
+    overflow-y: auto; }
   #setup > div { max-width: 34rem; }
   h1 { margin: 0 0 .5rem; font-size: 1.6rem; }
   p { color: var(--dim); }
@@ -19,6 +20,8 @@
   input[type=file] { display: none; }
   progress { width: 100%; height: 10px; margin-top: 1rem; }
   #why { color: #f77; white-space: pre-wrap; }
+  body.dragging #setup { outline: 3px dashed var(--accent); outline-offset: -12px; }
+  label.button { margin: 0 .3rem .4rem 0; }
   .support { margin-top: 1.5rem; padding: 1rem; border: 1px solid #333; border-radius: 8px; }
   .support h2 { margin: 0 0 .3rem; font-size: 1.05rem; }
   .support p { margin: 0 0 .8rem; }
@@ -30,6 +33,9 @@
     opacity: .9; transition: opacity .6s; }
   #heart.faded { opacity: 0; }
   #heart:hover { opacity: 1; }
+  #update { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); padding: .4rem .5rem .4rem 1rem;
+    background: rgba(0,0,0,.8); border: 1px solid var(--accent); border-radius: 8px; font-size: .9rem; }
+  #update button { padding: .3rem .7rem; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -39,10 +45,15 @@
   <h1>OpenMCM2</h1>
   <p>Motocross Madness 2, running in your browser. It plays from your own copy of the game:
     pick your installed game folder (the one with the <code>UI</code>, <code>RES</code> and
-    <code>TERAFORM</code> folders in it). Nothing is uploaded; the files stay on this computer.</p>
+    <code>TERAFORM</code> folders in it). Nothing is uploaded; the files stay on this device.
+    You can also pick your game CD's image (.iso, .bin, .img, .mdf or .nrg), the CD's own
+    folder, or a .zip of the game folder, which is the way on a phone or tablet. Or drop
+    any of them on this page.</p>
   <div id="pick">
     <label class="button" for="folder">Choose game folder</label>
+    <label class="button" for="file">Choose a CD image or .zip</label>
     <input id="folder" type="file" webkitdirectory multiple>
+    <input id="file" type="file" multiple accept=".zip,.iso,.bin,.img,.mdf,.nrg,.cue,application/zip">
     <p><label><input id="keep" type="checkbox" checked> Remember it in this browser</label></p>
   </div>
   <div id="kept" hidden>
@@ -60,9 +71,24 @@
     <a class="button" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener"><span aria-hidden="true">♥</span> Donate on GitHub Sponsors</a>
   </div>
 </div></div>
+<div id="update" hidden>A new version of OpenMCM2 is out. <button id="reload">Reload to update</button>
+  <button id="later" class="plain">Later</button></div>
 <a id="heart" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener" hidden><span aria-hidden="true">♥</span> Enjoying it? Support OpenMCM2</a>
 <script type="module">
-import * as fs from "./mm2fs.js";
+// This build's version: everything below is fetched for it, so a new
+// release never mixes with old files the browser kept.
+async function latest() {
+  return fetch("./version.json", { cache: "no-store" })
+    .then((r) => r.json())
+    .then((j) => j.version)
+    .catch(() => null);
+}
+const version = (await latest()) || "dev";
+const fresh = (path) => `${path}?v=${encodeURIComponent(version)}`;
+const fs = await import(fresh("./mm2fs.js"));
+const zip = await import(fresh("./zip.js"));
+const iso = await import(fresh("./iso.js"));
+const touch = await import(fresh("./touch.js"));
 
 const $ = (id) => document.getElementById(id);
 const status = (t) => ($("status").textContent = t);
@@ -70,6 +96,7 @@ globalThis.mm2page = {
   started() {
     $("setup").hidden = true;
     $("mm2").focus();
+    pad?.show(false);
     // Shown for a moment, then only when the pointer is on it.
     $("heart").hidden = false;
     setTimeout(() => $("heart").classList.add("faded"), 8000);
@@ -80,7 +107,20 @@ globalThis.mm2page = {
     status("The game could not start.");
     $("why").textContent = why;
   },
+  // A race started or ended: the touch buttons come and go with it.
+  racing(on) {
+    pad?.show(on);
+  },
 };
+
+// Touch screens: buttons for riding, and full screen on the first tap.
+const pad = touch.wanted() ? touch.setup($("mm2")) : null;
+if (pad) {
+  $("mm2").addEventListener("pointerdown", () => {
+    if (document.fullscreenElement) return;
+    document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.("landscape")).catch(() => {});
+  });
+}
 
 // The folder that holds UI/MAINMENU.DAT, among the picked files.
 function gameRoot(paths) {
@@ -110,7 +150,12 @@ async function readAll(list) {
 
 async function start(list) {
   if (!navigator.gpu) {
-    mm2page.fail("This browser has no WebGPU. Try a recent Chrome or Edge, or Safari 26.");
+    mm2page.fail(
+      "This browser can't run the game yet: it needs WebGPU.\n" +
+        "It works in Chrome or Edge 113 or newer (Windows, Mac, ChromeOS, Android 12+), " +
+        "Safari 26 (Mac, iPhone, iPad), and Firefox 141 or newer on Windows. " +
+        "On Linux, Chrome needs WebGPU turned on at chrome://flags/#enable-unsafe-webgpu."
+    );
     return;
   }
   $("pick").hidden = $("kept").hidden = true;
@@ -118,25 +163,112 @@ async function start(list) {
   await readAll(list);
   await fs.loadUser().catch((e) => console.warn("saves not read", e));
   status("Starting…");
-  const game = await import("./pkg/mm2-viewer.js");
-  await game.default();
+  const game = await import(fresh("./pkg/mm2-viewer.js"));
+  await game.default({ module_or_path: fresh("./pkg/mm2-viewer_bg.wasm") });
 }
 
-$("folder").addEventListener("change", async (e) => {
-  const picked = [...e.target.files];
-  const root = gameRoot(picked.map((f) => f.webkitRelativePath));
+$("folder").addEventListener("change", (e) => {
+  useFolder([...e.target.files].map((f) => [f.webkitRelativePath, f]));
+});
+
+// The zip's files under its game folder; a .zip kept in the browser is
+// kept as itself and read again on the next visit.
+async function fromZip(file) {
+  const all = await zip.entries(file);
+  const root = gameRoot(all.map(([name]) => name));
+  if (root === null) return null;
+  return all.filter(([name]) => name.startsWith(root)).map(([name, e]) => ["/game/" + name.slice(root.length), e]);
+}
+
+// The game's files in a CD image or a zip, as [path, file] under /game.
+async function fromFile(file) {
+  if (/\.zip$/i.test(file.name)) return fromZip(file);
+  const files = await iso.entries(file);
+  if (!files) throw new Error("That CD image has no GAME folder on it.");
+  return files.map(([name, e]) => ["/game/" + name, e]);
+}
+
+async function useFile(file) {
+  if (!file) return;
+  if (/\.cue$/i.test(file.name)) {
+    $("why").textContent = "Pick the .bin file that goes with the .cue.";
+    return;
+  }
+  const list = await fromFile(file).catch((err) => {
+    $("why").textContent = String(err.message || err);
+    return undefined;
+  });
+  if (list === null) {
+    $("why").textContent = "That zip has no UI/MAINMENU.DAT in it. Zip the folder the game is installed in.";
+  }
+  if (!list) return;
+  if ($("keep").checked) {
+    navigator.storage?.persist?.();
+    await fs.forgetGame().catch(() => {});
+    await fs.keepGame([["/file", file]]).catch((e) => console.warn("game not kept", e));
+  }
+  start(list);
+}
+
+async function useFolder(picked) {
+  const root = gameRoot(picked.map(([path]) => path));
   if (root === null) {
-    $("why").textContent = "That folder has no UI/MAINMENU.DAT in it. Pick the folder the game is installed in.";
+    $("why").textContent = "That folder has no UI/MAINMENU.DAT in it. Pick the folder the game is installed in, or the CD.";
     return;
   }
   const list = picked
-    .filter((f) => f.webkitRelativePath.startsWith(root))
-    .map((f) => ["/game/" + f.webkitRelativePath.slice(root.length), f]);
+    .filter(([path]) => path.startsWith(root))
+    .map(([path, f]) => ["/game/" + path.slice(root.length), f]);
   if ($("keep").checked) {
     navigator.storage?.persist?.();
+    await fs.forgetGame().catch(() => {});
     await fs.keepGame(list).catch((e) => console.warn("game not kept", e));
   }
   start(list);
+}
+
+$("file").addEventListener("change", (e) => {
+  const files = [...e.target.files];
+  useFile(files.find((f) => !/\.cue$/i.test(f.name)) || files[0]);
+});
+
+// Dropped on the page: a folder (walked through the browser's entries), or
+// a CD image or zip.
+function walk(entry, path) {
+  return new Promise((done) => {
+    if (entry.isFile) return entry.file((f) => done([[path + entry.name, f]]), () => done([]));
+    const reader = entry.createReader();
+    const all = [];
+    const more = () =>
+      reader.readEntries(async (batch) => {
+        if (!batch.length) {
+          const inner = await Promise.all(all.map((e) => walk(e, path + entry.name + "/")));
+          return done(inner.flat());
+        }
+        all.push(...batch);
+        more();
+      }, () => done([]));
+    more();
+  });
+}
+addEventListener("dragover", (e) => {
+  e.preventDefault();
+  document.body.classList.add("dragging");
+});
+addEventListener("dragleave", () => document.body.classList.remove("dragging"));
+addEventListener("drop", async (e) => {
+  e.preventDefault();
+  document.body.classList.remove("dragging");
+  if ($("setup").hidden || $("pick").hidden) return;
+  const entries = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry?.()).filter(Boolean);
+  if (entries.some((en) => en.isDirectory)) {
+    status("Looking through the folder…");
+    const files = (await Promise.all(entries.map((en) => walk(en, "")))).flat();
+    status("");
+    return useFolder(files);
+  }
+  const files = [...e.dataTransfer.files];
+  useFile(files.find((f) => !/\.cue$/i.test(f.name)) || files[0]);
 });
 
 $("forget").addEventListener("click", async () => {
@@ -146,7 +278,20 @@ $("forget").addEventListener("click", async () => {
   status("");
 });
 
-const kept = await fs.keptGame().catch(() => null);
+// A new release while the page is open: offer a reload. Your game files
+// and saves stay in the browser, so it starts straight away again.
+async function checkForUpdate() {
+  const now = await latest();
+  if (now && version !== "dev" && now !== version) $("update").hidden = false;
+}
+setInterval(checkForUpdate, 15 * 60 * 1000);
+document.addEventListener("visibilitychange", () => document.hidden || checkForUpdate());
+$("reload").addEventListener("click", () => location.reload());
+$("later").addEventListener("click", () => ($("update").hidden = true));
+
+let kept = await fs.keptGame().catch(() => null);
+const keptFile = kept?.find(([path]) => path === "/file");
+if (keptFile) kept = await fromFile(keptFile[1]).catch(() => null);
 if (kept) {
   $("pick").hidden = true;
   $("kept").hidden = false;

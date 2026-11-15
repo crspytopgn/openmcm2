@@ -2025,7 +2025,15 @@ impl Bike {
         let normal = normals.iter().sum::<Vec3>().normalize_or_zero();
         let r = middle / count as f32 - self.position;
         self.position += out + out.normalize_or_zero() * PUSH_MARGIN;
-        let w = self.orientation * self.spin;
+        // The same impulse as a bottomed tyre's (0x52bb10 → 0x5050b0):
+        // ridden, only 0.3, 0.1, 0.3 of the spin counts, in the contact's
+        // speed (world axes) and in the change (body axes).
+        let scale = if self.crash.is_some() {
+            Vec3::ONE
+        } else {
+            Vec3::new(0.3, 0.1, 0.3)
+        };
+        let w = (self.orientation * self.spin) * scale;
         // Against a moving vehicle it is the speed into it that bounces.
         let into = normal.dot(self.velocity + w.cross(r) - moving);
         if into < 0.0 {
@@ -2035,7 +2043,7 @@ impl Bike {
             let turn = (self.orientation * twist).cross(r).dot(normal);
             let j = -(1.0 + bounce) * into / (1.0 / mass + turn);
             self.velocity += normal * j / mass;
-            self.spin += twist * j;
+            self.spin += twist * scale * j;
         }
     }
 

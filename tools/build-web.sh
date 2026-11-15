@@ -16,4 +16,8 @@ if command -v wasm-opt >/dev/null; then
     wasm-opt -O3 --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
         web/pkg/mm2-viewer_bg.wasm -o web/pkg/mm2-viewer_bg.wasm
 fi
+# The page checks this to load a new build fresh and to tell players
+# when one is out while they play.
+version="$(git rev-parse --short HEAD 2>/dev/null || echo dev)-$(date -u +%Y%m%d%H%M%S)"
+printf '{"version":"%s"}\n' "$version" > web/version.json
 echo "built web/; serve it with: python3 -m http.server -d web 8000"

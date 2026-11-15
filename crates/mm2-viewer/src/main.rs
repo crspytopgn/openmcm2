@@ -4954,7 +4954,7 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         #[cfg(target_arch = "wasm32")]
         if self.state.is_none() {
             match web::take_gpu() {
@@ -4993,6 +4993,20 @@ impl ApplicationHandler for App {
                     s.config.height = size.height.max(1);
                     s.surface.configure(&s.device, &s.config);
                 }
+            }
+            // A finger on a touch screen works as the mouse: the menus and
+            // the replay player take a tap as a click. The race's own
+            // touch buttons are the page's (web/touch.js).
+            WindowEvent::Touch(t) => {
+                use winit::event::TouchPhase;
+                let device_id = t.device_id;
+                self.window_event(event_loop, id, WindowEvent::CursorMoved { device_id, position: t.location });
+                let state = match t.phase {
+                    TouchPhase::Started => ElementState::Pressed,
+                    TouchPhase::Ended | TouchPhase::Cancelled => ElementState::Released,
+                    TouchPhase::Moved => return,
+                };
+                self.window_event(event_loop, id, WindowEvent::MouseInput { device_id, state, button: MouseButton::Left });
             }
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(s) = &self.state {
@@ -5292,6 +5306,8 @@ impl ApplicationHandler for App {
                 self.update(dt);
                 self.feel_pad();
                 self.redraw();
+                #[cfg(target_arch = "wasm32")]
+                web::racing(self.race.is_some() && self.replay.is_none() && !self.in_menus());
                 if tweaks::get().show_fps != self.fps.is_some() {
                     self.fps = self.fps.is_none().then(|| (Instant::now(), 0, 0.0));
                     self.fps_shown = None;
