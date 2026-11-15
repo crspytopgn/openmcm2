@@ -51,6 +51,38 @@ turn it on.
 * **Forgiving landings** (in Extras): a hard landing level on both
   wheels no longer throws you off. The original is strict about this.
 
+New extras in the launcher's Extras page (and the browser's settings,
+where they work there). Like every extra, each one is off until you turn
+it on, so the game still plays and looks as the original did:
+
+* **Add-on art for added tracks:** archives in the game's `RES/ADDONS`
+  folder (such as `Rats Hole-ECO.RES`, or any `.res` in `RES/ADDONS/ECO`)
+  add the trees, models and pictures a player-made track needs. They
+  only add what the game's own archives don't have, so the stock tracks
+  never change. The Tracks page puts a track's own `.res` files there.
+* **Your own paints and outfits:** every `.tga` in the game's `BIKES`
+  and `RIDERS` folders shows up on the Bike & Rider page, named after
+  its file. Bike paints follow `BIKE01.TGA`'s layout, and you pick the
+  engine size.
+* **All gear in every event:** the bikes and outfits the Pro Circuit
+  gives out, in single races too.
+* **Track filter:** All tracks, Base game or Custom on the event page.
+* **Stick tuning:** dead zone, sensitivity and smoothing for a pad's
+  steering.
+* **Frame cap, smoother edges and sharpening** over the race picture, in
+  either look.
+* **Helmet Cam:** a view from the rider's helmet, after User Cam.
+* **More riders on the gate:** up to 30 in a single race.
+* **Lap leaderboards:** your best lap on each track, event, course and
+  bike class, from lap 2 on and only with the riding extras off. In
+  Nationals and Supercross, a lap with more than 2 seconds off the course
+  doesn't count. The launcher shows them. Sharing them needs a
+  leaderboard server address in the launcher; `tools/leaderboard` has a
+  small one anyone can run.
+* **Lobby downloads:** in a network race, the host's track and other
+  riders' own paints and outfits are sent to the players who don't have
+  them. Everyone in the race needs 0.5.0 or newer with it on.
+
 ## New in 0.4.2
 
 * **Network races in the browser:** the browser version can now host
