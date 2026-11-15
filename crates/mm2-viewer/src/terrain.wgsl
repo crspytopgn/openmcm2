@@ -333,7 +333,20 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     var bent = normalize(t * nm.x + b * nm.y + n * nm.z);
     // The ruts: dark, damp grooves where the tyres have run.
     var rut = 0.0;
-    if (enh.ruts.w > 0.5) {
+    var worn = 0.0;
+    if (enh.ruts.w > 1.5) {
+        // The gentle wear: where the tyres have run, again and again, the
+        // ground packs a little darker and smoother, a soft band with no
+        // grooves, blurred over a couple of feet.
+        let ruv = (in.world.xz - enh.ruts.xy) / enh.ruts.z;
+        let r = 1.0 / enh.ruts.z;
+        var sum = 0.0;
+        for (var i = 0; i < 9; i++) {
+            let o = vec2<f32>(f32(i % 3) - 1.0, f32(i / 3) - 1.0) * 1.4 * r;
+            sum += textureSampleLevel(rut_map, rut_sampler, ruv + o, 0.0).r;
+        }
+        worn = smoothstep(0.0, 0.05, sum / 9.0);
+    } else if (enh.ruts.w > 0.5) {
         let ruv = (in.world.xz - enh.ruts.xy) / enh.ruts.z;
         rut = textureSampleLevel(rut_map, rut_sampler, ruv, 0.0).r;
         let e = 1.0 / 8192.0;
@@ -348,6 +361,7 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     let albedo_game = pow(painted, vec3<f32>(1.0 / 2.2)) / baked;
     var albedo = pow(max(albedo_game, vec3<f32>(0.0)), vec3<f32>(2.2)) * colour;
     albedo *= 1.0 - rut * 0.22;
+    albedo *= mix(vec3<f32>(1.0), vec3<f32>(0.55, 0.52, 0.5), worn);
     // The wet ground is darker.
     albedo *= 1.0 - enh.world.y * 0.35;
     // In the wet, puddles in the hollows of flat ground and in the ruts:
@@ -373,10 +387,13 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     // A sheen off the smoother and the wet ground.
     let v = normalize(globals.camera.xyz - in.world);
     let h = normalize(globals.to_sun.xyz + v);
-    let r = clamp(mix(rough, 0.15, enh.world.y) - rut * 0.1, 0.08, 1.0);
+    let r = clamp(mix(rough, 0.15, enh.world.y) - rut * 0.1 - worn * 0.25, 0.08, 1.0);
     let power = 2.0 / (r * r * r * r) - 2.0;
     let glint = pow(max(dot(bent, h), 0.0), power) * (power + 2.0) / 8.0 * 0.04 * sun * max(dot(bent, globals.to_sun.xyz), 0.0);
     lit += globals.sun.rgb * glint;
+    // Under a stadium's floodlights the packed dirt catches their glints.
+    let lamp = lamps(bent, v, clamp(1.0 - r, 0.0, 1.0) * 0.5 + worn * 0.2);
+    lit += (albedo * lamp.x + albedo * lamp.y * 1.5) * vec3<f32>(1.0, 0.97, 0.92);
     return lit;
 }
 

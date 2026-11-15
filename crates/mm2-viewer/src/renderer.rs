@@ -358,7 +358,7 @@ impl TerrainRenderer {
             cache: None,
         });
         let enhanced = upgrades.map(|_| {
-            let shared = crate::enhance::Shared::new(device, queue, upgrades.is_some_and(|e| e.ruts));
+            let shared = crate::enhance::Shared::new(device, queue, upgrades.is_some_and(|e| e.ruts || e.wear));
             use crate::enhance::{sampler, texture, uniform};
             use wgpu::{ShaderStages as S, TextureSampleType as T, TextureViewDimension as D};
             let float = T::Float { filterable: true };
@@ -454,10 +454,11 @@ impl TerrainRenderer {
         let enhanced = enhanced.map(|(shared, terrain_pipeline, layout)| Enhanced {
             post: crate::post::Post::new(device, samples, target_format),
             group: terrain_bind_group(device, &layout, &globals, &terrain_views, &detail, &shadow_mask),
-            ruts: upgrades.is_some_and(|e| e.ruts).then(|| {
+            ruts: upgrades.is_some_and(|e| e.ruts || e.wear).then(|| {
                 // Over the whole terrain: x from 0, z up to 0.
                 let size = (n as f32 - 1.0) * terrain.scale;
-                crate::ruts::RutPainter::new(device, glam::Vec2::new(0.0, -size), size)
+                let wear = upgrades.is_some_and(|e| !e.ruts);
+                crate::ruts::RutPainter::new(device, glam::Vec2::new(0.0, -size), size, wear)
             }),
             mud: Vec::new(),
             crowd: None,
@@ -860,9 +861,9 @@ impl TerrainRenderer {
                     (Some(d), true) => d.horizon.extend(1.0).into(),
                     _ => [self.fog[0], self.fog[1], self.fog[2], 1.0],
                 },
-                texel: [texels[0], texels[1], texels[2], 0.0],
+                texel: [texels[0], texels[1], texels[2], flag(on.soft_shadows)],
                 world: day.as_ref().map_or([time, 0.0, 0.0, 0.0], |d| [time, d.wet, d.rain, d.cover]),
-                ruts: e.ruts.as_ref().filter(|_| on.ruts).map_or([0.0; 4], |r| r.uniform()),
+                ruts: e.ruts.as_ref().filter(|_| on.ruts || on.wear).map_or([0.0; 4], |r| r.uniform()),
                 more: [flag(on.ground), flag(on.grass), flag(real_sky), flag(on.bikes)],
                 material_average: e.shared.material_average,
                 // The clouds drift 30 ft a second.
@@ -870,7 +871,7 @@ impl TerrainRenderer {
                 zenith: day.as_ref().map_or([0.0; 4], |d| d.zenith.extend(1.0).into()),
                 horizon: day.as_ref().map_or([0.0; 4], |d| d.horizon.extend(1.0).into()),
                 smooth: e.smooth.as_ref().filter(|_| on.smooth).map_or([0.0; 4], |g| g.uniform(camera.position)),
-                surfaces: [flag(on.surfaces), 0.0, 0.0, 0.0],
+                surfaces: [flag(on.surfaces), flag(on.trees), flag(on.round), flag(on.floodlights && self.sky.is_none())],
             };
             queue.write_buffer(&e.shared.buffer, 0, bytemuck::bytes_of(&enh));
         }

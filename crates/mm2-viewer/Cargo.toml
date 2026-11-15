@@ -11,14 +11,24 @@ cpal = { version = "0.16.0", optional = true }
 ab_glyph = "0.2.29"
 gilrs = { version = "0.11", optional = true }
 glam = "0.30"
-mm2-formats = { version = "0.3.1", path = "../mm2-formats" }
-mm2-indeo = { version = "0.3.1", path = "../mm2-indeo" }
-mm2-physics = { version = "0.3.1", path = "../mm2-physics" }
-mm2-settings = { version = "0.3.1", path = "../mm2-settings" }
+mm2-formats = { version = "0.4.0", path = "../mm2-formats" }
+mm2-indeo = { version = "0.4.0", path = "../mm2-indeo" }
+mm2-physics = { version = "0.4.0", path = "../mm2-physics" }
+mm2-settings = { version = "0.4.0", path = "../mm2-settings" }
 png = "0.18.1"
 pollster = "1.0.1"
 wgpu = "30.0.1"
 winit = "0.30"
+# Instant and SystemTime that also work in a browser.
+web-time = "1"
+
+# The browser build (tools/build-web.sh).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1"
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Document", "Window", "Element", "HtmlCanvasElement", "Location", "console"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }

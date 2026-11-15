@@ -31,7 +31,7 @@ pub struct Movie {
 
 impl Movie {
     pub fn open(path: &Path, looping: bool) -> Option<Movie> {
-        let bytes = std::fs::read(path).ok()?;
+        let bytes = crate::fs::read(path).ok()?;
         let avi = mm2_formats::avi::parse(&bytes).ok()?;
         if &avi.codec[..] != b"IV50" && &avi.codec[..] != b"iv50" {
             return None;

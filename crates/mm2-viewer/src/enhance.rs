@@ -54,7 +54,8 @@ pub struct EnhGlobals {
     /// The smooth ground's patch: its corner (terrain units), cells a
     /// side, and whether it is drawn.
     pub smooth: [f32; 4],
-    /// x whether the trial track's objects get the photo materials.
+    /// x the objects' photo materials, y swaying trees, z round bikes and
+    /// riders, w a stadium's floodlights.
     pub surfaces: [f32; 4],
 }
 

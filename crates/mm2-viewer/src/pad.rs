@@ -25,7 +25,8 @@
 //! towards the rider (stick pulled back).
 
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use gilrs::ff::{BaseEffect, BaseEffectType, Effect, EffectBuilder};
 use gilrs::{Axis, Button, Gamepad, GamepadId, Gilrs, MappingSource};

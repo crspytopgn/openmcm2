@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenMCM2</title>
+<style>
+  :root { --bg: #111; --fg: #eee; --dim: #999; --accent: #e8a33a; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 16px/1.5 system-ui, sans-serif; overflow: hidden; }
+  #mm2 { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; }
+  #setup { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); padding: 16px; }
+  #setup > div { max-width: 34rem; }
+  h1 { margin: 0 0 .5rem; font-size: 1.6rem; }
+  p { color: var(--dim); }
+  button, label.button { display: inline-block; background: var(--accent); color: #111; border: 0;
+    border-radius: 6px; padding: .6rem 1.1rem; font: inherit; font-weight: 600; cursor: pointer; }
+  button.plain { background: none; color: var(--dim); text-decoration: underline; padding: .6rem .4rem; }
+  input[type=file] { display: none; }
+  progress { width: 100%; height: 10px; margin-top: 1rem; }
+  #why { color: #f77; white-space: pre-wrap; }
+  .support { margin-top: 1.5rem; padding: 1rem; border: 1px solid #333; border-radius: 8px; }
+  .support h2 { margin: 0 0 .3rem; font-size: 1.05rem; }
+  .support p { margin: 0 0 .8rem; }
+  a.button { display: inline-block; background: var(--accent); color: #111; border-radius: 6px;
+    padding: .45rem .9rem; font-weight: 600; text-decoration: none; }
+  /* While playing: a small link in the corner, faded until the pointer comes near. */
+  #heart { position: fixed; top: 8px; right: 8px; padding: .3rem .7rem; border-radius: 999px;
+    background: rgba(0,0,0,.6); color: var(--fg); font-size: .85rem; text-decoration: none;
+    opacity: .9; transition: opacity .6s; }
+  #heart.faded { opacity: 0; }
+  #heart:hover { opacity: 1; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="mm2" tabindex="0"></canvas>
+<div id="setup"><div>
+  <h1>OpenMCM2</h1>
+  <p>Motocross Madness 2, running in your browser. It plays from your own copy of the game:
+    pick your installed game folder (the one with the <code>UI</code>, <code>RES</code> and
+    <code>TERAFORM</code> folders in it). Nothing is uploaded; the files stay on this computer.</p>
+  <div id="pick">
+    <label class="button" for="folder">Choose game folder</label>
+    <input id="folder" type="file" webkitdirectory multiple>
+    <p><label><input id="keep" type="checkbox" checked> Remember it in this browser</label></p>
+  </div>
+  <div id="kept" hidden>
+    <button id="play">Play</button>
+    <button id="forget" class="plain">Use another folder</button>
+  </div>
+  <progress id="bar" hidden></progress>
+  <p id="status"></p>
+  <p id="why"></p>
+  <div class="support">
+    <h2>Enjoying it? Help keep it going</h2>
+    <p>OpenMCM2 is free and always will be. It's made with paid AI tools, though, and those cost
+      real money every month. If you enjoy it, a small donation helps cover that and pays for
+      future updates: more fixes, more tracks and more of the original game brought back.</p>
+    <a class="button" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener"><span aria-hidden="true">♥</span> Donate on GitHub Sponsors</a>
+  </div>
+</div></div>
+<a id="heart" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener" hidden><span aria-hidden="true">♥</span> Enjoying it? Support OpenMCM2</a>
+<script type="module">
+import * as fs from "./mm2fs.js";
+
+const $ = (id) => document.getElementById(id);
+const status = (t) => ($("status").textContent = t);
+globalThis.mm2page = {
+  started() {
+    $("setup").hidden = true;
+    $("mm2").focus();
+    // Shown for a moment, then only when the pointer is on it.
+    $("heart").hidden = false;
+    setTimeout(() => $("heart").classList.add("faded"), 8000);
+  },
+  fail(why) {
+    $("setup").hidden = false;
+    $("bar").hidden = true;
+    status("The game could not start.");
+    $("why").textContent = why;
+  },
+};
+
+// The folder that holds UI/MAINMENU.DAT, among the picked files.
+function gameRoot(paths) {
+  for (const p of paths) {
+    const m = /^(.*?)ui\/mainmenu\.dat$/i.exec(p);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+async function readAll(list) {
+  const bar = $("bar");
+  bar.hidden = false;
+  bar.max = list.reduce((n, [, b]) => n + b.size, 0);
+  bar.value = 0;
+  let next = 0;
+  async function worker() {
+    while (next < list.length) {
+      const [path, blob] = list[next++];
+      fs.put(path, new Uint8Array(await blob.arrayBuffer()));
+      bar.value += blob.size;
+      status(`Reading your game… ${Math.round((100 * bar.value) / bar.max)}%`);
+    }
+  }
+  await Promise.all(Array.from({ length: 8 }, worker));
+}
+
+async function start(list) {
+  if (!navigator.gpu) {
+    mm2page.fail("This browser has no WebGPU. Try a recent Chrome or Edge, or Safari 26.");
+    return;
+  }
+  $("pick").hidden = $("kept").hidden = true;
+  $("why").textContent = "";
+  await readAll(list);
+  await fs.loadUser().catch((e) => console.warn("saves not read", e));
+  status("Starting…");
+  const game = await import("./pkg/mm2-viewer.js");
+  await game.default();
+}
+
+$("folder").addEventListener("change", async (e) => {
+  const picked = [...e.target.files];
+  const root = gameRoot(picked.map((f) => f.webkitRelativePath));
+  if (root === null) {
+    $("why").textContent = "That folder has no UI/MAINMENU.DAT in it. Pick the folder the game is installed in.";
+    return;
+  }
+  const list = picked
+    .filter((f) => f.webkitRelativePath.startsWith(root))
+    .map((f) => ["/game/" + f.webkitRelativePath.slice(root.length), f]);
+  if ($("keep").checked) {
+    navigator.storage?.persist?.();
+    await fs.keepGame(list).catch((e) => console.warn("game not kept", e));
+  }
+  start(list);
+});
+
+$("forget").addEventListener("click", async () => {
+  await fs.forgetGame();
+  $("kept").hidden = true;
+  $("pick").hidden = false;
+  status("");
+});
+
+const kept = await fs.keptGame().catch(() => null);
+if (kept) {
+  $("pick").hidden = true;
+  $("kept").hidden = false;
+  status("Your game folder is remembered in this browser.");
+  $("play").addEventListener("click", () => start(kept));
+}
+</script>
+</body>
+</html>

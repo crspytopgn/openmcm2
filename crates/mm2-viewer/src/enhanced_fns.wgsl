@@ -51,6 +51,9 @@ fn sun_visible(world: vec3<f32>, n: vec3<f32>, dist: f32, lift: f32) -> f32 {
         return 1.0;
     }
     let step = 1.0 / 2048.0;
+    if (enh.texel.w > 0.5) {
+        return mix(soft_sun(uv, p.z, c, texel), 1.0, smoothstep(enh.splits.w * 0.9, enh.splits.w, dist));
+    }
     var sum = 0.0;
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
@@ -61,6 +64,55 @@ fn sun_visible(world: vec3<f32>, n: vec3<f32>, dist: f32, lift: f32) -> f32 {
     // Fade out over the last tenth of the last cascade.
     let fade = smoothstep(enh.splits.w * 0.9, enh.splits.w, dist);
     return mix(seen, 1.0, fade);
+}
+
+const POISSON: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
+    vec2<f32>(-0.94201624, -0.39906216), vec2<f32>(0.94558609, -0.76890725),
+    vec2<f32>(-0.09418410, -0.92938870), vec2<f32>(0.34495938, 0.29387760),
+    vec2<f32>(-0.91588581, 0.45771432), vec2<f32>(-0.81544232, -0.87912464),
+    vec2<f32>(-0.38277543, 0.27676845), vec2<f32>(0.97484398, 0.75648379),
+    vec2<f32>(0.44323325, -0.97511554), vec2<f32>(0.53742981, -0.47373420),
+    vec2<f32>(-0.26496911, -0.41893023), vec2<f32>(0.79197514, 0.19090188),
+    vec2<f32>(-0.24188840, 0.99706507), vec2<f32>(-0.81409955, 0.91437590),
+    vec2<f32>(0.19984126, 0.78641367), vec2<f32>(0.14383161, -0.14100790),
+);
+
+// Soft sun shadows (percentage-closer soft shadows, Fernando 2005): how far
+// the shadow lies from what casts it sets how soft its edge is, as the
+// sun's disc blurs a real one: sharp where a tyre meets the ground, softer
+// under a tree's crown.
+fn soft_sun(uv: vec2<f32>, z: f32, c: u32, texel: f32) -> f32 {
+    let side = 2048.0;
+    // The cascade's depth, ft (enhance::cascades: 2 radii plus the reach
+    // toward the sun).
+    let depth_ft = side * texel + 1500.0;
+    // A turn of the taps of its own for each pixel, so the few taps blur
+    // into a smooth edge rather than repeat.
+    let spin = fract(sin(dot(uv * side, vec2<f32>(12.9898, 78.233))) * 43758.547) * 6.2832;
+    let turn = mat2x2<f32>(cos(spin), sin(spin), -sin(spin), cos(spin));
+    // What lies between it and the sun, within 6 texels.
+    var blockers = 0.0;
+    var count = 0.0;
+    for (var i = 0; i < 16; i++) {
+        let at = uv + turn * POISSON[i] * 6.0 / side;
+        let t = clamp(vec2<i32>(at * side), vec2<i32>(0), vec2<i32>(2047));
+        let d = textureLoad(sun_map, t, c, 0);
+        if (d < z) {
+            blockers += d;
+            count += 1.0;
+        }
+    }
+    if (count < 0.5) {
+        return 1.0;
+    }
+    let gap_ft = (z - blockers / count) * depth_ft;
+    // The sun's disc, about half a degree across.
+    let radius = clamp(gap_ft * 0.022 / texel, 1.0, 8.0);
+    var sum = 0.0;
+    for (var i = 0; i < 16; i++) {
+        sum += textureSampleCompareLevel(sun_map, sun_sampler, uv + turn * POISSON[i] * radius / side, c, z);
+    }
+    return sum / 16.0;
 }
 
 // The enhanced fog: a haze that thickens with distance and never quite
@@ -76,4 +128,26 @@ fn apply_haze(c: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
     let range = max(globals.fog_range.y - globals.fog_range.x, 1.0);
     let fog = clamp((dist - globals.fog_range.x) / range, 0.0, 1.0);
     return mix(c, globals.fog.rgb, fog);
+}
+
+// A stadium's floodlights (enh.surfaces.w): four banks high in the
+// corners, in place of the open sky's one sun. x the soft light they add
+// on a surface facing `n`, y their glints off it seen from `v`, for a
+// surface `shine` 0 (matte) to 1 (gloss).
+fn lamps(n: vec3<f32>, v: vec3<f32>, shine: f32) -> vec2<f32> {
+    if (enh.surfaces.w < 0.5) {
+        return vec2<f32>(0.0);
+    }
+    var soft = 0.0;
+    var glint = 0.0;
+    let power = mix(12.0, 90.0, shine);
+    for (var i = 0; i < 4; i++) {
+        let sx = select(-1.0, 1.0, (i & 1) == 1);
+        let sz = select(-1.0, 1.0, (i & 2) == 2);
+        let l = normalize(vec3<f32>(sx * 0.8, 1.0, sz * 0.8));
+        soft += max(dot(n, l), 0.0);
+        let h = normalize(l + v);
+        glint += pow(max(dot(n, h), 0.0), power) * (power + 2.0) / 8.0;
+    }
+    return vec2<f32>(soft * 0.12, glint * 0.03);
 }

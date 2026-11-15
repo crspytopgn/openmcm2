@@ -19,3 +19,4 @@
 *.wav
 *.vcr
 *.gho
+/web/pkg

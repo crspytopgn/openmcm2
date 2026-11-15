@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn game_lists() {
         let game = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../GAME");
-        if !game.join("UI/UIRES.RES").is_file() {
+        if !crate::fs::is_file(game.join("UI/UIRES.RES")) {
             return;
         }
         let r = Roster::load(&game);

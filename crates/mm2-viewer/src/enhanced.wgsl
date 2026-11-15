@@ -11,7 +11,7 @@ struct Enh {
     sun: vec4<f32>,
     to_sun: vec4<f32>,
     fog: vec4<f32>,
-    // Each cascade's texel, ft.
+    // Each cascade's texel, ft; w soft shadows.
     texel: vec4<f32>,
     // The clock (s), wetness, rain, cloud cover.
     world: vec4<f32>,

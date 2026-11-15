@@ -83,7 +83,7 @@ struct Pack {
 
 impl Pack {
     fn load(path: &Path) -> Option<Pack> {
-        let bytes = std::fs::read(path)
+        let bytes = crate::fs::read(path)
             .map_err(|e| eprintln!("{}: {e}", path.display()))
             .ok()?;
         let dialog = {
@@ -143,12 +143,12 @@ fn font_files() -> Vec<PathBuf> {
     }
     let mut files = Vec::new();
     while let Some((dir, depth)) = dirs.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
+        let Ok(entries) = crate::fs::read_dir(&dir) else {
             continue;
         };
         for e in entries.flatten() {
             let p = e.path();
-            if p.is_dir() {
+            if crate::fs::is_dir(&p) {
                 if depth < 4 {
                     dirs.push((p, depth + 1));
                 }
@@ -190,7 +190,7 @@ impl Fonts {
                 .map(PathBuf::from)
                 .chain(named.cloned())
                 .find_map(|p| {
-                    let bytes = std::fs::read(p).ok()?;
+                    let bytes = crate::fs::read(p).ok()?;
                     ab_glyph::FontVec::try_from_vec(bytes).ok()
                 })
         };
@@ -401,7 +401,7 @@ impl Ui {
     pub fn new(game: &Path) -> Self {
         let dir = game.join("UI");
         let strings = |name: &str| {
-            std::fs::read(game.join(name))
+            crate::fs::read(game.join(name))
                 .ok()
                 .and_then(|b| mm2_formats::pe::strings(&b).ok())
                 .unwrap_or_default()

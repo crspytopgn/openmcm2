@@ -120,7 +120,7 @@ impl Tweaks {
 fn now() -> &'static RwLock<Tweaks> {
     static NOW: OnceLock<RwLock<Tweaks>> = OnceLock::new();
     NOW.get_or_init(|| {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = crate::args().collect();
         RwLock::new(Tweaks::from_args(&args))
     })
 }

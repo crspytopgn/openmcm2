@@ -3,7 +3,10 @@ name: Deploy site to GitHub Pages
 on:
   push:
     branches: [main]
-    paths: [site/**, .github/workflows/pages.yml]
+    paths: [site/**, web/**, crates/**, Cargo.lock, tools/build-web.sh, .github/workflows/pages.yml]
+  # So the site's version text follows each release.
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -23,6 +26,24 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # The browser version, served at /play. It holds no game data: the
+      # player picks their own copy of the game on the page.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Build the browser version
+        run: |
+          version=$(grep -A1 'name = "wasm-bindgen"$' Cargo.lock | sed -n 's/version = "\(.*\)"/\1/p')
+          cargo install wasm-bindgen-cli --version "$version" --locked
+          sh tools/build-web.sh
+          mkdir -p site/play
+          cp -R web/. site/play/
+      - name: Show the latest release's version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(gh api repos/${{ github.repository }}/releases/latest --jq .tag_name | sed 's/^v//')
+          case "$v" in [0-9]*.[0-9]*.[0-9]*) sed -i "s|<span class=\"ver\">[^<]*</span>|<span class=\"ver\">$v</span>|g" site/index.html ;; esac
       - uses: actions/configure-pages@v5
         with:
           enablement: true

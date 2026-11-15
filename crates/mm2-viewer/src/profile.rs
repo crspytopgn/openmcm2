@@ -252,7 +252,7 @@ impl Controls {
 
     /// The factory map, from the game's `UI/PRESET.CTL`.
     pub fn preset(game: &Path) -> Controls {
-        let text = std::fs::read(game.join("UI").join("PRESET.CTL"))
+        let text = crate::fs::read(game.join("UI").join("PRESET.CTL"))
             .map(|b| b.iter().map(|&c| c as char).collect::<String>())
             .unwrap_or_default();
         let mut c = Controls::parse(&text);
@@ -545,10 +545,10 @@ impl Store {
     /// The profiles there are, sorted as the game's list sorts them
     /// (ignoring case).
     pub fn list(&self) -> Vec<String> {
-        let mut names: Vec<String> = std::fs::read_dir(self.profiles())
+        let mut names: Vec<String> = crate::fs::read_dir(self.profiles())
             .map(|d| {
                 d.filter_map(|e| e.ok())
-                    .filter(|e| e.path().is_dir())
+                    .filter(|e| crate::fs::is_dir(e.path()))
                     .filter_map(|e| e.file_name().into_string().ok())
                     .collect()
             })
@@ -564,8 +564,8 @@ impl Store {
     /// Reads a profile (`0x528820`); `None` when it has no `.prf`.
     pub fn load(&self, name: &str, messages: [String; 10], preset: Controls) -> Option<Profile> {
         let folder = self.profiles().join(name);
-        let text = std::fs::read_to_string(folder.join(format!("{name}.prf"))).ok()?;
-        let keys = std::fs::read_to_string(folder.join("control.ctl"))
+        let text = crate::fs::read_to_string(folder.join(format!("{name}.prf"))).ok()?;
+        let keys = crate::fs::read_to_string(folder.join("control.ctl"))
             .map(|t| Controls::parse(&t))
             .ok()
             .filter(|c| !c.keys.is_empty())
@@ -582,9 +582,9 @@ impl Store {
             return Ok(());
         }
         let folder = self.profiles().join(&p.name);
-        std::fs::create_dir_all(&folder)?;
-        std::fs::write(folder.join(format!("{}.prf", p.name)), p.text())?;
-        std::fs::write(folder.join("control.ctl"), p.keys.text())?;
+        crate::fs::create_dir_all(&folder)?;
+        crate::fs::write(folder.join(format!("{}.prf", p.name)), p.text())?;
+        crate::fs::write(folder.join("control.ctl"), p.keys.text())?;
         let mut s = self.settings();
         s.set("MRUProfile", &p.name);
         self.save_settings(&s)
@@ -605,23 +605,27 @@ impl Store {
         if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
             return Ok(());
         }
-        std::fs::remove_dir_all(self.profiles().join(name))
+        crate::fs::remove_dir_all(self.profiles().join(name))
     }
 
     /// The machine's settings (the game's registry key).
     pub fn settings(&self) -> Settings {
-        let text = std::fs::read_to_string(self.dir.join("settings.ini")).unwrap_or_default();
+        let text = crate::fs::read_to_string(self.dir.join("settings.ini")).unwrap_or_default();
         Settings::parse(&text)
     }
 
     pub fn save_settings(&self, s: &Settings) -> std::io::Result<()> {
-        std::fs::create_dir_all(&self.dir)?;
-        std::fs::write(self.dir.join("settings.ini"), s.text())
+        crate::fs::create_dir_all(&self.dir)?;
+        crate::fs::write(self.dir.join("settings.ini"), s.text())
     }
 }
 
 /// The folder saves go in unless `MM2_USER_DIR` names another.
 pub fn user_dir() -> PathBuf {
+    // In a browser, the page keeps the saves.
+    if cfg!(target_arch = "wasm32") {
+        return PathBuf::from("/user");
+    }
     let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
     if cfg!(target_os = "macos") {
         if let Some(home) = env("HOME") {
@@ -778,7 +782,7 @@ mod tests {
         assert_eq!(q.name, "Ann");
         store.remove("Ann").unwrap();
         assert!(store.list().is_empty());
-        let _ = std::fs::remove_dir_all(dir);
+        let _ = crate::fs::remove_dir_all(dir);
     }
 
     #[test]

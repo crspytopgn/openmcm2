@@ -269,8 +269,8 @@ impl Recording {
 /// The date and time, as the game names a tape until it is described
 /// ("4/9/2000 12:19 AM"). In UTC; the port has no time zone to hand.
 fn date() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let secs = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs()) as i64;
     let (days, rest) = (secs.div_euclid(86400), secs.rem_euclid(86400));
     // Days to a civil date (Howard Hinnant's algorithm).
@@ -455,7 +455,7 @@ pub enum Ask {
 
 impl Replay {
     pub fn open(path: &Path) -> Option<Replay> {
-        let bytes = std::fs::read(path)
+        let bytes = crate::fs::read(path)
             .map_err(|e| eprintln!("{}: {e}", path.display()))
             .ok()?;
         let tape = Tape::parse(&bytes)
@@ -652,15 +652,15 @@ pub fn record_dir(user_dir: &Path) -> PathBuf {
 /// recorded, so saving the same race again keeps one file.
 pub fn save(tape: &Path, user_dir: &Path, track: &str) -> std::io::Result<PathBuf> {
     let dir = record_dir(user_dir);
-    std::fs::create_dir_all(&dir)?;
-    let path = match Tape::parse(&std::fs::read(tape)?).ok().and_then(|t| file_name(&t, track)) {
+    crate::fs::create_dir_all(&dir)?;
+    let path = match Tape::parse(&crate::fs::read(tape)?).ok().and_then(|t| file_name(&t, track)) {
         Some(name) => dir.join(name),
         None => free_name(user_dir, "Replay", "vcr")?,
     };
     // A saved replay played again is already kept.
     let same = |a: &Path, b: &Path| a.canonicalize().ok().zip(b.canonicalize().ok()).is_some_and(|(a, b)| a == b);
     if !same(tape, &path) {
-        std::fs::copy(tape, &path)?;
+        crate::fs::copy(tape, &path)?;
     }
     Ok(path)
 }
@@ -688,19 +688,19 @@ fn file_name(tape: &Tape, track: &str) -> Option<String> {
 /// Keeps a ghost race's best lap as the next free "Ghost N.gho".
 pub fn save_ghost(tape: &Tape, user_dir: &Path) -> std::io::Result<PathBuf> {
     let bytes = tape.write();
-    std::fs::write(user_dir.join("VCRghost.dat"), &bytes)?;
+    crate::fs::write(user_dir.join("VCRghost.dat"), &bytes)?;
     let path = free_name(user_dir, "Ghost", "gho")?;
-    std::fs::write(&path, bytes)?;
+    crate::fs::write(&path, bytes)?;
     Ok(path)
 }
 
 fn free_name(user_dir: &Path, stem: &str, ext: &str) -> std::io::Result<PathBuf> {
     let dir = record_dir(user_dir);
-    std::fs::create_dir_all(&dir)?;
+    crate::fs::create_dir_all(&dir)?;
     let mut n = 1;
     loop {
         let p = dir.join(format!("{stem} {n}.{ext}"));
-        if !p.exists() {
+        if !crate::fs::found(&p) {
             return Ok(p);
         }
         n += 1;

@@ -133,7 +133,7 @@ impl Data {
                 .get(name)
                 .map(|b| String::from_utf8_lossy(b).into_owned())
         };
-        let names = std::fs::read(game.join("UI").join("PCNAMES.TXT"))
+        let names = crate::fs::read(game.join("UI").join("PCNAMES.TXT"))
             .map(|b| {
                 String::from_utf8_lossy(&b)
                     .lines()
@@ -308,8 +308,8 @@ impl Rng {
     }
 
     pub fn from_time() -> Rng {
-        let t = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let t = web_time::SystemTime::now()
+            .duration_since(web_time::UNIX_EPOCH)
             .map_or(1, |d| d.as_nanos() as u64);
         Rng::new(t)
     }
@@ -809,10 +809,10 @@ impl Careers {
     }
 
     pub fn list(&self) -> Vec<Circuit> {
-        let mut v: Vec<Circuit> = std::fs::read_dir(&self.dir)
+        let mut v: Vec<Circuit> = crate::fs::read_dir(&self.dir)
             .map(|d| {
                 d.filter_map(|e| e.ok())
-                    .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+                    .filter_map(|e| crate::fs::read_to_string(e.path()).ok())
                     .filter_map(|t| Circuit::parse(&t))
                     .collect()
             })
@@ -822,12 +822,12 @@ impl Careers {
     }
 
     pub fn save(&self, c: &Circuit) -> std::io::Result<()> {
-        std::fs::create_dir_all(&self.dir)?;
-        std::fs::write(self.path(&c.name), c.text())
+        crate::fs::create_dir_all(&self.dir)?;
+        crate::fs::write(self.path(&c.name), c.text())
     }
 
     pub fn remove(&self, name: &str) -> std::io::Result<()> {
-        std::fs::remove_file(self.path(name))
+        crate::fs::remove_file(self.path(name))
     }
 }
 

@@ -89,7 +89,7 @@ impl HiRes {
         let mut files = HashMap::new();
         let mut stack = vec![dir.to_path_buf()];
         while let Some(dir) = stack.pop() {
-            for entry in std::fs::read_dir(&dir)? {
+            for entry in crate::fs::read_dir(&dir)? {
                 let path = entry?.path();
                 if path.is_dir() {
                     stack.push(path);
@@ -228,7 +228,7 @@ pub fn image(hires: Option<&HiRes>, key: &str, tex: &Texture) -> Image {
 
 /// Reads a PNG as top-down RGBA8.
 fn read_png(path: &Path) -> Result<(u32, u32, Vec<u8>), Box<dyn std::error::Error>> {
-    let file = std::io::BufReader::new(std::fs::File::open(path)?);
+    let file = std::io::BufReader::new(crate::fs::File::open(path)?);
     let mut decoder = png::Decoder::new(file);
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info()?;

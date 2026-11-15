@@ -1,4 +1,29 @@
-# OpenMCM2 0.3.3
+# OpenMCM2 0.4.0
+
+## New in 0.4.0
+
+* **Play in your browser:** OpenMCM2 now runs in a browser with WebGPU
+  (a recent Chrome or Edge, or Safari 26) at
+  https://crspytopgn.github.io/openmcm2/play/. Like the desktop version,
+  it plays from your own copy of the game: pick your installed game
+  folder, your CD or a CD image. The files are read on your computer and
+  never uploaded, and the page holds no game data. It also has touch
+  controls for phones and tablets. Network races aren't in the browser
+  version yet.
+* **More in the Enhanced look**, each with its own off switch (see
+  `docs/enhanced-graphics.md`):
+  * photo materials (wood, metal, concrete, straw) on every track's
+    buildings, fences, bridges and vehicles (`no-surfaces`)
+  * trees and bushes that sway in the wind (`no-trees`)
+  * soft shadows that blur the further they fall (`no-soft`)
+  * track wear: the racing line packs down darker lap after lap
+    (`no-wear`)
+  * rounder bikes and riders (`no-round`)
+  * floodlights in the supercross stadiums (`no-floodlights`)
+
+  The Original look is unchanged, and so are the physics.
+
+If you're on 0.1.6 or later, the launcher will offer this update itself.
 
 ## New in 0.3.3
 

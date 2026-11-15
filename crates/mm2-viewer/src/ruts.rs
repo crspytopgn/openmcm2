@@ -37,11 +37,16 @@ pub struct RutPainter {
     /// The map's corner (x, z) and side, ft.
     origin: Vec2,
     size: f32,
+    /// How deep one tyre's pass marks it: all at once for ruts, a tenth
+    /// for the wear, which adds up over the passes.
+    pass: f32,
 }
 
 impl RutPainter {
-    /// Over a terrain `size` ft a side, its corner at `origin`.
-    pub fn new(device: &wgpu::Device, origin: Vec2, size: f32) -> RutPainter {
+    /// Over a terrain `size` ft a side, its corner at `origin`; for the
+    /// gentle track `wear` (passes add up) rather than ruts (the deepest
+    /// pass is kept).
+    pub fn new(device: &wgpu::Device, origin: Vec2, size: f32, wear: bool) -> RutPainter {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ruts"),
             source: wgpu::ShaderSource::Wgsl(include_str!("ruts.wgsl").into()),
@@ -69,7 +74,7 @@ impl RutPainter {
                         color: wgpu::BlendComponent {
                             src_factor: wgpu::BlendFactor::One,
                             dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Max,
+                            operation: if wear { wgpu::BlendOperation::Add } else { wgpu::BlendOperation::Max },
                         },
                         alpha: wgpu::BlendComponent::REPLACE,
                     }),
@@ -96,12 +101,14 @@ impl RutPainter {
             pending: Vec::new(),
             origin,
             size,
+            pass: if wear { PASS / 7.0 } else { PASS },
         }
     }
 
-    /// The map's corner and side for the shaders: x, z, side, on.
+    /// The map's corner and side for the shaders: x, z, side, and 1 for
+    /// ruts or 2 for the wear.
     pub fn uniform(&self) -> [f32; 4] {
-        [self.origin.x, self.origin.y, self.size, 1.0]
+        [self.origin.x, self.origin.y, self.size, if self.pass < PASS { 2.0 } else { 1.0 }]
     }
 
     /// Where each bike's tyres touch the ground this frame (game
@@ -123,7 +130,7 @@ impl RutPainter {
                         let (a, b) = ((a - self.origin) / self.size, (b - self.origin) / self.size);
                         self.pending.push(Line {
                             ends: [a.x, a.y, b.x, b.y],
-                            shape: [half / self.size, PASS * (WIDTH * 0.5 / half), 0.0, 0.0],
+                            shape: [half / self.size, self.pass * (WIDTH * 0.5 / half), 0.0, 0.0],
                         });
                     }
                 }
