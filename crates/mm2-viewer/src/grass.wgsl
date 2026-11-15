@@ -189,7 +189,7 @@ fn fs_main(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4<f32
     let facing = max(dot(n, globals.to_sun.xyz), 0.0) * 0.6 + 0.4 * max(globals.to_sun.y, 0.0);
     let v = normalize(globals.camera.xyz - in.world);
     let through = pow(max(dot(-v, globals.to_sun.xyz), 0.0), 4.0) * 0.5;
-    let game = globals.ambient.rgb * 1.05 + globals.sun.rgb * (facing + through) * sun;
+    let game = globals.ambient.rgb * 1.05 * sky_seen(in.world) + globals.sun.rgb * (facing + through) * sun;
     let lit = in.colour * pow(soft_clamp(game), vec3<f32>(2.2)) * root * (1.0 - enh.world.y * 0.2);
     return vec4<f32>(apply_haze(lit, in.world, dist), cover);
 }

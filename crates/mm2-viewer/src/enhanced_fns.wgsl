@@ -191,3 +191,22 @@ fn sun_point(p: vec3<f32>) -> f32 {
 fn reflection(origin: vec3<f32>, dir: vec3<f32>, sky: vec3<f32>) -> vec3<f32> {
     return sky;
 }
+
+// How much of the sky's light reaches `world` past the hills round it
+// (skylight.rs), 1 all: baked for the ground, and for what stands above it
+// more of the sky the higher it is.
+fn sky_seen(world: vec3<f32>) -> f32 {
+    if (enh.sky_light.z <= 0.0) {
+        return 1.0;
+    }
+    let uv = (vec2<f32>(world.x, -world.z) / enh.sky_light.y + 0.5) / enh.sky_light.x;
+    if (any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0))) {
+        return 1.0;
+    }
+    let m = textureSampleLevel(sky_map, flood_sampler, uv, 0.0);
+    let ground = enh.sky_height.x + m.g * enh.sky_height.y;
+    // Squared: a hollow that hides a fifth of the sky shows it, open
+    // ground (nearly all of it) hardly changes.
+    let seen = mix(m.r * m.r, 1.0, smoothstep(2.0, 30.0, world.y - ground));
+    return mix(1.0, seen, enh.sky_light.z);
+}
