@@ -1,4 +1,16 @@
-# OpenMCM2 0.4.2
+# OpenMCM2 0.4.3
+
+## New in 0.4.3
+
+Fixes for the browser version:
+
+* **Right brightness:** it drew everything too dark, in every browser.
+* **Sound:** it had none. Safari starts it after your first click or key.
+* **Original or Enhanced:** pick the look on the start page (it's
+  remembered). While playing, the button in the top-left corner shows
+  which look is on and switches it.
+
+The desktop version is unchanged in this release.
 
 ## New in 0.4.2
 
