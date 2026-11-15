@@ -110,6 +110,7 @@ mod lapgap;
 mod tweaks;
 mod display;
 mod screens;
+mod share;
 mod sky;
 mod sound;
 mod sprites;

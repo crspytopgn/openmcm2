@@ -130,7 +130,7 @@ pub fn with_addons(path: &Path, base: Vec<u8>) -> Vec<u8> {
         .collect();
     // The player's own paints and outfits join the bikes' archive under
     // names of their own (the "own skins" extra).
-    if name.eq_ignore_ascii_case("BIKE.RES") && crate::tweaks::more().own_skins {
+    if name.eq_ignore_ascii_case("BIKE.RES") && (crate::tweaks::more().own_skins || crate::tweaks::more().lobby_downloads) {
         if let Some(game) = res.parent() {
             let mut files = Vec::new();
             for folder in ["BIKES", "RIDERS"] {

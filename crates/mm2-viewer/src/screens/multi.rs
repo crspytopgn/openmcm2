@@ -150,6 +150,10 @@ pub struct Multi {
     picked: Option<usize>,
     /// The host's game as last sent.
     sent: Option<GameInfo>,
+    /// The lobby downloads extra: what is coming and going, and the
+    /// host's game as last heard.
+    share: crate::share::Share,
+    heard_game: Option<GameInfo>,
 }
 
 /// The Event page's controls a joined player may not change.
@@ -207,6 +211,8 @@ impl Multi {
             finder: Some(net::Finder::new()),
             picked: None,
             sent: None,
+            share: Default::default(),
+            heard_game: None,
         })
     }
 
@@ -255,6 +261,14 @@ impl Multi {
             tag_ball: g.tag_ball,
             tag_stunts: g.tag_stunts,
             collisions: g.collisions,
+        }
+    }
+
+    /// The game in the lobby: the host's own, or as last heard from it.
+    fn lobby_game(&mut self, ui: &Ui) -> Option<GameInfo> {
+        match net::with(|s| s.host).unwrap_or(false) {
+            true => Some(self.game_info(ui)),
+            false => self.heard_game.clone(),
         }
     }
 
@@ -761,6 +775,7 @@ impl Multi {
                 Heard::Players => self.fill_players(),
                 Heard::Chat(line) => self.say(line),
                 Heard::Game(g) => {
+                    self.heard_game = Some(g.clone());
                     self.apply_game(cx.ui, &g);
                     if let View::Lobby { tab, sub: None, .. } = &self.view {
                         let tab = *tab;
@@ -774,6 +789,26 @@ impl Multi {
                         return Go::Race(Box::new(setup));
                     }
                 }
+                Heard::File(m) if crate::share::on() => {
+                    let game = cx.game().to_path_buf();
+                    let me = self.me(cx);
+                    let info = self.lobby_game(cx.ui);
+                    let track = info.as_ref().and_then(|g| Some((EventKind::from_number(g.event as u32)?, g.track.as_str())));
+                    if let Some(line) = self.share.heard(&game, m, track, (&me.ride.texture, &me.ride.outfit)) {
+                        let got_track = line.starts_with("Got the track");
+                        self.say(line);
+                        // A new track joins its event's list.
+                        if got_track {
+                            self.tracks.clear();
+                            if let Some(g) = info {
+                                self.apply_game(cx.ui, &g);
+                                if let View::Lobby { tab: 0, sub: None, .. } = &self.view {
+                                    self.page(cx, 0);
+                                }
+                            }
+                        }
+                    }
+                }
                 Heard::Lost => {
                     net::set(None);
                     // "<session> has disconnected".
@@ -782,6 +817,20 @@ impl Multi {
                 }
                 _ => {}
             }
+        }
+        // The lobby downloads extra: ask for what's missing, send what's
+        // asked.
+        if crate::share::on() && net::with(|_| ()).is_some() {
+            let game = cx.game().to_path_buf();
+            let info = self.lobby_game(cx.ui);
+            let track = info.as_ref().and_then(|g| Some((EventKind::from_number(g.event as u32)?, g.track.as_str())));
+            let (players, me) = net::with(|s| (s.players.clone(), s.me)).unwrap_or_default();
+            if me != u8::MAX {
+                for line in self.share.want(&game, track, &players, me) {
+                    self.say(line);
+                }
+            }
+            self.share.pump();
         }
         // The host's choices go to everyone as they change.
         if net::with(|s| s.host).unwrap_or(false) {
