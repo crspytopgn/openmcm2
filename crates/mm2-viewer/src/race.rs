@@ -927,6 +927,11 @@ pub struct Racer {
     pub laps: u32,
     pub finished: Option<f32>,
     pub lap_times: Vec<f32>,
+    /// How long each lap was spent off the course (the lap races' tracker
+    /// only), and the time off it so far this lap: the lap leaderboards
+    /// don't count a lap with much of it.
+    pub lap_off: Vec<f32>,
+    lap_off_now: f32,
     /// What the rider asked of the bike last step (the engine sound
     /// follows the gas).
     pub controls: Controls,
@@ -1045,6 +1050,8 @@ impl Racer {
             laps: 0,
             finished: None,
             lap_times: Vec::new(),
+            lap_off: Vec::new(),
+            lap_off_now: 0.0,
             lap_gap: Default::default(),
             controls: Controls::default(),
             lap_start: 0.0,
@@ -1364,6 +1371,7 @@ impl Racer {
             self.passed = 0;
             self.lap_times.push(clock - self.lap_start);
             self.lap_gap.lap(clock - self.lap_start, clock);
+            self.lap_off.push(std::mem::take(&mut self.lap_off_now));
             self.lap_start = clock;
             if self.laps >= laps {
                 self.finished = Some(clock);
@@ -1686,6 +1694,7 @@ impl Racer {
             self.passed = 0;
             self.lap_times.push(clock - self.lap_start);
             self.lap_gap.lap(clock - self.lap_start, clock);
+            self.lap_off.push(std::mem::take(&mut self.lap_off_now));
             self.lap_start = clock;
             self.timing.cross_line(laps, laps >= ENDLESS);
             if self.laps >= laps {
@@ -2099,6 +2108,9 @@ impl Race {
                         }
                         r.on_course = course.follow(probe, look, &mut r.place).is_some();
                         r.off_course = if r.on_course { 0.0 } else { r.off_course + step };
+                        if !r.on_course {
+                            r.lap_off_now += step;
+                        }
                     }
                     // Over 6 s off the course in a lap race (not practice),
                     // the player too is put back where they left it,

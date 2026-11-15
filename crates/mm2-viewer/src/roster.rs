@@ -18,6 +18,9 @@ pub struct BikeChoice {
     pub texture: String,
     pub cc: u32,
     pub four_stroke: bool,
+    /// The player's own paint from the game's `BIKES` folder: any engine
+    /// size, picked on the page.
+    pub own: bool,
 }
 
 /// One rider outfit.
@@ -43,9 +46,45 @@ pub struct Roster {
 
 /// Shown in the lists: `Availability` 2 and 3. 1 is kept from the player
 /// (the amateurs' kit), and 10 is the award bike, shown once the career is
-/// won (0x450630).
+/// won (0x450630). The "all gear" extra shows the amateurs' kit too.
 fn offered(availability: i32) -> bool {
-    matches!(availability, 2 | 3)
+    matches!(availability, 2 | 3) || (availability == 1 && crate::tweaks::more().all_gear)
+}
+
+/// The model a paint from the `BIKES` folder goes on: the game's template
+/// (`BIKES/BIKE01.TGA`) is laid out for the Yamaha frame.
+const OWN_MODEL: (&str, &str) = ("yamaha.mcf", "uiyamaha.mcf");
+
+/// The name a loose skin is found by in `BIKE.RES`, where
+/// [`crate::addons`] puts it: `own-bikes-<file>` or `own-riders-<file>`
+/// (no slash, as texture names lose their folders).
+pub fn own_key(folder: &str, file: &str) -> String {
+    format!("own-{}-{}", folder.to_ascii_lowercase(), file.to_ascii_lowercase())
+}
+
+/// The `.tga` files in the game folder's `folder` (`BIKES`, `RIDERS`),
+/// sorted, as (file name, shown name).
+pub fn own_files(game: &Path, folder: &str) -> Vec<(String, String)> {
+    let Some(dir) = crate::fs::read_dir(game)
+        .ok()
+        .and_then(|l| l.flatten().find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(folder)))
+        .map(|e| e.path())
+    else {
+        return Vec::new();
+    };
+    let mut out: Vec<(String, String)> = crate::fs::read_dir(&dir)
+        .map(|l| {
+            l.flatten()
+                .filter_map(|e| {
+                    let name = e.file_name().to_string_lossy().into_owned();
+                    let (stem, ext) = name.rsplit_once('.')?;
+                    ext.eq_ignore_ascii_case("tga").then(|| (name.clone(), stem.replace('_', " ")))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    out.sort_by_key(|(n, _)| n.to_ascii_lowercase());
+    out
 }
 
 impl Roster {
@@ -61,9 +100,31 @@ impl Roster {
             ar.get(name)
                 .map(|b| String::from_utf8_lossy(b).into_owned())
         };
-        Roster {
+        let mut roster = Roster {
             bikes: text("bikes.pb").map(|t| bikes(&t)).unwrap_or_default(),
             outfits: text("riders.pb").map(|t| outfits(&t)).unwrap_or_default(),
+        };
+        if crate::tweaks::more().own_skins {
+            roster.add_own(game);
+        }
+        roster
+    }
+
+    /// The player's own paints and outfits, after the game's.
+    fn add_own(&mut self, game: &Path) {
+        for (file, name) in own_files(game, "BIKES") {
+            self.bikes.push(BikeChoice {
+                name: format!("Custom {name}"),
+                model: OWN_MODEL.0.into(),
+                ui_model: OWN_MODEL.1.into(),
+                texture: own_key("BIKES", &file),
+                cc: 250,
+                four_stroke: false,
+                own: true,
+            });
+        }
+        for (file, name) in own_files(game, "RIDERS") {
+            self.outfits.push(Outfit { name: format!("Custom {name}"), file: own_key("RIDERS", &file) });
         }
     }
 
@@ -108,6 +169,7 @@ fn bikes(text: &str) -> Vec<BikeChoice> {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(250),
                 four_stroke: key("BikeFourStroke").is_some_and(|v| v.trim() == "1"),
+                own: false,
             });
         }
     }
@@ -171,5 +233,23 @@ mod tests {
         assert!(r.bikes.len() > 10, "{}", r.bikes.len());
         assert!(r.outfits.len() > 40, "{}", r.outfits.len());
         assert_eq!(r.bikes[0].name, "Honda CR125");
+    }
+}
+
+#[cfg(test)]
+mod own_tests {
+    #[test]
+    fn finds_loose_skins() {
+        let dir = std::env::temp_dir().join(format!("mm2-own-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Bikes")).unwrap();
+        std::fs::write(dir.join("Bikes/Red_One.TGA"), b"x").unwrap();
+        std::fs::write(dir.join("Bikes/a.tga"), b"x").unwrap();
+        std::fs::write(dir.join("Bikes/notes.txt"), b"x").unwrap();
+        let f = super::own_files(&dir, "BIKES");
+        assert_eq!(f, [("a.tga".to_string(), "a".to_string()), ("Red_One.TGA".into(), "Red One".into())]);
+        assert!(super::own_files(&dir, "RIDERS").is_empty());
+        assert_eq!(super::own_key("BIKES", "Red_One.TGA"), "own-bikes-red_one.tga");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

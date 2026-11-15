@@ -50,6 +50,7 @@
 // keeps stderr in last-run.log.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod addons;
 mod bars;
 mod eco;
 mod enhance;
@@ -68,6 +69,7 @@ mod crowd;
 mod cull;
 mod materials;
 mod graphics;
+mod polish;
 mod post;
 mod finish;
 mod podium;
@@ -108,6 +110,7 @@ mod lapgap;
 mod tweaks;
 mod display;
 mod screens;
+mod share;
 mod sky;
 mod sound;
 mod sprites;
@@ -203,7 +206,7 @@ fn main() -> Result<(), BoxError> {
         .and_then(|n| n.parse().ok())
         .or(tape.as_ref().map(|t| t.tape.riders.len()))
         .unwrap_or(RIDERS)
-        .clamp(1, 11);
+        .clamp(1, mm2_settings::RIDERS_MOST as usize);
     if let Some(v) = flag("--spawn") {
         let n: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
         if let [x, z, h] = n[..] {
@@ -266,6 +269,10 @@ fn main() -> Result<(), BoxError> {
             // practice uses the second).
             let slot = flag("--slot").and_then(|t| t.parse().ok()).unwrap_or(PLAYER);
             let mut r = make_race_as(&track, laps, slot).ok_or("this track has no bike to ride")?;
+            // `--view N`: presses the camera button N times first.
+            for _ in 0..flag("--view").and_then(|t| t.parse::<usize>().ok()).unwrap_or(0) {
+                r.next_view();
+            }
             // Scripted: the game's own steps, frame by frame; `--live-steps`
             // steps as live play does instead, to try frame rates.
             let live = args.iter().any(|a| a == "--live-steps");
@@ -2078,8 +2085,7 @@ fn detail_texture(res: &std::path::Path, scene: Option<&scn::Scene>) -> Option<m
 
 /// A texture in `RES/GLOBAL.RES`.
 fn global_texture(res: &std::path::Path, name: &str) -> Option<mm2_formats::tga::Image> {
-    let raw = crate::fs::read(res.join("GLOBAL.RES")).ok()?;
-    let bytes = mm2_formats::faoe::decode(&raw, "GLOBAL.RES").unwrap_or(raw);
+    let bytes = read_archive(&res.join("GLOBAL.RES")).ok()?;
     let archive = mm2_formats::rs2::Archive::parse(&bytes).ok()?;
     let data = archive
         .entries()
@@ -2090,8 +2096,7 @@ fn global_texture(res: &std::path::Path, name: &str) -> Option<mm2_formats::tga:
 }
 
 fn dirt_sheet(res: &std::path::Path) -> Option<mm2_formats::tga::Image> {
-    let raw = crate::fs::read(res.join("GLOBAL.RES")).ok()?;
-    let bytes = mm2_formats::faoe::decode(&raw, "GLOBAL.RES").unwrap_or(raw);
+    let bytes = read_archive(&res.join("GLOBAL.RES")).ok()?;
     let archive = mm2_formats::rs2::Archive::parse(&bytes).ok()?;
     let data = archive
         .entries()
@@ -2312,7 +2317,11 @@ fn results(race: &Race, ui: &ui::Ui) -> frontend::RaceResults {
 /// the profile (EditPlateNumber) and the computer riders' from their
 /// records; these are our picks until those are read.
 fn plate_number(rider: usize) -> u32 {
-    [7, 22, 4, 13, 31, 2, 18, 9, 45, 11, 26][rider % 11]
+    // Past the game's 11 (the more riders extra), numbers of their own.
+    match rider {
+        0..=10 => [7, 22, 4, 13, 31, 2, 18, 9, 45, 11, 26][rider],
+        _ => [33, 15, 27, 5, 41, 19, 8, 36, 24, 12, 48, 3, 29, 17, 38, 6, 21, 44, 14][(rider - 11) % 19],
+    }
 }
 
 /// Which of them the player rides.
@@ -2760,6 +2769,7 @@ fn replay_setup(game: &Path, tape: &mm2_formats::vcr::Tape) -> Option<frontend::
                 texture: r.bike_skin.clone(),
                 cc: r.cc,
                 four_stroke: false,
+                own: false,
             },
             outfit: r.rider_skin.clone(),
             plate: plate_number(i),
@@ -2821,11 +2831,13 @@ fn read_archive(path: &Path) -> Result<Vec<u8>, BoxError> {
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or_default();
-    match Container::detect(&raw) {
-        Container::Faoe => Ok(faoe::decode(&raw, name)?),
-        Container::Rs2 => Ok(raw),
-        Container::Unknown => Err(format!("{}: not an RS2 or FAOE archive", path.display()).into()),
-    }
+    let plain = match Container::detect(&raw) {
+        Container::Faoe => faoe::decode(&raw, name)?,
+        Container::Rs2 => raw,
+        Container::Unknown => return Err(format!("{}: not an RS2 or FAOE archive", path.display()).into()),
+    };
+    // Player-made packs in `RES/ADDONS` add what custom tracks need.
+    Ok(addons::with_addons(path, plain))
 }
 
 async fn gpu(
@@ -2999,7 +3011,17 @@ async fn screenshot(
         eprintln!("bench: {:.2} ms a frame ({:.3} ms recording)", start.elapsed().as_secs_f64() * 1000.0 / n, record * 1000.0 / n);
         renderer.report_gpu_times(&device);
     }
-    let draw = renderer.render(&device, &queue, view, (width, height), camera, time);
+    // The picture extras, as on screen.
+    let mut polish = (between_bars.is_none() && polish::wanted()).then(|| polish::Polish::new(&device, format));
+    let polish_view = polish.as_mut().map(|p| p.target(&device, format, (width, height)));
+    let draw = renderer.render(&device, &queue, polish_view.as_ref().unwrap_or(view), (width, height), camera, time);
+    let draw = match polish.as_ref().and_then(|p| p.finish(&device, &queue, view)) {
+        Some(finish) => {
+            queue.submit([draw]);
+            finish
+        }
+        None => draw,
+    };
     // The in-race display over the race.
     let mut encoder = device.create_command_encoder(&Default::default());
     if let (Some(race), Some((mut ui, mut hud))) = (race, track.hud()) {
@@ -3491,6 +3513,9 @@ struct App {
     pointer: (f32, f32),
     /// The pad's A and B last frame, to click and go back in the menus.
     pad_click: (bool, bool),
+    /// The stick's smoothed steering and when it was last read (the pad
+    /// smoothing extra).
+    pad_smooth: (f32, Option<Instant>),
     /// The race going on tape, and a tape playing (with the track it
     /// waits for while that loads).
     recording: Option<replay::Recording>,
@@ -3502,6 +3527,9 @@ struct App {
     /// Where the race's result goes in the track records, unless it is
     /// practice, a ghost race, a replay or over the network.
     records: Option<screens::records::Entry>,
+    /// The lap leaderboard this race's laps go on (the extra), and the
+    /// player's rider name for it.
+    lap_board: Option<mm2_settings::laps::Board>,
     /// A network race: whose bikes are whose, the other machines' bikes
     /// as they arrive, and the wait to send ours again.
     net: Option<frontend::NetRace>,
@@ -3550,6 +3578,9 @@ struct State {
     sprites: sprites::Sprites,
     /// The race between black bars on a window wider than 21:9.
     bars: bars::Bars,
+    /// The picture extras' pass (edge smoothing, sharpening), made when
+    /// first wanted.
+    polish: Option<polish::Polish>,
     camera: Camera,
     /// The Bike & Rider page's turning models, and `RES/BIKE.RES` for them.
     preview: Option<preview::Preview>,
@@ -3627,12 +3658,14 @@ impl App {
             sounds,
             pointer: (0.0, 0.0),
             pad_click: (false, false),
+            pad_smooth: (0.0, None),
             recording: None,
             ghost: None,
             replay: None,
             tape: None,
             event: None,
             records: None,
+            lap_board: None,
             net: None,
             remote: Vec::new(),
             send_wait: 0.0,
@@ -3744,6 +3777,7 @@ impl App {
             renderer: None,
             sprites,
             bars: bars::Bars::default(),
+            polish: None,
             camera: Camera::looking_at(Vec3::ZERO, Vec3::Z),
             preview: None,
             bike_res: None,
@@ -3856,6 +3890,15 @@ impl App {
                     course: setup.course,
                     title: setup.name.clone(),
                     length: setup.laps,
+                });
+                // Laps go on the leaderboards in the lap races, only as
+                // the original rides: with the riding extras off.
+                let t = tweaks::get();
+                let fair = t.air_steer == 0 && t.air_brake == 0 && !t.quick_get_up && !t.forgiving_landings;
+                let lap_event = matches!(setup.event, frontend::EventKind::Baja | frontend::EventKind::Nationals | frontend::EventKind::Supercross | frontend::EventKind::Enduro);
+                self.lap_board = (counts && fair && lap_event && tweaks::more().leaderboards).then(|| {
+                    let cc = setup.ride.as_ref().map_or(250, |r| r.bike.cc);
+                    mm2_settings::laps::Board::new(&setup.track, setup.event as u32, setup.course as u32, cc)
                 });
                 self.race = make_race_as(&track, laps, setup.net.map_or(PLAYER, |n| n.me));
                 self.replay = self.tape.take();
@@ -4072,6 +4115,34 @@ impl App {
             let name = rider_name(race, ui, race.player);
             if let Err(e) = screens::records::enter(&f.user().store.dir, &entry, &name, result) {
                 eprintln!("the track records: {e}");
+            }
+        }
+        // The laps that count go on the lap leaderboards: from the second
+        // (the first starts from the gate), and in the lap races not with
+        // much of it off the course.
+        if let (Some(board), Some(race), Some((ui, _)), Some(f)) = (self.lap_board.take(), &self.race, &self.hud, &self.front) {
+            let me = &race.racers[race.player];
+            let rider = rider_name(race, ui, race.player);
+            let laps: Vec<_> = me
+                .lap_times
+                .iter()
+                .enumerate()
+                .skip(1)
+                .filter(|&(i, _)| me.lap_off.get(i).is_none_or(|&off| off <= mm2_settings::laps::MOST_OFF_COURSE))
+                .map(|(_, &t)| mm2_settings::laps::Lap { board: board.clone(), rider: rider.clone(), ms: (t * 1000.0).round() as u32 })
+                .filter(|l| l.ms >= mm2_settings::laps::SHORTEST)
+                .collect();
+            if !laps.is_empty() {
+                let dir = &f.user().store.dir;
+                let old = |n: &str| crate::fs::read_to_string(dir.join(n)).unwrap_or_default();
+                if let Some((best, pending)) = mm2_settings::laps::enter(&old(mm2_settings::laps::BEST), &old(mm2_settings::laps::PENDING), &laps) {
+                    let _ = crate::fs::create_dir_all(dir);
+                    for (n, t) in [(mm2_settings::laps::BEST, best), (mm2_settings::laps::PENDING, pending)] {
+                        if let Err(e) = crate::fs::write(dir.join(n), t) {
+                            eprintln!("the lap leaderboards: {e}");
+                        }
+                    }
+                }
             }
         }
         let mut results = match (&self.race, &self.hud) {
@@ -4499,8 +4570,32 @@ impl App {
                 _ => 0.0,
             }
         };
-        let steer = pull(input::STEER_RIGHT, 1.0, pad::STEER_DEAD)
-            - pull(input::STEER_LEFT, -1.0, pad::STEER_DEAD);
+        // The pad tuning extra: its dead zone, sensitivity and smoothing,
+        // the game's own (0.04, as it reads, unsmoothed) unless changed.
+        let tune = crate::tweaks::more();
+        let dead = if tune.pad_dead_zone == mm2_settings::PAD_DEAD_ZONE {
+            pad::STEER_DEAD
+        } else {
+            tune.pad_dead_zone as f32 / 100.0
+        };
+        let mut steer = pull(input::STEER_RIGHT, 1.0, dead) - pull(input::STEER_LEFT, -1.0, dead);
+        if tune.pad_dead_zone != mm2_settings::PAD_DEAD_ZONE && steer != 0.0 {
+            // A bigger dead zone still reaches full lock at the edge.
+            steer = steer.signum() * ((steer.abs() - dead) / (1.0 - dead).max(0.05)).clamp(0.0, 1.0);
+        }
+        if tune.pad_sensitivity != 100 {
+            steer = (steer * tune.pad_sensitivity as f32 / 100.0).clamp(-1.0, 1.0);
+        }
+        if tune.pad_smoothing > 0 {
+            let now = Instant::now();
+            let dt = self.pad_smooth.1.map_or(0.0, |t| now.duration_since(t).as_secs_f32()).min(0.1);
+            // Up to a quarter of a second to follow the stick.
+            let tau = 0.25 * tune.pad_smoothing as f32 / 100.0;
+            let k = 1.0 - (-dt / tau).exp();
+            let s = self.pad_smooth.0 + (steer - self.pad_smooth.0) * k;
+            self.pad_smooth = (if s.abs() < 1e-3 && steer == 0.0 { 0.0 } else { s }, Some(now));
+            steer = self.pad_smooth.0;
+        }
         let lean = pull(input::LEAN_FORWARD, -1.0, 0.0) - pull(input::LEAN_BACK, 1.0, 0.0);
         if self.analog {
             if steer != 0.0 {
@@ -4839,9 +4934,20 @@ impl App {
         let between_bars = (racing && s.config.usage.contains(wgpu::TextureUsages::COPY_DST))
             .then(|| s.bars.target(&s.device, s.config.format.add_srgb_suffix(), window_size))
             .flatten();
-        let (view, size) = match &between_bars {
-            Some((view, size)) => (view, *size),
-            None => (&window_view, window_size),
+        // The picture extras draw the race into a picture of their own and
+        // put it on the window smoothed and sharpened.
+        let polishing = racing
+            && between_bars.is_none()
+            && polish::wanted();
+        let polish_view = polishing.then(|| {
+            let format = s.config.format;
+            let device = &s.device;
+            s.polish.get_or_insert_with(|| polish::Polish::new(device, format)).target(device, format, window_size)
+        });
+        let (view, size) = match (&between_bars, &polish_view) {
+            (Some((view, size)), _) => (view, *size),
+            (None, Some(view)) => (view, window_size),
+            (None, None) => (&window_view, window_size),
         };
         // Text is drawn at the window's own resolution, Retina included.
         s.sprites.scale = (size.0 as f32 / 640.0).min(size.1 as f32 / 480.0);
@@ -4869,6 +4975,16 @@ impl App {
                 .filter(|_| self.replay.is_some())
                 .map(|r| renderer::from_game(r.racers[r.player].bike.position()).distance(s.camera.position));
             commands.push(renderer.render(&s.device, &s.queue, view, size, &s.camera, time));
+            // The race's display goes over the polished picture, on the window.
+            let view = match (&polish_view, &s.polish) {
+                (Some(_), Some(p)) => {
+                    if let Some(c) = p.finish(&s.device, &s.queue, &window_view) {
+                        commands.push(c);
+                    }
+                    &window_view
+                }
+                _ => view,
+            };
             if let (Some((ui, hud)), Some(race)) = (&mut self.hud, &self.race) {
                 let mut gfx = ui::Gfx {
                     sprites: &mut s.sprites,
@@ -5382,6 +5498,19 @@ impl ApplicationHandler for App {
                         eprintln!("{text}");
                         self.fps_shown = Some((*frames as f32 / span).round() as u32);
                         self.fps = Some((Instant::now(), 0, 0.0));
+                    }
+                }
+                // The frame cap extra: a frame no sooner than its share of a
+                // second after the last began.
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let cap = tweaks::more().fps_cap;
+                    if cap > 0 {
+                        let next = now + std::time::Duration::from_secs_f64(1.0 / cap as f64);
+                        let left = next.saturating_duration_since(Instant::now());
+                        if !left.is_zero() {
+                            std::thread::sleep(left);
+                        }
                     }
                 }
                 if let Some(s) = &self.state {

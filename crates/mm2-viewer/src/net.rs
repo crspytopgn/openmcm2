@@ -111,7 +111,36 @@ pub enum Msg {
         time: f32,
     },
     Leave,
+    /// The lobby downloads extra: a file asked of its owner (`to`), a
+    /// part of one, or word that the owner hasn't it. The host passes on
+    /// those meant for someone else. `from` is filled in by the host.
+    FileAsk(FileNote),
+    FilePart {
+        note: FileNote,
+        offset: u32,
+        total: u32,
+        data: Vec<u8>,
+    },
+    FileNone(FileNote),
 }
+
+/// Which file a lobby download is about, and between whom.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FileNote {
+    pub to: u8,
+    pub from: u8,
+    /// [`FILE_TRACK`], [`FILE_BIKE`] or [`FILE_RIDER`].
+    pub kind: u8,
+    /// A track's file stem with its event's number before it
+    /// (`3:IFFENDIC`), or a skin's file name.
+    pub name: String,
+}
+
+pub const FILE_TRACK: u8 = 0;
+pub const FILE_BIKE: u8 = 1;
+pub const FILE_RIDER: u8 = 2;
+/// A download's parts, small enough for a browser's data channel.
+pub const FILE_PART: usize = 60 * 1024;
 
 /// Little-endian fields, strings with a length first.
 struct W(Vec<u8>);
@@ -153,6 +182,9 @@ impl W {
             self.player(p);
         }
         self
+    }
+    fn note(&mut self, n: &FileNote) -> &mut Self {
+        self.u8(n.to).u8(n.from).u8(n.kind).str(&n.name)
     }
     fn game(&mut self, g: &GameInfo) -> &mut Self {
         self.u8(g.event)
@@ -220,6 +252,14 @@ impl R<'_> {
         let n = (self.u32()? as usize).min(64);
         (0..n).map(|_| self.player()).collect()
     }
+    fn note(&mut self) -> io::Result<FileNote> {
+        Ok(FileNote {
+            to: self.u8()?,
+            from: self.u8()?,
+            kind: self.u8()?,
+            name: self.str()?,
+        })
+    }
     fn game(&mut self) -> io::Result<GameInfo> {
         Ok(GameInfo {
             event: self.u8()?,
@@ -256,6 +296,9 @@ impl Msg {
             } => w.u8(9).u8(*racer).f32(*time).u32(*kind as u32).bytes(data),
             Msg::Finished { racer, time } => w.u8(10).u8(*racer).f32(*time),
             Msg::Leave => w.u8(11),
+            Msg::FileAsk(n) => w.u8(12).note(n),
+            Msg::FilePart { note, offset, total, data } => w.u8(13).note(note).u32(*offset).u32(*total).bytes(data),
+            Msg::FileNone(n) => w.u8(14).note(n),
         };
         w.0
     }
@@ -288,6 +331,14 @@ impl Msg {
                 time: r.f32()?,
             },
             11 => Msg::Leave,
+            12 => Msg::FileAsk(r.note()?),
+            13 => Msg::FilePart {
+                note: r.note()?,
+                offset: r.u32()?,
+                total: r.u32()?,
+                data: r.bytes()?,
+            },
+            14 => Msg::FileNone(r.note()?),
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -383,6 +434,8 @@ pub enum Heard {
     },
     /// The host has gone; the session is over.
     Lost,
+    /// A lobby download meant for this player (the lobby downloads extra).
+    File(Msg),
 }
 
 pub struct Session {
@@ -406,6 +459,10 @@ pub struct Session {
     /// page tells of them (before the queue reaches `peers`).
     #[cfg(target_arch = "wasm32")]
     ids: Vec<(u32, u8)>,
+    /// The host's port (the tests join it).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub port: u16,
 }
 
 impl Session {
@@ -449,6 +506,7 @@ impl Session {
             peers: Vec::new(),
             rx,
             stop,
+            port,
         })
     }
 
@@ -474,6 +532,7 @@ impl Session {
             peers: vec![(0, stream)],
             rx,
             stop: Arc::new(AtomicBool::new(false)),
+            port: addr.port(),
         })
     }
 
@@ -549,6 +608,60 @@ impl Session {
     }
 
     fn got(&mut self, from: u8, m: Msg, out: &mut Vec<Heard>) {
+        if let Some(m) = self.route_file(from, m, out) {
+            self.got_game(from, m, out);
+        }
+    }
+
+    /// A lobby download's message: the host stamps who sent it and passes
+    /// it on unless it is for the host; one for this player is heard.
+    /// Anything else comes back to be handled as usual.
+    fn route_file(&mut self, from: u8, m: Msg, out: &mut Vec<Heard>) -> Option<Msg> {
+        let stamp = |n: &mut FileNote| {
+            if self.host {
+                n.from = from;
+            }
+        };
+        let mut m = m;
+        let note = match &mut m {
+            Msg::FileAsk(n) | Msg::FileNone(n) => n,
+            Msg::FilePart { note, .. } => note,
+            _ => return Some(m),
+        };
+        stamp(note);
+        let to = note.to;
+        if self.host && to != self.me {
+            if let Some((_, link)) = self.peers.iter_mut().find(|(p, _)| *p == to) {
+                let _ = send(link, &m);
+            }
+        } else if to == self.me || !self.host {
+            out.push(Heard::File(m));
+        }
+        None
+    }
+
+    /// Sends a lobby download's message: to the host, which passes it on,
+    /// or from the host straight to the player it is for.
+    pub fn send_file(&mut self, mut m: Msg) {
+        let me = self.me;
+        let to = match &mut m {
+            Msg::FileAsk(n) | Msg::FileNone(n) => {
+                n.from = me;
+                n.to
+            }
+            Msg::FilePart { note, .. } => {
+                note.from = me;
+                note.to
+            }
+            _ => return,
+        };
+        let target = if self.host { to } else { 0 };
+        if let Some((_, link)) = self.peers.iter_mut().find(|(p, _)| *p == target) {
+            let _ = send(link, &m);
+        }
+    }
+
+    fn got_game(&mut self, from: u8, m: Msg, out: &mut Vec<Heard>) {
         if self.host {
             match m {
                 Msg::Hello { name, ride } => {
@@ -816,6 +929,9 @@ pub fn set(s: Option<Session>) {
 mod tests {
     use super::*;
 
+    /// The sessions here share the finders' port, so one runs at a time.
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
     #[test]
     fn messages_go_both_ways() {
         let ride = RideInfo {
@@ -869,6 +985,14 @@ mod tests {
                 time: 99.0,
             },
             Msg::Leave,
+            Msg::FileAsk(FileNote { to: 2, from: 1, kind: FILE_TRACK, name: "3:MYSX".into() }),
+            Msg::FilePart {
+                note: FileNote { to: 1, from: 2, kind: FILE_BIKE, name: "red.tga".into() },
+                offset: 60,
+                total: 120,
+                data: vec![7; 60],
+            },
+            Msg::FileNone(FileNote { to: 1, from: 0, kind: FILE_RIDER, name: "r.tga".into() }),
         ] {
             assert_eq!(Msg::decode(&m.encode()).unwrap(), m);
         }
@@ -878,18 +1002,13 @@ mod tests {
     /// each other, chat goes round and a bike packet is passed on.
     #[test]
     fn a_session_on_this_machine() {
+        let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
         let me = |name: &str| Player {
             name: name.into(),
             ..Player::default()
         };
         let mut host = Session::host("test", me("Host")).unwrap();
-        let port = {
-            // The host took the first free port from PORT.
-            (PORT..PORT + 8)
-                .find(|&p| TcpStream::connect(("127.0.0.1", p)).is_ok())
-                .unwrap()
-        };
-        // That probe connected and left; the host forgets it.
+        let port = host.port;
         let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
         let mut guest = Session::join(addr, me("Guest")).unwrap();
         let wait = |f: &mut dyn FnMut() -> bool| {
@@ -938,6 +1057,66 @@ mod tests {
             gone.contains(&Heard::Lost)
         });
     }
+
+    /// Lobby downloads go between two players through the host, which
+    /// fills in who asked.
+    #[test]
+    fn files_go_through_the_host() {
+        let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        let me = |name: &str| Player { name: name.into(), ..Player::default() };
+        let mut host = Session::host("files", me("Host")).unwrap();
+        let port = host.port;
+        let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+        let mut a = Session::join(addr, me("A")).unwrap();
+        let mut b = Session::join(addr, me("B")).unwrap();
+        let wait = |f: &mut dyn FnMut() -> bool| {
+            let start = Instant::now();
+            while !f() {
+                assert!(start.elapsed() < Duration::from_secs(5), "timed out");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        wait(&mut || {
+            host.poll();
+            a.poll();
+            b.poll();
+            a.me != u8::MAX && b.me != u8::MAX && a.players.len() == 3 && b.players.len() == 3
+        });
+        // A asks B for its paint, through the host.
+        a.send_file(Msg::FileAsk(FileNote { to: b.me, from: 99, kind: FILE_BIKE, name: "red.tga".into() }));
+        let mut got = Vec::new();
+        wait(&mut || {
+            host.poll();
+            got.extend(b.poll());
+            !got.is_empty()
+        });
+        let Heard::File(Msg::FileAsk(n)) = &got[0] else { panic!("{got:?}") };
+        assert_eq!((n.from, n.name.as_str()), (a.me, "red.tga"));
+        // B answers; A gets it. The host asks A for nothing it hears.
+        b.send_file(Msg::FilePart {
+            note: FileNote { to: n.from, from: 0, kind: FILE_BIKE, name: "red.tga".into() },
+            offset: 0,
+            total: 3,
+            data: vec![1, 2, 3],
+        });
+        let mut back = Vec::new();
+        wait(&mut || {
+            assert!(host.poll().is_empty());
+            back.extend(a.poll().into_iter().filter(|h| matches!(h, Heard::File(_))));
+            !back.is_empty()
+        });
+        let Heard::File(Msg::FilePart { note, data, .. }) = &back[0] else { panic!() };
+        assert_eq!((note.from, data.as_slice()), (b.me, &[1u8, 2, 3][..]));
+        // And the host's own track, asked by A.
+        a.send_file(Msg::FileAsk(FileNote { to: 0, from: 0, kind: FILE_TRACK, name: "3:X".into() }));
+        let mut asked = Vec::new();
+        wait(&mut || {
+            asked.extend(host.poll());
+            !asked.is_empty()
+        });
+        assert!(matches!(&asked[0], Heard::File(Msg::FileAsk(n)) if n.from == a.me));
+    }
+
 }
 
 #[cfg(target_arch = "wasm32")]

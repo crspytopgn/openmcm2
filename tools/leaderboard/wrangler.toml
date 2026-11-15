@@ -1,0 +1,9 @@
+name = "openmcm2-laps"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# Make the namespace with `npx wrangler kv namespace create LAPS` and put
+# the id it prints here.
+[[kv_namespaces]]
+binding = "LAPS"
+id = "PUT-THE-NAMESPACE-ID-HERE"

@@ -724,6 +724,7 @@ impl Item {
             texture: self.file.clone(),
             cc: self.cc,
             four_stroke: self.four_stroke,
+            own: false,
         }
     }
 }
