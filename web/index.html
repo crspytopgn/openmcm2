@@ -45,6 +45,22 @@
   legend { color: var(--fg); font-weight: 600; padding: 0 .3rem; }
   fieldset label { display: block; color: var(--dim); margin: .3rem 0; }
   fieldset b { color: var(--fg); font-weight: 600; }
+  fieldset h3 { margin: .8rem 0 .2rem; font-size: .95rem; }
+  .hint { font-size: .9rem; margin: .3rem 0; }
+  .grid { display: grid; grid-template-columns: auto 1fr; gap: .4rem .8rem; align-items: center; margin: .6rem 0; color: var(--dim); }
+  .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0 1rem; }
+  label.range { display: flex; gap: .6rem; align-items: center; }
+  label.range input { flex: 1; max-width: 14rem; }
+  .value { color: var(--fg); min-width: 3rem; }
+  select { font: inherit; background: #222; color: var(--fg); border: 1px solid #444; border-radius: 6px; padding: .2rem .4rem; }
+  summary { cursor: pointer; color: var(--fg); margin-top: .4rem; }
+  details.more { margin-top: 1rem; }
+  details.more > summary { font-weight: 600; }
+  button.small { padding: .3rem .7rem; font-size: .9rem; }
+  button:disabled { opacity: .4; cursor: default; }
+  #tracklist { list-style: none; padding: 0; margin: .4rem 0; }
+  #tracklist li { display: flex; justify-content: space-between; gap: .5rem; color: var(--dim); padding: .15rem 0; }
+  @media (max-width: 30rem) { .grid { grid-template-columns: 1fr; } }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -69,11 +85,35 @@
     <button id="play">Play</button>
     <button id="forget" class="plain">Use another folder</button>
   </div>
-  <fieldset>
-    <legend>Look</legend>
-    <label><input type="radio" name="look" value="original"> <b>Original</b>: the game as it looked in 2000</label>
-    <label><input type="radio" name="look" value="enhanced"> <b>Enhanced</b>: modern lighting, shadows and materials</label>
-  </fieldset>
+  <div id="lookbox"></div>
+  <details class="more">
+    <summary>Settings and extras</summary>
+    <div id="settings"></div>
+  </details>
+  <details class="more">
+    <summary>Your own tracks</summary>
+    <fieldset>
+      <legend>Tracks made by players</legend>
+      <p class="hint">Thousands of tracks made by players are on
+        <a href="https://mdxracing.com/new/index.php" target="_blank" rel="noopener" style="color:var(--accent)">MDX Racing</a>,
+        and each belongs to the player who made it. Download a track's .zip there, then add it here with the
+        event it's for. It shows up in the game's track list for that event, and stays in this browser.</p>
+      <div class="grid">
+        <span>Event</span>
+        <select id="trackkind">
+          <option value="NATIONAL">Nationals</option>
+          <option value="SX">Supercross</option>
+          <option value="BAJA">Baja</option>
+          <option value="ENDURO">Enduro</option>
+          <option value="QUARRIES">Stunt</option>
+        </select>
+      </div>
+      <label class="button" for="trackfile">Add a track .zip</label>
+      <input id="trackfile" type="file" multiple accept=".zip,.env,application/zip">
+      <p id="trackstatus" class="hint"></p>
+      <ul id="tracklist"></ul>
+    </fieldset>
+  </details>
   <progress id="bar" hidden></progress>
   <p id="status"></p>
   <p id="why"></p>
@@ -125,33 +165,28 @@ if (NativeAudio) {
   for (const e of ["pointerdown", "keydown", "touchend"]) addEventListener(e, wake, true);
 }
 
-// The look: original or enhanced, picked on this page and remembered.
-// "?enhanced" in the address still works and wins.
+// The settings, as the desktop launcher has them, kept in this browser.
+// "?enhanced" in the address picks the enhanced look.
+const settings = await import(fresh("./settings.js"));
 const params = new URLSearchParams(location.search);
-const stored = (() => {
-  try {
-    return localStorage.getItem("mm2look");
-  } catch {
-    return null;
-  }
-})();
-let look = [...params.keys()].some((k) => k.startsWith("enhanced")) ? "enhanced" : stored || "original";
-for (const r of document.querySelectorAll("input[name=look]")) {
-  r.checked = r.value === look;
-  r.addEventListener("change", () => {
-    look = r.value;
-    try {
-      localStorage.setItem("mm2look", look);
-    } catch {}
-  });
-}
-// The game reads its options from the address.
+const s = settings.load();
+if ([...params.keys()].some((k) => k.startsWith("enhanced"))) s.enhanced = true;
+// The look goes above the rest, which waits behind "Settings and extras".
+let look = s.enhanced ? "enhanced" : "original";
+settings.render($("lookbox"), $("settings"), s, () => (look = s.enhanced ? "enhanced" : "original"));
+// The game reads its options from the address: the settings' options,
+// and whatever else the address holds (such as a race to join).
 function setLookInAddress() {
-  const q = new URLSearchParams(location.search);
-  const hadEnhanced = [...q.keys()].some((k) => k.startsWith("enhanced"));
-  if (look === "enhanced" && !hadEnhanced) q.set("enhanced", "");
-  if (look === "original") for (const k of [...q.keys()]) if (k.startsWith("enhanced")) q.delete(k);
-  const query = q.toString().replace(/=(&|$)/g, "$1");
+  const known = new Set(["enhanced", "show-fps", ...settings.EXTRAS.flatMap(([, l]) => l.map((e) => e.flag))]);
+  const kept = location.search
+    .slice(1)
+    .split("&")
+    .filter((o) => o && !known.has(decodeURIComponent(o).split("=")[0]));
+  const ours = settings.args(s).map((o) => {
+    const at = o.indexOf("=");
+    return at < 0 ? o : o.slice(0, at) + "=" + encodeURIComponent(o.slice(at + 1));
+  });
+  const query = [...kept, ...ours].join("&");
   history.replaceState(null, "", location.pathname + (query ? "?" + query : "") + location.hash);
 }
 // While playing: which look shows, and a switch. With the enhanced look
@@ -166,8 +201,9 @@ $("look").addEventListener("click", () => {
       $("mm2").dispatchEvent(new KeyboardEvent(type, { key: "F3", code: "F3", bubbles: true }));
     }
   } else {
+    s.enhanced = true;
+    settings.save(s);
     try {
-      localStorage.setItem("mm2look", "enhanced");
       sessionStorage.setItem("mm2autoplay", "1");
     } catch {}
     look = "enhanced";
@@ -259,6 +295,7 @@ async function start(list) {
   $("why").textContent = "";
   await readAll(list);
   await fs.loadUser().catch((e) => console.warn("saves not read", e));
+  addTracks();
   status("Starting…");
   setLookInAddress();
   const game = await import(fresh("./pkg/mm2-viewer.js"));
@@ -399,6 +436,65 @@ setInterval(checkForUpdate, 15 * 60 * 1000);
 document.addEventListener("visibilitychange", () => document.hidden || checkForUpdate());
 $("reload").addEventListener("click", () => location.reload());
 $("later").addEventListener("click", () => ($("update").hidden = true));
+
+// Players' tracks, kept among the saves as /user/Tracks/<EVENT>/<name>.env
+// and put into the game's TERAFORM/<EVENT> folder when it starts. One
+// never replaces a track the game has itself.
+const TRACKS = "/user/Tracks/";
+function addTracks() {
+  for (const path of [...fs.paths(TRACKS)]) {
+    const [kind, name] = path.slice(TRACKS.length).split("/");
+    const into = `/game/TERAFORM/${kind}/${name}`;
+    if (mm2fs.kind(into) === 0) fs.put(into, mm2fs.read(path));
+  }
+}
+async function listTracks() {
+  const list = $("tracklist");
+  list.replaceChildren();
+  const names = { NATIONAL: "Nationals", SX: "Supercross", BAJA: "Baja", ENDURO: "Enduro", QUARRIES: "Stunt" };
+  for (const path of await fs.userFiles(TRACKS).catch(() => [])) {
+    const [kind, name] = path.slice(TRACKS.length).split("/");
+    const li = document.createElement("li");
+    const text = document.createElement("span");
+    text.textContent = `${name.replace(/\.env$/i, "")} (${names[kind.toUpperCase()] || kind})`;
+    const remove = document.createElement("button");
+    remove.className = "plain";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", async () => {
+      await fs.forgetUser(path);
+      listTracks();
+    });
+    li.append(text, remove);
+    list.append(li);
+  }
+}
+$("trackfile").addEventListener("change", async (e) => {
+  const kind = $("trackkind").value;
+  let added = 0;
+  const problems = [];
+  for (const file of e.target.files) {
+    try {
+      let envs;
+      if (/\.env$/i.test(file.name)) envs = [[file.name, file]];
+      else envs = (await zip.entries(file)).filter(([n]) => /\.env$/i.test(n));
+      if (!envs.length) {
+        problems.push(`${file.name} has no track (.env) in it`);
+        continue;
+      }
+      for (const [n, entry] of envs) {
+        const name = n.split("/").pop();
+        await fs.keepUser(TRACKS + kind + "/" + name, new Uint8Array(await entry.arrayBuffer()));
+        added++;
+      }
+    } catch (err) {
+      problems.push(`${file.name}: ${err.message}`);
+    }
+  }
+  e.target.value = "";
+  $("trackstatus").textContent = [added ? `Added ${added} track${added > 1 ? "s" : ""}.` : "", ...problems].join(" ");
+  listTracks();
+});
+listTracks();
 
 let kept = await fs.keptGame().catch(() => null);
 const keptFile = kept?.find(([path]) => path === "/file");
