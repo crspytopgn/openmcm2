@@ -23,6 +23,21 @@ struct Post {
     // x 1 when the scene is drawn smaller than the screen and stretched
     // over it.
     scaled: vec4<f32>,
+    // Temporal anti-aliasing (fs_taa): from the screen into the world and
+    // the world into the last frame's screen, unshifted; the camera; x 1
+    // with a history to blend with, y how much the result is sharpened,
+    // zw how far this frame is shifted, pixels.
+    taa_inverse: mat4x4<f32>,
+    taa_before: mat4x4<f32>,
+    taa_camera: vec4<f32>,
+    taa: vec4<f32>,
+    // The size it draws at (the screen's) and one over each.
+    taa_out: vec4<f32>,
+    // The rain, drawn here when temporal anti-aliasing is on (which would
+    // blend its streaks away in the scene): the time, how hard it rains
+    // (0 for none here), the screen's shape and the camera's x; its colour.
+    rain: vec4<f32>,
+    rain_colour: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> post: Post;
@@ -32,6 +47,10 @@ struct Post {
 @group(0) @binding(4) var src_tex: texture_2d<f32>;
 @group(0) @binding(5) var smooth_sampler: sampler;
 @group(0) @binding(6) var bloom_tex: texture_2d<f32>;
+// The ray-traced light shafts (rt_volume.wgsl), when drawn (scaled.y).
+@group(0) @binding(7) var shaft_tex: texture_2d<f32>;
+// The moving models' motion on screen (objects.wgsl fs_motion).
+@group(0) @binding(8) var motion_tex: texture_2d<f32>;
 
 struct Out {
     @builtin(position) position: vec4<f32>,
@@ -264,6 +283,56 @@ fn cinematic(uv: vec2<f32>, p: vec2<i32>) -> vec3<f32> {
     return sum / max(weight, 1e-4);
 }
 
+fn rain_hash(x: f32) -> f32 {
+    return fract(sin(x * 91.345) * 47453.5453);
+}
+
+// How much of the pixel at `uv` the rain's streaks cover: as rain.wgsl
+// draws them into the scene, here over the finished picture.
+fn rain_cover(uv: vec2<f32>) -> f32 {
+    let time = post.rain.x;
+    var cover = 0.0;
+    for (var k = 0; k < 3; k++) {
+        let layer = f32(k);
+        let columns = mix(70.0, 220.0, layer / 2.0);
+        let speed = mix(2.6, 1.3, layer / 2.0);
+        let length_ = mix(0.09, 0.035, layer / 2.0);
+        var q = vec2<f32>(uv.x * post.rain.z, uv.y);
+        q.x += q.y * 0.12 + post.rain.w * 0.002 * (3.0 - layer);
+        let col = floor(q.x * columns);
+        let x = fract(q.x * columns) - 0.5;
+        let r = rain_hash(col + layer * 17.0);
+        let y = fract(q.y - time * speed * (0.8 + r * 0.4) + r * 7.0);
+        let line = smoothstep(0.08, 0.0, abs(x) * (1.0 + layer)) * smoothstep(0.0, length_ * 0.3, y) * smoothstep(length_, length_ * 0.5, y);
+        let some = step(rain_hash(col * 1.7 + floor(q.y - time * speed + r * 7.0) + layer), 0.55);
+        cover += line * some * mix(0.35, 0.18, layer / 2.0);
+    }
+    return clamp(cover * post.rain.y, 0.0, 0.5);
+}
+
+// The ray-traced light shafts at `uv` (scene pixel `p`), stretched from
+// their half size: between the four round about, those that looked as far
+// as this pixel does counting most, so leaves take the leaves' and the sky
+// between them the sky's (rt_volume.wgsl `sample_at`).
+fn traced_shafts(uv: vec2<f32>, p: vec2<i32>) -> f32 {
+    let size = vec2<i32>(textureDimensions(shaft_tex));
+    let dist = length(view_at(p));
+    let at = uv * vec2<f32>(size) - 0.5;
+    let base = vec2<i32>(floor(at));
+    let f = at - floor(at);
+    var sum = 0.0;
+    var weight = 0.0;
+    for (var j = 0; j < 4; j++) {
+        let o = vec2<i32>(j & 1, j >> 1u);
+        let t = textureLoad(shaft_tex, clamp(base + o, vec2<i32>(0), size - 1), 0);
+        let apart = abs(t.y - dist) / max(dist, 1.0);
+        let w = (mix(1.0 - f.x, f.x, f32(o.x)) * mix(1.0 - f.y, f.y, f32(o.y)) + 0.01) / (0.02 + apart);
+        sum += t.x * w;
+        weight += w;
+    }
+    return sum / weight;
+}
+
 @fragment
 fn fs_composite(in: Out) -> @location(0) vec4<f32> {
     var p = vec2<i32>(in.position.xy);
@@ -274,6 +343,18 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
     } else {
         c = textureLoad(hdr_tex, p, 0).rgb;
     }
+    // After temporal anti-aliasing (which softens a little), sharpened
+    // back: away from the pixels round about, within them, so no halo.
+    if (post.taa.y > 0.0) {
+        let t = 1.0 / vec2<f32>(textureDimensions(hdr_tex));
+        let n = textureSampleLevel(hdr_tex, smooth_sampler, in.uv - vec2<f32>(0.0, t.y), 0.0).rgb;
+        let s = textureSampleLevel(hdr_tex, smooth_sampler, in.uv + vec2<f32>(0.0, t.y), 0.0).rgb;
+        let w = textureSampleLevel(hdr_tex, smooth_sampler, in.uv - vec2<f32>(t.x, 0.0), 0.0).rgb;
+        let e = textureSampleLevel(hdr_tex, smooth_sampler, in.uv + vec2<f32>(t.x, 0.0), 0.0).rgb;
+        let lo = min(min(min(n, s), min(w, e)), c);
+        let hi = max(max(max(n, s), max(w, e)), c);
+        c = clamp(c + (c - (n + s + w + e) * 0.25) * post.taa.y, lo, hi);
+    }
     if (post.cinematic.w > 0.5) {
         c = cinematic(in.uv, p);
     }
@@ -281,7 +362,17 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
     if (post.flags.x > 0.5) {
         c *= textureSampleLevel(ao_tex, smooth_sampler, in.uv, 0.0).r;
     }
-    if (post.sun.z > 0.0) {
+    if (post.rain.y > 0.0) {
+        let a = rain_cover(in.uv);
+        c = c * (1.0 - a) + post.rain_colour.rgb * a;
+    }
+    if (post.scaled.y > 0.0) {
+        // Ray traced: the sunlit air, as strong as scaled.y says (with
+        // temporal anti-aliasing, already in its blend).
+        if (post.taa.y <= 0.0) {
+            c += post.sun_colour.rgb * traced_shafts(in.uv, p) * post.scaled.y;
+        }
+    } else if (post.sun.z > 0.0) {
         c += shafts(in.uv, in.position.xy);
     }
     if (post.flags.y > 0.5) {
@@ -294,4 +385,171 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
         c = grade(c, in.uv);
     }
     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+}
+
+// ---- Temporal anti-aliasing. ----
+//
+// Each frame is drawn a different fraction of a pixel aside (renderer.rs),
+// and blended here into the history of the ones before: each pixel's
+// surface found where it was a frame ago (by the camera's move, or on a
+// moving model by its own), the history read there. Kept within what the
+// pixels round about show now, so what moves or comes into view leaves no
+// trail. Fine texture and thin edges, a different few pixels each frame
+// alone, so hold still.
+
+// How many frames of history a pixel keeps: still, and moving fast (the
+// pixels a frame moves at that), where each read of it softens it and the
+// motion hides what it would smooth.
+// (As frames gathered, the output's alpha counting them: each new frame
+// is one more among them, so a place just come into view shows at once
+// and one that holds still goes on settling.)
+const TAA_FRAMES: f32 = 32.0;
+const TAA_FRAMES_MOVING: f32 = 3.0;
+const TAA_FAST: f32 = 12.0;
+// How far from what is round about now the history may stray standing
+// still, in its spreads: cut-out leaves against the sky change much from
+// one shifted frame to the next, and a tight limit there would clip the
+// history differently each frame and flutter.
+const TAA_CLIP_STILL: f32 = 2.5;
+
+// Bright pixels count for less in the blend, so one does not flash.
+fn tame(c: vec3<f32>) -> vec3<f32> {
+    return c / (1.0 + max(c.r, max(c.g, c.b)));
+}
+fn untame(c: vec3<f32>) -> vec3<f32> {
+    return c / max(1.0 - max(c.r, max(c.g, c.b)), 1e-4);
+}
+fn to_ycocg(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(0.25 * c.r + 0.5 * c.g + 0.25 * c.b, 0.5 * c.r - 0.5 * c.b, -0.25 * c.r + 0.5 * c.g - 0.25 * c.b);
+}
+fn from_ycocg(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z);
+}
+
+// The history at `uv`, Catmull-Rom from five bilinear taps: sharper than
+// bilinear, so it does not soften as it is read again each frame.
+fn history_at(uv: vec2<f32>) -> vec3<f32> {
+    let size = vec2<f32>(textureDimensions(src_tex));
+    let p = uv * size;
+    let c = floor(p - 0.5) + 0.5;
+    let f = p - c;
+    let w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    let w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    let w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    let w3 = f * f * (-0.5 + 0.5 * f);
+    let w12 = w1 + w2;
+    let t0 = (c - 1.0) / size;
+    let t3 = (c + 2.0) / size;
+    let t12 = (c + w2 / w12) / size;
+    let r = textureSampleLevel(src_tex, smooth_sampler, vec2<f32>(t12.x, t0.y), 0.0).rgb * (w12.x * w0.y)
+        + textureSampleLevel(src_tex, smooth_sampler, vec2<f32>(t0.x, t12.y), 0.0).rgb * (w0.x * w12.y)
+        + textureSampleLevel(src_tex, smooth_sampler, vec2<f32>(t12.x, t12.y), 0.0).rgb * (w12.x * w12.y)
+        + textureSampleLevel(src_tex, smooth_sampler, vec2<f32>(t3.x, t12.y), 0.0).rgb * (w3.x * w12.y)
+        + textureSampleLevel(src_tex, smooth_sampler, vec2<f32>(t12.x, t3.y), 0.0).rgb * (w12.x * w3.y);
+    let w = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+    return max(r / w, vec3<f32>(0.0));
+}
+
+@fragment
+fn fs_taa(in: Out) -> @location(0) vec4<f32> {
+    // Drawn at the screen's size (taa_out); the scene's own pixels may be
+    // fewer (size). Where this pixel is on the scene, in its pixels.
+    let uv = in.position.xy * post.taa_out.zw;
+    let size = vec2<i32>(post.size.xy);
+    let at_scene = uv * post.size.xy;
+    let centre = clamp(vec2<i32>(floor(at_scene)), vec2<i32>(0), size - 1);
+    // The ray-traced light shafts join the scene here, before the blend,
+    // so they settle with it (the last step adds them without it): soft,
+    // the same for the pixels round about.
+    var shaft = vec3<f32>(0.0);
+    if (post.scaled.y > 0.0) {
+        shaft = post.sun_colour.rgb * traced_shafts(uv, centre) * post.scaled.y;
+    }
+    let own = finite(textureLoad(hdr_tex, centre, 0).rgb) + shaft;
+    // The scene's pixels round about, and the nearest of them: a thin edge
+    // in front is found where it was with what is in front. Each pixel's
+    // sample this frame stands where the frame's shift put it; weighed by
+    // how near that is to this pixel's middle (a Gaussian near the
+    // Blackman-Harris window), they rebuild this pixel's sample, and where
+    // the nearest is far (drawn smaller than the screen, only some frames
+    // have a sample near) the history counts for more.
+    var m1 = vec3<f32>(0.0);
+    var m2 = vec3<f32>(0.0);
+    var nearest = 2.0;
+    var at = centre;
+    var filtered = vec3<f32>(0.0);
+    var filtered_weight = 0.0;
+    var closest = 0.0;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            let q = clamp(centre + vec2<i32>(x, y), vec2<i32>(0), size - 1);
+            let s = to_ycocg(tame(finite(textureLoad(hdr_tex, q, 0).rgb) + shaft));
+            m1 += s;
+            m2 += s * s;
+            let off = vec2<f32>(centre + vec2<i32>(x, y)) + 0.5 - post.taa.zw - at_scene;
+            let w = exp(-2.29 * dot(off, off));
+            filtered += s * w;
+            filtered_weight += w;
+            closest = max(closest, w);
+            let d = textureLoad(depth_tex, q, 0);
+            if (d < nearest) {
+                nearest = d;
+                at = q;
+            }
+        }
+    }
+    let settled = untame(from_ycocg(filtered / max(filtered_weight, 1e-4)));
+    if (post.taa.x < 0.5) {
+        return vec4<f32>(settled, 1.0);
+    }
+    m1 /= 9.0;
+    let sigma = sqrt(max(m2 / 9.0 - m1 * m1, vec3<f32>(0.0)));
+
+    // Where it was a frame ago: by the camera's move, or on a moving model
+    // (its motion drawn there, at the same distance as what shows) its own.
+    let h = post.taa_inverse * vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, nearest, 1.0);
+    let world = h.xyz / h.w;
+    var was = uv;
+    let m = textureLoad(motion_tex, at, 0);
+    let dist = length(world - post.taa_camera.xyz);
+    if (m.w > 0.5 && abs(m.z - dist) < 0.03 * dist + 0.5) {
+        was = uv + m.xy * post.size.zw;
+    } else {
+        let c = post.taa_before * vec4<f32>(world, 1.0);
+        if (c.w <= 0.0) {
+            return vec4<f32>(settled, 1.0);
+        }
+        was = vec2<f32>(c.x / c.w * 0.5 + 0.5, 0.5 - c.y / c.w * 0.5);
+    }
+    if (any(was < vec2<f32>(0.0)) || any(was > vec2<f32>(1.0))) {
+        return vec4<f32>(settled, 1.0);
+    }
+    var hist = to_ycocg(tame(history_at(was)));
+    // How far it moved, in the scene's pixels.
+    let moved = length((was - uv) * post.size.xy);
+    let fast = clamp(moved / TAA_FAST, 0.0, 1.0);
+    // The rebuilt sample where the picture holds still (its edges settle
+    // smoothly); moving, where it would only soften, the nearest pixel's
+    // own (drawn at the screen's size; smaller, the rebuilt one always).
+    let upscaled = post.taa_out.x > post.size.x + 0.5;
+    let now = select(mix(settled, own, clamp(moved / 2.0, 0.0, 1.0)), settled, upscaled);
+    // Clipped toward the middle of what is round about now, not clamped
+    // corner by corner, so it takes on no tint; wider standing still,
+    // where nothing can trail and a tight clip only makes edges flutter.
+    let d = hist - m1;
+    let range = max(mix(TAA_CLIP_STILL, 1.0, fast) * sigma, vec3<f32>(1e-4));
+    let k = max(max(abs(d.x) / range.x, abs(d.y) / range.y), abs(d.z) / range.z);
+    if (k > 1.0) {
+        hist = m1 + d / k;
+    }
+    // Less history the farther it moved: far fewer as soon as it moves at
+    // all, as each frame the history is read between pixels, and many such
+    // reads would wash fine leaves out.
+    let frames = textureSampleLevel(src_tex, smooth_sampler, was, 0.0).a;
+    let most = 1.0 / mix(1.0 / TAA_FRAMES, 1.0 / TAA_FRAMES_MOVING, sqrt(fast));
+    let n = min(frames + 1.0, most);
+    // This frame's share, less where its nearest sample is far.
+    let share = select(1.0, mix(0.25, 1.0, closest), upscaled) / (n + 1.0);
+    let c = mix(hist, to_ycocg(tame(now)), share);
+    return vec4<f32>(max(untame(from_ycocg(c)), vec3<f32>(0.0)), n);
 }

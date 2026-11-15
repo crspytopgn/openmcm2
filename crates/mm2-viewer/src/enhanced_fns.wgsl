@@ -151,3 +151,43 @@ fn lamps(n: vec3<f32>, v: vec3<f32>, shine: f32) -> vec2<f32> {
     }
     return vec2<f32>(soft * 0.12, glint * 0.03);
 }
+
+// The bikes' headlights' light at `world` facing `n`: none without ray
+// tracing (enhanced_rt.wgsl's takes its place).
+fn headlight_at(world: vec3<f32>, n: vec3<f32>, dist: f32) -> vec3<f32> {
+    // Without ray tracing, only the light poles' light, baked over the
+    // ground once (flood.rs): as it falls on the ground where a surface
+    // faces up, and for what stands up from it, as much as reaches there,
+    // less on faces turned down.
+    if (enh.flood.z <= 0.0 || enh.night.x <= 0.0) {
+        return vec3<f32>(0.0);
+    }
+    let uv = (world.xz - enh.flood.xy) / enh.flood.zw;
+    if (any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0))) {
+        return vec3<f32>(0.0);
+    }
+    let m = textureSampleLevel(flood_map, flood_sampler, uv, 0.0);
+    let standing = vec3<f32>(0.95, 0.97, 1.0) / 0.97 * m.a * (0.15 + 0.3 * clamp(n.y + 0.5, 0.0, 1.0));
+    let c = mix(standing, m.rgb, smoothstep(0.6, 0.9, n.y));
+    return min(c, vec3<f32>(2.5)) * enh.night.x;
+}
+
+// The same, softly, for what stands by the track: here as it is (the baked
+// light is already smooth); ray traced (enhanced_rt.wgsl), spread wide.
+fn headlight_soft(world: vec3<f32>, n: vec3<f32>, dist: f32) -> vec3<f32> {
+    return headlight_at(world, n, dist);
+}
+
+// Whether the sun reaches `p`, a point in the air, past what is solid: -1
+// here, for not known (the shadow maps are read per pixel); the ray-traced
+// scene's (enhanced_rt.wgsl) answers when it is drawn.
+fn sun_point(p: vec3<f32>) -> f32 {
+    return -1.0;
+}
+
+// What a reflection from `origin` along `dir` shows: here only the sky,
+// `sky`; the ray-traced scene's (enhanced_rt.wgsl) takes its place when it
+// is drawn.
+fn reflection(origin: vec3<f32>, dir: vec3<f32>, sky: vec3<f32>) -> vec3<f32> {
+    return sky;
+}

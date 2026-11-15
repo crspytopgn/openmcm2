@@ -50,6 +50,11 @@ pub struct Species {
     /// largest, at 128 going up.
     pub height: [f32; 3],
     pub width: [f32; 3],
+    /// The five numbers after the sizes: where its picture is in the
+    /// ecosystem's LOD3 picture (the game's far billboards).
+    pub billboard_rect: [f32; 5],
+    /// The two after them.
+    pub billboard_extra: [f32; 2],
     pub shapes: Vec<Shape>,
 }
 
@@ -162,6 +167,8 @@ pub fn parse(bytes: &[u8]) -> Result<EcoSystem> {
             billboard,
             height: [f[0], f[1], f[2]],
             width: [f[3], f[4], f[5]],
+            billboard_rect: [f[6], f[7], f[8], f[9], f[10]],
+            billboard_extra: [f[11], f[12]],
             shapes,
         });
     }

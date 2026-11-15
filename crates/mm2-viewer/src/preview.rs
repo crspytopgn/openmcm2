@@ -68,6 +68,7 @@ impl Preview {
         let textures = [("BIKE.RES", bike_res.clone())];
         let mesh = ObjectMesh::build(
             &[],
+            (0..0, &[]),
             &[],
             &[],
             &animations,

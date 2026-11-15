@@ -29,6 +29,30 @@ struct Enh {
     // The smooth ground's patch: its corner (terrain units), cells a side,
     // on.
     fine_ground: vec4<f32>,
-    // x the trial track's objects in photo materials.
+    // x the objects' photo materials, y swaying trees, z round bikes and
+    // riders, w a stadium's floodlights.
     surfaces: vec4<f32>,
+    // x the shadows ray traced.
+    traced: vec4<f32>,
+    // From the drawing to the screen, for the ray-traced shadows.
+    view_proj: mat4x4<f32>,
+    // The ambient light's colour, for what the reflections see.
+    ambient: vec4<f32>,
+    // From the drawing to the dust's shadow map, and x whether it is
+    // drawn, y the least spread of a cloud's depth in it.
+    dust_view: mat4x4<f32>,
+    dust: vec4<f32>,
+    // The terrain for the reflections: ft a terrain unit, and terrain
+    // units the ground's colour map spans.
+    terrain: vec4<f32>,
+    // x how much it is night (0 to 1); yzw the track's own light on level
+    // ground, which the ground's painted light is taken against at night.
+    night: vec4<f32>,
+    // Each bike's headlight, ray traced (rt.rs): x on, y how many glow.
+    headlights: vec4<f32>,
+    // Each glowing headlight's place and strength.
+    lamps: array<vec4<f32>, 64>,
+    // The light poles' baked light (flood.rs): its map's corner (x, z)
+    // and the ft it spans across and down; 0 for none.
+    flood: vec4<f32>,
 };
