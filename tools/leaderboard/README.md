@@ -14,8 +14,8 @@ boards. To set it up:
 3. `npx wrangler deploy`. It prints the address, such as
    `https://openmcm2-laps.<your-name>.workers.dev`.
 
-To make that address the default for everyone, set `LEADERBOARD_URL` in
-`crates/mm2-settings/src/lib.rs` to it before a release.
+To make another address the default for everyone, set `LEADERBOARD_URL`
+in `crates/mm2-settings/src/lib.rs` to it before a release.
 
 ## What it takes and gives
 
@@ -23,6 +23,14 @@ To make that address the default for everyone, set `LEADERBOARD_URL` in
   as the launcher sends from `laps-pending.txt`.
 - `GET /board?track=farm&event=2&course=0&class=250`: that board's laps as
   `rider<TAB>ms` lines, fastest first.
+
+- `POST /playtime`: anonymous playtime as `key<TAB>seconds` lines to add
+  (`total`, `races`, `count`, `players`, `event:N`, `track:NAME`,
+  `bike:CC`), and `GET /playtime` gives everyone's added up.
+
+OpenMCM2's own server runs at `https://openmcm2-laps.openmcm2-laps.workers.dev`
+(the default `LEADERBOARD_URL`). To update it after changing `worker.js`,
+run `npx wrangler deploy` here again.
 
 Each board keeps one lap per rider, their best, and the best 100 riders. Laps
 under 5 seconds or over an hour are turned away. There are no accounts, so

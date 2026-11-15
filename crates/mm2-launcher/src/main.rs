@@ -106,19 +106,37 @@ struct Boards {
     fetching: Option<Slot<Vec<(String, u32)>>>,
     shown: Option<(mm2_settings::laps::Board, Option<Result<Vec<(String, u32)>, String>>)>,
     note: Option<String>,
+    /// Everyone's playtime from the server, once fetched.
+    everyone: Option<Result<mm2_settings::playtime::Times, String>>,
+    fetching_everyone: Option<Slot<mm2_settings::playtime::Times>>,
 }
 
 impl Boards {
     /// Sends the laps the game kept, if the extra is on with a server.
+    /// Sends the playtime too, unless that is turned off, and fetches
+    /// everyone's.
     fn send(&mut self, s: &Settings) {
         let url = s.more.leaderboard_url.trim().to_string();
-        if !s.more.leaderboards || url.is_empty() || self.sending.is_some() {
+        if url.is_empty() || self.sending.is_some() {
             return;
         }
+        let (laps, play) = (s.more.leaderboards, s.more.share_playtime);
         let slot: Slot<usize> = Arc::default();
         let out = slot.clone();
-        std::thread::spawn(move || *out.lock().unwrap() = Some(boards::send_pending(&url, &settings::user_dir())));
+        let everyone: Slot<mm2_settings::playtime::Times> = Arc::default();
+        let all = everyone.clone();
+        std::thread::spawn(move || {
+            let dir = settings::user_dir();
+            if play {
+                if let Err(e) = boards::send_playtime(&url, &dir) {
+                    eprintln!("playtime: {e}");
+                }
+            }
+            *all.lock().unwrap() = Some(boards::fetch_playtime(&url));
+            *out.lock().unwrap() = Some(if laps { boards::send_pending(&url, &dir) } else { Ok(0) });
+        });
         self.sending = Some(slot);
+        self.fetching_everyone = Some(everyone);
     }
 
     fn show(&mut self, url: &str, board: mm2_settings::laps::Board) {
@@ -144,6 +162,11 @@ impl Boards {
                 }
                 None => ctx.request_repaint_after(Duration::from_millis(250)),
             }
+        }
+        let everyone = self.fetching_everyone.as_ref().and_then(|f| f.lock().unwrap().take());
+        if let Some(r) = everyone {
+            self.everyone = Some(r);
+            self.fetching_everyone = None;
         }
         if let Some(f) = &self.fetching {
             let got = f.lock().unwrap().take();
@@ -567,7 +590,69 @@ impl Launcher {
         self.update_banner(ui, busy);
         self.game_card(ui, busy);
         self.summary_card(ui);
+        self.playtime_card(ui);
         self.display_card(ui);
+    }
+
+    /// The playtime tracker: the player's own, and everyone's.
+    fn playtime_card(&mut self, ui: &mut egui::Ui) {
+        use look::icon;
+        use mm2_settings::playtime::{self, shown};
+        let mine = playtime::read(&settings::user_dir(), playtime::FILE);
+        look::card(ui, icon::ICON_SCHEDULE, "Playtime", |ui| {
+            let get = |k: &str| mine.get(k).copied().unwrap_or(0);
+            if get("total") == 0 {
+                ui.label(look::weak("Nothing yet. The time you play goes here."));
+            } else {
+                ui.label(format!(
+                    "{} played, {} of it racing in {} race{}.",
+                    shown(get("total")),
+                    shown(get("races")),
+                    get("count"),
+                    if get("count") == 1 { "" } else { "s" }
+                ));
+                // The most played of each kind.
+                let top = |prefix: &str, name: &dyn Fn(&str) -> String| -> String {
+                    let mut list: Vec<(&String, &u64)> = mine.iter().filter(|(k, _)| k.starts_with(prefix)).collect();
+                    list.sort_by(|a, b| b.1.cmp(a.1));
+                    list.iter().take(3).map(|(k, v)| format!("{} {}", name(&k[prefix.len()..]), shown(**v))).collect::<Vec<_>>().join(", ")
+                };
+                let event = |k: &str| boards::event_name(k.parse().unwrap_or(99)).to_string();
+                let track = |k: &str| k.to_string();
+                let bike = |k: &str| format!("{k}cc");
+                let kinds: [(&str, &str, &dyn Fn(&str) -> String); 3] = [("Events", "event:", &event), ("Tracks", "track:", &track), ("Bikes", "bike:", &bike)];
+                egui::Grid::new("playtime").num_columns(2).show(ui, |ui| {
+                    for (label, prefix, name) in kinds {
+                        let text = top(prefix, name);
+                        if !text.is_empty() {
+                            ui.label(egui::RichText::new(label).family(look::bold_family()));
+                            ui.label(text);
+                            ui.end_row();
+                        }
+                    }
+                });
+            }
+            if let Some(Ok(all)) = &self.boards.everyone {
+                let get = |k: &str| all.get(k).copied().unwrap_or(0);
+                if get("total") > 0 {
+                    ui.label(look::weak(format!(
+                        "Everyone: {} played by {} player{}, in {} races.",
+                        shown(get("total")),
+                        get("players"),
+                        if get("players") == 1 { "" } else { "s" },
+                        get("count")
+                    )));
+                }
+            }
+            let m = &mut self.settings.more;
+            look::switch_tile(
+                ui,
+                &mut m.share_playtime,
+                "Add my time to everyone's",
+                "Sends how long you play each event, track and bike class to the OpenMCM2 server, added to everyone's. No name or anything else that says who you are.",
+                ui.available_width(),
+            );
+        });
     }
 
     fn game_card(&mut self, ui: &mut egui::Ui, busy: bool) {
@@ -759,7 +844,7 @@ impl Launcher {
                 ui.label(egui::RichText::new("Leaderboard server").family(look::bold_family()));
                 ui.add(egui::TextEdit::singleline(&mut m.leaderboard_url).hint_text("https://…").desired_width(360.0));
             });
-            ui.label(look::weak("With a server, your best laps are shared and you can see everyone's. Without one, they stay on this computer."));
+            ui.label(look::weak("Your best laps go on the OpenMCM2 leaderboard under your rider name, and Board shows everyone's. Clear the address to keep them on this computer only."));
             let url = m.leaderboard_url.trim().to_string();
             if let Some(note) = &self.boards.note {
                 ui.label(look::weak(note));
@@ -1284,7 +1369,7 @@ mod shots {
     fn shots() {
         let dir = std::env::var("MM2_SHOTS").expect("MM2_SHOTS: where to draw the pages");
         for (name, page, enhanced, height) in [
-            ("play", Page::Play, true, 760.0),
+            ("play", Page::Play, true, 1300.0),
             ("graphics", Page::Graphics, true, 1900.0),
             ("graphics_original", Page::Graphics, false, 760.0),
             ("tracks", Page::Tracks, true, 760.0),
