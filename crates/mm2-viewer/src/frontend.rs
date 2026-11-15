@@ -212,6 +212,9 @@ pub struct Frontend {
     level: usize,
     track: usize,
     tracks: HashMap<EventKind, Vec<TrackEntry>>,
+    /// Which tracks the event page lists with the track filter extra:
+    /// 0 all, 1 the game's own, 2 custom ones.
+    track_source: usize,
     /// The last race's results, for the Race Info page.
     results: RaceResults,
     /// The bikes and outfits on offer, and the player's picks.
@@ -294,6 +297,40 @@ fn sky_row(page: &mut Dlg) {
     page.set_text("WeatherLabel", "Weather:");
 }
 
+/// The track filter's choices (the extra's).
+const TRACK_SOURCES: [&str; 3] = ["All tracks", "Base game", "Custom"];
+
+/// The track filter (an extra): the track list a little narrower, and a
+/// drop-down list beside it for all tracks, the game's own or custom ones.
+fn filter_row(page: &mut Dlg) {
+    let Some(i) = page.index("DDLTextBox") else {
+        return;
+    };
+    let at = page.dialog.controls[i].rect;
+    let width = 128;
+    page.dialog.controls[i].rect[2] = at[2] - width - 4;
+    page.add_copy("EventTypeDropDown", "TrackSource", [at[0] + at[2] - width, at[1] - 3, width, 27]);
+}
+
+/// The tracks that came with the game, by event (the rest are custom).
+pub fn is_stock(event: EventKind, path: &Path) -> bool {
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_uppercase();
+    let numbered = |prefix: &str, most: u32| {
+        stem.strip_prefix(prefix)
+            .filter(|n| n.len() == 2)
+            .and_then(|n| n.parse::<u32>().ok())
+            .is_some_and(|n| (1..=most).contains(&n))
+    };
+    match event {
+        EventKind::Stunt => numbered("QUARRY", 5),
+        EventKind::Baja => numbered("BAJA", 5),
+        EventKind::Nationals => numbered("NAT", 12),
+        EventKind::Supercross => numbered("SX", 17),
+        EventKind::Tag => numbered("TAG", 3),
+        EventKind::Enduro => ["AIRFIELD", "FARM", "OPENPIT", "SKILODGE", "TRAILER"].contains(&stem.as_str()),
+    }
+}
+
 /// The time of day and weather now, as places in mm2_settings::TIMES and
 /// WEATHERS.
 fn sky_now() -> (usize, usize) {
@@ -353,6 +390,7 @@ impl Frontend {
             level: 1,
             track: 0,
             tracks: HashMap::new(),
+            track_source: 0,
             results: RaceResults::default(),
             roster: Roster::load(game),
             bike: 0,
@@ -1043,6 +1081,9 @@ impl Frontend {
         let bikes: Vec<String> = self.roster.bikes.iter().map(|b| b.name.clone()).collect();
         let outfits: Vec<String> = self.roster.outfits.iter().map(|o| o.name.clone()).collect();
         let cc = self.roster.bikes.get(self.bike).map_or(250, |b| b.cc);
+        // The player's own paint takes any engine size, as the game's
+        // page offers for them.
+        let own = self.roster.bikes.get(self.bike).is_some_and(|b| b.own);
         let size = ENGINE_SIZES
             .iter()
             .position(|e| e.0 >= cc)
@@ -1054,8 +1095,8 @@ impl Frontend {
         page.set_items("DDLRiders", outfits, self.outfit);
         let sizes = ENGINE_SIZES.iter().map(|e| e.1.to_string()).collect();
         page.set_items("DDLEngineSize", sizes, size);
-        page.enable("DDLEngineSize", false);
-        page.enable("TxtEngineSize", false);
+        page.enable("DDLEngineSize", own);
+        page.enable("TxtEngineSize", own);
         page.set_on("ChkAutoRotate", true);
         page.set_text("EditPlateNumber", self.plate.clone());
     }
@@ -1239,6 +1280,9 @@ impl Frontend {
         if crate::graphics::enhanced().is_some() {
             sky_row(&mut page);
         }
+        if crate::tweaks::more().track_filter {
+            filter_row(&mut page);
+        }
         self.screen = Screen::Single { base, page };
         self.fill_event_page();
     }
@@ -1300,6 +1344,20 @@ impl Frontend {
             "ddlriders" => {
                 self.outfit = line;
                 self.keep_ride();
+            }
+            "tracksource" => {
+                self.track_source = line.min(TRACK_SOURCES.len() - 1);
+                self.track = 0;
+                self.fill_event_page();
+            }
+            "ddlenginesize" => {
+                if let (Some(b), Some(&(cc, name))) = (self.roster.bikes.get_mut(self.bike), ENGINE_SIZES.get(line)) {
+                    if b.own {
+                        b.cc = cc;
+                        b.four_stroke = name.contains("4-stroke");
+                    }
+                }
+                self.fill_bike_page();
             }
             "eventtypedropdown" => {
                 let event = EventKind::LIST[line.min(EventKind::LIST.len() - 1)].0;
@@ -1404,7 +1462,7 @@ impl Frontend {
     /// the boxes its race mode uses (`0x44ee90`).
     fn fill_event_page(&mut self) {
         let event = self.event;
-        let tracks = self.tracks(event).to_vec();
+        let tracks = self.shown_tracks(event);
         let lang = |id| self.ui.lang(id);
         let events: Vec<String> = EventKind::LIST.iter().map(|e| lang(e.1)).collect();
         let modes: Vec<(u32, String)> = MODES
@@ -1487,6 +1545,9 @@ impl Frontend {
         for (i, name) in LEVELS.iter().enumerate() {
             page.set_on(name, i == self.level);
         }
+        if page.index("TrackSource").is_some() {
+            page.set_items("TrackSource", TRACK_SOURCES.iter().map(|s| s.to_string()).collect(), self.track_source);
+        }
         if page.index("TimeList").is_some() {
             let (time, weather) = sky_now();
             page.set_items("TimeList", mm2_settings::TIMES.iter().map(|t| t.1.to_string()).collect(), time);
@@ -1496,6 +1557,21 @@ impl Frontend {
 
     /// The tracks of an event, in the order the game lists them (by file
     /// name), each course of a Baja or enduro track its own line.
+    /// The event's tracks the page lists: all of them, or with the track
+    /// filter extra only the game's own or only custom ones.
+    fn shown_tracks(&mut self, event: EventKind) -> Vec<TrackEntry> {
+        let source = self.track_source;
+        self.tracks(event)
+            .iter()
+            .filter(|t| match source {
+                1 => is_stock(event, &t.path),
+                2 => !is_stock(event, &t.path),
+                _ => true,
+            })
+            .cloned()
+            .collect()
+    }
+
     fn tracks(&mut self, event: EventKind) -> &[TrackEntry] {
         let game = self.ui.game().to_path_buf();
         self.tracks
@@ -1517,7 +1593,7 @@ impl Frontend {
             }
         }
         let (event, track) = (self.event, self.track);
-        let Some(entry) = self.tracks(event).get(track).cloned() else {
+        let Some(entry) = self.shown_tracks(event).get(track).cloned() else {
             return Next::Stay;
         };
         if let Some(d) = Dlg::open(&mut self.ui, self.event.loading(), (0.0, 0.0)) {
@@ -1572,7 +1648,7 @@ impl Frontend {
         let track = self.track;
         let preview = match &self.screen {
             Screen::Single { page, .. } if page.index("PictureBox").is_some() => {
-                self.tracks(event).get(track).cloned()
+                self.shown_tracks(event).get(track).cloned()
             }
             _ => None,
         };

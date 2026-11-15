@@ -2759,6 +2759,7 @@ fn replay_setup(game: &Path, tape: &mm2_formats::vcr::Tape) -> Option<frontend::
                 texture: r.bike_skin.clone(),
                 cc: r.cc,
                 four_stroke: false,
+                own: false,
             },
             outfit: r.rider_skin.clone(),
             plate: plate_number(i),

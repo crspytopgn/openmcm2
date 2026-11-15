@@ -114,7 +114,7 @@ pub fn with_addons(path: &Path, base: Vec<u8>) -> Vec<u8> {
     let (Some(res), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str())) else {
         return base;
     };
-    let packs: Vec<(String, Vec<u8>)> = packs_for(res, name)
+    let mut packs: Vec<(String, Vec<u8>)> = packs_for(res, name)
         .into_iter()
         .filter_map(|p| {
             let n = p.file_name()?.to_string_lossy().into_owned();
@@ -128,6 +128,28 @@ pub fn with_addons(path: &Path, base: Vec<u8>) -> Vec<u8> {
             }
         })
         .collect();
+    // The player's own paints and outfits join the bikes' archive under
+    // names of their own (the "own skins" extra).
+    if name.eq_ignore_ascii_case("BIKE.RES") && crate::tweaks::more().own_skins {
+        if let Some(game) = res.parent() {
+            let mut files = Vec::new();
+            for folder in ["BIKES", "RIDERS"] {
+                for (file, _) in crate::roster::own_files(game, folder) {
+                    let dir = fs::read_dir(game)
+                        .ok()
+                        .and_then(|l| l.flatten().find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(folder)))
+                        .map(|e| e.path());
+                    if let Some(data) = dir.and_then(|d| fs::read(d.join(&file)).ok()) {
+                        files.push((crate::roster::own_key(folder, &file), data));
+                    }
+                }
+            }
+            if !files.is_empty() {
+                let list: Vec<(&str, &[u8])> = files.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect();
+                packs.push(("own skins".into(), rs2::build(&list)));
+            }
+        }
+    }
     join(base, &packs)
 }
 

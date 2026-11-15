@@ -312,6 +312,194 @@ pub struct Settings {
     /// Draw with OpenGL instead of the GPU's best API, for older graphics
     /// cards without Vulkan (`--opengl`; not on a Mac).
     pub opengl: bool,
+    /// The 0.5.0 extras: skins, gear, track filter, pad tuning, picture,
+    /// cameras, riders, leaderboards and lobby downloads.
+    pub more: More,
+}
+
+/// The extras added in 0.5.0, all off (the game's own) by default.
+#[derive(Debug, Clone, PartialEq)]
+pub struct More {
+    /// Every `.tga` in the game's `BIKES` and `RIDERS` folders is a bike
+    /// paint or outfit of its own (`--own-skins`).
+    pub own_skins: bool,
+    /// The amateur bikes and outfits of the Pro Circuit in every event
+    /// (`--all-gear`).
+    pub all_gear: bool,
+    /// All, Base game and Custom in the track lists (`--track-filter`).
+    pub track_filter: bool,
+    /// A pad stick's dead zone, % of its travel (`--pad-dead-zone=N`; the
+    /// game's 4).
+    pub pad_dead_zone: u32,
+    /// How far a stick steers, % (`--pad-sensitivity=N`; the game's 100).
+    pub pad_sensitivity: u32,
+    /// How much a stick's steering is smoothed, % (`--pad-smoothing=N`;
+    /// the game's 0).
+    pub pad_smoothing: u32,
+    /// The most frames a second, 0 for no cap (`--fps-cap=N`).
+    pub fps_cap: u32,
+    /// Smoother edges after the picture is drawn (`--fxaa`).
+    pub fxaa: bool,
+    /// Sharpening, % (`--sharpen=N`).
+    pub sharpen: u32,
+    /// A camera from the rider's helmet among the race cameras
+    /// (`--helmet-cam`).
+    pub helmet_cam: bool,
+    /// Riders on the gate in a single race, 0 for the game's own count
+    /// (`--gate-riders=N`).
+    pub riders: u32,
+    /// Lap leaderboards: best laps kept and, with an address, shared
+    /// (`--leaderboards`, `--leaderboard-url=URL`).
+    pub leaderboards: bool,
+    pub leaderboard_url: String,
+    /// The lobby offers to fetch a host's track or a rider's own skins the
+    /// player is missing (`--lobby-downloads`).
+    pub lobby_downloads: bool,
+}
+
+/// The game's own pad dead zone, %.
+pub const PAD_DEAD_ZONE: u32 = 4;
+/// The most riders on the gate the extra allows.
+pub const RIDERS_MOST: u32 = 30;
+/// The shared leaderboard server the game uses unless told otherwise.
+/// Empty: laps are only kept on this computer until one is set up.
+pub const LEADERBOARD_URL: &str = "";
+
+impl Default for More {
+    fn default() -> Self {
+        More {
+            own_skins: false,
+            all_gear: false,
+            track_filter: false,
+            pad_dead_zone: PAD_DEAD_ZONE,
+            pad_sensitivity: 100,
+            pad_smoothing: 0,
+            fps_cap: 0,
+            fxaa: false,
+            sharpen: 0,
+            helmet_cam: false,
+            riders: 0,
+            leaderboards: false,
+            leaderboard_url: LEADERBOARD_URL.into(),
+            lobby_downloads: false,
+        }
+    }
+}
+
+impl More {
+    /// Reads one `key=value` line; false if it isn't one of these.
+    fn read(&mut self, k: &str, v: &str) -> bool {
+        let yes = v == "1" || v == "true";
+        let n = |most: u32, or: u32| v.parse::<u32>().map_or(or, |n| n.min(most));
+        match k {
+            "own_skins" => self.own_skins = yes,
+            "all_gear" => self.all_gear = yes,
+            "track_filter" => self.track_filter = yes,
+            "pad_dead_zone" => self.pad_dead_zone = n(50, PAD_DEAD_ZONE),
+            "pad_sensitivity" => self.pad_sensitivity = n(200, 100).max(25),
+            "pad_smoothing" => self.pad_smoothing = n(90, 0),
+            "fps_cap" => self.fps_cap = n(500, 0),
+            "fxaa" => self.fxaa = yes,
+            "sharpen" => self.sharpen = n(100, 0),
+            "helmet_cam" => self.helmet_cam = yes,
+            "riders" => self.riders = n(RIDERS_MOST, 0),
+            "leaderboards" => self.leaderboards = yes,
+            "leaderboard_url" => self.leaderboard_url = v.to_string(),
+            "lobby_downloads" => self.lobby_downloads = yes,
+            _ => return false,
+        }
+        true
+    }
+
+    fn text(&self) -> String {
+        let b = |v: bool| if v { "1" } else { "0" };
+        format!(
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\nfps_cap={}\nfxaa={}\nsharpen={}\nhelmet_cam={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\n",
+            b(self.own_skins),
+            b(self.all_gear),
+            b(self.track_filter),
+            self.pad_dead_zone,
+            self.pad_sensitivity,
+            self.pad_smoothing,
+            self.fps_cap,
+            b(self.fxaa),
+            self.sharpen,
+            b(self.helmet_cam),
+            self.riders,
+            b(self.leaderboards),
+            self.leaderboard_url,
+            b(self.lobby_downloads),
+        )
+    }
+
+    /// The viewer's arguments for these, only where they differ from the
+    /// game's own.
+    pub fn args(&self) -> Vec<String> {
+        let d = More::default();
+        let mut a = Vec::new();
+        for (on, flag) in [
+            (self.own_skins, "--own-skins"),
+            (self.all_gear, "--all-gear"),
+            (self.track_filter, "--track-filter"),
+            (self.fxaa, "--fxaa"),
+            (self.helmet_cam, "--helmet-cam"),
+            (self.lobby_downloads, "--lobby-downloads"),
+        ] {
+            if on {
+                a.push(flag.to_string());
+            }
+        }
+        for (v, dv, flag) in [
+            (self.pad_dead_zone, d.pad_dead_zone, "--pad-dead-zone"),
+            (self.pad_sensitivity, d.pad_sensitivity, "--pad-sensitivity"),
+            (self.pad_smoothing, d.pad_smoothing, "--pad-smoothing"),
+            (self.fps_cap, d.fps_cap, "--fps-cap"),
+            (self.sharpen, d.sharpen, "--sharpen"),
+            (self.riders, d.riders, "--gate-riders"),
+        ] {
+            if v != dv {
+                a.push(format!("{flag}={v}"));
+            }
+        }
+        if self.leaderboards {
+            a.push("--leaderboards".into());
+            if !self.leaderboard_url.is_empty() && self.leaderboard_url != LEADERBOARD_URL {
+                a.push(format!("--leaderboard-url={}", self.leaderboard_url));
+            }
+        }
+        a
+    }
+
+    /// Reads them back from the viewer's arguments.
+    pub fn from_args(args: &[String]) -> More {
+        let d = More::default();
+        let has = |f: &str| args.iter().any(|a| a == f);
+        let value = |f: &str| args.iter().find_map(|a| a.strip_prefix(f).and_then(|r| r.strip_prefix('=')));
+        let mut m = More {
+            own_skins: has("--own-skins"),
+            all_gear: has("--all-gear"),
+            track_filter: has("--track-filter"),
+            fxaa: has("--fxaa"),
+            helmet_cam: has("--helmet-cam"),
+            lobby_downloads: has("--lobby-downloads"),
+            leaderboards: has("--leaderboards"),
+            ..d.clone()
+        };
+        for (flag, key) in [
+            ("--pad-dead-zone", "pad_dead_zone"),
+            ("--pad-sensitivity", "pad_sensitivity"),
+            ("--pad-smoothing", "pad_smoothing"),
+            ("--fps-cap", "fps_cap"),
+            ("--sharpen", "sharpen"),
+            ("--gate-riders", "riders"),
+            ("--leaderboard-url", "leaderboard_url"),
+        ] {
+            if let Some(v) = value(flag) {
+                m.read(key, v);
+            }
+        }
+        m
+    }
 }
 
 /// The game's field of view, degrees.
@@ -357,6 +545,7 @@ impl Default for Settings {
             mute_in_background: false,
             screenshot_key: false,
             opengl: false,
+            more: More::default(),
         }
     }
 }
@@ -394,6 +583,9 @@ impl Settings {
         self.forgiving_landings = d.forgiving_landings;
         self.mute_in_background = d.mute_in_background;
         self.screenshot_key = d.screenshot_key;
+        // The leaderboard's address is where to send laps, not an extra.
+        let url = std::mem::take(&mut self.more.leaderboard_url);
+        self.more = More { leaderboard_url: url, ..More::default() };
     }
 
     pub fn load() -> Settings {
@@ -461,6 +653,7 @@ impl Settings {
                 "mute_in_background" => s.mute_in_background = yes(v),
                 "screenshot_key" => s.screenshot_key = yes(v),
                 "opengl" => s.opengl = yes(v),
+                k if s.more.read(k, v) => {}
                 // Files from before version 2 kept the replay blur on by
                 // default; it starts off now, so their setting is dropped.
                 "upgrade.cinematic" if !text.lines().any(|l| l.trim() == "version=2") => {}
@@ -516,6 +709,7 @@ impl Settings {
             b(self.opengl),
             b(self.forgiving_landings),
         );
+        t += &self.more.text();
         for (u, on) in UPGRADES.iter().zip(&self.upgrades) {
             t += &format!("upgrade.{}={}\n", u.0, b(*on));
         }
@@ -613,6 +807,7 @@ impl Settings {
                 a.push(flag.into());
             }
         }
+        a.extend(self.more.args());
         a.push(match self.vibration {
             true => format!("--vibration={}", self.vibration_strength),
             false => "--vibration=off".into(),
@@ -714,6 +909,37 @@ mod tests {
         assert!(!s.is_original());
         s.original();
         assert!(s.is_original());
+    }
+
+    #[test]
+    fn the_new_extras_round_trip() {
+        let mut s = Settings::default();
+        s.more = More {
+            own_skins: true,
+            all_gear: true,
+            track_filter: true,
+            pad_dead_zone: 10,
+            pad_sensitivity: 120,
+            pad_smoothing: 30,
+            fps_cap: 144,
+            fxaa: true,
+            sharpen: 40,
+            helmet_cam: true,
+            riders: 20,
+            leaderboards: true,
+            leaderboard_url: "https://example.org/mm2".into(),
+            lobby_downloads: true,
+        };
+        assert_eq!(Settings::parse(&s.text()), s);
+        let mut args = vec!["mm2-viewer".to_string()];
+        args.extend(s.args());
+        assert_eq!(More::from_args(&args), s.more);
+        assert!(!s.is_original());
+        s.original();
+        assert!(s.is_original());
+        assert_eq!(s.more.leaderboard_url, "https://example.org/mm2");
+        assert_eq!(More::from_args(&[]), More::default());
+        assert!(More::default().args().is_empty());
     }
 
     #[test]

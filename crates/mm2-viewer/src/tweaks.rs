@@ -130,6 +130,16 @@ fn now() -> &'static RwLock<Tweaks> {
     })
 }
 
+/// The 0.5.0 extras from the command line the launcher makes (they are
+/// set in the launcher, not in the game).
+pub fn more() -> &'static mm2_settings::More {
+    static MORE: OnceLock<mm2_settings::More> = OnceLock::new();
+    MORE.get_or_init(|| {
+        let args: Vec<String> = crate::args().collect();
+        mm2_settings::More::from_args(&args)
+    })
+}
+
 /// The tweaks as they are now.
 pub fn get() -> Tweaks {
     *now().read().unwrap()
