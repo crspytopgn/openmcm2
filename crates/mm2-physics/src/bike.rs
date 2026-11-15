@@ -194,6 +194,9 @@ const KAHUNA_CLEAR: f32 = -3.5;
 const EDGE: f32 = 105.0;
 const EDGE_THROW: f32 = 0.055;
 const EDGE_RISE: f32 = 120.0;
+/// The longest an edge throw may fly before its crash clock starts
+/// anyway, s (120 ft/s up comes down in about 7.5 s).
+const EDGE_FLIGHT: f32 = 15.0;
 /// Put back this far behind the confirmed course place, ft (0x4eb170).
 const RESET_BACK: f32 = 3.5;
 /// How the bike bounces off a solid object while ridden (f_14c, applied
@@ -458,6 +461,10 @@ pub struct Bike {
     /// The Wrecker's +0xac: the thrown rider has touched something since
     /// the crash clock last cleared it.
     touched: bool,
+    /// Thrown off the world's edge: the rider has left the ground, and
+    /// how long the throw has flown, s.
+    edge_clear: bool,
+    edge_flight: f32,
     /// The collision points run against solid objects; none, no objects.
     pub hull: Option<std::sync::Arc<Hull>>,
     /// The Reverse control (TogReverse) is held.
@@ -564,6 +571,8 @@ impl Bike {
             crash_time: CRASH_TIME,
             touch_clock: false,
             touched: false,
+            edge_clear: false,
+            edge_flight: 0.0,
             hull: None,
             reverse: false,
             clutch: false,
@@ -606,6 +615,8 @@ impl Bike {
     /// static sag; any crash is over.
     pub fn reset(&mut self, ground: &dyn Ground, origin: Vec3, direction: Vec3) {
         self.touched = false;
+        self.edge_clear = false;
+        self.edge_flight = 0.0;
         let flat = Vec3::new(direction.x, 0.0, direction.z).normalize_or(Vec3::Z);
         let heading = flat.x.atan2(flat.z);
         let (front, _) = ground.terrain(
@@ -1196,7 +1207,24 @@ impl Bike {
             Some(w) => w.step(ground, h, place, self.velocity),
             None => true,
         };
-        let left = if self.touch_clock {
+        let left = if why == Crash::Edge && !self.touched {
+            // Thrown off the world's edge, the clock waits for the rider
+            // to come down (0x40b010 counts only once the Wrecker's +0xac
+            // is set), so the whole flight back toward the middle is seen.
+            // The touch at the launch itself doesn't count, and a throw
+            // that never comes down ends after `EDGE_FLIGHT`.
+            let touching = self.wreck.as_ref().is_some_and(|w| w.touching);
+            self.edge_flight += h;
+            if !touching {
+                self.edge_clear = true;
+            } else if self.edge_clear {
+                self.touched = true;
+            }
+            if self.edge_flight > EDGE_FLIGHT {
+                self.touched = true;
+            }
+            left
+        } else if self.touch_clock {
             self.touched |= self.wreck.as_ref().is_some_and(|w| w.touching);
             if self.touched {
                 left - h
@@ -1212,7 +1240,11 @@ impl Bike {
             // facing along it (0x4eb170); off the course graph, where
             // the rider came to rest, facing the way the bike was
             // going.
-            let (at, dir) = match self.reset_to {
+            // Thrown off the world's edge, the rider gets up where they
+            // came down, back toward the middle, not where they left the
+            // course.
+            let back = if why == Crash::Edge { None } else { self.reset_to };
+            let (at, dir) = match back {
                 Some((at, dir)) => (at - dir * RESET_BACK, dir),
                 None => {
                     let at = self.wreck.as_ref().map_or(self.position, |w| w.position);
@@ -2471,6 +2503,17 @@ mod tests {
         assert_eq!(bike.wreck.as_ref().unwrap().motion, "Endo");
         // Back toward the middle and up.
         assert!(bike.velocity.z < 0.0 && bike.velocity.y > 50.0, "{}", bike.velocity);
+        // The crash lasts the whole flight, and the rider gets up where
+        // they came down, well in from the edge, not where they left the
+        // course (issue #21).
+        bike.reset_to = Some((Vec3::new(2048.0, 0.0, 3990.0), Vec3::Z));
+        let mut flew = 0.0;
+        while bike.crash.is_some() && flew < 30.0 {
+            bike.step(&Island, Controls::default(), 0.02);
+            flew += 0.02;
+        }
+        assert!(bike.crash.is_none() && flew > 6.0, "crash lasted {flew} s");
+        assert!(bike.position.z < 3700.0, "got up at {}", bike.position);
         // In from the edge it rides on.
         let mut bike = Bike::new(&Island, Vec3::new(2048.0, 0.0, 3900.0), Vec3::Z);
         ride(&mut bike, &Island, Controls::default(), 0.1);
