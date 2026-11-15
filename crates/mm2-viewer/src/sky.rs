@@ -58,6 +58,11 @@ impl SkyRenderer {
         enhanced: Option<&wgpu::BindGroupLayout>,
     ) -> SkyRenderer {
         let side = images.side;
+        // Seven layers, not six, so OpenGL keeps it an array, not a cube
+        // map (see `renderer::array_layers`); the seventh is never drawn.
+        let layers = crate::renderer::array_layers(6, side, side);
+        let mut faces = images.faces.clone();
+        faces.resize(images.faces.len() / 6 * layers as usize, 0);
         let texture = device.create_texture_with_data(
             queue,
             &wgpu::TextureDescriptor {
@@ -65,7 +70,7 @@ impl SkyRenderer {
                 size: wgpu::Extent3d {
                     width: side,
                     height: side,
-                    depth_or_array_layers: 6,
+                    depth_or_array_layers: layers,
                 },
                 mip_level_count: 1,
                 sample_count: 1,
@@ -75,7 +80,7 @@ impl SkyRenderer {
                 view_formats: &[],
             },
             wgpu::util::TextureDataOrder::LayerMajor,
-            &images.faces,
+            &faces,
         );
         let mut vertices = Vec::new();
         for (face, tiles) in cube.faces.iter().enumerate() {
