@@ -1,4 +1,12 @@
-# OpenMCM2 0.4.0
+# OpenMCM2 0.4.1
+
+## New in 0.4.1
+
+* **More ways to add your game:** the launcher and the browser version
+  now also take a `.zip` holding an installed game, the CD's files or a
+  CD image, and `.mdf`/`.mds` images (including 2448-byte-sector ones).
+
+If you're on 0.1.6 or later, the launcher will offer this update itself.
 
 ## New in 0.4.0
 

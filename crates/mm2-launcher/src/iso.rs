@@ -8,8 +8,9 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 /// The sector sizes and where each sector's 2048 bytes of data start:
-/// cooked, raw Mode 1, raw Mode 2 form 1, and Mode 2 without the sync.
-const LAYOUTS: [(u64, u64); 4] = [(2048, 0), (2352, 16), (2352, 24), (2336, 8)];
+/// cooked, raw Mode 1, raw Mode 2 form 1, Mode 2 without the sync, and
+/// raw with the 96 bytes of subchannel some `.mdf` images keep.
+const LAYOUTS: [(u64, u64); 6] = [(2048, 0), (2352, 16), (2352, 24), (2336, 8), (2448, 16), (2448, 24)];
 
 /// Some images start with a header before the first sector (`.nrg` can
 /// have a 150-sector pregap).
@@ -37,12 +38,18 @@ pub struct Entry {
 }
 
 impl Image {
-    /// Opens `path`, or for a `.cue` the image it names.
+    /// Opens `path`, or for a `.cue` the image it names, or for an `.mds`
+    /// the `.mdf` beside it.
     pub fn open(path: &Path) -> io::Result<Image> {
-        let path = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("cue")) {
-            cue_image(path)?
-        } else {
-            path.to_path_buf()
+        let ext = path.extension().map(|e| e.to_ascii_lowercase());
+        let path = match ext.as_ref().and_then(|e| e.to_str()) {
+            Some("cue") => cue_image(path)?,
+            Some("mds") => crate::game::find_ci(path.parent().unwrap_or(Path::new(".")), &format!(
+                "{}.mdf",
+                path.file_stem().unwrap_or_default().to_string_lossy()
+            ))
+            .ok_or_else(|| bad("the .mdf that goes with this .mds isn't beside it"))?,
+            _ => path.to_path_buf(),
         };
         let mut file = File::open(&path)?;
         for start in STARTS {

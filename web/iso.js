@@ -4,8 +4,9 @@
 // same reader as the desktop launcher's (crates/mm2-launcher/src/iso.rs).
 
 // The sector sizes and where each sector's 2048 bytes of data start:
-// cooked, raw Mode 1, raw Mode 2 form 1, and Mode 2 without the sync.
-const LAYOUTS = [[2048, 0], [2352, 16], [2352, 24], [2336, 8]];
+// cooked, raw Mode 1, raw Mode 2 form 1, Mode 2 without the sync, and raw
+// with the 96 bytes of subchannel some .mdf images keep.
+const LAYOUTS = [[2048, 0], [2352, 16], [2352, 24], [2336, 8], [2448, 16], [2448, 24]];
 // Some images start with a header before the first sector.
 const STARTS = [0, 150 * 2352, 150 * 2048];
 

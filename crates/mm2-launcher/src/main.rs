@@ -471,7 +471,8 @@ impl Launcher {
         section(ui, "Game data", |ui| {
             ui.label(
                 "OpenMCM2 doesn't include the game. Point it at your own Motocross Madness 2: \
-                 the CD, a CD image of it (.iso, .bin/.cue, .img), or the folder it's installed in.",
+                 the CD, a CD image of it (.iso, .bin/.cue, .mdf/.mds, .img), a .zip of either, \
+                 or the folder it's installed in.",
             );
             ui.add_space(4.0);
             match &self.settings.game {
@@ -491,10 +492,10 @@ impl Launcher {
             }
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(!busy, |ui| {
-                    if ui.button("Choose CD image…").clicked() {
+                    if ui.button("Choose CD image or zip…").clicked() {
                         if let Some(f) = rfd::FileDialog::new()
-                            .set_title("Your Motocross Madness 2 CD image")
-                            .add_filter("CD image", &["iso", "bin", "cue", "img", "mdf", "nrg"])
+                            .set_title("Your Motocross Madness 2 CD image or zip")
+                            .add_filter("CD image or zip", &["iso", "bin", "cue", "img", "mdf", "mds", "nrg", "zip"])
                             .add_filter("All files", &["*"])
                             .pick_file()
                         {
