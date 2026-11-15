@@ -40,7 +40,8 @@ More from me: [OpenSGolf](https://github.com/crspytopgn/opensgolf) · [OpenLinks
 Download a release and start **OpenMCM2** (`OpenMCM2.app` on a Mac,
 `mm2-launcher` on Windows and Linux). The first time, point it at your own
 copy of Motocross Madness 2: a CD image (`.iso`, `.bin`/`.cue`, `.img`,
-`.mdf`, `.nrg`), the CD itself, or the folder it is installed in. It copies
+`.mdf`/`.mds`, `.nrg`), the CD itself, the folder it is installed in, or a
+`.zip` of any of these. It copies
 the game's `GAME` folder into the port's user folder
 (`~/Library/Application Support/MM2/GAME` on a Mac, `%APPDATA%\MM2\GAME` on
 Windows, `~/.local/share/mm2/GAME` on Linux). Then pick the look, effects,

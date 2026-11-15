@@ -44,11 +44,26 @@ pub enum Source {
     CdFolder(PathBuf),
     /// A CD image: its `GAME` folder is copied out.
     Image(PathBuf),
+    /// A zip (an abandonware download, a backup): an install or a CD
+    /// folder in it is copied out, or a CD image in it is.
+    Zip(PathBuf),
 }
+
+/// The disc image files a zip may hold.
+const IMAGES: [&str; 5] = [".iso", ".mdf", ".bin", ".img", ".nrg"];
 
 impl Source {
     /// Works out what `path` is.
     pub fn of(path: &Path) -> Result<Source, String> {
+        if path.is_file() && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
+            let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let zip = zip::ZipArchive::new(file).map_err(|e| format!("{}: {e}", path.display()))?;
+            let names: Vec<String> = zip.file_names().map(|n| n.map(|n| n.to_ascii_lowercase()).unwrap_or_default()).collect();
+            if names.iter().any(|n| n.ends_with("ui/mainmenu.dat") || IMAGES.iter().any(|i| n.ends_with(i))) {
+                return Ok(Source::Zip(path.to_path_buf()));
+            }
+            return Err("this zip has no Motocross Madness 2 in it (no UI/MAINMENU.DAT and no CD image)".into());
+        }
         if path.is_file() {
             let mut img = Image::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
             return match img.find("GAME/UI/MAINMENU.DAT") {
@@ -86,6 +101,7 @@ pub fn import(source: Source, dest: PathBuf) -> Arc<Progress> {
             Source::Installed(dir) => Ok(dir),
             Source::CdFolder(game) => copy_folder(&game, &dest, &p).map(|_| dest.clone()),
             Source::Image(img) => extract(&img, &dest, &p).map(|_| dest.clone()),
+            Source::Zip(zip) => unzip(&zip, &dest, &p).map(|_| dest.clone()),
         };
         let r = r.map_err(|e| e.to_string()).and_then(|dir| {
             let gone = missing(&dir);
@@ -132,6 +148,75 @@ fn extract(path: &Path, dest: &Path, p: &Progress) -> io::Result<()> {
         }
     }
     finish(&tmp, dest)
+}
+
+/// Copies the game out of a zip: the folder holding `UI/MAINMENU.DAT`,
+/// or else the biggest CD image in it, unpacked beside `dest` first.
+fn unzip(path: &Path, dest: &Path, p: &Progress) -> io::Result<()> {
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(path)?).map_err(io::Error::other)?;
+    let names: Vec<String> = zip.file_names().map(|n| n.map(|n| n.into_owned()).unwrap_or_default()).collect();
+    let root = names.iter().find_map(|n| {
+        let l = n.to_ascii_lowercase().replace('\\', "/");
+        l.strip_suffix("ui/mainmenu.dat").map(|r| n[..r.len()].to_string())
+    });
+    if let Some(root) = root {
+        let files: Vec<usize> =
+            (0..zip.len()).filter(|&i| names[i].starts_with(&root) && !names[i].ends_with('/')).collect();
+        let mut total = 0;
+        for &i in &files {
+            total += zip.by_index(i).map_err(io::Error::other)?.size();
+        }
+        p.total.store(total, Ordering::Relaxed);
+        let tmp = dest.with_extension("part");
+        fresh(&tmp)?;
+        for i in files {
+            if p.cancel.load(Ordering::Relaxed) {
+                return Err(cancelled());
+            }
+            let mut f = zip.by_index(i).map_err(io::Error::other)?;
+            let rel = names[i][root.len()..].replace('\\', "/");
+            // Only plain paths inside the folder.
+            if rel.split('/').any(|part| part == ".." || part.is_empty()) {
+                continue;
+            }
+            let out = tmp.join(&rel);
+            if let Some(dir) = out.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            io::copy(&mut f, &mut std::fs::File::create(&out)?)?;
+            p.done.fetch_add(f.size(), Ordering::Relaxed);
+        }
+        return finish(&tmp, dest);
+    }
+    // A CD image: unpacked to a file of its own, then read as any image.
+    let image = (0..zip.len())
+        .filter(|&i| IMAGES.iter().any(|e| names[i].to_ascii_lowercase().ends_with(e)))
+        .max_by_key(|&i| zip.by_index(i).map(|f| f.size()).unwrap_or(0))
+        .ok_or_else(|| io::Error::other("no game folder or CD image in the zip"))?;
+    let mut f = zip.by_index(image).map_err(io::Error::other)?;
+    p.total.store(f.size(), Ordering::Relaxed);
+    let unpacked = dest.with_extension("image");
+    {
+        let mut out = std::fs::File::create(&unpacked)?;
+        let mut buf = vec![0u8; 1 << 20];
+        loop {
+            if p.cancel.load(Ordering::Relaxed) {
+                drop(out);
+                let _ = std::fs::remove_file(&unpacked);
+                return Err(cancelled());
+            }
+            let n = io::Read::read(&mut f, &mut buf)?;
+            if n == 0 {
+                break;
+            }
+            io::Write::write_all(&mut out, &buf[..n])?;
+            p.done.fetch_add(n as u64, Ordering::Relaxed);
+        }
+    }
+    p.done.store(0, Ordering::Relaxed);
+    let r = extract(&unpacked, dest, p);
+    let _ = std::fs::remove_file(&unpacked);
+    r
 }
 
 fn copy_folder(from: &Path, dest: &Path, p: &Progress) -> io::Result<()> {

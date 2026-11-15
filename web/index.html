@@ -47,13 +47,13 @@
     pick your installed game folder (the one with the <code>UI</code>, <code>RES</code> and
     <code>TERAFORM</code> folders in it). Nothing is uploaded; the files stay on this device.
     You can also pick your game CD's image (.iso, .bin, .img, .mdf or .nrg), the CD's own
-    folder, or a .zip of the game folder, which is the way on a phone or tablet. Or drop
-    any of them on this page.</p>
+    folder, or a .zip of the game folder or of a CD image, which is the way on a phone or
+    tablet. Or drop any of them on this page.</p>
   <div id="pick">
     <label class="button" for="folder">Choose game folder</label>
     <label class="button" for="file">Choose a CD image or .zip</label>
     <input id="folder" type="file" webkitdirectory multiple>
-    <input id="file" type="file" multiple accept=".zip,.iso,.bin,.img,.mdf,.nrg,.cue,application/zip">
+    <input id="file" type="file" multiple accept=".zip,.iso,.bin,.img,.mdf,.mds,.nrg,.cue,application/zip">
     <p><label><input id="keep" type="checkbox" checked> Remember it in this browser</label></p>
   </div>
   <div id="kept" hidden>
@@ -176,7 +176,18 @@ $("folder").addEventListener("change", (e) => {
 async function fromZip(file) {
   const all = await zip.entries(file);
   const root = gameRoot(all.map(([name]) => name));
-  if (root === null) return null;
+  if (root === null) {
+    // A download that is a CD image in a zip (often an .mdf and .mds):
+    // the biggest image, unpacked into memory, read as any image.
+    const image = all
+      .filter(([name]) => /\.(iso|mdf|bin|img|nrg)$/i.test(name))
+      .sort((a, b) => b[1].size - a[1].size)[0];
+    if (!image) return null;
+    status("Unpacking the CD image…");
+    const files = await iso.entries(new Blob([await image[1].arrayBuffer()]));
+    if (!files) throw new Error("The CD image in that zip has no GAME folder on it.");
+    return files.map(([name, e]) => ["/game/" + name, e]);
+  }
   return all.filter(([name]) => name.startsWith(root)).map(([name, e]) => ["/game/" + name.slice(root.length), e]);
 }
 
@@ -190,8 +201,10 @@ async function fromFile(file) {
 
 async function useFile(file) {
   if (!file) return;
-  if (/\.cue$/i.test(file.name)) {
-    $("why").textContent = "Pick the .bin file that goes with the .cue.";
+  if (/\.(cue|mds)$/i.test(file.name)) {
+    $("why").textContent = /\.cue$/i.test(file.name)
+      ? "Pick the .bin file that goes with the .cue."
+      : "Pick the .mdf file that goes with the .mds.";
     return;
   }
   const list = await fromFile(file).catch((err) => {
@@ -229,7 +242,7 @@ async function useFolder(picked) {
 
 $("file").addEventListener("change", (e) => {
   const files = [...e.target.files];
-  useFile(files.find((f) => !/\.cue$/i.test(f.name)) || files[0]);
+  useFile(files.find((f) => !/\.(cue|mds)$/i.test(f.name)) || files[0]);
 });
 
 // Dropped on the page: a folder (walked through the browser's entries), or
@@ -268,7 +281,7 @@ addEventListener("drop", async (e) => {
     return useFolder(files);
   }
   const files = [...e.dataTransfer.files];
-  useFile(files.find((f) => !/\.cue$/i.test(f.name)) || files[0]);
+  useFile(files.find((f) => !/\.(cue|mds)$/i.test(f.name)) || files[0]);
 });
 
 $("forget").addEventListener("click", async () => {
