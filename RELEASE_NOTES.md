@@ -1,6 +1,6 @@
-# OpenMCM2 0.4.3
+# OpenMCM2 0.5.0
 
-## New in 0.4.3
+## New in 0.5.0
 
 Fixes for the browser version:
 
