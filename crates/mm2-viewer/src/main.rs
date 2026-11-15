@@ -69,6 +69,7 @@ mod crowd;
 mod cull;
 mod materials;
 mod graphics;
+mod online;
 mod polish;
 mod post;
 mod finish;
@@ -3529,7 +3530,7 @@ struct App {
     records: Option<screens::records::Entry>,
     /// The lap leaderboard this race's laps go on (the extra), and the
     /// player's rider name for it.
-    lap_board: Option<mm2_settings::laps::Board>,
+    lap_board: Option<(mm2_settings::laps::Board, String)>,
     /// The playtime tracker: when the time open was last written down,
     /// and when this race began with the keys it adds to.
     play_mark: Instant,
@@ -3908,7 +3909,7 @@ impl App {
                 });
                 self.lap_board = (counts && fair && lap_event && tweaks::more().leaderboards).then(|| {
                     let cc = setup.ride.as_ref().map_or(250, |r| r.bike.cc);
-                    mm2_settings::laps::Board::new(&setup.track, setup.event as u32, setup.course as u32, cc)
+                    (mm2_settings::laps::Board::new(&setup.track, setup.event as u32, setup.course as u32, cc), setup.name.clone())
                 });
                 self.race = make_race_as(&track, laps, setup.net.map_or(PLAYER, |n| n.me));
                 self.replay = self.tape.take();
@@ -4153,7 +4154,7 @@ impl App {
         // The laps that count go on the lap leaderboards: from the second
         // (the first starts from the gate), and in the lap races not with
         // much of it off the course.
-        if let (Some(board), Some(race), Some((ui, _)), Some(f)) = (self.lap_board.take(), &self.race, &self.hud, &self.front) {
+        if let (Some((board, title)), Some(race), Some((ui, _)), Some(f)) = (self.lap_board.take(), &self.race, &self.hud, &self.front) {
             let me = &race.racers[race.player];
             let rider = rider_name(race, ui, race.player);
             let laps: Vec<_> = me
@@ -4162,7 +4163,7 @@ impl App {
                 .enumerate()
                 .skip(1)
                 .filter(|&(i, _)| me.lap_off.get(i).is_none_or(|&off| off <= mm2_settings::laps::MOST_OFF_COURSE))
-                .map(|(_, &t)| mm2_settings::laps::Lap { board: board.clone(), rider: rider.clone(), ms: (t * 1000.0).round() as u32 })
+                .map(|(_, &t)| mm2_settings::laps::Lap { board: board.clone(), rider: rider.clone(), ms: (t * 1000.0).round() as u32, title: title.clone() })
                 .filter(|l| l.ms >= mm2_settings::laps::SHORTEST)
                 .collect();
             if !laps.is_empty() {
@@ -4177,6 +4178,11 @@ impl App {
                     }
                 }
             }
+        }
+        // New laps and playtime go to the leaderboard server now (the
+        // browser has no launcher to send them).
+        if let Some(f) = &self.front {
+            crate::online::send_saved(&f.user().store.dir);
         }
         let mut results = match (&self.race, &self.hud) {
             (Some(race), Some((ui, _))) => Some(results(race, ui)),

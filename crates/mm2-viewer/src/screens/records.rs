@@ -204,6 +204,21 @@ pub struct HighScores {
     event: u32,
     table: usize,
     tracks: Vec<TrackRecords>,
+    /// The leaderboards' Online button (ours): everyone's best laps from
+    /// the leaderboard server instead of this computer's records.
+    online: bool,
+    boards: Vec<crate::online::BoardInfo>,
+    asked_boards: Option<crate::online::Reply>,
+    asked_board: Option<crate::online::Reply>,
+}
+
+/// The Online button's name and text.
+const ONLINE: &str = "TabOnline";
+const ONLINE_TEXT: &str = "Online";
+
+/// The events with lap leaderboards.
+fn has_boards(event: u32) -> bool {
+    matches!(event, 1 | 2 | 3 | 5)
 }
 
 impl HighScores {
@@ -214,11 +229,24 @@ impl HighScores {
             dlg.set_text(tab, cx.ui.lang(id));
         }
         dlg.set_selectable("LstTrack", true);
+        // The Online button, a copy of the last event's under it.
+        if crate::online::address().is_some() {
+            if let (Some(a), Some(b)) = (dlg.index("TabBaja"), dlg.index("TabEnduro")) {
+                let (above, last) = (dlg.dialog.controls[a].rect, dlg.dialog.controls[b].rect);
+                let step = last[1] - above[1];
+                dlg.add_copy("TabEnduro", ONLINE, [last[0], last[1] + step + step / 3, last[2], last[3]]);
+                dlg.set_text(ONLINE, ONLINE_TEXT);
+            }
+        }
         let mut h = HighScores {
             dlg,
             event: 0,
             table: 0,
             tracks: Vec::new(),
+            online: false,
+            boards: Vec::new(),
+            asked_boards: None,
+            asked_board: None,
         };
         h.show(cx);
         Some(h)
@@ -229,6 +257,14 @@ impl HighScores {
         let d = &mut self.dlg;
         for (tab, event, _) in TABS {
             d.set_on(tab, event == self.event);
+        }
+        d.set_on(ONLINE, self.online);
+        d.set_text("TxtTitle", if self.online { "Online Leaderboard".to_string() } else { cx.ui.lang(2392) });
+        for tab in &TABLES[1..] {
+            d.show(tab, !self.online);
+        }
+        if self.online {
+            return self.show_online(cx);
         }
         let points = matches!(self.event, 0 | 4);
         let names = if points {
@@ -260,8 +296,102 @@ impl HighScores {
         }
     }
 
+    /// The Online view: the event's tracks with laps on the server, then a
+    /// track's best laps in every class.
+    fn show_online(&mut self, cx: &mut Cx) {
+        let d = &mut self.dlg;
+        d.set_text(TABLES[0], cx.ui.lang(5159));
+        d.set_on(TABLES[0], true);
+        d.set_text("TxtTrack", cx.ui.lang(3014));
+        d.set_text("TxtStats1", "");
+        d.set_text("TxtStats2", "");
+        d.set_items("LstStats1", Vec::new(), 0);
+        d.set_items("LstStats2", Vec::new(), 0);
+        self.boards.clear();
+        self.asked_board = None;
+        let url = crate::online::address();
+        match (has_boards(self.event), url) {
+            (true, Some(url)) => {
+                d.set_items("LstTrack", vec!["Fetching...".into()], 0);
+                d.enable("LstTrack", false);
+                self.asked_boards = Some(crate::online::get(format!("{url}/boards?event={}", self.event)));
+            }
+            _ => {
+                d.set_items("LstTrack", vec![cx.ui.lang(5166)], 0);
+                d.enable("LstTrack", false);
+                self.asked_boards = None;
+            }
+        }
+        d.mark("LstTrack", None);
+    }
+
+    /// A board's name in the track list.
+    fn board_line(&self, b: &crate::online::BoardInfo) -> String {
+        let mut name = if b.title.is_empty() { b.track.to_ascii_uppercase() } else { b.title.clone() };
+        if matches!(self.event, 1 | 5) && b.course > 0 {
+            name += &format!(" ({})", b.course + 1);
+        }
+        format!("{name} [{}]", b.riders)
+    }
+
+    /// The answers from the server, as they come.
+    fn poll(&mut self, cx: &mut Cx) {
+        if let Some(r) = self.asked_boards.as_ref().and_then(crate::online::take) {
+            self.asked_boards = None;
+            let d = &mut self.dlg;
+            match r {
+                Ok(text) => {
+                    self.boards = crate::online::parse_boards(&text);
+                    if self.boards.is_empty() {
+                        d.set_items("LstTrack", vec![cx.ui.lang(5166)], 0);
+                    } else {
+                        let lines = self.boards.iter().map(|b| self.board_line(b)).collect();
+                        let d = &mut self.dlg;
+                        d.set_items("LstTrack", lines, 0);
+                        d.enable("LstTrack", true);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("the leaderboard server: {e}");
+                    d.set_items("LstTrack", vec!["Can't reach the leaderboard".into()], 0);
+                }
+            }
+            self.dlg.mark("LstTrack", None);
+        }
+        if let Some(r) = self.asked_board.as_ref().and_then(crate::online::take) {
+            self.asked_board = None;
+            let rows = r.map(|t| crate::online::parse_board(&t)).unwrap_or_default();
+            let names = rows.iter().enumerate().map(|(i, (rider, _, class))| format!("{}. {rider} ({class}cc)", i + 1)).collect();
+            let times = rows.iter().map(|(_, ms, _)| time(*ms as f32 / 1000.0)).collect();
+            self.dlg.set_items("LstStats1", names, 0);
+            self.dlg.set_items("LstStats2", times, 0);
+        }
+    }
+
+    /// A track's best laps on the server.
+    fn show_board(&mut self, cx: &mut Cx, line: usize) {
+        let (Some(b), Some(url)) = (self.boards.get(line), crate::online::address()) else {
+            return;
+        };
+        let d = &mut self.dlg;
+        d.set_text("TxtStats1", cx.ui.lang(3012));
+        d.set_text("TxtStats2", cx.ui.lang(3013));
+        d.set_items("LstStats1", vec!["Fetching...".into()], 0);
+        d.set_items("LstStats2", Vec::new(), 0);
+        let q = format!(
+            "{url}/board?track={}&event={}&course={}",
+            crate::online::escape(&b.track),
+            self.event,
+            b.course
+        );
+        self.asked_board = Some(crate::online::get(q));
+    }
+
     /// A track's table (`0x525b30`): names, and times or scores.
     fn show_track(&mut self, cx: &mut Cx, line: usize) {
+        if self.online {
+            return self.show_board(cx, line);
+        }
         let Some(t) = self.tracks.get(line) else {
             return;
         };
@@ -291,15 +421,30 @@ impl Screen for HighScores {
         vec![&mut self.dlg]
     }
 
+    fn tick(&mut self, cx: &mut Cx) -> Go {
+        self.poll(cx);
+        Go::Stay
+    }
+
     fn event(&mut self, cx: &mut Cx, e: Event) -> Go {
         match e {
             Event::Clicked(n) => {
                 if n.eq_ignore_ascii_case("Back") {
                     return Go::Back;
                 }
-                if let Some((_, event, _)) = TABS.iter().find(|t| t.0.eq_ignore_ascii_case(&n)) {
+                if n.eq_ignore_ascii_case(ONLINE) {
+                    self.online = !self.online;
+                    self.table = 0;
+                    // Only the lap races have leaderboards.
+                    if self.online && !has_boards(self.event) {
+                        self.event = 2;
+                    }
+                    self.show(cx);
+                } else if let Some((_, event, _)) = TABS.iter().find(|t| t.0.eq_ignore_ascii_case(&n)) {
                     self.event = *event;
                     self.show(cx);
+                } else if self.online {
+                    self.dlg.set_on(TABLES[0], true);
                 } else if let Some(i) = TABLES.iter().position(|t| t.eq_ignore_ascii_case(&n)) {
                     let line = self.dlg.marked("LstTrack");
                     self.table = i;
