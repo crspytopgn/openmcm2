@@ -37,6 +37,10 @@ pub struct Sprites {
     /// The third field is whether the quad stands at a place in the 3D
     /// view (a rider's label), with [`widescreen`](Self::widescreen).
     quads: Vec<(TextureId, [Vertex; 4], bool)>,
+    /// The last frame's vertex and index buffers, freed at the next. A
+    /// browser would otherwise keep each one until its garbage collector
+    /// ran.
+    spent: Vec<wgpu::Buffer>,
     /// Stretch 640×480 over the whole window, as the game's race display
     /// does, rather than keep it 4:3 (the menus).
     pub stretch: bool,
@@ -139,6 +143,7 @@ impl Sprites {
             sampler,
             textures: Vec::new(),
             quads: Vec::new(),
+            spent: Vec::new(),
             stretch: false,
             scale: 1.0,
             widescreen: false,
@@ -398,6 +403,9 @@ impl Sprites {
         if indices.is_empty() {
             return;
         }
+        for b in self.spent.drain(..) {
+            b.destroy();
+        }
         let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("sprite vertices"),
             contents: bytemuck::cast_slice(&vertices),
@@ -415,6 +423,7 @@ impl Sprites {
             pass.set_bind_group(0, &self.textures[id.0].group, &[]);
             pass.draw_indexed(range, 0, 0..1);
         }
+        self.spent.extend([vb, ib]);
     }
 
     /// Where a window position falls on the 640×480 screen.

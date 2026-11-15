@@ -56,8 +56,19 @@ pub struct Enhanced {
     /// Mud and dust caking the bikes and riders as they ride.
     pub mud: bool,
     /// Photo materials' grain (wood, metal, concrete, straw) on the
-    /// objects of the trial track (materials::surfaced).
+    /// objects (materials::surface).
     pub surfaces: bool,
+    /// Trees and bushes swaying in the wind, their leaves lit through.
+    pub trees: bool,
+    /// Shadows sharp where they touch and softer further from what casts
+    /// them.
+    pub soft_shadows: bool,
+    /// A gently darker, packed racing line that builds up over the race.
+    pub wear: bool,
+    /// Bikes and riders drawn rounder, from their own models.
+    pub round: bool,
+    /// Supercross stadiums lit by their lamps from above.
+    pub floodlights: bool,
     /// How dirty the bikes start, 0 to 1.
     pub mud_start: f32,
     /// How strongly the new ground's detail shows, 0 to 1.
@@ -102,6 +113,11 @@ impl Default for Enhanced {
             scenery: false,
             mud: true,
             surfaces: true,
+            trees: true,
+            soft_shadows: true,
+            wear: true,
+            round: true,
+            floodlights: true,
             mud_start: 0.0,
             detail: 0.5,
             weather: Weather::Clear,
@@ -262,9 +278,14 @@ impl Enhanced {
                 "smooth" => e.smooth = on,
                 "scenery" | "props" => e.scenery = on,
                 "surfaces" | "materials" => e.surfaces = on,
+                "trees" | "wind" => e.trees = on,
+                "soft" | "soft-shadows" => e.soft_shadows = on,
+                "wear" => e.wear = on,
+                "round" => e.round = on,
+                "floodlights" | "lamps" => e.floodlights = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/ultra, resolution=1080p, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/ultra, resolution=1080p, weather=rain or time=dusk"
                     ))
                 }
             }

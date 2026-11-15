@@ -26,18 +26,20 @@ const METAL: u32 = 6;
 const CONCRETE: u32 = 7;
 const STRAW: u32 = 8;
 
-/// The tracks whose objects get the photo materials: a trial on one track
-/// first, by its file name.
-pub fn surfaced(track_file: &str) -> bool {
-    track_file.eq_ignore_ascii_case("FARM.ENV")
+/// The tracks whose objects get the photo materials: every track (it began
+/// as a trial on Farm). Textures `surface` doesn't know stay as they are.
+pub fn surfaced(_track_file: &str) -> bool {
+    true
 }
 
-/// The material an object texture of the trial tracks is mostly made of,
-/// picked by eye; None for those left as they are (people, signs, tyres).
+/// The material an object texture is mostly made of, picked by eye from
+/// the game's textures; None for those left as they are (people, bikes,
+/// signs, banners, tyres, plants and textures mixing many materials).
 pub fn surface(texture: &str) -> Option<u32> {
     let stem = texture.to_ascii_lowercase();
     let stem = stem.split('.').next().unwrap_or_default();
     Some(match stem {
+        // Farm.
         "barn_mapint_08" | "barn_mapwalls_08" | "boxes_06" | "fence_picket_08" | "fh_mapa_08" | "haywagon_08"
         | "lightpole_08" | "loadingramp_08" | "pumpshack_08" | "rrt_08" | "supports_08" | "tower_08"
         | "windmill_pump01_08" => WOOD,
@@ -46,6 +48,24 @@ pub fn surface(texture: &str) -> Option<u32> {
         | "silo_map_08" | "tractor_08" | "trc-old_map_08" | "tressel02_08" => METAL,
         "brickbldg01_08" | "culvert01_08" | "gastation02_08" | "irrigcanal_08" | "ms_map_08" | "support_08" => CONCRETE,
         "haybail3_08" => STRAW,
+        // The other tracks: cabins, bridges, sheds, fences and poles.
+        "bridge_old_08" | "cabin_08" | "hut_mapa" | "miningshack01_08" | "pedbrdg_wood_08" | "rs_map_08"
+        | "rsmapnosnow_08" | "splitrail02_07" | "telephonepole_07" | "walls01_08" | "outhouse_07"
+        | "picnictable01_07" | "station_08" | "skilodgemap_08" | "cargo_map_08" | "still_07" => WOOD,
+        // Hangars, towers, tanks, trailers, machines and vehicles.
+        "ant-cel_map_08" | "antenna01" | "bridge_map_08" | "cargowreck01_08" | "cargowreck_inside01_08"
+        | "cargoplane01" | "cargoplane_inside01_08" | "carport01" | "container_08" | "hanger_08" | "ht_map"
+        | "ht_map03" | "mainoffice_08" | "mtlarchmap_08" | "pedbrdg_metal_08" | "pit_bridge_08" | "quonset_08"
+        | "rail01_07" | "twr-d_map_08" | "water_tank_08" | "scraper01_08" | "dumptruk_08" | "semitrailer_08"
+        | "machines01_08" | "sy_map_08" | "op_map_08" | "firetruck_08" | "schoolbus_08" | "semicab_08"
+        | "semilog_08" | "watertruck_08" | "pickupmap_08" | "4runner_blue_08" | "4runner_brown_08"
+        | "4runner_green_08" | "4runner_white_08" | "jeep_08" | "jeep_green_08" | "jeep_grey_08"
+        | "chevelleblue_08" | "chevellered_08" | "300zx_08" | "toyotamap_08" | "famt_map_08" | "bobcat_map_08"
+        | "cop_08" | "cop_navy_08" | "airplanetractor01_08" | "plane02_08" | "beech18rev02_08"
+        | "helinewsbody_08" => METAL,
+        // Stone, concrete and brick.
+        "floor01_08" | "helipad_08" | "rrt_elev_08" | "rrt_culvert_08" | "sl-bridge_map_08" | "sl-patio_map_08"
+        | "pyramid_mapa_08" | "ruin_mapa_08" | "steps01_06" | "radiostation01_08" => CONCRETE,
         _ => return None,
     })
 }

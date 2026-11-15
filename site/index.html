@@ -26,6 +26,7 @@
     <a href="#tour">Tour</a>
     <a href="#ideas">Ideas</a>
     <a href="#play">Play</a>
+    <a href="play/">Browser</a>
     <a href="#support">Support</a>
     <a href="https://github.com/crspytopgn/openmcm2">GitHub</a>
   </div>
@@ -33,11 +34,12 @@
 
 <header class="hero">
   <div class="hero-text">
-    <p class="eyebrow">Version 0.2.1 · free and open source · built with AI</p>
+    <p class="eyebrow">Version <span class="ver">0.4.0</span> · free and open source · built with AI</p>
     <h1>An open-source engine for Motocross Madness&nbsp;2</h1>
-    <p class="lede">OpenMCM2 is a fan project that has rewritten the 2000 Rainbow Studios game from the ground up in Rust. It isn't an emulator or a wrapper around the old exe. The whole engine is new code, and it all runs natively on Mac, Windows and Linux. It reads the tracks, bikes and menus from your own copy of the game.</p>
+    <p class="lede">OpenMCM2 is a fan project that has rewritten the 2000 Rainbow Studios game from the ground up in Rust. It isn't an emulator or a wrapper around the old exe. The whole engine is new code, and it all runs natively on Mac, Windows and Linux. It reads the tracks, bikes and menus from your own copy of the game. It now plays in your web browser as well.</p>
     <div class="cta">
-      <a class="btn primary" href="https://github.com/crspytopgn/openmcm2/releases/latest">Download 0.2.1</a>
+      <a class="btn primary" href="https://github.com/crspytopgn/openmcm2/releases/latest">Download <span class="ver">0.4.0</span></a>
+      <a class="btn" href="play/">Play in your browser</a>
       <a class="btn" href="https://github.com/crspytopgn/openmcm2">Browse the code</a>
       <a class="btn heart" href="https://github.com/sponsors/crspytopgn"><span aria-hidden="true">♥</span> Support it</a>
     </div>
@@ -55,7 +57,7 @@
     </article>
     <article>
       <h3>Runs natively everywhere</h3>
-      <p>It draws with <a href="https://wgpu.rs">wgpu</a>: Metal on Mac, Vulkan on Linux, DirectX&nbsp;12 or Vulkan on Windows. It works at any resolution and frame rate, with no compatibility layers.</p>
+      <p>It draws with <a href="https://wgpu.rs">wgpu</a>: Metal on Mac, Vulkan on Linux, DirectX&nbsp;12 or Vulkan on Windows, and WebGPU in a browser. It works at any resolution and frame rate, with no compatibility layers.</p>
     </article>
     <article>
       <h3>Your game, shared code</h3>
@@ -116,13 +118,22 @@
 
 <section id="looks">
   <h2>Original look, or a gentle remaster</h2>
-  <p class="sub">By default it looks the way the 2000 game did. Add <code>--enhanced</code> for sun shadows, HDR, soft shading and more detailed ground, and press F3 to switch between the two while you ride. The physics are the same either way. Drag the slider to compare.</p>
+  <p class="sub">By default it looks the way the 2000 game did. Pick Enhanced in the launcher (or add <code>--enhanced</code>) for soft sun shadows, HDR, more detailed ground, photo materials on buildings and vehicles, trees that sway in the wind, wear along the racing line, rounder bikes and riders, and floodlights in the stadiums. Press F3 to switch between the two while you ride. Every effect can be turned off on its own, and the physics are the same either way. Drag the slider to compare.</p>
   <div class="compare" id="compare" style="--pos:50%">
     <img src="img/cmp-enhanced.jpg" alt="Supercross start, enhanced look" loading="lazy">
     <img class="top-img" src="img/cmp-original.jpg" alt="Supercross start, original look" loading="lazy">
     <span class="tag left">Original</span><span class="tag right">Enhanced</span>
     <input type="range" min="0" max="100" value="50" aria-label="Compare original and enhanced">
     <div class="handle" aria-hidden="true"></div>
+  </div>
+</section>
+
+<section class="feature flip">
+  <figure><img src="img/enhanced-national.jpg" alt="The start of a national track in the enhanced look, with soft shadows and trees" loading="lazy"></figure>
+  <div class="text">
+    <h2>New in the enhanced look</h2>
+    <p>Version 0.4 adds photo materials on every track's buildings, fences and vehicles, and trees and bushes that sway with the wind. Shadows now soften as they fall further from what casts them. The racing line packs down darker lap after lap, and the bikes and riders are shaded rounder. Supercross stadiums get floodlights.</p>
+    <p>It all stays close to the original's colours, and the original look is still exactly as it was.</p>
   </div>
 </section>
 
@@ -193,6 +204,7 @@
     <li class="done"><h3>Sound</h3><p>Engines, crashes, crowd and track sounds, placed in 3D like the original.</p></li>
     <li class="wip"><h3>Physics</h3><p>The original's own bike model, checked against recordings of the original game. Most runs match, but a few landings and rough patches still feel different.</p></li>
     <li class="wip"><h3>Enhanced look</h3><p>Optional, and kept close to the original's palette.</p></li>
+    <li class="wip"><h3>In the browser</h3><p>The whole game in a WebGPU browser, from your own game files. Network races aren't in the browser version yet.</p></li>
   </ol>
 </section>
 
@@ -203,6 +215,8 @@
     <li><b>2</b><div><h3>Add your game</h3><p>Choose your Motocross Madness&nbsp;2 CD image (<code>.iso</code>, <code>.bin</code>/<code>.cue</code>, <code>.img</code>, <code>.mdf</code>, <code>.nrg</code>), the CD itself, or an installed folder.</p></div></li>
     <li><b>3</b><div><h3>Pick and play</h3><p>Choose the original or enhanced look, full screen or a window, then press Play.</p></div></li>
   </ol>
+  <h3 id="browser">Or play in your browser</h3>
+  <p class="sub"><a href="play/">Open the browser version</a> in a recent Chrome or Edge, or Safari&nbsp;26 (it needs WebGPU). Then pick your installed game folder, your CD, or a CD image. The files are read on your own computer and never uploaded, and the page holds no game data. It can remember your game in that browser for next time.</p>
   <p class="sub">The launcher copies the game from your own copy and keeps your settings. It never downloads the game. If you like, it can fetch player-made tracks from <a href="https://mdxracing.com">MDX Racing</a>, one at a time when you ask. To build from source you need <a href="https://rustup.rs">Rust</a>:</p>
 <pre><code>git clone https://github.com/crspytopgn/openmcm2
 cd openmcm2
@@ -226,6 +240,16 @@ cargo build --release -p mm2-viewer -p mm2-launcher
 <div class="lightbox" id="lightbox" hidden><img alt=""></div>
 
 <script>
+// The version shown is the latest release's: written in when the site is
+// deployed (pages.yml), and checked again here in case a release came out
+// since.
+fetch('https://api.github.com/repos/crspytopgn/openmcm2/releases/latest')
+  .then(function (r) { return r.ok ? r.json() : null; })
+  .then(function (r) {
+    var v = r && /^v?(\d+\.\d+\.\d+)$/.exec(r.tag_name || '');
+    if (v) document.querySelectorAll('.ver').forEach(function (el) { el.textContent = v[1]; });
+  })
+  .catch(function () {});
 (function () {
   var c = document.getElementById('compare');
   var r = c.querySelector('input');

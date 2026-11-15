@@ -19,3 +19,5 @@
 *.wav
 *.vcr
 *.gho
+/web/pkg
+/web/version.json

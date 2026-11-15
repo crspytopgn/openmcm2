@@ -60,6 +60,8 @@ struct VertexOut {
     @location(9) @interpolate(flat) mud: f32,
     // Which way it faces on the model at rest.
     @location(10) rest_normal: vec3<f32>,
+    // The enhanced drawing's: a plant's height above its foot, ft.
+    @location(11) plant_up: f32,
 };
 
 // How a vertex is lit, from the top bits of its node (objects.rs).
@@ -91,6 +93,10 @@ fn vs_main(
     @location(3) color: vec4<f32>,
     @location(4) node: u32,
 ) -> VertexOut {
+    return game_vertex(position, normal, uv, color, node);
+}
+
+fn game_vertex(position: vec3<f32>, normal: vec3<f32>, uv: vec2<f32>, color: vec4<f32>, node: u32) -> VertexOut {
     let m = node_matrix(node & 0x3fffffffu);
     let world = (m * vec4<f32>(position, 1.0)).xyz;
     var out: VertexOut;
@@ -107,6 +113,7 @@ fn vs_main(
     out.rest = position;
     out.rest_normal = normal;
     out.mud = m[1][3];
+    out.plant_up = 0.0;
     return out;
 }
 
@@ -192,6 +199,49 @@ fn fs_depth(in: CasterOut) {
 @group(1) @binding(2) var<uniform> surface: vec4<f32>;
 
 #include "enhanced_fns.wgsl"
+
+// The wind's way and its gusts, as the grass sways (grass.wgsl).
+const WIND: vec3<f32> = vec3<f32>(0.7, 0.0, 0.4);
+fn gust(time: f32, xz: vec2<f32>) -> f32 {
+    return sin(time * 1.6 + xz.x * 0.21 + xz.y * 0.17) * 0.5 + sin(time * 2.7 + xz.x * 0.5) * 0.25;
+}
+
+// The game's vertex shader, with the enhanced drawing's extras: plants
+// sway in the wind, a little more the taller they stand, their leaves
+// fluttering; moving models shade as round, from their smoothed normals.
+@vertex
+fn vs_enhanced(
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(3) color: vec4<f32>,
+    @location(4) node: u32,
+    @location(5) smooth_normal: vec3<f32>,
+    @location(6) sway: vec2<f32>,
+) -> VertexOut {
+    var out = game_vertex(position, normal, uv, color, node);
+    if (enh.surfaces.y > 0.5 && out.mode == PLANT && sway.x > 0.0) {
+        let time = enh.world.x;
+        let up = sway.x;
+        // A trunk bends from its foot: the tops of a 30 ft tree move about
+        // half a foot; stronger in the rain's wind.
+        let windy = 1.0 + enh.world.y * 0.8;
+        let bend = min(up * up * 0.0016, 1.6) * windy;
+        let g = gust(time * 0.6, out.world.xz * 0.2) + sin(time * 0.9 + sway.y) * 0.35;
+        // The leaves flutter on their own, faster and smaller.
+        let leaf = sin(time * 6.0 + dot(out.world, vec3<f32>(1.7, 2.3, 1.1)) + sway.y) * 0.1 * smoothstep(0.5, 4.0, up);
+        let moved = out.world + WIND * g * bend + vec3<f32>(leaf, leaf * 0.5, leaf * 0.7) * windy;
+        out.world = moved;
+        out.clip = globals.view_proj * vec4<f32>(moved, 1.0);
+        out.plant_up = up;
+    }
+    if (enh.surfaces.z > 0.5 && dot(smooth_normal, smooth_normal) > 0.5) {
+        let m = node_matrix(node & 0x3fffffffu);
+        out.normal = (m * vec4<f32>(smooth_normal, 0.0)).xyz;
+        out.rest_normal = smooth_normal;
+    }
+    return out;
+}
 
 // How many ft each object material's texture spans: wood, metal,
 // concrete, straw.
@@ -283,14 +333,14 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         let s = surface_at(m, in.rest, in.rest_normal);
         let dist = length(in.world - globals.camera.xyz);
         // Gently, and fading out where the texture's own paint suffices.
-        let near = 1.0 - smoothstep(30.0, 120.0, dist);
+        let near = 1.0 - smoothstep(60.0, 220.0, dist);
         // Only its light and dark, softened.
-        let lum = clamp(luminance(s.detail), 0.6, 1.5);
-        grain = vec3<f32>(mix(1.0, lum, 0.8 * near));
+        let lum = clamp(luminance(s.detail), 0.45, 1.8);
+        grain = vec3<f32>(mix(1.0, lum, near));
         // How the bumps turn the normal, on the model at rest; laid on
         // the drawn normal as is (the still models' rest is where they
         // stand), on the side the eye sees.
-        bend = (s.normal - normalize(in.rest_normal)) * near;
+        bend = (s.normal - normalize(in.rest_normal)) * near * 1.6;
         strength *= 1.0 - 0.8 * near;
     }
     let bumped = normalize(bump(n, in.world, luminance(texel.rgb), strength) + bend * sign(dot(n, normalize(in.normal))));
@@ -317,6 +367,12 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         let h = normalize(l + v);
         let glint = pow(max(dot(bumped, h), 0.0), 16.0) * 0.08 * lit * select(1.0, 0.0, in.mode == PLANT);
         light = pow(soft_clamp(game), vec3<f32>(2.2)) + globals.sun.rgb * glint;
+        if (enh.surfaces.y > 0.5 && in.mode == PLANT) {
+            // Leaves glow a little where the sun shines through them,
+            // seen from the shade side of the tree, toward the sun.
+            let through = pow(max(dot(-v, globals.to_sun.xyz), 0.0), 3.0);
+            light += globals.sun.rgb * vec3<f32>(0.9, 1.0, 0.6) * through * 0.5 * lit;
+        }
     } else if (in.mode < UNLIT) {
         // The game's own light, only shadowed.
         let lit = sun_visible(in.world, n, dist, 0.0);
@@ -344,6 +400,14 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         albedo = mix(albedo, dirt * (0.7 + 0.6 * luminance(texel.rgb)) * (0.85 + 0.3 * splat), caked);
     }
     var colour = albedo * light;
+    if (in.mode < UNLIT && in.mode != PLANT) {
+        // A stadium's floodlights: soft light from the four corners, and
+        // their glints off paint and plastic.
+        let v = normalize(globals.camera.xyz - in.world);
+        let shine = select(0.2, 0.75, polished) * (1.0 - caked);
+        let lamp = lamps(bumped, v, shine);
+        colour += (albedo * lamp.x + vec3<f32>(lamp.y * select(0.3, 1.0, polished))) * vec3<f32>(1.0, 0.97, 0.92);
+    }
     if (caked > 0.0 && enh.world.y > 0.3 && in.mode < UNLIT) {
         // Wet mud shines.
         let v = normalize(globals.camera.xyz - in.world);

@@ -44,7 +44,7 @@ pub struct Replays {
 fn tapes(cx: &Cx, tab: usize) -> Vec<(PathBuf, Tape)> {
     let ext = if tab == 0 { "gho" } else { "vcr" };
     let dir = crate::replay::record_dir(&cx.user.store.dir);
-    let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+    let mut paths: Vec<PathBuf> = crate::fs::read_dir(&dir)
         .map(|d| {
             d.filter_map(|e| e.ok().map(|e| e.path()))
                 .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)))
@@ -55,7 +55,7 @@ fn tapes(cx: &Cx, tab: usize) -> Vec<(PathBuf, Tape)> {
     paths
         .into_iter()
         .filter_map(|p| {
-            let tape = Tape::parse(&std::fs::read(&p).ok()?).ok()?;
+            let tape = Tape::parse(&crate::fs::read(&p).ok()?).ok()?;
             Some((p, tape))
         })
         .collect()
@@ -147,12 +147,12 @@ impl Replays {
         let Some(p) = self.picked.and_then(|i| self.files.get(i)) else {
             return;
         };
-        let written = std::fs::read(p)
+        let written = crate::fs::read(p)
             .ok()
             .and_then(|b| Tape::parse(&b).ok())
             .map(|mut t| {
                 t.description = text.chars().take(31).collect();
-                std::fs::write(p, t.write())
+                crate::fs::write(p, t.write())
             });
         if let Some(Err(e)) = written {
             eprintln!("{}: {e}", p.display());
@@ -252,7 +252,7 @@ impl Screen for Replays {
         }
         if n.eq_ignore_ascii_case("ButDelete") {
             if let Some(p) = picked {
-                if let Err(err) = std::fs::remove_file(&p) {
+                if let Err(err) = crate::fs::remove_file(&p) {
                     eprintln!("{}: {err}", p.display());
                 }
                 self.show(cx, self.tab);

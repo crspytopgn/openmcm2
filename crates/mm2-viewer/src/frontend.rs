@@ -498,7 +498,7 @@ impl Frontend {
     /// A ghost race against the ghost in `path`: its track and course, the
     /// player on their bike.
     fn ghost_setup(&mut self, path: &Path) -> Option<Setup> {
-        let tape = mm2_formats::vcr::Tape::parse(&std::fs::read(path).ok()?).ok()?;
+        let tape = mm2_formats::vcr::Tape::parse(&crate::fs::read(path).ok()?).ok()?;
         let event = EventKind::from_number(tape.setting(mm2_formats::vcr::setting::EVENT))?;
         let (stem, course) = (tape.track(), tape.course());
         let entry = self
@@ -1302,7 +1302,7 @@ impl Frontend {
             .and_then(|s| s.to_str())
             .unwrap_or("");
         let dir = crate::replay::record_dir(&self.user.store.dir);
-        let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        let mut files: Vec<PathBuf> = crate::fs::read_dir(dir)
             .map(|d| {
                 d.filter_map(|e| e.ok().map(|e| e.path()))
                     .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("gho")))
@@ -1311,7 +1311,7 @@ impl Frontend {
             .unwrap_or_default();
         files.sort();
         for f in files {
-            let Some(tape) = std::fs::read(&f)
+            let Some(tape) = crate::fs::read(&f)
                 .ok()
                 .and_then(|b| mm2_formats::vcr::Tape::parse(&b).ok())
             else {
@@ -1595,7 +1595,7 @@ const PULL_DOWNS: [(&str, &str); 3] = [
 ];
 
 pub fn list_tracks(folder: &Path, event: EventKind) -> Vec<TrackEntry> {
-    let mut files: Vec<PathBuf> = std::fs::read_dir(folder)
+    let mut files: Vec<PathBuf> = crate::fs::read_dir(folder)
         .map(|d| {
             d.filter_map(|e| e.ok().map(|e| e.path()))
                 .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("env")))

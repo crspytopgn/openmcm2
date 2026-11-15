@@ -100,10 +100,10 @@ fn key(track: &Path, course: usize) -> String {
 
 /// Every track of an event that has records, in name order.
 pub fn tracks(user: &Path, event: u32) -> Vec<TrackRecords> {
-    let mut v: Vec<TrackRecords> = std::fs::read_dir(folder(user, event))
+    let mut v: Vec<TrackRecords> = crate::fs::read_dir(folder(user, event))
         .map(|d| {
             d.filter_map(|e| e.ok())
-                .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+                .filter_map(|e| crate::fs::read_to_string(e.path()).ok())
                 .map(|t| TrackRecords::parse(&t))
                 .filter(|r| r.tables.iter().any(|t| !t.is_empty()))
                 .collect()
@@ -127,7 +127,7 @@ pub fn add(
 ) -> std::io::Result<Option<usize>> {
     let dir = folder(user, event);
     let path = dir.join(key(track, course));
-    let mut r = std::fs::read_to_string(&path)
+    let mut r = crate::fs::read_to_string(&path)
         .map(|t| TrackRecords::parse(&t))
         .unwrap_or_default();
     r.title = title.to_string();
@@ -142,8 +142,8 @@ pub fn add(
     }
     t.insert(at, record);
     t.truncate(KEEP);
-    std::fs::create_dir_all(&dir)?;
-    std::fs::write(path, r.text())?;
+    crate::fs::create_dir_all(&dir)?;
+    crate::fs::write(path, r.text())?;
     Ok(Some(at))
 }
 
@@ -353,7 +353,7 @@ mod tests {
         assert_eq!(times(0), [50.0, 52.5, 52.5]);
         assert_eq!(times(1), [270.0]);
         assert!(times(2).is_empty());
-        std::fs::remove_dir_all(&dir).unwrap();
+        crate::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -402,7 +402,7 @@ mod tests {
             add(&dir, 0, track, 0, "Quarry", 0, rec("B", 900.0)).unwrap(),
             Some(0)
         );
-        std::fs::remove_dir_all(&dir).ok();
+        crate::fs::remove_dir_all(&dir).ok();
         assert_eq!(time(83.456), "1:23.46");
     }
 }

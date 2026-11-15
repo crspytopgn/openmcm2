@@ -26,6 +26,12 @@ pub struct Vertex {
     /// identity used by static objects. The top two bits say how it is
     /// lit: [`UNLIT`] or [`PLANT`].
     node: u32,
+    /// For the enhanced drawing only (the game's own shaders skip it): a
+    /// moving model's normal smoothed over its neighbours' (zero for
+    /// others), and a plant's height above its foot and a phase of its
+    /// own, for swaying in the wind.
+    smooth: [f32; 3],
+    sway: [f32; 2],
 }
 
 /// A vertex of a model with `UseLighting=F`: its stored colour only.
@@ -664,13 +670,46 @@ impl ObjectMesh {
                         [c[2], c[1], c[0], 255]
                     },
                     node: node | mode,
+                    smooth: [0.0; 3],
+                    sway: match place {
+                        Some(place) if mode == PLANT => {
+                            let foot = place.transform_point3(Vec3::ZERO);
+                            let up = place.transform_point3(Vec3::from(*pos)).y - foot.y;
+                            [up.max(0.0), (foot.x * 0.137 + foot.z * 0.071).rem_euclid(6.2832)]
+                        }
+                        _ => [0.0; 2],
+                    },
                 });
+            }
+            if place.is_none() && mode == 0 {
+                smooth_normals(&mut self.vertices[base as usize..]);
             }
             batches
                 .entry(texture)
                 .or_default()
                 .extend(s.faces.iter().flatten().map(|&i| base + i as u32));
         }
+    }
+}
+
+/// Each vertex's normal averaged with those of the vertices at the same
+/// place on the same part that face within about 80° of it, so a moving
+/// model's facets (tyres, tanks, helmets, arms) shade as round; sharper
+/// edges stay sharp.
+fn smooth_normals(vertices: &mut [Vertex]) {
+    let key = |v: &Vertex| {
+        let q = |x: f32| (x * 512.0).round() as i32;
+        (v.node, q(v.position[0]), q(v.position[1]), q(v.position[2]))
+    };
+    let mut at: HashMap<(u32, i32, i32, i32), Vec<usize>> = HashMap::new();
+    for (i, v) in vertices.iter().enumerate() {
+        at.entry(key(v)).or_default().push(i);
+    }
+    let normals: Vec<Vec3> = vertices.iter().map(|v| Vec3::from(v.normal)).collect();
+    for (i, v) in vertices.iter_mut().enumerate() {
+        let n = normals[i];
+        let sum: Vec3 = at[&key(v)].iter().map(|&j| normals[j]).filter(|m| m.dot(n) > 0.17).sum();
+        v.smooth = sum.normalize_or(n).into();
     }
 }
 
@@ -888,7 +927,7 @@ impl ObjectRenderer {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &wgpu::vertex_attr_array![
                 0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Unorm8x4,
-                4 => Uint32
+                4 => Uint32, 5 => Float32x3, 6 => Float32x2
             ],
         })];
         let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -942,7 +981,7 @@ impl ObjectRenderer {
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &wgpu::vertex_attr_array![
                         0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Unorm8x4,
-                        4 => Uint32
+                        4 => Uint32, 5 => Float32x3, 6 => Float32x2
                     ],
                 })],
             },
@@ -979,7 +1018,7 @@ impl ObjectRenderer {
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
-                    entry_point: Some("vs_main"),
+                    entry_point: Some("vs_enhanced"),
                     compilation_options: Default::default(),
                     buffers: &vertex_layout,
                 },

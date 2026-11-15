@@ -976,7 +976,7 @@ mod tests {
     #[test]
     fn engine_lists_load() {
         let res = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../GAME/RES");
-        if !res.join("ENGINE.RES").is_file() {
+        if !crate::fs::is_file(res.join("ENGINE.RES")) {
             return;
         }
         for sixteen in [true, false] {

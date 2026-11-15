@@ -1055,7 +1055,14 @@ The reference parser is `engine/docs/re/colparse.py`.
   the normalized sum of the distinct face normals, and the bike moves by the push plus 0.075 ft along it
   (0x435cb0). Per object hit, the callback 0x406af0 → 0x405fb0 applies a rigid-body impulse at the
   contact (0x52bb10 → 0x5050b0): `j = -(1+e)·vn / (1/m + n·((I⁻¹(r×n))×r))`, e = f_14c ridden (0.1 in the running
-  game, the sx10 wall memory watch: 81.6 ft/s into the wall, 6.3 back out), 0.1 crashed, with no friction. Then 0x40aeb0 → 0x492650 crashes the bike only if a trick is running;
+  game, the sx10 wall memory watch: 81.6 ft/s into the wall, 6.3 back out), 0.1 crashed, with no friction.
+  Ridden, the spin is scaled by (0.3, 0.1, 0.3) here too, as for a bottomed tyre (0x52bb10 → 0x5050b0 is
+  the same call): only that share of the spin counts in the contact's speed, and the spin change is scaled
+  the same. The port had applied the full spin change, so a glancing hit on a bale or barrier at speed
+  swung the bike 0.46 rad in one step where the original turns about 0.05 rad a step. Fixed 2026-11-15:
+  crash_wall1 and crash_wall2 (SX15, a glancing hit then the wall) now crash at 3.53 s against the
+  original's 3.55 and 3.63 (were 5.65 and 7.33); over 117 whole-ride replays the crash outcomes match
+  100 (were 99) and no other ride's outcome changed. Then 0x40aeb0 → 0x492650 crashes the bike only if a trick is running;
   otherwise the usual checks of 0x40a950 decide (the speed-loss check 4 catches head-on hits).
 * `.scn` `[TerrainZoneN]` has SurfaceFriction, SurfaceDrag and SurfaceTraction (0x4f0d50 reads zones 2–8 into
   three 8-float tables at terrain+0x3a0 / +0x3c0 / +0x3e0, default 1.0; zone 1 stays 1.0). Each terrain

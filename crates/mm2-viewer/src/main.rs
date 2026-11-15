@@ -71,6 +71,10 @@ mod countdown;
 mod cues;
 mod reverb;
 mod frontend;
+#[cfg(target_arch = "wasm32")]
+mod web;
+mod fs;
+mod job;
 mod gates;
 mod ground;
 mod hires;
@@ -121,7 +125,7 @@ use ride::Controls;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use web_time::Instant;
 use tdf::TrackDef;
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, ElementState, MouseButton, WindowEvent};
@@ -132,7 +136,9 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 type BoxError = Box<dyn std::error::Error>;
 
 fn main() -> Result<(), BoxError> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(target_arch = "wasm32")]
+    console_error_panic_hook::set_once();
+    let args: Vec<String> = crate::args().skip(1).collect();
     // Started with nothing (a shortcut, a double-click): as the launcher
     // starts it, with its saved settings.
     if args.is_empty() && play_with_launcher_settings() {
@@ -168,7 +174,7 @@ fn main() -> Result<(), BoxError> {
         let Some(game) = path
             .map(Path::to_path_buf)
             .or_else(find_game)
-            .filter(|g| g.join("UI").join("MAINMENU.DAT").is_file())
+            .filter(|g| fs::is_file(g.join("UI").join("MAINMENU.DAT")))
         else {
             eprintln!(
                 "usage: mm2-viewer [GAME folder] | <TRACK.ENV> [--screenshot out.png] [--size WxH] [--camera x,y,z,yaw,pitch]"
@@ -289,7 +295,7 @@ fn main() -> Result<(), BoxError> {
             // Or play a key script (`--inputs FILE`) from the gate drop, or
             // from race time `--inputs-at`, through the factory keyboard.
             let script = match flag("--inputs") {
-                Some(f) => Some(input::Script::parse(&std::fs::read_to_string(f)?)),
+                Some(f) => Some(input::Script::parse(&crate::fs::read_to_string(f)?)),
                 None => None,
             };
             // `--practice`: the original's practice has no gate, so the
@@ -383,7 +389,7 @@ fn main() -> Result<(), BoxError> {
             // two frames.
             let shift = if practice { r.lead } else { 0.0 };
             let frames: Vec<f32> = flag("--frames")
-                .and_then(|p| std::fs::read_to_string(p).ok())
+                .and_then(|p| crate::fs::read_to_string(p).ok())
                 .map(|s| s.split_whitespace().filter_map(|x| x.parse::<f32>().ok()).map(|t| t + shift).collect())
                 .unwrap_or_default();
             let mut film = match flag("--film") {
@@ -573,7 +579,7 @@ fn main() -> Result<(), BoxError> {
                 for s in out {
                     wav.extend(((s.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
                 }
-                std::fs::write(path, wav)?;
+                crate::fs::write(path, wav)?;
             }
             if let Some(g) = &ghost {
                 let best = g.best().map(|t| t.length);
@@ -581,13 +587,13 @@ fn main() -> Result<(), BoxError> {
                 eprintln!("ghost: best lap {best:?}, showing {shown}");
             }
             if let (Some(text), Some(out)) = (ai_csv, flag("--ai-csv")) {
-                std::fs::write(out, text)?;
+                crate::fs::write(out, text)?;
             }
             if let (Some(text), Some(out)) = (csv, flag("--csv")) {
-                std::fs::write(out, text)?;
+                crate::fs::write(out, text)?;
             }
             if let (Some(rec), Some(out)) = (rec, flag("--record")) {
-                std::fs::write(out, rec.finish().write())?;
+                crate::fs::write(out, rec.finish().write())?;
                 eprintln!("wrote the tape to {out}");
             }
             let b = &r.racers[r.player].bike;
@@ -735,9 +741,35 @@ fn main() -> Result<(), BoxError> {
     run(App::new(Some(track), race, None))
 }
 
+/// The command line; in a browser, the page address's options, so that
+/// `index.html?enhanced` is `--enhanced`.
+fn args() -> std::vec::IntoIter<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default();
+        let options = query.trim_start_matches('?').split('&').filter(|o| !o.is_empty());
+        let args: Vec<String> = std::iter::once("mm2-viewer".to_string())
+            .chain(options.map(|o| format!("--{}", js_sys::decode_uri_component(o).map(String::from).unwrap_or(o.to_string()))))
+            .collect();
+        args.into_iter()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    std::env::args().collect::<Vec<_>>().into_iter()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn run(mut app: App) -> Result<(), BoxError> {
     let event_loop = EventLoop::new()?;
     event_loop.run_app(&mut app)?;
+    Ok(())
+}
+
+/// In a browser the page's own frame loop runs the game, after `main`
+/// has returned.
+#[cfg(target_arch = "wasm32")]
+fn run(app: App) -> Result<(), BoxError> {
+    use winit::platform::web::EventLoopExtWebSys;
+    EventLoop::new()?.spawn_app(app);
     Ok(())
 }
 
@@ -753,7 +785,7 @@ fn present_mode() -> wgpu::PresentMode {
 
 /// `--window WxH`: the window's size, 1024 × 768 unless given.
 fn window_size() -> winit::dpi::LogicalSize<f64> {
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = crate::args().collect();
     args.iter()
         .position(|a| a == "--window")
         .and_then(|i| args.get(i + 1))
@@ -776,7 +808,7 @@ fn play_with_launcher_settings() -> bool {
     };
     let settings = mm2_settings::Settings::load();
     if let Some(game) = settings.game.as_ref().filter(|g| g.join("UI").join("MAINMENU.DAT").is_file()) {
-        let log = std::fs::File::create(mm2_settings::user_dir().join("last-run.log"));
+        let log = crate::fs::File::create(mm2_settings::user_dir().join("last-run.log"));
         return Command::new(&me)
             .args(settings.args())
             .current_dir(game)
@@ -793,11 +825,15 @@ fn play_with_launcher_settings() -> bool {
 }
 
 fn find_game() -> Option<std::path::PathBuf> {
+    // In a browser, the copy the player picked on the page.
+    if cfg!(target_arch = "wasm32") {
+        return Some(std::path::PathBuf::from("/game"));
+    }
     let here = std::env::current_dir().ok()?;
     here.ancestors()
         .flat_map(|d| [d.join("GAME"), d.to_path_buf()])
         .chain([profile::user_dir().join("GAME")])
-        .find(|g| g.join("UI").join("MAINMENU.DAT").is_file())
+        .find(|g| fs::is_file(g.join("UI").join("MAINMENU.DAT")))
 }
 
 /// A track's terrain and the objects its scene places.
@@ -924,7 +960,7 @@ fn ai_check(
     out: &str,
 ) -> Result<(), BoxError> {
     use std::fmt::Write as _;
-    let text = std::fs::read_to_string(tape)?;
+    let text = crate::fs::read_to_string(tape)?;
     let mut lines = text.lines();
     let head: Vec<&str> = lines.next().unwrap_or("").split(',').collect();
     let col = |n: &str| head.iter().position(|h| *h == n).unwrap_or(0);
@@ -994,7 +1030,7 @@ fn ai_check(
             }
         }
     }
-    std::fs::write(out, text)?;
+    crate::fs::write(out, text)?;
     Ok(())
 }
 
@@ -1570,7 +1606,7 @@ fn load_track(
     let res = path
         .ancestors()
         .map(|dir| dir.join("RES"))
-        .find(|res| res.join("MODELS.RES").is_file());
+        .find(|res| fs::is_file(res.join("MODELS.RES")));
     let cc = ride.as_ref().map_or(250, |r| r.bike.cc);
     let spec = res
         .as_deref()
@@ -2012,7 +2048,7 @@ fn detail_texture(res: &std::path::Path, scene: Option<&scn::Scene>) -> Option<m
 
 /// A texture in `RES/GLOBAL.RES`.
 fn global_texture(res: &std::path::Path, name: &str) -> Option<mm2_formats::tga::Image> {
-    let raw = std::fs::read(res.join("GLOBAL.RES")).ok()?;
+    let raw = crate::fs::read(res.join("GLOBAL.RES")).ok()?;
     let bytes = mm2_formats::faoe::decode(&raw, "GLOBAL.RES").unwrap_or(raw);
     let archive = mm2_formats::rs2::Archive::parse(&bytes).ok()?;
     let data = archive
@@ -2024,7 +2060,7 @@ fn global_texture(res: &std::path::Path, name: &str) -> Option<mm2_formats::tga:
 }
 
 fn dirt_sheet(res: &std::path::Path) -> Option<mm2_formats::tga::Image> {
-    let raw = std::fs::read(res.join("GLOBAL.RES")).ok()?;
+    let raw = crate::fs::read(res.join("GLOBAL.RES")).ok()?;
     let bytes = mm2_formats::faoe::decode(&raw, "GLOBAL.RES").unwrap_or(raw);
     let archive = mm2_formats::rs2::Archive::parse(&bytes).ok()?;
     let data = archive
@@ -2750,7 +2786,7 @@ fn file_name(path: &Path) -> String {
 }
 
 fn read_archive(path: &Path) -> Result<Vec<u8>, BoxError> {
-    let raw = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let raw = crate::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -2906,9 +2942,9 @@ async fn screenshot(
         let draw = renderer.render(&device, &queue, view, (width, height), camera, time);
         queue.submit([draw]);
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
-        let (mut record, start) = (0.0, std::time::Instant::now());
+        let (mut record, start) = (0.0, web_time::Instant::now());
         for _ in 0..n {
-            let t = std::time::Instant::now();
+            let t = web_time::Instant::now();
             let draw = renderer.render(&device, &queue, view, (width, height), camera, time);
             record += t.elapsed().as_secs_f64();
             queue.submit([draw]);
@@ -3054,7 +3090,7 @@ impl Film {
 impl Drop for Film {
     fn drop(&mut self) {
         if let Some((path, text)) = &self.log {
-            let _ = std::fs::write(path, text);
+            let _ = crate::fs::write(path, text);
         }
     }
 }
@@ -3263,7 +3299,7 @@ fn save_screenshot(device: &wgpu::Device, queue: &wgpu::Queue, frame: &wgpu::Tex
         return Err("this window's picture can't be read back".into());
     }
     let dir = mm2_settings::user_dir().join("Screenshots");
-    std::fs::create_dir_all(&dir)?;
+    crate::fs::create_dir_all(&dir)?;
     let out = (1..)
         .map(|n| dir.join(format!("OpenMCM2 {n:04}.png")))
         .find(|p| !p.exists())
@@ -3326,7 +3362,7 @@ fn save_png(
         });
     }
     let mut encoder = png::Encoder::new(
-        std::io::BufWriter::new(std::fs::File::create(out)?),
+        std::io::BufWriter::new(crate::fs::File::create(out)?),
         width,
         height,
     );
@@ -3350,7 +3386,7 @@ fn load_step() {
 /// A track loading on another thread while the loading screen shows.
 struct Loading {
     setup: frontend::Setup,
-    job: std::thread::JoinHandle<Result<Track, String>>,
+    job: job::Job<Result<Track, String>>,
 }
 
 struct App {
@@ -3369,7 +3405,7 @@ struct App {
     /// Each raced frame's keys, controls and the player's state
     /// (`MM2_RIDE_LOG=FILE`), to set a live ride beside a tape of the
     /// game's.
-    ride_log: Option<std::io::BufWriter<std::fs::File>>,
+    ride_log: Option<std::io::BufWriter<crate::fs::File>>,
     /// A chat line being typed in a network race (`/`, 0x4203e0).
     chat: Option<String>,
     /// Ctrl+S has turned the race's sounds off.
@@ -3518,7 +3554,7 @@ impl App {
             key_map: input::KeyMap::factory(),
             pad_map: input::factory_pad(),
             analog: true,
-            ride_log: std::env::var("MM2_RIDE_LOG").ok().and_then(|p| std::fs::File::create(p).ok()).map(|f| {
+            ride_log: std::env::var("MM2_RIDE_LOG").ok().and_then(|p| crate::fs::File::create(p).ok()).map(|f| {
                 use std::io::Write as _;
                 let mut w = std::io::BufWriter::new(f);
                 let _ = writeln!(w, "t,dt,keys,x,y,z,roll,pitch,heading,vx,vy,vz,speed,gear,rpm,crashed,bars,lean,front_down,rear_down,front_squeeze,rear_squeeze");
@@ -3565,15 +3601,38 @@ impl App {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn init(&mut self, event_loop: &ActiveEventLoop) -> Result<State, BoxError> {
+        let (window, instance, surface) = Self::open_window(event_loop)?;
+        let gpu = pollster::block_on(gpu_from(&instance, Some(&surface)))?;
+        self.make_state(window, surface, gpu)
+    }
+
+    /// The window, and the GPU's way to draw in it.
+    fn open_window(
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(Arc<Window>, wgpu::Instance, wgpu::Surface<'static>), BoxError> {
         let attrs = Window::default_attributes()
             .with_title("Motocross Madness 2")
             .with_inner_size(window_size())
             .with_window_icon(window_icon());
         // `--fullscreen`: the whole screen, as Alt+Enter gives.
-        let attrs = if std::env::args().any(|a| a == "--fullscreen") {
+        let attrs = if crate::args().any(|a| a == "--fullscreen") {
             attrs.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)))
         } else {
+            attrs
+        };
+        // In a browser, the page's canvas, sized by the page.
+        #[cfg(target_arch = "wasm32")]
+        let attrs = {
+            use wasm_bindgen::JsCast;
+            use winit::platform::web::WindowAttributesExtWebSys;
+            let canvas = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.get_element_by_id("mm2"))
+                .and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok());
+            let mut attrs = attrs.with_canvas(canvas);
+            attrs.inner_size = None;
             attrs
         };
         let window = Arc::new(event_loop.create_window(attrs)?);
@@ -3593,7 +3652,15 @@ impl App {
             wgpu::InstanceDescriptor::new_with_display_handle_from_env(display),
         );
         let surface = instance.create_surface(window.clone())?;
-        let (adapter, device, queue) = pollster::block_on(gpu_from(&instance, Some(&surface)))?;
+        Ok((window, instance, surface))
+    }
+
+    fn make_state(
+        &mut self,
+        window: Arc<Window>,
+        surface: wgpu::Surface<'static>,
+        (adapter, device, queue): (wgpu::Adapter, wgpu::Device, wgpu::Queue),
+    ) -> Result<State, BoxError> {
         let size = window.inner_size();
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
@@ -3700,7 +3767,7 @@ impl App {
             rides[1] = setup.ride.clone();
         }
         LOAD_STEPS.store(0, std::sync::atomic::Ordering::Relaxed);
-        let job = std::thread::spawn(move || {
+        let job = job::Job::spawn(move || {
             load_track(&path, course, riders, rides, me, ghost.then_some(1)).map_err(|e| e.to_string())
         });
         self.loading = Some(Loading {
@@ -3762,7 +3829,7 @@ impl App {
                     let mut h = heading(&setup, r);
                     h.riders.truncate(1);
                     let saved = setup.ghost.as_ref().and_then(|p| {
-                        let bytes = std::fs::read(p).ok()?;
+                        let bytes = crate::fs::read(p).ok()?;
                         mm2_formats::vcr::Tape::parse(&bytes).ok()
                     });
                     self.ghost = Some(replay::Ghost::new(1, replay::header(h), saved, 0.0));
@@ -3963,8 +4030,8 @@ impl App {
             let path = replay::tape_path(&f.user().store.dir);
             let written = path
                 .parent()
-                .map_or(Ok(()), std::fs::create_dir_all)
-                .and_then(|_| std::fs::write(&path, rec.finish().write()));
+                .map_or(Ok(()), crate::fs::create_dir_all)
+                .and_then(|_| crate::fs::write(&path, rec.finish().write()));
             match written {
                 Ok(()) => r.replay = Some(path),
                 Err(e) => eprintln!("{}: {e}", path.display()),
@@ -4862,6 +4929,19 @@ impl ApplicationHandler for App {
         if self.state.is_some() {
             return;
         }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // A browser hands out the GPU later: once it has,
+            // `window_event` finishes setting up.
+            if web::ASKED.with(|a| a.get()) {
+                return;
+            }
+            match Self::open_window(event_loop) {
+                Ok((window, instance, surface)) => web::ask_gpu(window, instance, surface),
+                Err(e) => web::fail(&e.to_string()),
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         match self.init(event_loop) {
             Ok(state) => {
                 state.window.request_redraw();
@@ -4874,7 +4954,22 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        #[cfg(target_arch = "wasm32")]
+        if self.state.is_none() {
+            match web::take_gpu() {
+                Some((window, surface, Ok(gpu))) => match self.make_state(window, surface, gpu) {
+                    Ok(state) => {
+                        state.window.request_redraw();
+                        self.state = Some(state);
+                        web::started();
+                    }
+                    Err(e) => web::fail(&e.to_string()),
+                },
+                Some((_, _, Err(e))) => web::fail(&e),
+                None => {}
+            }
+        }
         let now = self.start.elapsed().as_secs_f32();
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
@@ -4898,6 +4993,20 @@ impl ApplicationHandler for App {
                     s.config.height = size.height.max(1);
                     s.surface.configure(&s.device, &s.config);
                 }
+            }
+            // A finger on a touch screen works as the mouse: the menus and
+            // the replay player take a tap as a click. The race's own
+            // touch buttons are the page's (web/touch.js).
+            WindowEvent::Touch(t) => {
+                use winit::event::TouchPhase;
+                let device_id = t.device_id;
+                self.window_event(event_loop, id, WindowEvent::CursorMoved { device_id, position: t.location });
+                let state = match t.phase {
+                    TouchPhase::Started => ElementState::Pressed,
+                    TouchPhase::Ended | TouchPhase::Cancelled => ElementState::Released,
+                    TouchPhase::Moved => return,
+                };
+                self.window_event(event_loop, id, WindowEvent::MouseInput { device_id, state, button: MouseButton::Left });
             }
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(s) = &self.state {
@@ -5197,6 +5306,8 @@ impl ApplicationHandler for App {
                 self.update(dt);
                 self.feel_pad();
                 self.redraw();
+                #[cfg(target_arch = "wasm32")]
+                web::racing(self.race.is_some() && self.replay.is_none() && !self.in_menus());
                 if tweaks::get().show_fps != self.fps.is_some() {
                     self.fps = self.fps.is_none().then(|| (Instant::now(), 0, 0.0));
                     self.fps_shown = None;
