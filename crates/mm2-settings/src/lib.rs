@@ -348,16 +348,16 @@ pub struct More {
     /// Riders on the gate in a single race, 0 for the game's own count
     /// (`--gate-riders=N`).
     pub riders: u32,
-    /// Lap leaderboards: best laps kept and, with an address, shared
-    /// (`--leaderboards`, `--leaderboard-url=URL`).
+    /// Lap leaderboards: best laps kept and shared with the leaderboard
+    /// server; on unless turned off (`--no-leaderboards`). The address
+    /// (`--leaderboard-url=URL`, `none` for none) also takes the playtime.
     pub leaderboards: bool,
     pub leaderboard_url: String,
     /// The lobby offers to fetch a host's track or a rider's own skins the
     /// player is missing (`--lobby-downloads`).
     pub lobby_downloads: bool,
     /// The playtime tracker sends anonymous totals (no name) to the
-    /// leaderboard server; on unless turned off. The launcher's, not the
-    /// game's.
+    /// leaderboard server; on unless turned off (`--no-share-playtime`).
     pub share_playtime: bool,
 }
 
@@ -382,7 +382,7 @@ impl Default for More {
             sharpen: 0,
             helmet_cam: false,
             riders: 0,
-            leaderboards: false,
+            leaderboards: true,
             leaderboard_url: LEADERBOARD_URL.into(),
             lobby_downloads: false,
             share_playtime: true,
@@ -409,7 +409,13 @@ impl More {
             "riders" => self.riders = n(RIDERS_MOST, 0),
             "leaderboards" => self.leaderboards = yes,
             // Empty (as an early 0.5.0 build saved it) is the default.
-            "leaderboard_url" => self.leaderboard_url = if v.trim().is_empty() { LEADERBOARD_URL.into() } else { v.trim().to_string() },
+            "leaderboard_url" => {
+                self.leaderboard_url = match v.trim() {
+                    "" => LEADERBOARD_URL.into(),
+                    "none" => String::new(),
+                    v => v.to_string(),
+                }
+            }
             "share_playtime" => self.share_playtime = yes,
             "lobby_downloads" => self.lobby_downloads = yes,
             _ => return false,
@@ -433,7 +439,7 @@ impl More {
             b(self.helmet_cam),
             self.riders,
             b(self.leaderboards),
-            self.leaderboard_url,
+            if self.leaderboard_url.is_empty() { "none" } else { &self.leaderboard_url },
             b(self.lobby_downloads),
             b(self.share_playtime),
         )
@@ -451,6 +457,8 @@ impl More {
             (self.fxaa, "--fxaa"),
             (self.helmet_cam, "--helmet-cam"),
             (self.lobby_downloads, "--lobby-downloads"),
+            (!self.leaderboards, "--no-leaderboards"),
+            (!self.share_playtime, "--no-share-playtime"),
         ] {
             if on {
                 a.push(flag.to_string());
@@ -468,11 +476,9 @@ impl More {
                 a.push(format!("{flag}={v}"));
             }
         }
-        if self.leaderboards {
-            a.push("--leaderboards".into());
-            if !self.leaderboard_url.is_empty() && self.leaderboard_url != LEADERBOARD_URL {
-                a.push(format!("--leaderboard-url={}", self.leaderboard_url));
-            }
+        if self.leaderboard_url != LEADERBOARD_URL {
+            // Empty: kept on this computer only.
+            a.push(format!("--leaderboard-url={}", if self.leaderboard_url.is_empty() { "none" } else { &self.leaderboard_url }));
         }
         a
     }
@@ -489,7 +495,8 @@ impl More {
             fxaa: has("--fxaa"),
             helmet_cam: has("--helmet-cam"),
             lobby_downloads: has("--lobby-downloads"),
-            leaderboards: has("--leaderboards"),
+            leaderboards: !has("--no-leaderboards"),
+            share_playtime: !has("--no-share-playtime"),
             ..d.clone()
         };
         for (flag, key) in [
@@ -591,9 +598,11 @@ impl Settings {
         self.mute_in_background = d.mute_in_background;
         self.screenshot_key = d.screenshot_key;
         // The leaderboard's address is where to send laps, not an extra.
-        // Nor is sharing playtime.
+        // Nor are the leaderboards and sharing playtime, which change
+        // nothing in the game.
         let url = std::mem::take(&mut self.more.leaderboard_url);
-        self.more = More { leaderboard_url: url, share_playtime: self.more.share_playtime, ..More::default() };
+        let m = &self.more;
+        self.more = More { leaderboard_url: url, leaderboards: m.leaderboards, share_playtime: m.share_playtime, ..More::default() };
     }
 
     pub fn load() -> Settings {
@@ -940,7 +949,7 @@ mod tests {
             sharpen: 40,
             helmet_cam: true,
             riders: 20,
-            leaderboards: true,
+            leaderboards: false,
             leaderboard_url: "https://example.org/mm2".into(),
             lobby_downloads: true,
             share_playtime: false,
@@ -948,13 +957,17 @@ mod tests {
         assert_eq!(Settings::parse(&s.text()), s);
         let mut args = vec!["mm2-viewer".to_string()];
         args.extend(s.args());
-        // Sharing playtime is the launcher's, so not on the game's line.
-        assert_eq!(More { share_playtime: false, ..More::from_args(&args) }, s.more);
+        assert_eq!(More::from_args(&args), s.more);
         assert!(!s.is_original());
         s.original();
         assert!(s.is_original());
         assert_eq!(s.more.leaderboard_url, "https://example.org/mm2");
-        assert!(!s.more.share_playtime);
+        assert!(!s.more.share_playtime && !s.more.leaderboards, "not extras: kept");
+        assert!(More::default().share_playtime && More::default().leaderboards, "on unless turned off");
+        let none = More { leaderboard_url: String::new(), ..More::default() };
+        assert_eq!(More::from_args(&none.args()).leaderboard_url, "");
+        let kept = Settings { more: none.clone(), ..Settings::default() };
+        assert_eq!(Settings::parse(&kept.text()).more.leaderboard_url, "");
         assert_eq!(Settings::parse("leaderboard_url=\n").more.leaderboard_url, LEADERBOARD_URL);
         assert_eq!(More::from_args(&[]), More::default());
         assert!(More::default().args().is_empty());

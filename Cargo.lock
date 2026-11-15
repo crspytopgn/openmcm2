@@ -1666,18 +1666,18 @@ dependencies = [
 
 [[package]]
 name = "mm2-formats"
-version = "0.5.1"
+version = "0.5.2"
 
 [[package]]
 name = "mm2-indeo"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "mm2-formats",
 ]
 
 [[package]]
 name = "mm2-launcher"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "eframe",
  "egui_kittest",
@@ -1697,7 +1697,7 @@ dependencies = [
 
 [[package]]
 name = "mm2-physics"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "glam",
  "mm2-formats",
@@ -1705,11 +1705,11 @@ dependencies = [
 
 [[package]]
 name = "mm2-settings"
-version = "0.5.1"
+version = "0.5.2"
 
 [[package]]
 name = "mm2-tools"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "mm2-formats",
  "png",
@@ -1717,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "mm2-viewer"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "ab_glyph",
  "bytemuck",
@@ -1733,6 +1733,7 @@ dependencies = [
  "naga",
  "png",
  "pollster 1.0.1",
+ "ureq",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

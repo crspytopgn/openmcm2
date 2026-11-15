@@ -834,7 +834,7 @@ impl Launcher {
                 ui,
                 &mut m.leaderboards,
                 "Lap leaderboards",
-                "Keeps your best laps in each race from lap 2 on, with the riding extras off. In Nationals and Supercross, a lap with more than 2 seconds off the course doesn't count.",
+                "On unless you turn it off. Sends your best lap in each race from lap 2 on, with the riding extras off, under your rider name. In Nationals and Supercross, a lap with more than 2 seconds off the course doesn't count. In the game: High Scores, Online.",
                 ui.available_width(),
             );
             if !m.leaderboards {

@@ -1,4 +1,18 @@
-# OpenMCM2 0.5.1
+# OpenMCM2 0.5.2
+
+## New in 0.5.2
+
+* **Leaderboards in the game:** High Scores now has an **Online** button
+  under the events. It lists the tracks with laps on the OpenMCM2
+  leaderboard for Baja, Nationals, Supercross and Enduro, and each
+  track's best laps from every rider, with their bike class.
+* **On by default, on desktop and in the browser:** after each race the
+  game itself sends your new best laps (under your rider name) and your
+  playtime (with no name) to the OpenMCM2 server. To keep them to
+  yourself, turn off "Lap leaderboards" in the launcher's Extras, or
+  "Add my time to everyone's" on its Play page. In the browser, tick
+  "Keep my laps off the leaderboards" or "Don't add my time to
+  everyone's" in the settings.
 
 ## New in 0.5.1
 

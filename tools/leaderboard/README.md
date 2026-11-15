@@ -22,7 +22,11 @@ in `crates/mm2-settings/src/lib.rs` to it before a release.
 - `POST /laps`: lines of `track<TAB>event<TAB>course<TAB>class<TAB>rider<TAB>ms`,
   as the launcher sends from `laps-pending.txt`.
 - `GET /board?track=farm&event=2&course=0&class=250`: that board's laps as
-  `rider<TAB>ms` lines, fastest first.
+  `rider<TAB>ms` lines, fastest first. Without `class`, every class's laps
+  as `rider<TAB>ms<TAB>class` lines (the game's High Scores, Online).
+- `GET /boards?event=2`: the event's tracks with laps, as
+  `track<TAB>course<TAB>riders<TAB>name` lines. A lap line may end with a
+  seventh field, the track's name as the game shows it.
 
 - `POST /playtime`: anonymous playtime as `key<TAB>seconds` lines to add
   (`total`, `races`, `count`, `players`, `event:N`, `track:NAME`,

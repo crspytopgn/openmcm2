@@ -1,16 +1,16 @@
-//! Lap leaderboards (an extra, off unless turned on): the player's best
-//! laps, kept beside the saves and, when a leaderboard address is set,
-//! shared with other players.
+//! Lap leaderboards (on unless turned off): the player's best laps, kept
+//! beside the saves and shared with other players through the leaderboard
+//! server (`tools/leaderboard/`).
 //!
 //! The game writes each lap that counts into two files in the user's data
 //! folder: `laps.txt`, the best lap for each board, and
-//! `laps-pending.txt`, the laps not yet sent. The launcher sends the
-//! pending ones when it starts (see `tools/leaderboard/`) and shows the
-//! boards.
+//! `laps-pending.txt`, the laps not yet sent. The game sends the pending
+//! ones after each race, the launcher when it starts.
 //!
 //! A board is one track, event, course and bike class. A line in either
-//! file is the board, the rider and the time in milliseconds, split by
-//! tabs: `farm\t2\t0\t250\tMichael\t83456`.
+//! file is the board, the rider, the time in milliseconds and the track's
+//! name as the game shows it, split by tabs:
+//! `farm\t2\t0\t250\tMichael\t83456\tMunchberry Farms`.
 
 use std::path::{Path, PathBuf};
 
@@ -53,16 +53,22 @@ pub struct Lap {
     pub board: Board,
     pub rider: String,
     pub ms: u32,
+    /// The track's name in the game's lists (may be empty).
+    pub title: String,
 }
 
 impl Lap {
     pub fn line(&self) -> String {
-        format!("{}\t{}\t{}", self.board.key(), clean(&self.rider), self.ms)
+        format!("{}\t{}\t{}\t{}", self.board.key(), clean(&self.rider), self.ms, clean_title(&self.title))
     }
 
     pub fn parse(line: &str) -> Option<Lap> {
         let f: Vec<&str> = line.trim_end_matches(['\r', '\n']).split('\t').collect();
-        let [track, event, course, class, rider, ms] = f.as_slice() else { return None };
+        let (fields, title) = match f.as_slice() {
+            [a @ .., t] if a.len() == 6 => (a, *t),
+            a => (a, ""),
+        };
+        let [track, event, course, class, rider, ms] = fields else { return None };
         Some(Lap {
             board: Board {
                 track: clean(track),
@@ -72,6 +78,7 @@ impl Lap {
             },
             rider: clean(rider),
             ms: ms.parse().ok().filter(|&ms| ms >= SHORTEST)?,
+            title: clean_title(title),
         })
     }
 }
@@ -80,6 +87,11 @@ impl Lap {
 /// most 24 letters.
 pub fn clean(s: &str) -> String {
     s.chars().filter(|c| !c.is_control()).take(24).collect::<String>().trim().to_string()
+}
+
+/// A track's name for a line: like [`clean`], up to 40 letters.
+pub fn clean_title(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).take(40).collect::<String>().trim().to_string()
 }
 
 pub fn parse_all(text: &str) -> Vec<Lap> {
@@ -147,7 +159,7 @@ mod tests {
     use super::*;
 
     fn lap(track: &str, rider: &str, ms: u32) -> Lap {
-        Lap { board: Board::new(Path::new(track), 2, 0, 250), rider: rider.into(), ms }
+        Lap { board: Board::new(Path::new(track), 2, 0, 250), rider: rider.into(), ms, title: String::new() }
     }
 
     #[test]
@@ -157,6 +169,9 @@ mod tests {
         assert_eq!(Lap::parse(&l.line()), Some(Lap { rider: "Mike".into(), ..l.clone() }));
         assert_eq!(Lap::parse("farm\t2\t0\t250\tA\t10"), None, "too short");
         assert_eq!(Lap::parse("junk"), None);
+        let named = Lap::parse("farm\t2\t0\t250\tA\t60000\tMunchberry Farms").unwrap();
+        assert_eq!(named.title, "Munchberry Farms");
+        assert_eq!(Lap::parse(&named.line()), Some(named));
     }
 
     #[test]
