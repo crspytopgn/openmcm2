@@ -83,7 +83,7 @@ pub struct Chase {
     /// The frozen camera's spot (mode 5, Numpad 0, 0x4679e0): the eye
     /// stays where it was and turns to watch the bike.
     frozen: Option<Vec3>,
-    /// The Helmet Cam (an extra), after User Cam in the cycle.
+    /// The Helmet Cam (not in the original), after User Cam in the cycle.
     pub helmet: bool,
     /// The Helmet Cam's eye, its height softened apart from its place.
     head: Vec3,
@@ -187,10 +187,10 @@ impl Chase {
         if self.frozen.take().is_some() {
             return if self.helmet { HELMET_CAM } else { self.view.name() };
         }
-        // The Helmet Cam extra comes after the game's last view.
+        // The Helmet Cam comes after the game's last view.
         if self.helmet {
             self.helmet = false;
-        } else if self.view == View::User && crate::tweaks::more().helmet_cam {
+        } else if self.view == View::User {
             self.helmet = true;
             return HELMET_CAM;
         }
@@ -201,20 +201,12 @@ impl Chase {
         self.view.name()
     }
 
-    /// F1, with the Helmet Cam extra on: straight into the Helmet Cam,
-    /// or back out to the view it came from. `None` when the extra is off
-    /// (F1 does nothing in the original's races).
-    pub fn toggle_helmet(&mut self) -> Option<&'static str> {
-        self.toggle_helmet_if(crate::tweaks::more().helmet_cam)
-    }
-
-    fn toggle_helmet_if(&mut self, on: bool) -> Option<&'static str> {
-        if !on {
-            return None;
-        }
+    /// F1: straight into the Helmet Cam, or back out to the view it came
+    /// from; the view's name, to flash.
+    pub fn toggle_helmet(&mut self) -> &'static str {
         self.frozen = None;
         self.helmet = !self.helmet;
-        Some(if self.helmet { HELMET_CAM } else { self.view.name() })
+        if self.helmet { HELMET_CAM } else { self.view.name() }
     }
 
     /// Numpad 0 (0x4679e0's key 0x52): freezes the camera where it is, or
@@ -225,6 +217,12 @@ impl Chase {
             None => Some(self.eye),
         };
         self.frozen.is_some()
+    }
+
+    /// The view is from the rider's own eyes (Rider Cam or the Helmet
+    /// Cam), so the rider's body and sign are left out.
+    pub fn first_person(&self) -> bool {
+        self.frozen.is_none() && (self.helmet || self.view == View::Rider)
     }
 
     /// Home and End: the field of view narrows or widens by 3° (10° to
@@ -323,11 +321,24 @@ impl Chase {
         }
         let (ride_eye, ride_target) = match (self.view, preset) {
             (View::Rider, _) if !keys.reverse => {
-                let head = position + bike.up * Self::HEAD;
+                // From the rider's eyes (his `Head` frame, 0x417db0), held
+                // with the bike, looking a little down over the bars; the
+                // rider's own body and sign are not drawn in this view.
+                let level = Vec3::new(forward.x, 0.0, forward.z).normalize_or(self.yaw);
+                let nose = (level - bike.up * level.dot(bike.up)).normalize_or(level);
+                let head = position + bike.up * Self::HELMET_UP + nose * Self::HELMET_AHEAD;
+                // Only up and down eases: a lag along the ground at speed
+                // would put the eye inside the rider's helmet.
                 let lag = if steady() { Self::STEADY_HEAD } else { 0.02 };
                 let k = 1.0 - (-dt / lag).exp();
-                self.eye += (head - self.eye) * k;
-                self.target = head + forward * 30.0;
+                self.eye.y += (head.y - self.eye.y) * k;
+                if (self.eye.y - head.y).abs() > 2.0 {
+                    self.eye.y = head.y;
+                }
+                self.eye.x = head.x;
+                self.eye.z = head.z;
+                let dir = (level + Vec3::Y * (nose.y.clamp(-0.9, 0.9) - Self::LOOK_DOWN)).normalize_or(level);
+                self.target = self.eye + dir * 30.0;
                 let floor = ground(terrain, self.eye.x, self.eye.z) + 0.5;
                 self.eye.y = self.eye.y.max(floor);
                 return (self.eye, self.target);
@@ -500,12 +511,10 @@ mod tests {
     #[test]
     fn f1_goes_straight_to_the_helmet_cam_and_back() {
         let mut c = Chase::new(Vec3::ZERO, Vec3::Z);
-        assert_eq!(c.toggle_helmet_if(false), None);
-        assert!(!c.helmet);
         c.next_view();
-        assert_eq!(c.toggle_helmet_if(true), Some(HELMET_CAM));
+        assert_eq!(c.toggle_helmet(), HELMET_CAM);
         assert!(c.helmet);
-        assert_eq!(c.toggle_helmet_if(true), Some(View::Slot.name()));
+        assert_eq!(c.toggle_helmet(), View::Slot.name());
         assert!(!c.helmet);
         assert_eq!(c.view, View::Slot);
     }

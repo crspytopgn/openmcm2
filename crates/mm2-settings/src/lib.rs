@@ -382,9 +382,6 @@ pub struct More {
     pub fxaa: bool,
     /// Sharpening, % (`--sharpen=N`).
     pub sharpen: u32,
-    /// A camera from the rider's helmet among the race cameras
-    /// (`--helmet-cam`).
-    pub helmet_cam: bool,
     /// Riders on the gate in a single race, 0 for the game's own count
     /// (`--gate-riders=N`).
     pub riders: u32,
@@ -424,7 +421,6 @@ impl Default for More {
             fps_cap: 0,
             fxaa: false,
             sharpen: 0,
-            helmet_cam: false,
             riders: 0,
             leaderboards: true,
             leaderboard_url: LEADERBOARD_URL.into(),
@@ -450,7 +446,8 @@ impl More {
             "fps_cap" => self.fps_cap = n(500, 0),
             "fxaa" => self.fxaa = yes,
             "sharpen" => self.sharpen = n(100, 0),
-            "helmet_cam" => self.helmet_cam = yes,
+            // The Helmet Cam was an extra until 0.5.4; it is always there now.
+            "helmet_cam" => {}
             "riders" => self.riders = n(RIDERS_MOST, 0),
             "leaderboards" => self.leaderboards = yes,
             // Empty (as an early 0.5.0 build saved it) is the default.
@@ -472,7 +469,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\nfps_cap={}\nfxaa={}\nsharpen={}\nhelmet_cam={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -482,7 +479,6 @@ impl More {
             self.fps_cap,
             b(self.fxaa),
             self.sharpen,
-            b(self.helmet_cam),
             self.riders,
             b(self.leaderboards),
             if self.leaderboard_url.is_empty() { "none" } else { &self.leaderboard_url },
@@ -502,7 +498,6 @@ impl More {
             (self.all_gear, "--all-gear"),
             (self.track_filter, "--track-filter"),
             (self.fxaa, "--fxaa"),
-            (self.helmet_cam, "--helmet-cam"),
             (!self.leaderboards, "--no-leaderboards"),
             (!self.share_playtime, "--no-share-playtime"),
             (!self.lobby_downloads, "--no-lobby-downloads"),
@@ -541,7 +536,6 @@ impl More {
             all_gear: has("--all-gear"),
             track_filter: has("--track-filter"),
             fxaa: has("--fxaa"),
-            helmet_cam: has("--helmet-cam"),
             lobby_downloads: !has("--no-lobby-downloads"),
             list_races: !has("--no-list-races"),
             leaderboards: !has("--no-leaderboards"),
@@ -1076,7 +1070,6 @@ mod tests {
             fps_cap: 144,
             fxaa: true,
             sharpen: 40,
-            helmet_cam: true,
             riders: 20,
             leaderboards: false,
             leaderboard_url: "https://example.org/mm2".into(),
