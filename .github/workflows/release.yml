@@ -79,7 +79,12 @@ jobs:
               ditto -c -k --keepParent "$dir" "$dir.zip" ;;
             *)
               cp $bin/mm2-launcher $bin/mm2-viewer $bin/mm2-tools "$dir/"
-              tar czf "$dir.tar.gz" "$dir" ;;
+              tar czf "$dir.tar.gz" "$dir"
+              # The same programs as one AppImage, with icon and menu
+              # entry (for the Steam Deck and other Linux handhelds).
+              # appimagetool checks the menu entry with desktop-file-validate.
+              sudo apt-get install -y -q desktop-file-utils >/dev/null
+              sh tools/make-appimage.sh "$bin" "$dir.AppImage" ;;
           esac
       - uses: actions/upload-artifact@v4
         with:
@@ -95,8 +100,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+      - name: Steam library pictures
+        run: cd assets && zip -r "../openmcm2-steam-artwork.zip" steam
       - name: Checksums
-        run: sha256sum openmcm2-*.zip openmcm2-*.tar.gz > SHA256SUMS && cat SHA256SUMS
+        run: sha256sum openmcm2-*.zip openmcm2-*.tar.gz openmcm2-*.AppImage > SHA256SUMS && cat SHA256SUMS
       - name: Drop unpublished drafts (and, with replace, this version's release)
         env:
           GH_TOKEN: ${{ github.token }}

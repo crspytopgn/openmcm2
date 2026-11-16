@@ -208,15 +208,68 @@ pub fn factory_pad() -> [(i32, i32); crate::profile::ACTIONS] {
     ]
 }
 
+/// A game pad's own buttons for the actions the factory map leaves on
+/// keys, which a pad hasn't got: the stick clicks Kahuna and Thrill
+/// Cam, the shoulders Reverse Cam and the clutch, the D-pad's left the
+/// taunt and its down backing up. (DirectInput's numbers, the D-pad's
+/// as [`crate::pad`] gives them.)
+pub const PAD_EXTRAS: [(usize, i32); 6] = [
+    (KAHUNA, 8),
+    (THRILL_CAM, 9),
+    (REVERSE_CAM, 4),
+    (CLUTCH, 5),
+    (TAUNT, 12),
+    (BACK_UP, 11),
+];
+
+/// A game pad's map with [`PAD_EXTRAS`] filled in where it has no pad
+/// button of its own, each only if the map doesn't use that button.
+pub fn with_pad_extras(mut map: [(i32, i32); crate::profile::ACTIONS]) -> [(i32, i32); crate::profile::ACTIONS] {
+    for (action, button) in PAD_EXTRAS {
+        let used = map.iter().any(|&(k, c)| k == 2 && c == button);
+        if map[action].0 != 2 && !used {
+            map[action] = (2, button);
+        }
+    }
+    map
+}
+
 /// A stick's steering is cubed (0x52e3e0, for joystick devices): fine
-/// near the centre, full lock at the edge.
-pub fn stick_steer(x: f32) -> f32 {
-    x * x * x
+/// near the centre, full lock at the edge. The steering curve extra
+/// (`curve`, % of the game's) eases it towards a straight line: the
+/// power runs from 3 at 100% to 1 at 0%.
+pub fn stick_steer(x: f32, curve: u32) -> f32 {
+    if curve >= 100 {
+        return x * x * x;
+    }
+    let power = 1.0 + 2.0 * curve as f32 / 100.0;
+    x.signum() * x.abs().powf(power)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn steering_curve() {
+        assert_eq!(stick_steer(0.5, 100), 0.125);
+        assert!((stick_steer(-0.5, 0) + 0.5).abs() < 1e-6);
+        assert!((stick_steer(0.5, 50) - 0.25).abs() < 1e-6);
+        assert_eq!(stick_steer(1.0, 30), 1.0);
+    }
+
+    #[test]
+    fn pad_extras_fill_only_free_buttons() {
+        let mut map = factory_pad();
+        // The player put the low stunts on LB themselves.
+        map[STUNTS_LOW] = (2, 4);
+        let m = with_pad_extras(map);
+        assert_eq!(m[KAHUNA], (2, 8));
+        assert_eq!(m[CLUTCH], (2, 5));
+        assert_eq!(m[REVERSE_CAM], (0, 56), "LB is taken, so Reverse Cam stays on its key");
+        assert_eq!(m[STEER_LEFT], (2, -3));
+        assert_eq!(m[ACCELERATE], (2, 0));
+    }
 
     #[test]
     fn reads_a_script() {

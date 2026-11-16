@@ -19,7 +19,12 @@
 //! leaned or steered for good, so the first moment a pad is seen its
 //! axes are taken at rest: one resting past nine tenths reads from its
 //! rest instead, 0 there and 1 at its other end. DirectInput's
-//! calibration does as much for the game.
+//! calibration does as much for the game. One resting part of the way
+//! out (a trigger read half way, a motion sensor, a worn stick) reads
+//! nothing until it has been seen back in the middle, so no pad leans
+//! or steers the bike on its own. Only a pad that has been used counts
+//! besides the one in use (a Steam Deck has its own controls and
+//! Steam's copy of them, and other devices may look like pads).
 //!
 //! Axis values here are DirectInput's way round, −1 to 1 with Y growing
 //! towards the rider (stick pulled back).
@@ -32,8 +37,12 @@ use gilrs::ff::{BaseEffect, BaseEffectType, Effect, EffectBuilder};
 use gilrs::{Axis, Button, Gamepad, GamepadId, Gilrs, MappingSource};
 
 /// The axes found resting at an end: each one's rest, −1 or 1, by pad
-/// and native axis code.
+/// and native axis code; 0 for one found part of the way out, which
+/// reads nothing until seen in the middle.
 type Rest = HashMap<(GamepadId, u32), f32>;
+
+/// How near the middle an axis must be seen to count as centred.
+const CENTRED: f32 = 0.25;
 
 /// How long after a pad is first seen its axes count as at rest.
 const SETTLE: Duration = Duration::from_millis(1500);
@@ -42,8 +51,10 @@ const SETTLE: Duration = Duration::from_millis(1500);
 /// others to be passed over (stick drift is less).
 const IN_USE: f32 = 0.15;
 
-/// A known pad's buttons in DirectInput's order for an Xbox pad.
-const PAD_BUTTONS: [Button; 10] = [
+/// A known pad's buttons in DirectInput's order for an Xbox pad, then
+/// the D-pad's four (which DirectInput gave as a hat) as 10 to 13, so
+/// they can be bound too.
+const PAD_BUTTONS: [Button; 14] = [
     Button::South,
     Button::East,
     Button::West,
@@ -54,7 +65,17 @@ const PAD_BUTTONS: [Button; 10] = [
     Button::Start,
     Button::LeftThumb,
     Button::RightThumb,
+    Button::DPadUp,
+    Button::DPadDown,
+    Button::DPadLeft,
+    Button::DPadRight,
 ];
+
+/// The D-pad's buttons, by DirectInput's number here.
+pub const DPAD_UP: i32 = 10;
+pub const DPAD_DOWN: i32 = 11;
+pub const DPAD_LEFT: i32 = 12;
+pub const DPAD_RIGHT: i32 = 13;
 
 /// The six axis codes, X to RZ.
 pub const AXES: [i32; 6] = [-3, -5, -7, -9, -11, -13];
@@ -96,6 +117,10 @@ pub struct Pads {
     /// the pad settles.
     rest: Rest,
     centred: HashSet<(GamepadId, u32)>,
+    /// The pads a button or stick has been used on.
+    touched: HashSet<GamepadId>,
+    /// The pads whose axes at rest have been written to the log.
+    logged: HashSet<GamepadId>,
     /// The pad vibrating: its heavy and light motors, each a steady
     /// effect turned up and down, and the strengths last asked.
     motors: Option<(GamepadId, [Effect; 2], [f32; 2])>,
@@ -117,6 +142,8 @@ impl Pads {
             first: HashMap::new(),
             rest: HashMap::new(),
             centred: HashSet::new(),
+            touched: HashSet::new(),
+            logged: HashSet::new(),
             motors: None,
         })
     }
@@ -144,6 +171,7 @@ impl Pads {
                     self.first.remove(&ev.id);
                     self.rest.retain(|&(id, _), _| id != ev.id);
                     self.centred.retain(|&(id, _)| id != ev.id);
+                    self.touched.remove(&ev.id);
                 }
                 _ => {}
             }
@@ -179,8 +207,10 @@ impl Pads {
         out
     }
 
-    /// What the pad does to the menus' pointer: the left stick or the
-    /// D-pad's push (x, y, screen-down positive), and A and B held.
+    /// What the pad does to the menus' pointer: the left stick's push
+    /// (x, y, screen-down positive), and A and B held. (The D-pad jumps
+    /// between the buttons instead: its presses.) A stick read as it
+    /// comes moves the pointer with its hat too.
     pub fn pointer(&self) -> ([f32; 2], bool, bool) {
         let Some(pad) = self.pad() else {
             return ([0.0; 2], false, false);
@@ -189,14 +219,16 @@ impl Pads {
             axis(&pad, -3, &self.rest).unwrap_or(0.0),
             axis(&pad, -5, &self.rest).unwrap_or(0.0),
         ];
-        for (b, i, s) in [
-            (Button::DPadLeft, 0, -1.0),
-            (Button::DPadRight, 0, 1.0),
-            (Button::DPadUp, 1, -1.0),
-            (Button::DPadDown, 1, 1.0),
-        ] {
-            if pad.is_pressed(b) {
-                v[i] = s;
+        if !known(&pad) {
+            for (b, i, s) in [
+                (Button::DPadLeft, 0, -1.0),
+                (Button::DPadRight, 0, 1.0),
+                (Button::DPadUp, 1, -1.0),
+                (Button::DPadDown, 1, 1.0),
+            ] {
+                if pad.is_pressed(b) {
+                    v[i] = s;
+                }
             }
         }
         (v, button(&pad, 0), button(&pad, 1))
@@ -217,7 +249,9 @@ impl Pads {
         }
         self.gilrs
             .gamepads()
+            .filter(|(id, _)| self.touched.contains(id))
             .filter_map(|(_, p)| axis(&p, code, &self.rest))
+            .chain(own)
             .reduce(|a, b| if b.abs() > a.abs() { b } else { a })
     }
 
@@ -277,29 +311,54 @@ impl Pads {
     }
 
     /// Takes each pad's axes at rest in its first moments: one past nine
-    /// tenths and not seen in the middle rests at that end.
+    /// tenths and not seen in the middle rests at that end; one part of
+    /// the way out reads nothing until it comes back to the middle.
     fn settle(&mut self) {
         let now = Instant::now();
         for (id, pad) in self.gilrs.gamepads() {
             let since = *self.first.entry(id).or_insert(now);
-            if now.duration_since(since) > SETTLE {
-                continue;
+            let settling = now.duration_since(since) <= SETTLE;
+            if !settling && self.logged.insert(id) {
+                // For a player's log: what the pad is and where it rests.
+                let axes: Vec<String> = pad
+                    .state()
+                    .axes()
+                    .map(|(code, data)| format!("{:#x}={:+.2}", code.into_u32() & 0xffff, data.value()))
+                    .collect();
+                eprintln!(
+                    "joystick: {} ({:04x}:{:04x}, {:?}) axes at rest: {}",
+                    pad.name(),
+                    pad.vendor_id().unwrap_or(0),
+                    pad.product_id().unwrap_or(0),
+                    pad.mapping_source(),
+                    if axes.is_empty() { "none moved".to_string() } else { axes.join(" ") },
+                );
             }
             for (code, data) in pad.state().axes() {
                 let key = (id, code.into_u32());
                 let v = data.value();
-                if v.abs() < PUSHED {
+                if !settling {
+                    // A doubtful axis is trusted once seen in the middle.
+                    if self.rest.get(&key) == Some(&0.0) && v.abs() < CENTRED {
+                        eprintln!("joystick: {} axis {:#x} centred", pad.name(), key.1);
+                        self.rest.remove(&key);
+                    }
+                    continue;
+                }
+                if v.abs() < CENTRED {
                     self.centred.insert(key);
                     self.rest.remove(&key);
-                } else if v.abs() > 0.9 && !self.centred.contains(&key) && !self.rest.contains_key(&key) {
+                } else if !self.centred.contains(&key) && !self.rest.contains_key(&key) {
+                    let r = if v.abs() > 0.9 { v.signum() } else { 0.0 };
                     eprintln!("joystick: {} axis {:#x} rests at {v:+.2}", pad.name(), key.1);
-                    self.rest.insert(key, v.signum());
+                    self.rest.insert(key, r);
                 }
             }
         }
     }
 
     fn take(&mut self, id: GamepadId) {
+        self.touched.insert(id);
         if self.active != Some(id) {
             let pad = self.gilrs.gamepad(id);
             eprintln!("joystick in use: {} ({})", pad.name(), kind_name(&pad));
@@ -307,12 +366,15 @@ impl Pads {
         }
     }
 
-    /// The pad in use: the last one touched, else the first connected.
+    /// The pad in use: the last one touched, else the first game pad
+    /// connected, else the first stick.
     pub fn pad(&self) -> Option<Gamepad<'_>> {
-        match self.active.and_then(|id| self.gilrs.connected_gamepad(id)) {
-            Some(p) => Some(p),
-            None => self.gilrs.gamepads().next().map(|(_, p)| p),
+        if let Some(p) = self.active.and_then(|id| self.gilrs.connected_gamepad(id)) {
+            return Some(p);
         }
+        let mut all = self.gilrs.gamepads().map(|(_, p)| p);
+        let first = self.gilrs.gamepads().next().map(|(_, p)| p);
+        all.find(|p| known(p)).or(first)
     }
 
     /// The device the controls page and `control.ctl` file the pad
@@ -405,6 +467,7 @@ pub fn axis(pad: &Gamepad, code: i32, rest: &Rest) -> Option<f32> {
 /// else 0 at rest to ±1 at its other end.
 fn from_rest(pad: &Gamepad, code: u32, v: f32, rest: &Rest) -> f32 {
     match rest.get(&(pad.id(), code)) {
+        Some(&r) if r == 0.0 => 0.0,
         Some(r) => (v - r) * 0.5,
         None => v,
     }

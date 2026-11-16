@@ -73,6 +73,7 @@ export const EXTRAS = [
   ["Controllers and picture", [
     { key: "pad_dead_zone", flag: "pad-dead-zone", label: "Stick dead zone", about: "How far a stick moves before it steers. 4% is the original game's.", range: [0, 50, 1, "%"], off: 4 },
     { key: "pad_sensitivity", flag: "pad-sensitivity", label: "Stick sensitivity", about: "How far a stick steers for how far it is pushed. 100% is the original game's.", range: [25, 200, 5, "%"], off: 100 },
+    { key: "pad_curve", flag: "pad-curve", label: "Stick steering curve", about: "How gently a stick steers near the middle. 100% is the original game's: little steering for a small push and a lot near the edge. 0% steers in straight proportion.", range: [0, 100, 5, "%"], off: 100 },
     { key: "pad_smoothing", flag: "pad-smoothing", label: "Stick smoothing", about: "Evens out a twitchy stick's steering. 0% is the original game's.", range: [0, 90, 5, "%"], off: 0 },
     { key: "fxaa", flag: "fxaa", label: "Smoother edges", about: "Softens jagged edges over the race picture, in either look." },
     { key: "sharpen", flag: "sharpen", label: "Sharpening", about: "Brings out detail in the race picture, in either look. 0% is the original game's.", range: [0, 100, 5, "%"], off: 0 },

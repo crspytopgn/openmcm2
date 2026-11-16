@@ -379,6 +379,9 @@ pub struct More {
     /// How much a stick's steering is smoothed, % (`--pad-smoothing=N`;
     /// the game's 0).
     pub pad_smoothing: u32,
+    /// How curved a stick's steering is, % (`--pad-curve=N`): 100 is the
+    /// game's (cubed: fine near the middle, steep at the edge), 0 straight.
+    pub pad_curve: u32,
     /// The most frames a second, 0 for no cap (`--fps-cap=N`).
     pub fps_cap: u32,
     /// Smoother edges after the picture is drawn (`--fxaa`).
@@ -421,6 +424,7 @@ impl Default for More {
             pad_dead_zone: PAD_DEAD_ZONE,
             pad_sensitivity: 100,
             pad_smoothing: 0,
+            pad_curve: 100,
             fps_cap: 0,
             fxaa: false,
             sharpen: 0,
@@ -446,6 +450,7 @@ impl More {
             "pad_dead_zone" => self.pad_dead_zone = n(50, PAD_DEAD_ZONE),
             "pad_sensitivity" => self.pad_sensitivity = n(200, 100).max(25),
             "pad_smoothing" => self.pad_smoothing = n(90, 0),
+            "pad_curve" => self.pad_curve = n(100, 100),
             "fps_cap" => self.fps_cap = n(500, 0),
             "fxaa" => self.fxaa = yes,
             "sharpen" => self.sharpen = n(100, 0),
@@ -472,13 +477,14 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
             self.pad_dead_zone,
             self.pad_sensitivity,
             self.pad_smoothing,
+            self.pad_curve,
             self.fps_cap,
             b(self.fxaa),
             self.sharpen,
@@ -514,6 +520,7 @@ impl More {
             (self.pad_dead_zone, d.pad_dead_zone, "--pad-dead-zone"),
             (self.pad_sensitivity, d.pad_sensitivity, "--pad-sensitivity"),
             (self.pad_smoothing, d.pad_smoothing, "--pad-smoothing"),
+            (self.pad_curve, d.pad_curve, "--pad-curve"),
             (self.fps_cap, d.fps_cap, "--fps-cap"),
             (self.sharpen, d.sharpen, "--sharpen"),
             (self.riders, d.riders, "--gate-riders"),
@@ -549,6 +556,7 @@ impl More {
             ("--pad-dead-zone", "pad_dead_zone"),
             ("--pad-sensitivity", "pad_sensitivity"),
             ("--pad-smoothing", "pad_smoothing"),
+            ("--pad-curve", "pad_curve"),
             ("--fps-cap", "fps_cap"),
             ("--sharpen", "sharpen"),
             ("--gate-riders", "riders"),
@@ -1075,6 +1083,7 @@ mod tests {
             pad_dead_zone: 10,
             pad_sensitivity: 120,
             pad_smoothing: 30,
+            pad_curve: 50,
             fps_cap: 144,
             fxaa: true,
             sharpen: 40,

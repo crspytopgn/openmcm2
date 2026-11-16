@@ -70,11 +70,16 @@ fn mac(viewer: &Path) -> Result<PathBuf, String> {
     write_runnable(desktop()?.join(format!("{NAME}.command")), &format!("#!/bin/sh\nexec '{at}'\n"))
 }
 
-/// A `.desktop` entry.
+/// A `.desktop` entry. Run from the AppImage, the viewer sits in a folder
+/// that only lasts while it runs, so the entry starts the AppImage itself
+/// with `--play` instead.
 fn linux(viewer: &Path) -> Result<PathBuf, String> {
+    let exec = match crate::update::appimage() {
+        Some(image) => format!("\"{}\" --play", image.display()),
+        None => format!("\"{}\"", viewer.display()),
+    };
     let text = format!(
-        "[Desktop Entry]\nType=Application\nName={NAME}\nComment=Motocross Madness 2 (OpenMCM2)\nExec=\"{}\"\nTerminal=false\nCategories=Game;\n",
-        viewer.display(),
+        "[Desktop Entry]\nType=Application\nName={NAME}\nComment=Motocross Madness 2 (OpenMCM2)\nExec={exec}\nTerminal=false\nCategories=Game;\n",
     );
     write_runnable(desktop()?.join(format!("{NAME}.desktop")), &text)
 }
