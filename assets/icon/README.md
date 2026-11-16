@@ -14,8 +14,10 @@ License), turned into outlines.
   background, so it works on light and dark.
 - `wordmark.svg`: OPENMCM2 on one line in chrome, for tight spaces like the
   site's top bar.
-- `app-icon.svg`: the app icon (1024 grid), a dirt bike wheel with a chrome rim and 18 spokes;
-  `app-icon-small.svg` has thicker spokes and fewer knobs, for 64 px and below.
+- `app-icon.png`: the app icon (1024 px), a spinning dirt bike wheel on a
+  lime-edged plate tile: chrome rim and hub with the same sky and ground
+  reflection as the lettering, 18 spokes, a little dirt flicking off the back
+  of the tyre, and the same worn finish. The other icon files are made from it.
 - `icon-256.png`: window icon for the launcher and the game.
 - `logo-dark.png`: the logo at the top of the launcher.
 - `openmcm2.ico`: Windows .exe icon (16 to 256 px), added by each crate's `build.rs`.

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "assets" / "steam"
 SHOTS = ROOT / "site" / "img"
 LOGO = ROOT / "assets" / "icon" / "openmcm2-worn.png"
-ICON = ROOT / "assets" / "icon" / "app-icon.svg"
+ICON = ROOT / "assets" / "icon" / "app-icon.png"
 
 
 def svg(path, width):
