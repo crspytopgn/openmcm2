@@ -658,7 +658,7 @@ impl Launcher {
     // ---- Play ----
 
     fn play_page(&mut self, ui: &mut egui::Ui, busy: bool) {
-        look::page_title(ui, "Ready to ride", "Motocross Madness 2, rebuilt to run natively.");
+        look::page_title(ui, "Ready to ride", "Motocross Madness 2, running natively on your computer.");
         self.update_banner(ui, busy);
         self.game_card(ui, busy);
         self.summary_card(ui);
@@ -1340,7 +1340,7 @@ impl Launcher {
                     )).wrap());
                     ui.horizontal(|ui| {
                         let can = !busy && self.running.is_none();
-                        let b = egui::Button::new(egui::RichText::new("Update and restart").color(egui::Color32::WHITE)).fill(look::ACCENT);
+                        let b = egui::Button::new(egui::RichText::new("Update and restart").color(look::ON_ACCENT)).fill(look::ACCENT);
                         if ui.add_enabled(can, b).clicked() {
                             act = Some(true);
                         }
@@ -1430,7 +1430,7 @@ impl Launcher {
         });
         look::card(ui, look::icon::ICON_FAVORITE, "Enjoying OpenMCM2?", |ui| {
             ui.add(egui::Label::new("Want more updates? OpenMCM2 is free and always will be. If you enjoy it, a small donation helps keep the updates coming.").wrap());
-            let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_FAVORITE, "Donate on GitHub")).color(egui::Color32::WHITE)).fill(look::ACCENT);
+            let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_FAVORITE, "Donate on GitHub")).color(look::ON_ACCENT)).fill(look::ACCENT);
             if ui.add(b).on_hover_text(SPONSOR_URL).clicked() {
                 ui.ctx().open_url(egui::OpenUrl::new_tab(SPONSOR_URL));
             }
@@ -1546,7 +1546,7 @@ impl Launcher {
                                 }
                                 ui.label(egui::RichText::new(look::with(look::icon::ICON_CHECK_CIRCLE, "Added")).color(look::GOOD));
                             } else if track.can_add() {
-                                let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_DOWNLOAD, "Get")).color(egui::Color32::WHITE)).fill(look::ACCENT);
+                                let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_DOWNLOAD, "Get")).color(look::ON_ACCENT)).fill(look::ACCENT);
                                 if ui.add(b).clicked() {
                                     add = Some(track.clone());
                                 }

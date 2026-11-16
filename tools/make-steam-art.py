@@ -12,11 +12,14 @@ from PIL import Image, ImageDraw, ImageFilter
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "assets" / "steam"
 SHOTS = ROOT / "site" / "img"
-LOGO = ROOT / "assets" / "icon" / "openmcm2-dark.svg"
-ICON = ROOT / "assets" / "icon" / "app-icon.svg"
+LOGO = ROOT / "assets" / "icon" / "openmcm2-worn.png"
+ICON = ROOT / "assets" / "icon" / "app-icon.png"
 
 
 def svg(path, width):
+    if path.suffix == ".png":
+        im = Image.open(path).convert("RGBA")
+        return im.resize((width, round(width * im.height / im.width)), Image.LANCZOS)
     png = cairosvg.svg2png(url=str(path), output_width=width)
     return Image.open(io.BytesIO(png)).convert("RGBA")
 
@@ -39,7 +42,7 @@ def shade(im, top, bottom):
         a = max(top * (1 - t / 0.45) if t < 0.45 else 0, bottom * ((t - 0.5) / 0.5) if t > 0.5 else 0)
         mask.putpixel((0, y), int(255 * min(1, a)))
     mask = mask.resize((w, h))
-    dark = Image.new("RGB", (w, h), (14, 20, 28))
+    dark = Image.new("RGB", (w, h), (18, 17, 16))
     return Image.composite(dark, im, mask)
 
 
@@ -61,11 +64,11 @@ def main():
     # Portrait capsule (the library grid), 600x900.
     cap = shot("enduro-airfield.jpg", (480, 150, 640, 690), (600, 900))
     cap = shade(cap, 0.0, 0.85)
-    with_logo(cap, 520, 790).save(OUT / "capsule-600x900.png", optimize=True)
+    with_logo(cap, 420, 690).save(OUT / "capsule-600x900.png", optimize=True)
     # Wide capsule (recent games, the Deck's home row), 920x430.
     wide = shot("hero-dusk.jpg", (300, 225, 1000, 467), (920, 430))
     wide = shade(wide, 0.0, 0.8)
-    with_logo(wide, 560, 350).save(OUT / "wide-920x430.png", optimize=True)
+    with_logo(wide, 330, 215).save(OUT / "wide-920x430.png", optimize=True)
     # Hero (the banner on the game's page), 1920x620, no logo: Steam
     # puts the logo picture over it.
     hero = shot("nat-butte.jpg", (40, 235, 1400, 452), (1920, 620))

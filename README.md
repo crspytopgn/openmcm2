@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/icon/openmcm2-dark.svg">
-  <img src="assets/icon/openmcm2.svg" alt="OpenMCM2" width="360">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/icon/openmcm2-worn.png">
+  <img src="assets/icon/openmcm2-worn.png" alt="OpenMCM2" width="420">
 </picture>
 
 # OpenMCM2
@@ -228,6 +228,9 @@ MM2_DATA="/path/to/Motocross Madness 2" cargo test
 * The Linux build carries [Liberation Sans](https://github.com/liberationfonts)
   for the menus' text on systems without Arial or a look-alike, under the
   SIL Open Font License 1.1 ([assets/fonts/LICENSE-OFL.txt](assets/fonts/LICENSE-OFL.txt)).
+* The logo, the launcher's titles and the site's headings use
+  [Archivo](https://github.com/Omnibus-Type/Archivo) Expanded Black Italic,
+  also under the SIL Open Font License 1.1.
 
 ## Legal
 

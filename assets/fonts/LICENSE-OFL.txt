@@ -1,3 +1,9 @@
+Liberation Sans 2 (LiberationSans-*.ttf) and Archivo Expanded Black Italic
+(archivo-expanded-black-italic.ttf, a Latin subset, used for the launcher's
+titles and the logo; Copyright 2020 The Archivo Project Authors,
+https://github.com/Omnibus-Type/Archivo) are both under the SIL Open Font
+License 1.1 below.
+
 Liberation Sans 2 (from the Liberation Fonts project, https://github.com/liberationfonts)
 
 Digitized data copyright (c) 2010 Google Corporation with Reserved Font Arimo, Tinos and Cousine.
