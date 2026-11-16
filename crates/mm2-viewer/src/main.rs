@@ -169,7 +169,7 @@ fn main() -> Result<(), BoxError> {
     // The enhanced graphics, all of them or less those named after `=`.
     if let Some(arg) = args.iter().find(|a| *a == "--enhanced" || a.starts_with("--enhanced=")) {
         let list = arg.strip_prefix("--enhanced").unwrap().trim_start_matches('=');
-        graphics::enable(graphics::Enhanced::parse(list)?);
+        graphics::enable_list(list)?;
         eprintln!("enhanced graphics: {:?} (F3 switches to the original look)", graphics::enhanced().unwrap());
     }
     if let Some(dir) = flag("--hires") {
@@ -795,6 +795,34 @@ fn present_mode() -> wgpu::PresentMode {
     match tweaks::get().vsync {
         true => wgpu::PresentMode::AutoVsync,
         false => wgpu::PresentMode::AutoNoVsync,
+    }
+}
+
+/// The full screen asked for: the screen's mode `--screen WxH` names
+/// (its fastest refresh, most colours), or the screen as it is when it
+/// has no such mode or none was named.
+fn full_screen(event_loop: &ActiveEventLoop) -> winit::window::Fullscreen {
+    let args: Vec<String> = crate::args().collect();
+    let asked = args
+        .iter()
+        .position(|a| a == "--screen")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|v| mm2_settings::parse_size(v))
+        .filter(|z| z.0 > 0 && z.1 > 0);
+    let Some((w, h)) = asked else {
+        return winit::window::Fullscreen::Borderless(None);
+    };
+    let monitor = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next());
+    let mode = monitor.into_iter().flat_map(|m| m.video_modes()).filter(|m| m.size() == winit::dpi::PhysicalSize::new(w, h)).max_by_key(|m| (m.refresh_rate_millihertz(), m.bit_depth()));
+    match mode {
+        Some(m) => {
+            eprintln!("display: full screen at {w}x{h}, {:.0} Hz", m.refresh_rate_millihertz() as f64 / 1000.0);
+            winit::window::Fullscreen::Exclusive(m)
+        }
+        None => {
+            eprintln!("display: the screen has no {w}x{h} mode; full screen at its own");
+            winit::window::Fullscreen::Borderless(None)
+        }
     }
 }
 
@@ -2865,6 +2893,8 @@ async fn gpu_from(
             ..Default::default()
         })
         .await?;
+    // `quality=auto`: the preset for this card and screen.
+    graphics::pick_auto(&adapter.get_info());
     // The enhanced drawing reads depth textures, which OpenGL cannot.
     if adapter.get_info().backend == wgpu::Backend::Gl && graphics::enhanced().is_some() {
         eprintln!("enhanced graphics need Vulkan, Metal or DirectX 12: drawing the original look on OpenGL");
@@ -3708,9 +3738,10 @@ impl App {
             .with_title("Motocross Madness 2")
             .with_inner_size(window_size())
             .with_window_icon(window_icon());
-        // `--fullscreen`: the whole screen, as Alt+Enter gives.
+        // `--fullscreen`: the whole screen, as Alt+Enter gives; with
+        // `--screen WxH`, at that resolution if the screen has it.
         let attrs = if crate::args().any(|a| a == "--fullscreen") {
-            attrs.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)))
+            attrs.with_fullscreen(Some(full_screen(event_loop)))
         } else {
             attrs
         };
@@ -3728,6 +3759,9 @@ impl App {
             attrs
         };
         let window = Arc::new(event_loop.create_window(attrs)?);
+        if let Some(m) = window.current_monitor().or_else(|| event_loop.primary_monitor()) {
+            graphics::set_screen((m.size().width, m.size().height));
+        }
         // The game's own is drawn instead, so never two.
         if ui::draws_pointer() {
             window.set_cursor_visible(false);

@@ -205,7 +205,10 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             e.pixels = None;
             e.ruts = true;
         }
-        _ => return Err(format!("quality must be low, medium, high, raytraced or ultra, not {name}")),
+        // For the computer it's on: Medium until the graphics card is
+        // known, then [`pick_auto`]'s.
+        "auto" => preset(e, "medium")?,
+        _ => return Err(format!("quality must be auto, low, medium, high, raytraced or ultra, not {name}")),
     }
     Ok(())
 }
@@ -384,7 +387,12 @@ pub fn weather(name: &str) -> Option<Weather> {
     }
 }
 
-static ENHANCED: OnceLock<Enhanced> = OnceLock::new();
+static ENHANCED: std::sync::RwLock<Option<Enhanced>> = std::sync::RwLock::new(None);
+/// `--enhanced`'s list when it asks for `quality=auto`, until the
+/// graphics card is known.
+static AUTO: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// The screen the game opened on, in pixels.
+static SCREEN: std::sync::Mutex<Option<(u32, u32)>> = std::sync::Mutex::new(None);
 /// The time of day and weather picked on the game's event page, over the
 /// launcher's (crate::frontend): from the next race on.
 static SKY: std::sync::RwLock<Option<(Option<f32>, Weather)>> = std::sync::RwLock::new(None);
@@ -438,7 +446,92 @@ static SHOWING: AtomicBool = AtomicBool::new(true);
 pub fn enable(e: Enhanced) {
     #[cfg(target_arch = "wasm32")]
     let e = e.for_browser();
-    let _ = ENHANCED.set(e);
+    *ENHANCED.write().unwrap() = Some(e);
+}
+
+/// Turns the upgrades on from `--enhanced`'s list; with `quality=auto`,
+/// picked again once the graphics card is known ([`pick_auto`]).
+pub fn enable_list(list: &str) -> Result<(), String> {
+    enable(Enhanced::parse(list)?);
+    if list.split(',').any(|i| i.trim() == "quality=auto") {
+        *AUTO.lock().unwrap() = Some(list.to_string());
+    }
+    Ok(())
+}
+
+/// Notes the screen the game opened on, for [`pick_auto`].
+pub fn set_screen(pixels: (u32, u32)) {
+    *SCREEN.lock().unwrap() = Some(pixels);
+}
+
+/// With `quality=auto`: picks Low, Medium or High for this graphics card
+/// and screen ([`auto_quality`]), and says what it picked (for the
+/// launcher, in `auto-graphics.txt`). Once, before anything is drawn.
+pub fn pick_auto(info: &wgpu::AdapterInfo) {
+    let Some(list) = AUTO.lock().unwrap().take() else {
+        return;
+    };
+    let screen = *SCREEN.lock().unwrap();
+    let pixels = screen.map_or(1920 * 1080, |(w, h)| w as u64 * h as u64);
+    let q = auto_quality(&info.name, info.device_type, info.backend, pixels, cfg!(target_arch = "wasm32"));
+    let list: Vec<String> = list
+        .split(',')
+        .map(|i| if i.trim() == "quality=auto" { format!("quality={q}") } else { i.trim().to_string() })
+        .collect();
+    match Enhanced::parse(&list.join(",")) {
+        Ok(e) => enable(e),
+        Err(e) => eprintln!("auto graphics: {e}"),
+    }
+    let card = if info.name.is_empty() { "this graphics card" } else { info.name.as_str() };
+    eprintln!("auto graphics: {q} for {card} ({:?}) on a {} screen", info.device_type, screen.map_or("unknown".into(), |(w, h)| format!("{w}x{h}")));
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let size = screen.map_or(String::new(), |(w, h)| format!("{w}x{h}"));
+        let _ = std::fs::write(mm2_settings::user_dir().join("auto-graphics.txt"), format!("quality={q}\ncard={card}\nscreen={size}\n"));
+    }
+}
+
+/// The preset for a graphics card (by its name and kind) and a screen of
+/// `pixels`: Low for software drawing, OpenGL and the older Intel chips;
+/// Medium for most other built-in graphics and older cards; High for
+/// recent cards and Apple's bigger chips. A screen bigger than 1440p
+/// steps it down one, unless the card is a strong one (or in a browser); in a browser it
+/// is at most Medium, but for a card of its own.
+pub fn auto_quality(name: &str, kind: wgpu::DeviceType, backend: wgpu::Backend, pixels: u64, browser: bool) -> &'static str {
+    use wgpu::DeviceType as D;
+    let n = name.to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| n.contains(w));
+    if kind == D::Cpu || backend == wgpu::Backend::Gl || has(&["llvmpipe", "swiftshader", "software", "microsoft basic"]) {
+        return "low";
+    }
+    // Strong enough for High even on a 4K screen.
+    let strong = has(&["rtx", "rx 6", "rx 7", "rx 9", "arc b", " max", " ultra"]);
+    let mut level = if n.contains("apple") {
+        // Apple's chips: the first M1 and M2 Medium, the rest High.
+        match (has(&[" pro", " max", " ultra"]), has(&["m1", "m2"])) {
+            (true, _) => 2,
+            (false, true) => 1,
+            _ => 2,
+        }
+    } else if has(&["intel"]) && !has(&["arc"]) {
+        // Intel's built-in graphics: Iris Xe and newer Medium.
+        if has(&["iris xe", "iris(r) xe", "graphics 1", "arc graphics"]) || n.contains("intel(r) graphics") { 1 } else { 0 }
+    } else if kind == D::DiscreteGpu {
+        // Cards of their own: older ones Medium.
+        if has(&["gtx 9", "gtx 7", "gtx 6", "gt ", "mx", "radeon hd", "r7 ", "r9 ", "rx 4", "rx 5", "quadro"]) { 1 } else { 2 }
+    } else {
+        // Other built-in graphics (AMD's, phones'), or not known.
+        1
+    };
+    // (A browser draws the scene at most 1080p's worth whatever the
+    // screen: Enhanced::for_browser.)
+    if pixels > 2560 * 1440 && !strong && !browser {
+        level -= 1;
+    }
+    if browser && kind != D::DiscreteGpu {
+        level = level.min(1);
+    }
+    ["low", "medium", "high"][level.clamp(0, 2) as usize]
 }
 
 impl Enhanced {
@@ -484,7 +577,7 @@ pub fn enhanced() -> Option<Enhanced> {
     if !DRAWABLE.load(Ordering::Relaxed) {
         return None;
     }
-    let mut e = ENHANCED.get().copied()?;
+    let mut e = (*ENHANCED.read().unwrap())?;
     if let Some((time, weather)) = *SKY.read().unwrap() {
         e.time = time;
         e.weather = weather;
@@ -534,6 +627,8 @@ mod tests {
         assert_eq!(e.scene_size((3840, 2160)), (2560, 1440));
         assert_eq!(Enhanced::parse("resolution=native").unwrap().scene_size((3840, 2160)), (3840, 2160));
         assert_eq!(Enhanced::parse("res=1080p").unwrap().scene_size((3840, 2160)), (1920, 1080));
+        let auto = Enhanced::parse("quality=auto").unwrap();
+        assert!(auto.taa && auto.pixels == Some(1920 * 1080));
         let low = Enhanced::parse("quality=low").unwrap();
         assert_eq!((low.msaa, low.ao, low.scene_size((2560, 1440))), (1, false, (1280, 720)));
         assert!(Enhanced::parse("quality=potato").is_err());
@@ -553,6 +648,32 @@ mod tests {
         let share = Enhanced::parse("quality=high,resolution=75%").unwrap();
         assert_eq!(share.scene_size((3440, 1440)), (2580, 1080));
         assert!(Enhanced::parse("resolution=150%").is_err());
+    }
+
+    #[test]
+    fn auto_picks_for_the_card_and_screen() {
+        use wgpu::{Backend as B, DeviceType as D};
+        let hd = 1920 * 1080;
+        let uhd = 3840 * 2160;
+        let q = |name, kind, px| auto_quality(name, kind, B::Vulkan, px, false);
+        assert_eq!(q("llvmpipe (LLVM 17.0.6, 256 bits)", D::Cpu, hd), "low");
+        assert_eq!(auto_quality("NVIDIA GeForce RTX 3060", D::DiscreteGpu, B::Gl, hd, false), "low");
+        assert_eq!(q("Intel(R) HD Graphics 3000", D::IntegratedGpu, hd), "low");
+        assert_eq!(q("Intel(R) Iris(R) Xe Graphics", D::IntegratedGpu, hd), "medium");
+        assert_eq!(q("AMD Radeon 780M Graphics", D::IntegratedGpu, hd), "medium");
+        assert_eq!(q("NVIDIA GeForce GTX 970", D::DiscreteGpu, hd), "medium");
+        assert_eq!(q("NVIDIA GeForce RTX 4070", D::DiscreteGpu, hd), "high");
+        assert_eq!(q("NVIDIA GeForce RTX 4070", D::DiscreteGpu, uhd), "high");
+        assert_eq!(q("AMD Radeon RX 580", D::DiscreteGpu, uhd), "low");
+        assert_eq!(q("Apple M1", D::IntegratedGpu, hd), "medium");
+        assert_eq!(q("Apple M4", D::IntegratedGpu, hd), "high");
+        // A 4K screen on a plain M4: one step down.
+        assert_eq!(q("Apple M4", D::IntegratedGpu, uhd), "medium");
+        assert_eq!(q("Apple M4 Max", D::IntegratedGpu, uhd), "high");
+        // A browser: at most Medium without a card of its own; not known
+        // (Safari names no card) is Medium.
+        assert_eq!(auto_quality("Apple M4 Pro", D::IntegratedGpu, B::BrowserWebGpu, hd, true), "medium");
+        assert_eq!(auto_quality("", D::Other, B::BrowserWebGpu, hd, true), "medium");
     }
 
     #[test]

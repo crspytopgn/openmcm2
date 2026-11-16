@@ -35,14 +35,15 @@ export const UPGRADES = [
 // In a browser, Ultra draws as High does (the game caps both: see
 // graphics::Enhanced::for_browser), so it isn't offered. Medium is the
 // default: High has stalled a whole Mac in Safari.
-const QUALITIES = [["low", "Low"], ["medium", "Medium (recommended)"], ["high", "High (a fast computer)"]];
+const QUALITIES = [["auto", "Auto (picks for your computer)"], ["low", "Low"], ["medium", "Medium"], ["high", "High (a fast computer)"]];
 // Whether a quality preset keeps an upgrade on (Quality::has).
 function presetHas(quality, name) {
+  if (quality === "auto") quality = "medium"; // until the game knows the graphics card
   const off = { low: ["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr"], medium: ["shafts", "smooth", "gtao", "ssr"] }[quality] || [];
   return !off.includes(name) && UPGRADES.some(([n, , on]) => n === name && on);
 }
 
-const ABOUT_QUALITY = "A preset for the effects below. Medium suits most computers in a browser; High needs a fast one. You can change any effect after.";
+const ABOUT_QUALITY = "A preset for the effects below. Auto looks at your graphics card when the game starts and picks Low, Medium or High for it. Medium suits most computers in a browser; High needs a fast one. Changing an effect below picks Medium with that change.";
 const ABOUT_TIME = "Where the sun is: the track's own, or an hour of your choice.";
 const ABOUT_WEATHER = "Clear, overcast or rain, for looks only: the riding is the same.";
 const ABOUT_DETAIL = "How strongly the grain of the photo ground shows.";
@@ -97,7 +98,7 @@ export function setQuality(s, q) {
 export function defaults() {
   const s = {
     enhanced: false,
-    quality: "medium",
+    quality: "auto",
     time: "",
     weather: "clear",
     detail: 0.5,
@@ -150,7 +151,8 @@ export function args(s) {
   const a = [];
   if (s.enhanced) {
     const list = [`quality=${s.quality}`];
-    for (const [n] of UPGRADES) {
+    // Auto picks the effects itself.
+    if (s.quality !== "auto") for (const [n] of UPGRADES) {
       if (!!s.upgrades[n] !== presetHas(s.quality, n)) list.push(s.upgrades[n] ? n : `no-${n}`);
     }
     if (s.time) list.push(`time=${s.time}`);
@@ -245,7 +247,10 @@ export function render(lookBox, box, s, changed) {
     for (const [n, text, , about] of UPGRADES) {
       list.append(checkbox(text, about, !!s.upgrades[n], (on) => {
         s.upgrades[n] = on;
-        set("upgrades", s.upgrades);
+        // Under Auto, changing an effect means choosing yourself.
+        const wasAuto = s.quality === "auto";
+        if (wasAuto) s.quality = "medium";
+        set("upgrades", s.upgrades, wasAuto);
       }));
     }
     effects.append(list);
