@@ -424,15 +424,15 @@ async fn answer(
         }
         let (ch, rx, closed) = channel();
         let open = Arc::new(Notify::new());
-        hear(&dc, &pc, id, &tx, closed);
-        let (tx, o) = (tx.clone(), open.clone());
-        let ch = Mutex::new(Some(ch));
+        // The player is the session's now, before any of its messages
+        // (which can come before the channel's open handler runs); what
+        // the session sends waits for the channel to open.
         debug(format_args!("player {id}'s channel came"));
+        let _ = tx.send(In::Joined(id, Link::Rtc(ch)));
+        hear(&dc, &pc, id, &tx, closed);
+        let o = open.clone();
         dc.on_open(Box::new(move || {
             debug(format_args!("player {id}'s channel is open"));
-            if let Some(ch) = ch.lock().unwrap().take() {
-                let _ = tx.send(In::Joined(id, Link::Rtc(ch)));
-            }
             o.notify_one();
             Box::pin(async {})
         }));
