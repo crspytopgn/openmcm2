@@ -83,7 +83,7 @@ pub struct Chase {
     /// The frozen camera's spot (mode 5, Numpad 0, 0x4679e0): the eye
     /// stays where it was and turns to watch the bike.
     frozen: Option<Vec3>,
-    /// The Helmet Cam (an extra), after User Cam in the cycle.
+    /// The Helmet Cam (not in the original), after User Cam in the cycle.
     pub helmet: bool,
     /// The Helmet Cam's eye, its height softened apart from its place.
     head: Vec3,
@@ -187,10 +187,10 @@ impl Chase {
         if self.frozen.take().is_some() {
             return if self.helmet { HELMET_CAM } else { self.view.name() };
         }
-        // The Helmet Cam extra comes after the game's last view.
+        // The Helmet Cam comes after the game's last view.
         if self.helmet {
             self.helmet = false;
-        } else if self.view == View::User && crate::tweaks::more().helmet_cam {
+        } else if self.view == View::User {
             self.helmet = true;
             return HELMET_CAM;
         }
@@ -201,20 +201,12 @@ impl Chase {
         self.view.name()
     }
 
-    /// F1, with the Helmet Cam extra on: straight into the Helmet Cam,
-    /// or back out to the view it came from. `None` when the extra is off
-    /// (F1 does nothing in the original's races).
-    pub fn toggle_helmet(&mut self) -> Option<&'static str> {
-        self.toggle_helmet_if(crate::tweaks::more().helmet_cam)
-    }
-
-    fn toggle_helmet_if(&mut self, on: bool) -> Option<&'static str> {
-        if !on {
-            return None;
-        }
+    /// F1: straight into the Helmet Cam, or back out to the view it came
+    /// from; the view's name, to flash.
+    pub fn toggle_helmet(&mut self) -> &'static str {
         self.frozen = None;
         self.helmet = !self.helmet;
-        Some(if self.helmet { HELMET_CAM } else { self.view.name() })
+        if self.helmet { HELMET_CAM } else { self.view.name() }
     }
 
     /// Numpad 0 (0x4679e0's key 0x52): freezes the camera where it is, or
@@ -519,12 +511,10 @@ mod tests {
     #[test]
     fn f1_goes_straight_to_the_helmet_cam_and_back() {
         let mut c = Chase::new(Vec3::ZERO, Vec3::Z);
-        assert_eq!(c.toggle_helmet_if(false), None);
-        assert!(!c.helmet);
         c.next_view();
-        assert_eq!(c.toggle_helmet_if(true), Some(HELMET_CAM));
+        assert_eq!(c.toggle_helmet(), HELMET_CAM);
         assert!(c.helmet);
-        assert_eq!(c.toggle_helmet_if(true), Some(View::Slot.name()));
+        assert_eq!(c.toggle_helmet(), View::Slot.name());
         assert!(!c.helmet);
         assert_eq!(c.view, View::Slot);
     }

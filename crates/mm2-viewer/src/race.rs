@@ -1820,9 +1820,8 @@ impl Race {
         self.chase.next_view()
     }
 
-    /// F1: the Helmet Cam extra on or off; its name, or `None` when the
-    /// extra is off.
-    pub fn toggle_helmet(&mut self) -> Option<&'static str> {
+    /// F1: the Helmet Cam on or off; the view's name.
+    pub fn toggle_helmet(&mut self) -> &'static str {
         self.chase.toggle_helmet()
     }
 

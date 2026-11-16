@@ -5429,11 +5429,11 @@ impl ApplicationHandler for App {
                                     r.freeze_camera();
                                 }
                             }
-                            // F1: the Helmet Cam extra, straight in and out
+                            // F1: the Helmet Cam, straight in and out
                             // (on a Mac keyboard, fn+F1 unless the F keys are
                             // set as standard function keys).
                             KeyCode::F1 if self.follow => {
-                                if let Some(name) = self.race.as_mut().and_then(|r| r.toggle_helmet()) {
+                                if let Some(name) = self.race.as_mut().map(|r| r.toggle_helmet()) {
                                     if let Some((_, hud)) = &mut self.hud {
                                         hud.say(name);
                                     }
