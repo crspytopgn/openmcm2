@@ -19,8 +19,14 @@ pub const BEST: &str = "laps.txt";
 /// The laps not yet sent.
 pub const PENDING: &str = "laps-pending.txt";
 /// A lap with more than this off the course (seconds) doesn't count, in
-/// the lap races where the game tracks it.
+/// Nationals and Supercross.
 pub const MOST_OFF_COURSE: f32 = 2.0;
+
+/// Whether a lap in `event` must keep to the course ([`MOST_OFF_COURSE`]):
+/// Nationals and Supercross. Baja and Enduro go between checkpoints.
+pub fn keeps_on_course(event: u32) -> bool {
+    matches!(event, 2 | 3)
+}
 /// Laps shorter than this (ms) can't be real.
 pub const SHORTEST: u32 = 5_000;
 
@@ -185,6 +191,7 @@ mod tests {
         assert_eq!(best.len(), 3);
         assert_eq!(best.iter().find(|l| l.rider == "A" && l.board.track == "farm").unwrap().ms, 80_000);
         assert_eq!(pending(&dir).1.len(), 3);
+        assert!(keeps_on_course(2) && keeps_on_course(3) && !keeps_on_course(1) && !keeps_on_course(5));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
