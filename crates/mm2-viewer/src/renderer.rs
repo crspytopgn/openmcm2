@@ -1340,7 +1340,11 @@ impl TerrainRenderer {
                     resolve_target: resolve,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(self.clear),
-                        store: wgpu::StoreOp::Store,
+                        // Anti-aliased, only the resolved picture is read
+                        // after: the samples themselves need not be kept
+                        // (on a tiled GPU, such as Apple's, they then never
+                        // leave the chip, a large saving at 4K).
+                        store: if resolve.is_some() { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store },
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {

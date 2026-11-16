@@ -51,6 +51,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod addons;
+mod pace;
 mod bars;
 mod eco;
 mod enhance;
@@ -3523,6 +3524,10 @@ struct App {
     visual_cues: bool,
     looking: bool,
     last: Instant,
+    /// Evens the frame times to the screen's beat (`pace`).
+    pace: pace::Pace,
+    /// The screen's beat, s, and when it was last asked for.
+    beat: (Option<Instant>, Option<f32>),
     /// F2 (or the Show frame rate tweak): the frame rate, at the bottom
     /// of the screen and in the terminal, each second: since when, the
     /// frames and the slowest.
@@ -3684,6 +3689,8 @@ impl App {
             visual_cues: true,
             looking: false,
             last: Instant::now(),
+            pace: pace::Pace::default(),
+            beat: (None, None),
             fps: tweaks::get().show_fps.then(|| (Instant::now(), 0, 0.0)),
             fps_shown: None,
             start: Instant::now(),
@@ -5565,8 +5572,18 @@ impl ApplicationHandler for App {
                     self.next(n, event_loop);
                 }
                 let now = Instant::now();
-                let dt = (now - self.last).as_secs_f32().min(0.1);
+                let real = (now - self.last).as_secs_f32().min(0.1);
                 self.last = now;
+                // Waiting for the screen, the world moves on in whole beats
+                // of it, so what moves across it does so evenly.
+                // (Asked again each second: the window may move to
+                // another screen.)
+                if self.beat.0.is_none_or(|at| now - at > std::time::Duration::from_secs(1)) {
+                    let hz = self.state.as_ref().and_then(|s| s.window.current_monitor()).and_then(|m| m.refresh_rate_millihertz());
+                    self.beat = (Some(now), hz.map(|mhz| 1000.0 / mhz.max(1) as f32));
+                }
+                let beat = self.beat.1.filter(|_| tweaks::get().vsync);
+                let dt = self.pace.even(real, beat);
                 self.frame = dt;
                 self.poll_pads(event_loop, dt);
                 self.update(dt);
