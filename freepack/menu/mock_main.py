@@ -173,6 +173,7 @@ def compose_bg(photo):
     # big title, right side, knocked out of a rust block
     logo = Image.open(os.environ.get("FP_LOGO", os.path.join(os.path.dirname(__file__), "logo.png"))).convert("RGBA")
     style = os.environ.get("FP_LOGOSTYLE", "full"); lw = {"full": 700, "asis": 640}.get(style, 560)
+    if logo.size[1] / logo.size[0] > 0.45: lw = int(lw * 0.72)  # two-line plate
     logo = logo_style(logo.resize((lw, int(lw * logo.size[1] / logo.size[0])), Image.LANCZOS), style).rotate(2, Image.BICUBIC, expand=True)
     sh = Image.new("RGBA", logo.size, (0, 0, 0, 0)); sh.paste((0, 0, 0, 120), (0, 0), logo.split()[3]); sh = sh.filter(ImageFilter.GaussianBlur(8))
     lx = W - lw - 60; canvas.alpha_composite(sh, (lx + 8, 70 + 12)); canvas.alpha_composite(logo, (lx, 70))
@@ -180,8 +181,9 @@ def compose_bg(photo):
         for tx, ty, rot in ((lx - 20, 60, 35), (lx + lw - 70, 70 + logo.size[1] - 40, 30)):
             canvas.alpha_composite(tape(110, 30).rotate(rot, expand=True), (tx, ty))
     tag = font("barlowcondensed/BarlowCondensed-Bold.ttf", 30)
-    d.text((W - 640, 330), "RIDE IT LIKE YOU STOLE IT.", font=tag, fill=BONE)
-    d.text((W - 640, 366), "No disc. No catch. Just dirt.", font=spec, fill=(220, 214, 200))
+    ty = 70 + logo.size[1] + 18; tx = lx + 10
+    d.text((tx, ty), "RIDE IT LIKE YOU STOLE IT.", font=tag, fill=BONE)
+    d.text((tx, ty + 36), "No disc. No catch. Just dirt.", font=spec, fill=(220, 214, 200))
     return canvas, spec
 
 def main(photo, out):
