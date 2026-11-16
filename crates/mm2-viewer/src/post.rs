@@ -31,6 +31,26 @@ const TAA_SHARPEN: f32 = 0.8;
 /// Halvings in the bloom's chain.
 const BLOOM_STEPS: usize = 6;
 
+/// The plain depth the anti-aliased scene's depth is copied to.
+const SINGLE_DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+/// Copies each pixel's first depth sample, exactly (24 bits fit in a
+/// float's 32).
+const DEPTH_COPY: &str = r#"
+@group(0) @binding(0) var src: texture_depth_multisampled_2d;
+
+@vertex
+fn vs_full(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+    let p = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
+    return vec4<f32>(p * 2.0 - 1.0, 0.0, 1.0);
+}
+
+@fragment
+fn fs_copy(@builtin(position) at: vec4<f32>) -> @builtin(frag_depth) f32 {
+    return textureLoad(src, vec2<i32>(at.xy), 0);
+}
+"#;
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct PostGlobals {
@@ -101,6 +121,11 @@ struct Targets {
     msaa: Option<wgpu::TextureView>,
     hdr: wgpu::TextureView,
     depth: wgpu::TextureView,
+    /// Anti-aliased, the depth's first sample copied to a plain depth
+    /// texture for the occlusion and the reflections, which read it many
+    /// times a pixel: a plain texture is a quarter or less of the memory
+    /// to fetch from. The same values, so the same picture.
+    depth_single: Option<(wgpu::TextureView, wgpu::BindGroup)>,
     ao_group: wgpu::BindGroup,
     ao: wgpu::TextureView,
     blur_group: wgpu::BindGroup,
@@ -148,6 +173,8 @@ pub struct Post {
     bloom_up: wgpu::RenderPipeline,
     composite: wgpu::RenderPipeline,
     taa: wgpu::RenderPipeline,
+    /// Copies the anti-aliased depth's first sample (`depth_single`).
+    depth_copy: Option<wgpu::RenderPipeline>,
     /// Which of the outputs is written next, and whether the other holds
     /// the last frame.
     taa_next: std::cell::Cell<usize>,
@@ -202,6 +229,47 @@ impl Post {
             label: Some("post"),
             source: wgpu::ShaderSource::Wgsl(include_str!("post.wgsl").replace("DEPTH_TEXTURE", depth_type).into()),
         });
+        // The occlusion and the reflections read the plain copy.
+        let single = match samples > 1 {
+            true => device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("post (plain depth)"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("post.wgsl").replace("DEPTH_TEXTURE", "texture_depth_2d").into()),
+            }),
+            false => shader.clone(),
+        };
+        let depth_copy = (samples > 1).then(|| {
+            let copy = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("depth copy"),
+                source: wgpu::ShaderSource::Wgsl(DEPTH_COPY.into()),
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("depth copy"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &copy,
+                    entry_point: Some("vs_full"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &copy,
+                    entry_point: Some("fs_copy"),
+                    compilation_options: Default::default(),
+                    targets: &[],
+                }),
+                primitive: Default::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: SINGLE_DEPTH,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        });
         let add = wgpu::BlendState {
             color: wgpu::BlendComponent {
                 src_factor: wgpu::BlendFactor::One,
@@ -230,9 +298,10 @@ impl Post {
                 min_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             }),
-            ao: pipeline(device, &shader, "fs_ao", AO_FORMAT, None),
+            ao: pipeline(device, &single, "fs_ao", AO_FORMAT, None),
             ao_blur: pipeline(device, &shader, "fs_ao_blur", AO_FORMAT, None),
-            ssr: pipeline(device, &shader, "fs_ssr", HDR_FORMAT, None),
+            ssr: pipeline(device, &single, "fs_ssr", HDR_FORMAT, None),
+            depth_copy,
             bloom_first: pipeline(device, &shader, "fs_bloom_first", HDR_FORMAT, None),
             bloom_down: pipeline(device, &shader, "fs_bloom_down", HDR_FORMAT, None),
             bloom_up: pipeline(device, &shader, "fs_bloom_up", HDR_FORMAT, Some(add)),
@@ -323,9 +392,22 @@ impl Post {
             s = ((s.0 / 2).max(1), (s.1 / 2).max(1));
             bloom.push(view(Self::texture(device, "bloom", s, HDR_FORMAT, 1, draw)));
         }
-        let ao_group = self.group(device, &self.ao, &[(1, &depth_only)], true, false);
+        let depth_single = self.depth_copy.as_ref().map(|copy| {
+            let single = view(Self::texture(device, "scene depth (first sample)", size, SINGLE_DEPTH, 1, draw));
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("depth copy"),
+                layout: &copy.get_bind_group_layout(0),
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&depth_only),
+                }],
+            });
+            (single, group)
+        });
+        let read = depth_single.as_ref().map_or(&depth_only, |(v, _)| v);
+        let ao_group = self.group(device, &self.ao, &[(1, read)], true, false);
         let blur_group = self.group(device, &self.ao_blur, &[(3, &ao)], true, true);
-        let ssr_group = self.group(device, &self.ssr, &[(1, &depth_only), (2, &hdr)], true, false);
+        let ssr_group = self.group(device, &self.ssr, &[(1, read), (2, &hdr)], true, false);
         let bloom_first = self.group(device, &self.bloom_first, &[(2, &hdr)], false, true);
         let bloom_down = (1..BLOOM_STEPS)
             .map(|i| self.group(device, &self.bloom_down, &[(4, &bloom[i - 1])], false, true))
@@ -358,6 +440,7 @@ impl Post {
             msaa,
             hdr,
             depth,
+            depth_single,
             ao_group,
             ao,
             blur_group,
@@ -499,6 +582,26 @@ impl Post {
             }
             None => (&t.bloom_first, &t.composite),
         };
+        if let (Some((single, group)), Some(copy), true) = (&t.depth_single, &self.depth_copy, wet > 0.0 || ao || contact > 0.0) {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("depth copy"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: single,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(copy);
+            pass.set_bind_group(0, group, &[]);
+            pass.draw(0..3, 0..1);
+        }
         if wet > 0.0 {
             pass(encoder, &t.ssr, false, &self.ssr, &t.ssr_group);
             mark(encoder, "post: reflections");
