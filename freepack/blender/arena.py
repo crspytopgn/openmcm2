@@ -94,7 +94,10 @@ def profile():
     segs.append((((o, h), (o + 3, h)), "cap")); o += 3
     return segs, o, h
 
-def build():
+def build(name="fp_arena", hx=300.0, hz=150.0, k=1.0):
+    """k scales the stands (bigger stadiums get taller, deeper tiers)."""
+    global HX, HZ
+    HX, HZ = hx, hz
     reset()
     crowd = os.path.join(TEX, "fp_crowd.png"); ads = os.path.join(TEX, "fp_ads.png"); crowd_png(crowd); ads_png(ads)
     M = {"riser": image_mat(crowd, "crowd", 0.9), "tread": image_mat(crowd, "crowd", 0.9), "ads": image_mat(ads, "ads", 0.6),
@@ -102,6 +105,7 @@ def build():
          "wall": flat("bowlwall", (0.22, 0.23, 0.25), 0.8), "back": flat("bowlback", (0.3, 0.3, 0.31), 0.85),
          "steel": flat("steel", (0.32, 0.33, 0.35), 0.5, 0.6), "lamp": flat("lamp", (0.9, 0.9, 0.86), 0.3), "roof": flat("roof", (0.2, 0.21, 0.22), 0.6, 0.3), "fascia": image_mat(os.path.join(TEX, "fp_ads.png"), "ads", 0.6)}
     P, N, S = path_pts(); segs, OUT, TOP = profile(); n = len(P)
+    segs = [(((a[0] * k, a[1] * k), (b[0] * k, b[1] * k)), kind) for (a, b), kind in segs]; OUT *= k; TOP *= k
     bm = bmesh.new(); uvl = bm.loops.layers.uv.new()
     mats = list(dict.fromkeys(M.values())); midx = {m.name: i for i, m in enumerate(mats)}
     def quad(i, a, b, kind):
@@ -110,7 +114,7 @@ def build():
               bm.verts.new(P[j] + N[j] * b[0] + Vector((0, 0, b[1]))), bm.verts.new(P[i] + N[i] * b[0] + Vector((0, 0, b[1])))]
         f = bm.faces.new(vs); f.material_index = midx[M[kind].name]
         if kind in ("riser", "tread"):
-            u0, u1 = S[i] / 20, S[i + 1] / 20; v0, v1 = ((0.5, 1.0) if kind == "riser" else (0.5, 0.0))
+            u0, u1 = S[i] / (20 * k), S[i + 1] / (20 * k); v0, v1 = ((0.5, 1.0) if kind == "riser" else (0.5, 0.0))
             uvs = [(u0, v0), (u1, v0), (u1, v1), (u0, v1)] if kind == "riser" else [(u0, 0.5), (u1, 0.5), (u1, 0.0), (u0, 0.0)]
         elif kind in ("ads", "fascia"):
             u0, u1 = S[i] / 160, S[i + 1] / 160; uvs = [(u0, 0), (u1, 0), (u1, 1), (u0, 1)]
@@ -122,8 +126,8 @@ def build():
         quad(i, (OUT, TOP), (OUT, 0), "back")   # outer face down to the ground
     # cantilever roof from the back of the upper bowl, rising toward the floor, with a fascia
     for i in range(n):
-        quad(i, (OUT + 2, TOP), (OUT - 58, TOP + 14), "roof")
-        quad(i, (OUT - 58, TOP + 9), (OUT - 58, TOP + 14), "fascia")
+        quad(i, (OUT + 2 * k, TOP), (OUT - 58 * k, TOP + 14 * k), "roof")
+        quad(i, (OUT - 58 * k, TOP + 9 * k), (OUT - 58 * k, TOP + 14 * k), "fascia")
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.01)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     me = bpy.data.meshes.new("bowl"); bm.to_mesh(me); bm.free()
@@ -133,14 +137,20 @@ def build():
     me.polygons.foreach_set("use_smooth", [False] * len(me.polygons))
     # light banks hung under the fascia, and back struts
     for i in range(3, n, 8):
-        c = P[i] + N[i] * (OUT - 56) + Vector((0, 0, TOP + 7)); t = Vector((-N[i].y, N[i].x, 0))
-        box(c - t * 8 - N[i] * 1.2 - Vector((0, 0, 2)), c + t * 8 + N[i] * 1.2 + Vector((0, 0, 2)), M["lamp"])
+        c = P[i] + N[i] * (OUT - 56 * k) + Vector((0, 0, TOP + 7 * k)); t = Vector((-N[i].y, N[i].x, 0))
+        box(c - t * 8 * k - N[i] * 1.2 * k - Vector((0, 0, 2 * k)), c + t * 8 * k + N[i] * 1.2 * k + Vector((0, 0, 2 * k)), M["lamp"])
     for i in range(0, n, 6):
-        cyl(P[i] + N[i] * (OUT + 1) + Vector((0, 0, TOP)), P[i] + N[i] * (OUT - 30) + Vector((0, 0, TOP + 7.2)), 0.8, M["steel"], 6)
-    o = join_all("fp_arena")
+        cyl(P[i] + N[i] * (OUT + 1 * k) + Vector((0, 0, TOP)), P[i] + N[i] * (OUT - 30 * k) + Vector((0, 0, TOP + 7.2 * k)), 0.8 * k, M["steel"], 6)
+    o = join_all(name)
     tris = sum(len(p.vertices) - 2 for p in o.data.polygons)
-    export(os.path.join(BUILD, "objects", "fp_arena.glb"))
-    print("fp_arena tris", tris, "top", TOP + 38, "outer", OUT)
+    export(os.path.join(BUILD, "objects", name + ".glb"))
+    print(name, "tris", tris, "top", TOP + 14 * k, "outer", OUT + OFF)
+
+# stock stadium shells we stand in for: name -> (half floor x, half floor z, stand scale), sized to the stock bounds
+SHELLS = {"b1b_02": (1053.5 - 10 - 1.9 * 125, 1053.5 - 10 - 1.9 * 125, 1.9),
+          "euro": (6514 - 10 - 6 * 126, 6514 - 10 - 6 * 126, 6.0), "football": (6514 - 10 - 6 * 126, 6514 - 10 - 6 * 126, 6.0)}
 
 if __name__ == "__main__":
-    build()
+    names = sys.argv[1:] or ["fp_arena"]
+    for n in names:
+        build() if n == "fp_arena" else build(n, *SHELLS[n])

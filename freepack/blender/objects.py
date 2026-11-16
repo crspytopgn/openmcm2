@@ -982,14 +982,17 @@ RULES = [
     (r"^(300zx|4runner.*|chevelle.*|cop.*|jeep.*|mx3.*|sts.*|greyhound|schoolbus|semicab|firetruck|watertruck|tanker|dumptruck|feduptruck|companytruck|famtrkstr|truckbed01|airfield_tractor)$", vehicle),
     (r"^(trailer\d+|flatbed|semitrailer|nattrailer01|pit_trailer|haywagon)$", trailer),
     (r"^(boxcarclosed|boxcaropen|caboose|cattlecar|coalcar|engine|gondola|hopper)$", railcar),
-    (r"^(biplane|supercub|beech18|dc-3|cargoplane01?|aircraftq|bellranger|helinocam)$", aircraft),
+    (r"^(biplane|supercub|beech18|dc-3|cargoplane(01)?|aircraftq|bellranger|helinocam)$", aircraft),
     (r"^(sign_.*|infosign.*|trpksign01|ironmountainsign)$", sign), (r"^splitrail", splitrail), (r"^fence_picket$", picket),
     (r"^(cabin|farmhouse|garage0\d|hut|office01|main_office|rangerstation.*|quonset|gasstation|radiostation|miningbldg01|station|hanger)$", building),
 ]
 
 def build(name, lo_g, hi_g):
+    from external import KIND
+    if name in KIND: return KIND[name]          # imported or stadium shell, made by external.py
     reset(); lo, hi = B(lo_g, hi_g)
-    fn = next((f for p, f in RULES if re.match(p, name)), generic)
+    from structures import STRUCT
+    fn = next((f for p, f in STRUCT if re.match(p, name)), None) or next((f for p, f in RULES if re.match(p, name)), generic)
     d = sorted(hi - lo)
     if fn is generic and d[1] < 3.0: fn = pole
     if fn is generic and d[1] > 40:
@@ -1000,8 +1003,10 @@ def build(name, lo_g, hi_g):
         return "missing"
     fn(lo, hi, name)
     o = join_all(name)
+    kind = getattr(fn, "__name__", "struct")
+    kind = "struct" if kind == "<lambda>" else kind
     path = os.path.join(BUILD, "objects", name + ".glb"); export(path)
-    return fn.__name__
+    return kind
 
 if __name__ == "__main__":
     sizes = {}
@@ -1012,6 +1017,10 @@ if __name__ == "__main__":
     names = [a for a in sys.argv[1:] if not a.startswith("-")] or list(sizes)
     out = []
     for n in names:
-        kind = build(n, *sizes[n]); out.append((n, kind)); print("built", n, kind, flush=True)
+        try:
+            kind = build(n, *sizes[n])
+        except Exception as e:
+            import traceback; traceback.print_exc(); print("FAILED", n, e, flush=True); continue
+        out.append((n, kind)); print("built", n, kind, flush=True)
     with open(os.path.join(BUILD, "objects", "built.txt"), "a") as f:
         for n, k in out: f.write(f"{n}\t{k}\n")

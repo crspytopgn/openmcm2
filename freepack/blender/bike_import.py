@@ -38,6 +38,10 @@ def load(src):
     bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT"); bpy.ops.mesh.separate(type="LOOSE"); bpy.ops.object.mode_set(mode="OBJECT")
     return [x for x in bpy.context.scene.objects if x.type == "MESH"]
 
+def used_mats(o):
+    """Material names actually used by the piece's faces (joined pieces keep every slot)."""
+    ms = o.data.materials; return {ms[i].name for i in {f.material_index for f in o.data.polygons} if i < len(ms) and ms[i]}
+
 def info(o):
     vs = [o.matrix_world @ v.co for v in o.data.vertices]
     lo = Vector(map(min, *vs)) if len(vs) > 1 else vs[0]; hi = Vector(map(max, *vs)) if len(vs) > 1 else vs[0]
@@ -51,7 +55,11 @@ def fit(src, model, front_sign=-1):
     def circ(p):
         lo, hi, c = I[p.name]; d = hi - lo; m = max(d.y, d.z)
         return abs(d.y - d.z) < 0.06 * m and d.x < 0.45 * m and m > 0.2 * blen
-    cands = sorted([p for p in parts if circ(p)], key=lambda p: -(I[p.name][1].z - I[p.name][0].z))
+    tm = next((x.split("=")[1] for x in sys.argv if x.startswith("--tyre=")), None)
+    if tm:   # the model names its tyre material: the biggest tyre-material piece in each half is a tyre
+        cands = sorted([p for p in parts if tm in used_mats(p)], key=lambda p: -(I[p.name][1].z - I[p.name][0].z))
+    else:
+        cands = sorted([p for p in parts if circ(p)], key=lambda p: -(I[p.name][1].z - I[p.name][0].z))
     fr = [p for p in cands if (I[p.name][2].y - ymid) * front_sign > 0]; rr = [p for p in cands if (I[p.name][2].y - ymid) * front_sign < 0]
     tyres = [rr[0], fr[0]]; rear, front = I[rr[0].name][2], I[fr[0].name][2]
     wb = (front - rear).length; s = 4.965 / wb
@@ -64,7 +72,7 @@ def fit(src, model, front_sign=-1):
     RA = Vector((0, -2.657, 1.115)); FA = (T @ front); R = (I[tyres[0].name][1].z - I[tyres[0].name][0].z) * 0.5
     HP = Vector((0, 0.950, 3.701)); SP = Vector((0, -0.731, 1.619)); KP = Vector((0.381, -0.816, 1.592))
     ax = (FA - HP).normalized()
-    tyre_mat = max(((m.name, sum(1 for f in t.data.polygons if t.data.materials[f.material_index] == m)) for t in tyres for m in t.data.materials), key=lambda x: x[1])[0]
+    tyre_mat = tm or max(((m.name, sum(1 for f in t.data.polygons if t.data.materials[f.material_index] == m)) for t in tyres for m in t.data.materials), key=lambda x: x[1])[0]
     def node_of(p):
         lo, hi, cen = I[p.name]; size = (hi - lo).length
         dF, dR = (cen - FA).length, (cen - RA).length
@@ -75,23 +83,33 @@ def fit(src, model, front_sign=-1):
                 # Off-centre larger pieces (fork guards, calipers) stay with the forks/swingarm.
                 cc = Vector((0, cen.y - A_.y, cen.z - A_.z)).length
                 spans = lo.y < A_.y - R * 0.3 and hi.y > A_.y + R * 0.3 and lo.z < A_.z - R * 0.3 and hi.z > A_.z + R * 0.3
-                if spans or size < R * 0.35 or tyre_mat in [m.name for m in p.data.materials]: return n_
+                if spans or size < R * 0.35 or tyre_mat in (used_mats(p) if "--slot-wheels" not in sys.argv else [m.name for m in p.data.materials if m]): return n_
         # along the steering axis, ahead of the frame: forks, bars, plate, fender
         t = (cen - HP).dot(ax); off = (cen - HP - ax * t).length
-        if -0.6 < t < (FA - HP).length + 0.3 and off < 0.75 and cen.y > HP.y - 0.35:
+        q = HP + ax * t   # nearest point on the steering axis: forks and bars sit on it or ahead of it
+        if -0.6 < t < (FA - HP).length + 0.3 and off < 0.75 and cen.y > HP.y - 0.35 and cen.y > q.y - 0.3:
             return "Shocks" if t > (FA - HP).length * 0.55 else "HandleBars"
         if cen.z > HP.z - 0.2 and cen.y > HP.y - 0.5 and abs(cen.x) > 0.25: return "HandleBars"   # bar ends, levers, mirrors
         # under and behind the pivot, toward the rear axle: swingarm, chain
-        if cen.y < SP.y + 0.2 and cen.y > RA.y - 0.4 and cen.z < SP.z + 0.35 and size < 4.0 and dR > R * 0.25:
+        if cen.y < SP.y - 0.05 and cen.y > RA.y - 0.4 and cen.z < SP.z + 0.35 and size < 4.0 and dR > R * 0.25:
             rel = (cen.y - RA.y) / (SP.y - RA.y); zline = RA.z + (SP.z - RA.z) * rel
             if abs(cen.z - zline) < 0.55: return "SwingArm"
-        if (cen - KP).length < 0.45 and cen.x > 0.25 and size < 1.2: return "KickStart"
+        if (cen - KP).length < 0.45 and cen.x > 0.25 and size < 1.2 and not any("peg" in m for m in used_mats(p)): return "KickStart"
         return "Bike"
     groups = {}
     for p in parts:
         n = node_of(p); groups.setdefault(n, []).append(p)
         if os.environ.get("DBG") and n.startswith("Tire") and any(m.name == os.environ["DBG"] for m in p.data.materials):
             lo, hi, cen = I[p.name]; print("dbg", n, len(p.data.polygons), [round(x, 2) for x in lo], [round(x, 2) for x in hi], "R", round(R, 2))
+    # wheels: centre each on its axle pivot and size it to touch the ground, so it spins true
+    for n in ("TireFront", "TireRear"):
+        ps = groups.get(n, [])
+        if not ps: continue
+        vs = [v.co for p in ps for v in p.data.vertices]; lo = Vector(map(min, *vs)); hi = Vector(map(max, *vs))
+        c = (lo + hi) / 2; Rw = (hi.z - lo.z) / 2; piv = Vector((0, PIV[n][2], PIV[n][1]))
+        M = Matrix.Translation(piv) @ Matrix.Scale(piv.z / Rw, 4) @ Matrix.Translation(-c)
+        for p in ps: p.data.transform(M)
+        print("wheel", n, "radius", round(Rw, 3), "->", round(piv.z, 3), "centre shift", tuple(round(x, 3) for x in (piv - c)))
     nodes = {}
     for n in ORDER:
         piv = Vector((PIV[n][0], PIV[n][2], PIV[n][1])); ps = groups.get(n, [])
@@ -157,6 +175,14 @@ def livery(nodes, paint, png):
                     p = mw @ me.vertices[me.loops[li].vertex_index].co
                     s_ = (p.y - y0) / (y1 - y0 + 1e-6); t_ = (p.z - a0) / (a1 - a0 + 1e-6)
                     uvl.data[li].uv = reg_uv(z, 1 - s_ if left else s_, t_)
+        # number plates: the front plate and the flat side panels under the seat get the "plate"
+        # material (same picture), where the engine prints the rider's number
+        PL = bpy.data.materials.get("plate")
+        if PL is None: PL = L.copy(); PL.name = "plate"
+        if PL.name not in [m.name for m in me.materials if m]: me.materials.append(PL)
+        pi = [m.name for m in me.materials].index(PL.name)
+        for f in Z.get("plate", []) + [f for f in Z.get("side", []) if abs((mw.to_3x3() @ f.normal).normalized().x) > 0.6 and (mw @ f.center).y < -0.3]:
+            f.material_index = pi
 
 # real-world finishes for models that ship untextured, by material-name keyword (first match wins)
 FINISH = {"sonnie": [
