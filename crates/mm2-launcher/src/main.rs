@@ -814,7 +814,6 @@ impl Launcher {
             slider(ui, "Sharpening", "Brings out detail in the race picture, in either look. 0% is the original game's.", &mut s.more.sharpen, 0..=100, 5.0, "%");
         });
         look::card(ui, icon::ICON_TWO_WHEELER, "Tracks, bikes and riders", |ui| {
-            tile(ui, &mut s.more.own_skins, "Your own paints and outfits", "Every .tga picture in the game's BIKES and RIDERS folders is a bike paint or outfit to pick, named after its file. Bike paints follow BIKE01.TGA's layout.");
             tile(ui, &mut s.more.all_gear, "All gear in every event", "The bikes and outfits the Pro Circuit gives out, in single races too.");
             tile(ui, &mut s.more.track_filter, "Track filter", "All tracks, the base game's or only the ones you added, on the event page.");
             slider(ui, "Riders on the gate", "Up to 30 riders in a single race. 0 is the original game's count.", &mut s.more.riders, 0..=mm2_settings::RIDERS_MOST, 1.0, "");
