@@ -359,8 +359,9 @@ pub struct Settings {
 /// The extras added in 0.5.0, all off (the game's own) by default.
 #[derive(Debug, Clone, PartialEq)]
 pub struct More {
-    /// Every `.tga` in the game's `BIKES` and `RIDERS` folders is a bike
-    /// paint or outfit of its own (`--own-skins`).
+    /// No longer read: the game always offers the `.tga` paints and
+    /// outfits of its `BIKES` and `RIDERS` folders, as the original does.
+    /// Kept so older settings files and `--own-skins` still load.
     pub own_skins: bool,
     /// The amateur bikes and outfits of the Pro Circuit in every event
     /// (`--all-gear`).

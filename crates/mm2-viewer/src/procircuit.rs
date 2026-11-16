@@ -122,6 +122,10 @@ pub struct Data {
     pub names: Vec<String>,
     pub bikes: Vec<Item>,
     pub outfits: Vec<Item>,
+    /// The paints of the game's `BIKES` folder, on the "(User Map)" bike:
+    /// on offer in every class and at every level, any engine size of the
+    /// class (0x4db774). The rivals never ride them.
+    pub own_bikes: Vec<Item>,
 }
 
 impl Data {
@@ -151,7 +155,34 @@ impl Data {
                 .unwrap_or_default(),
             names,
             bikes: text("bikes.pb").map(|t| bikes(&t)).unwrap_or_default(),
-            outfits: text("riders.pb").map(|t| outfits(&t)).unwrap_or_default(),
+            outfits: {
+                let mut o = text("riders.pb").map(|t| outfits(&t)).unwrap_or_default();
+                // The RIDERS folder's outfits, at every level.
+                o.extend(crate::roster::own_files(game, "RIDERS").into_iter().map(|(file, name)| Item {
+                    maker: String::new(),
+                    name,
+                    file: crate::roster::own_key("RIDERS", &file),
+                    model: String::new(),
+                    ui_model: String::new(),
+                    cc: 0,
+                    four_stroke: false,
+                    availability: 0,
+                }));
+                o
+            },
+            own_bikes: crate::roster::own_files(game, "BIKES")
+                .into_iter()
+                .map(|(file, name)| Item {
+                    maker: crate::roster::USER_MAP.into(),
+                    name,
+                    file: crate::roster::own_key("BIKES", &file),
+                    model: crate::roster::OWN_MODEL.0.into(),
+                    ui_model: crate::roster::OWN_MODEL.1.into(),
+                    cc: 250,
+                    four_stroke: false,
+                    availability: 0,
+                })
+                .collect(),
         }
     }
 
@@ -160,6 +191,7 @@ impl Data {
         self.bikes
             .iter()
             .filter(|b| b.availability <= level && class_fits(class, engine_class(b.cc)))
+            .chain(&self.own_bikes)
             .collect()
     }
 
@@ -238,6 +270,10 @@ fn outfits(text: &str) -> Vec<Item> {
         })
         .collect()
 }
+
+/// The engine sizes an own paint can take, and whether each is a
+/// four-stroke (`0x572bec`).
+pub const OWN_SIZES: [(u32, bool); 5] = [(125, false), (250, false), (400, true), (500, false), (600, true)];
 
 /// Whether an engine class (0–4) races in a circuit's class (1 125, 2
 /// 250, 3 Open).
@@ -606,7 +642,21 @@ impl Circuit {
 
     /// The player's ride (the Bike & Rider page).
     pub fn set_ride(&mut self, bike: &Item, outfit: &Item) {
+        let was = self.riders[0].clone();
         ride(&mut self.riders[0], bike);
+        // An own paint keeps the engine size picked for it, or takes the
+        // class's first.
+        if bike.own() {
+            let r = &mut self.riders[0];
+            if was.paint.eq_ignore_ascii_case(&bike.file) {
+                (r.cc, r.four_stroke) = (was.cc, was.four_stroke);
+            }
+            if !class_fits(self.class, engine_class(r.cc)) {
+                if let Some(&(cc, four)) = OWN_SIZES.iter().find(|s| class_fits(self.class, engine_class(s.0))) {
+                    (r.cc, r.four_stroke) = (cc, four);
+                }
+            }
+        }
         self.riders[0].outfit = outfit.file.clone();
     }
 
@@ -724,8 +774,13 @@ impl Item {
             texture: self.file.clone(),
             cc: self.cc,
             four_stroke: self.four_stroke,
-            own: false,
+            own: self.own(),
         }
+    }
+
+    /// A paint from the game's `BIKES` folder.
+    pub fn own(&self) -> bool {
+        self.maker == crate::roster::USER_MAP
     }
 }
 
@@ -736,10 +791,17 @@ impl Data {
         let bike = self
             .bikes
             .iter()
+            .chain(&self.own_bikes)
             .find(|b| b.file.eq_ignore_ascii_case(&p.paint))
             .or_else(|| self.bikes_for(c.level, c.class).first().copied())?;
+        let mut choice = bike.choice();
+        // An own paint rides the engine size picked for it.
+        if choice.own && p.paint.eq_ignore_ascii_case(&bike.file) {
+            choice.cc = p.cc;
+            choice.four_stroke = p.four_stroke;
+        }
         Some(Ride {
-            bike: bike.choice(),
+            bike: choice,
             outfit: p.outfit.clone(),
             plate,
         })
@@ -973,6 +1035,35 @@ mod tests {
         // Saved and read back whole.
         let back = Circuit::parse(&c.text()).unwrap();
         assert_eq!(back, c);
+    }
+
+    /// A paint from the BIKES folder is on offer in every class, rides
+    /// an engine size of the class and keeps the one picked for it.
+    #[test]
+    fn own_paints() {
+        let mut d = data();
+        let own = Item {
+            maker: crate::roster::USER_MAP.into(),
+            name: "BIKE01".into(),
+            file: "own-bikes-bike01.tga".into(),
+            model: "yamaha.mcf".into(),
+            ui_model: "uiyamaha.mcf".into(),
+            cc: 250,
+            four_stroke: false,
+            availability: 0,
+        };
+        d.own_bikes.push(own.clone());
+        let mut c = Circuit::new(&d, "T", "P", 1, 1, 2, String::new(), &mut Rng::new(3));
+        assert!(d.bikes_for(1, 1).iter().any(|b| b.own()));
+        assert!(c.riders.iter().skip(1).all(|r| r.paint != own.file));
+        let outfit = d.outfits[0].clone();
+        c.set_ride(&own, &outfit);
+        assert_eq!(c.player().cc, 125);
+        c.set_ride(&own, &outfit);
+        assert_eq!(c.player().cc, 125);
+        let ride = d.ride(&c, 101).unwrap();
+        assert!(ride.bike.own);
+        assert_eq!(ride.bike.cc, 125);
     }
 
     #[test]

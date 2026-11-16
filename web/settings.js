@@ -79,7 +79,6 @@ export const EXTRAS = [
     { key: "sharpen", flag: "sharpen", label: "Sharpening", about: "Brings out detail in the race picture, in either look. 0% is the original game's.", range: [0, 100, 5, "%"], off: 0 },
   ]],
   ["Tracks, bikes and riders", [
-    { key: "own_skins", flag: "own-skins", label: "Your own paints and outfits", about: "Every .tga picture in the game's BIKES and RIDERS folders is a bike paint or outfit to pick, named after its file." },
     { key: "all_gear", flag: "all-gear", label: "All gear in every event", about: "The bikes and outfits the Pro Circuit gives out, in single races too." },
     { key: "track_filter", flag: "track-filter", label: "Track filter", about: "All tracks, the base game's or only the ones you added, on the event page." },
     { key: "riders", flag: "gate-riders", label: "Riders on the gate", about: "Up to 30 riders in a single race. 0 is the original game's count.", range: [0, 30, 1, ""], off: 0 },

@@ -623,8 +623,11 @@ impl Multi {
             .position(|&c| c >= cc)
             .unwrap_or(4);
         d.set_items("DDLEngineSize", engines, size);
-        d.enable("DDLEngineSize", false);
-        d.enable("TxtEngineSize", false);
+        // Open for a paint from the BIKES folder, as on the single player
+        // page (0x4fdbca).
+        let own = self.roster.bikes.get(g.bike).is_some_and(|b| b.own);
+        d.enable("DDLEngineSize", own);
+        d.enable("TxtEngineSize", own);
         d.enable("ButWrench", false);
         d.set_text("EditPlateNumber", cx.user.profile.plate.to_string());
     }
@@ -1105,6 +1108,16 @@ impl Multi {
                 }
                 "ddlriders" => {
                     self.game.outfit = line;
+                    self.send_ride(cx);
+                }
+                "ddlenginesize" => {
+                    if let (Some(b), Some(name)) = (self.roster.bikes.get_mut(self.game.bike), ENGINES.get(line)) {
+                        if b.own {
+                            b.cc = [125, 250, 400, 500, 600][line];
+                            b.four_stroke = name.contains("4-stroke");
+                        }
+                    }
+                    self.page(cx, 1);
                     self.send_ride(cx);
                 }
                 "largestopponentdropdown" => self.game.largest = line,
