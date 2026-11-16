@@ -16,58 +16,14 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const LATEST: &str = "https://api.github.com/repos/crspytopgn/openmcm2/releases/latest";
+use mm2_settings::release::{platform, LATEST};
+pub use mm2_settings::release::{current, newer};
+
 /// Where updates are unpacked, beside the installed files so they can be
 /// swapped in by renaming.
 const STAGING: &str = ".openmcm2-update";
 /// No release is anywhere near this; a bigger download is refused.
 const MAX_DOWNLOAD: u64 = 512 << 20;
-
-/// This build's release tag, from the release build (`OPENMCM2_VERSION`,
-/// or the release workflow's `VERSION`). Builds made from source have
-/// none and never update themselves.
-pub fn current() -> Option<&'static str> {
-    [option_env!("OPENMCM2_VERSION"), option_env!("VERSION")]
-        .into_iter()
-        .flatten()
-        .find(|v| parse(v).is_some())
-}
-
-/// `v1.2.3` as numbers, or none if it isn't a version.
-fn parse(tag: &str) -> Option<Vec<u64>> {
-    let t = tag.trim().trim_start_matches(['v', 'V']);
-    let parts = t.split('.').map(|p| p.parse().ok()).collect::<Option<Vec<u64>>>()?;
-    (!parts.is_empty()).then_some(parts)
-}
-
-/// Whether `tag` is a later version than `than`.
-pub fn newer(tag: &str, than: &str) -> bool {
-    match (parse(tag), parse(than)) {
-        (Some(mut a), Some(mut b)) => {
-            let n = a.len().max(b.len());
-            a.resize(n, 0);
-            b.resize(n, 0);
-            a > b
-        }
-        _ => false,
-    }
-}
-
-/// The end of this platform's release archive name, as the release
-/// workflow names them.
-fn platform() -> Option<&'static str> {
-    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        Some("-macos-arm64.zip")
-    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
-        Some("-macos-x86_64.zip")
-    } else if cfg!(all(windows, target_arch = "x86_64")) {
-        Some("-windows-x86_64.zip")
-    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        Some("-linux-x86_64.tar.gz")
-    } else {
-        None
-    }
-}
 
 /// What gets replaced: the Mac app bundle, or the folder the launcher,
 /// viewer and tools sit in.
@@ -190,7 +146,7 @@ fn release_from(json: &serde_json::Value, current: &str, ending: &str) -> Result
         .find(|a| s(a, "name").is_some_and(|n| n == "SHA256SUMS" || n == "SHA256SUMS.txt"))
         .and_then(|a| s(a, "browser_download_url"));
     Ok(Some(Release {
-        page: s(json, "html_url").unwrap_or_else(|| "https://github.com/crspytopgn/openmcm2/releases/latest".into()),
+        page: s(json, "html_url").unwrap_or_else(|| mm2_settings::release::PAGE.into()),
         asset: s(asset, "name").unwrap_or_default(),
         url: s(asset, "browser_download_url").ok_or("the download has no address")?,
         size: asset.get("size").and_then(|x| x.as_u64()).unwrap_or(0),
@@ -552,17 +508,6 @@ pub fn restart(install: &Install) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn versions() {
-        assert!(newer("v0.1.6", "v0.1.5"));
-        assert!(newer("v0.2", "v0.1.9"));
-        assert!(newer("v0.1.10", "v0.1.9"));
-        assert!(!newer("v0.1.5", "v0.1.5"));
-        assert!(!newer("v0.1.5.0", "v0.1.5"));
-        assert!(!newer("v0.1.4", "v0.1.5"));
-        assert!(!newer("nightly", "v0.1.5"));
-    }
 
     #[test]
     fn picks_the_platform_asset() {

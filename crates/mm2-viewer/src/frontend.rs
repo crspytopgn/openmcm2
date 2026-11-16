@@ -10,7 +10,7 @@ use crate::audio::Audio;
 use crate::movie::Movie;
 use crate::roster::{Ride, Roster};
 use crate::screens::{self, profiles, Cx, Go};
-use crate::ui::{Dlg, Event, Gfx, Ui};
+use crate::ui::{color, Dlg, Event, Gfx, Ui};
 use mm2_formats::{rs2, scn, tga};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -260,6 +260,8 @@ pub struct Frontend {
     ghost: usize,
     /// What a screen asked between inputs (a network race starting).
     pending: Option<Next>,
+    /// Where the update note was drawn last, and its ×, for clicks.
+    note_at: Option<([f32; 4], [f32; 4])>,
 }
 
 /// The Bike & Rider page's engine sizes (`0x44fe50`), for the bikes made
@@ -422,6 +424,7 @@ impl Frontend {
             ghosts: Vec::new(),
             ghost: 0,
             pending: None,
+            note_at: None,
         };
         f.fill_main();
         Some(f)
@@ -745,6 +748,18 @@ impl Frontend {
     }
 
     pub fn mouse_up(&mut self, audio: &Audio, x: f32, y: f32, now: f32) -> Next {
+        // The update note, over the main menu.
+        if let Some((note, close)) = self.note_at {
+            let inside = |r: [f32; 4]| x >= r[0] && x < r[0] + r[2] && y >= r[1] && y < r[1] + r[3];
+            if inside(close) {
+                crate::update_note::close();
+                self.note_at = None;
+                return Next::Stay;
+            }
+            if inside(note) {
+                return if crate::update_note::open() { Next::Quit } else { Next::Stay };
+            }
+        }
         // An open drop-down list takes the click, wherever it lands.
         let mut events = Vec::new();
         let dialogs = self.dialogs();
@@ -1707,6 +1722,8 @@ impl Frontend {
         let dt = (now - self.now).max(0.0);
         self.now = now;
         self.events_tick(dt);
+        // Set again below while the main menu shows it.
+        self.note_at = None;
         if let Screen::Extra(s) = &mut self.screen {
             let mut cx = Cx {
                 ui: &mut self.ui,
@@ -1754,6 +1771,14 @@ impl Frontend {
                     b.tick(now);
                     b.draw(ui, gfx, now);
                 }
+                // Only on the bare menu: not over a pull-down or a box.
+                let bare = self.ghost_ask.is_none()
+                    && !self.boxes.is_open()
+                    && PULL_DOWNS.iter().all(|(_, anim)| !d.is_shown(anim));
+                self.note_at = match crate::update_note::get() {
+                    Some(n) if bare => draw_note(ui, gfx, d, &n.tag),
+                    _ => None,
+                };
             }
             Screen::Extra(s) => s.draw(ui, gfx, now),
             Screen::Single { base, page } => {
@@ -1821,6 +1846,38 @@ impl Frontend {
             d.draw_tip(ui, gfx, now, on && Some(k) == top);
         }
     }
+}
+
+/// The update note just above the Current Profile bar, drawn as that bar
+/// is: a dark blue box with a grey rim and the dialogs' light blue text,
+/// white under the pointer. Where it and its × are.
+fn draw_note(ui: &mut Ui, gfx: &mut Gfx, d: &Dlg, tag: &str) -> Option<([f32; 4], [f32; 4])> {
+    let bar = d.rect_of("TxtCurrentProfile").unwrap_or([216.0, 448.0, 254.0, 26.0]);
+    let text = format!("OpenMCM2 {tag} is out. Click here to update.");
+    let t = ui.text(gfx, &text, 12.0, false)?;
+    let x_mark = ui.text(gfx, "×", 12.0, true)?;
+    let (tw, th) = gfx.sprites.size(t);
+    let (xw, xh) = gfx.sprites.size(x_mark);
+    let (tw, th, xw, xh) = (tw as f32, th as f32, xw as f32, xh as f32);
+    let h = 18.0;
+    let w = (tw + xw + 26.0).round();
+    let x = (bar[0] + (bar[2] - w) / 2.0).round();
+    let y = bar[1] - h - 6.0;
+    ui.fill(gfx, [x, y, w, h], color(0x392920));
+    ui.fill(gfx, [x + 1.0, y + 1.0, w - 2.0, h - 2.0], color(0x392010));
+    let (px, py) = d.pointer();
+    let close = [x + w - xw - 10.0, y, xw + 10.0, h];
+    let note = [x, y, w - close[2], h];
+    let over = |r: [f32; 4]| px >= r[0] && px < r[0] + r[2] && py >= r[1] && py < r[1] + r[3];
+    let tint = |on: bool| if on { [1.0; 4] } else { color(0xfeb97a) };
+    gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [x + 8.0, y + ((h - th) / 2.0).floor(), tw, th], tint(over(note)));
+    gfx.sprites.quad(
+        x_mark,
+        [0.0, 0.0, 1.0, 1.0],
+        [close[0] + 4.0, y + ((h - xh) / 2.0).floor(), xw, xh],
+        tint(over(close)),
+    );
+    Some((note, close))
 }
 
 /// The main menu's buttons and the pull-downs they open.

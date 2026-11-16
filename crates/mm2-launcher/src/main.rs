@@ -307,7 +307,13 @@ impl Launcher {
         }
         let mut l = Launcher::with(Settings::load(), install);
         l.boards.send(&l.settings);
-        if l.settings.check_updates && l.install.is_ok() {
+        // `--updates`: opened from the game's update note, so straight to
+        // the Updates page with the check made whatever the setting.
+        let asked = std::env::args().any(|a| a == "--updates");
+        if asked {
+            l.page = Page::Updates;
+        }
+        if (l.settings.check_updates || asked) && l.install.is_ok() {
             l.check_updates();
         }
         // A game copied before but since moved or deleted.
@@ -1342,8 +1348,14 @@ impl Launcher {
                 return;
             }
             ui.horizontal(|ui| {
-                look::switch(ui, &mut self.settings.check_updates);
-                ui.label("Check for updates when the launcher opens");
+                let tip = "Each time the launcher opens it asks GitHub whether a newer OpenMCM2 is out, and offers to update. Nothing is downloaded unless you say so.";
+                look::switch(ui, &mut self.settings.check_updates).on_hover_text(tip);
+                ui.label("Check for updates when the launcher opens").on_hover_text(tip);
+            });
+            ui.horizontal(|ui| {
+                let tip = "If you start the game without the launcher, a small note on the main menu tells you when a new version is out. Click it to open the launcher and update, or click its × to hide it until the next version.";
+                look::switch(ui, &mut self.settings.update_notice).on_hover_text(tip);
+                ui.label("Tell me about updates in the game's main menu").on_hover_text(tip);
             });
             let can = self.import.is_none() && self.running.is_none();
             ui.horizontal(|ui| {
