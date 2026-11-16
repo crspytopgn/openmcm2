@@ -681,14 +681,17 @@ impl Options {
     }
 
     /// The controls page's keys on the device shown (`0x4b7af0`).
+    /// With a game pad in use, a joystick device's list shows the pad's
+    /// own buttons for the actions left on keys, as the race gives them
+    /// ([`crate::input::with_pad_extras`]).
     fn fill_keys(ui: &Ui, d: &mut Dlg, p: &Profile) {
         let device = p.controls.device as usize;
-        let keys = (0..ACTIONS)
-            .map(|a| {
-                let (kind, code) = p.keys.get(device, a);
-                keys::input_name(kind, code, |id| ui.lang(id))
-            })
-            .collect();
+        let mut map: [(i32, i32); ACTIONS] = std::array::from_fn(|a| p.keys.get(device, a));
+        let game_pad = keys::pad().is_some_and(|i| i.family.is_some());
+        if device < crate::input::KEYBOARD && game_pad {
+            map = crate::input::with_pad_extras(map);
+        }
+        let keys = map.iter().map(|&(kind, code)| keys::input_name(kind, code, |id| ui.lang(id))).collect();
         let at = d.selected("MapKeyListBox");
         d.set_items("MapKeyListBox", keys, at);
     }
