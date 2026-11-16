@@ -1831,7 +1831,16 @@ impl Race {
     /// The camera is in the player's own eyes (Rider Cam or the Helmet
     /// Cam), so the player's sign is left out.
     pub fn first_person(&self) -> bool {
-        self.watching() == self.player && self.chase.first_person()
+        self.watching() == self.player
+            && self.chase.first_person()
+            && !self.cam_keys.reverse
+            && !self.racers[self.player].bike.crashed()
+    }
+
+    /// How far the view tilts about the way it looks, rad, as the
+    /// drawing's camera takes it.
+    pub fn camera_roll(&self) -> f32 {
+        self.chase.roll()
     }
 
     /// Numpad 0: the camera freezes where it is, or goes back to its view.
