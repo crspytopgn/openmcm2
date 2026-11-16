@@ -4223,6 +4223,14 @@ impl App {
                         if pad_device(&self.pads) == 3 {
                             self.pad_map = input::with_pad_extras(self.pad_map);
                         }
+                        // For a player's log: the map the race reads.
+                        eprintln!(
+                            "joystick map: device {} (shown {shown}), analog {}, flipped {}: {:?}",
+                            pad_device(&self.pads),
+                            p.controls.analog_axes,
+                            self.joy_flipped,
+                            self.pad_map
+                        );
                         self.analog = p.controls.analog_axes;
                         if let race::Bike::Player(b) = &mut r.racers[r.player].bike {
                             b.gas_gyro = p.controls.gas_gyro;
