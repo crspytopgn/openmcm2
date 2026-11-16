@@ -227,6 +227,12 @@ impl Chase {
         self.frozen.is_some()
     }
 
+    /// The view is from the rider's own eyes (Rider Cam or the Helmet
+    /// Cam), so the rider's body and sign are left out.
+    pub fn first_person(&self) -> bool {
+        self.frozen.is_none() && (self.helmet || self.view == View::Rider)
+    }
+
     /// Home and End: the field of view narrows or widens by 3° (10° to
     /// 120°).
     pub fn zoom(&mut self, by: f32) {
@@ -323,11 +329,24 @@ impl Chase {
         }
         let (ride_eye, ride_target) = match (self.view, preset) {
             (View::Rider, _) if !keys.reverse => {
-                let head = position + bike.up * Self::HEAD;
+                // From the rider's eyes (his `Head` frame, 0x417db0), held
+                // with the bike, looking a little down over the bars; the
+                // rider's own body and sign are not drawn in this view.
+                let level = Vec3::new(forward.x, 0.0, forward.z).normalize_or(self.yaw);
+                let nose = (level - bike.up * level.dot(bike.up)).normalize_or(level);
+                let head = position + bike.up * Self::HELMET_UP + nose * Self::HELMET_AHEAD;
+                // Only up and down eases: a lag along the ground at speed
+                // would put the eye inside the rider's helmet.
                 let lag = if steady() { Self::STEADY_HEAD } else { 0.02 };
                 let k = 1.0 - (-dt / lag).exp();
-                self.eye += (head - self.eye) * k;
-                self.target = head + forward * 30.0;
+                self.eye.y += (head.y - self.eye.y) * k;
+                if (self.eye.y - head.y).abs() > 2.0 {
+                    self.eye.y = head.y;
+                }
+                self.eye.x = head.x;
+                self.eye.z = head.z;
+                let dir = (level + Vec3::Y * (nose.y.clamp(-0.9, 0.9) - Self::LOOK_DOWN)).normalize_or(level);
+                self.target = self.eye + dir * 30.0;
                 let floor = ground(terrain, self.eye.x, self.eye.z) + 0.5;
                 self.eye.y = self.eye.y.max(floor);
                 return (self.eye, self.target);

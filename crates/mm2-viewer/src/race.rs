@@ -1826,6 +1826,12 @@ impl Race {
         self.chase.toggle_helmet()
     }
 
+    /// The camera is in the player's own eyes (Rider Cam or the Helmet
+    /// Cam), so the player's sign is left out.
+    pub fn first_person(&self) -> bool {
+        self.watching() == self.player && self.chase.first_person()
+    }
+
     /// Numpad 0: the camera freezes where it is, or goes back to its view.
     pub fn freeze_camera(&mut self) -> bool {
         self.chase.freeze()

@@ -1437,7 +1437,7 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
             }
             None => [hidden; 3],
         };
-        if !race.player_indicator || race.ghost.is_some() {
+        if !race.player_indicator || race.ghost.is_some() || race.first_person() {
             places[2] = hidden;
         }
         for (object, place) in models.into_iter().zip(places) {
