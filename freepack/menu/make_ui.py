@@ -286,8 +286,8 @@ def widgets():
             save(dat, "Resources\\RadioButton%s.tga" % n, check("radio", on, grey))
     # bottom bar of the single/multi set-up screens: big icon stickers
     r = np.random.default_rng(9)
-    for stem, text, ico, (w, h), (b, f) in (("R2Back", "BACK", "exit", (79, 76), (BONE, INK)), ("R2Help", "HELP", "help", (56, 76), (BONE, INK)),
-                                           ("R2Joy", "PAD", None, (58, 76), (BONE, INK)), ("R2Option", "OPTIONS", "wrench", (87, 76), (OLIVE, BONE)),
+    for stem, text, ico, (w, h), (b, f) in (("R2Back", "BACK", "back", (79, 76), (BONE, INK)), ("R2Help", "HELP", "help", (56, 76), (BONE, INK)),
+                                           ("R2Joy", "PAD", "pad", (58, 76), (BONE, INK)), ("R2Option", "OPTIONS", "wrench", (87, 76), (OLIVE, BONE)),
                                            ("R2Start", "START", "flag", (64, 76), (LIME, INK))):
         fw, fh = int(w * X * 0.86), int(h * X * 0.8)
         face = plate(fw, fh, b, len(stem)); d = ImageDraw.Draw(face)
@@ -301,6 +301,70 @@ def widgets():
         for s in ("Up", "Lit", "Down"):
             save(dat, "Rev2GlobalSource\\%s%s.tga" % (stem, s), finish(face, w * X, h * X, float(r.uniform(-3, 3)), s))
 
+def flat_sticker(w, h, text, bg, fg, seed=0):
+    face = plate(w * X, h * X, bg, seed)
+    return label(face, text, fg, align="center") if text else face
+
+def corner(which, col=LIME):
+    im = Image.new("RGBA", (4 * X, 4 * X), (0, 0, 0, 0)); d = ImageDraw.Draw(im); W = 4 * X
+    pts = {"UL": [(0, 0), (W, 0), (0, W)], "UR": [(0, 0), (W, 0), (W, W)], "LL": [(0, 0), (0, W), (W, W)], "LR": [(W, 0), (W, W), (0, W)]}[which]
+    d.polygon(pts, fill=col + (255,)); return im
+
+def screen_frame(w, h):
+    im = Image.new("RGBA", (w * X, h * X), (8, 8, 8, 255)); d = ImageDraw.Draw(im)
+    d.rectangle([0, 0, w * X - 1, h * X - 1], outline=BONE + (255,), width=3 * X)
+    return im
+
+def page_back(w, h, title, seed):
+    p = board(w * X, h * X, tone=(30, 28, 25), seed=seed)
+    d = ImageDraw.Draw(p); f = font(MED, 10 * X)
+    d.text((w * X - 150 * X, h * X - 16 * X), title, font=f, fill=(120, 116, 106))
+    return taped(p, seed)
+
+def sp_base(photo):
+    dat = "SPBASE"; W, H = 640 * X, 480 * X
+    bg = ImageOps.fit(Image.open(photo).convert("RGB"), (W, H), centering=(0.5, 0.6)).convert("RGBA")
+    # set-up screens: the photo strip sits under the bottom bar, paper on top
+    c = Image.new("RGBA", (W, H), M.BONE + (255,))
+    ph = bg.crop((0, H - 90 * X, W, H)); c.alpha_composite(ph, (0, H - 90 * X))
+    ht = M.halftone(bg.crop((0, 0, W, 400 * X)).filter(ImageFilter.GaussianBlur(1)), 7)
+    ink = Image.new("RGBA", (W, 400 * X), (60, 56, 50, 255)); c.paste(ink, (0, 0), ImageOps.invert(ht).point(lambda v: int(v * 0.18)))
+    d = ImageDraw.Draw(c); spec = font(MED, 8 * X)
+    d.text((436 * X, 12 * X), "OPENMCM2  /  SINGLE PLAYER  /  SET-UP", font=spec, fill=INK)
+    d.line([12 * X, 34 * X, 628 * X, 34 * X], fill=INK, width=X)
+    d.rectangle([0, 396 * X, W, 400 * X], fill=INK)
+    save(dat, r"SinglePlayer\SPBackGround.tga", M.grain(c, 5).convert("RGBA"))
+    for k, text in enumerate(("EVENT", "BIKE + RIDER", "RACE INFO", ""), 1):
+        w = (100, 101, 99, 100)[k - 1]
+        save(dat, "SinglePlayer\\Tab%02d.tga" % k, flat_sticker(w, 33, text, INK, BONE, 60 + k))
+        save(dat, "SinglePlayer\\TabDown%02d.tga" % k, flat_sticker(w, 33, text, LIME, INK, 60 + k))
+
+def sp_pages():
+    for dat, sub, back, title in (("SPEVENT", r"SinglePlayer\1_EventDialog", "SPEBack", "01 / EVENT"),
+                                  ("SPBIKER", r"SinglePlayer\2_BikeRiderDlg", "SPBBack", "02 / BIKE + RIDER"),
+                                  ("SPRINFO", r"SinglePlayer\3_RaceInfoDlg", "SPRBack", "03 / RACE INFO")):
+        save(dat, sub + "\\" + back + ".tga", page_back(610, 355, title, len(dat)))
+    e = "SinglePlayer\\1_EventDialog\\"; b = "SinglePlayer\\2_BikeRiderDlg\\"; r_ = "SinglePlayer\\3_RaceInfoDlg\\"
+    save("SPEVENT", e + "Screen.tga", screen_frame(456, 224)); save("SPBIKER", b + "BRScreen.tga", screen_frame(456, 224)); save("SPRINFO", r_ + "RIScreen.tga", screen_frame(456, 224))
+    for n in ("01", "02", "03"): save("SPEVENT", e + "Plate%s.tga" % n, flat_sticker(130, 57, "", OLIVE, BONE, int(n)))
+    save("SPEVENT", e + "Plate04.tga", flat_sticker(315, 52, "", OLIVE, BONE, 4))
+    save("SPEVENT", e + "GhostPanel.tga", flat_sticker(415, 28, "", OLIVE, BONE, 5))
+    for dat, pre, items in (("SPEVENT", e, [("DropDown01", 108, 21, True), ("DropDown02", 157, 21, True), ("EvDropDown04", 412, 21, True), ("EventTextBox", 412, 21, False),
+                                            ("GhostDropDown", 331, 20, True), ("SmalleditBox", 33, 21, False)]),
+                            ("SPBIKER", b, [("BRDropDown01", 157, 21, True), ("BRDropDown03", 199, 21, True), ("BRDropDown04", 412, 21, True), ("BREventTextBox", 412, 21, False), ("BRSmalleditBox", 33, 21, False)])):
+        for n, w, h, drop in items: save(dat, pre + n + ".tga", field(w, h, drop))
+    for dat, pre, items in (("SPEVENT", e, [("DropDownBG01", 108, 77), ("DropDownBG02", 157, 62), ("EvDropDownBG04", 412, 96), ("GhostDropDownBG", 331, 113)]),
+                            ("SPBIKER", b, [("BRDropDownBG01", 157, 62), ("BRDropDownBG03", 199, 62), ("BRDropDownBG04", 412, 96)])):
+        for n, w, h in items: save(dat, pre + n + ".tga", field(w, h))
+    for dat, pre, items in (("SPEVENT", e, [("EvVertScroll04", 21, 96), ("GhostVerticleScroll", 21, 113), ("VerticleScroll01", 21, 77), ("VerticleScroll02", 21, 62)]),
+                            ("SPBIKER", b, [("BRVertScroll04", 21, 96), ("BRVerticleScroll", 21, 62), ("BRVerticleScroll02", 21, 62)])):
+        for n, w, h in items: save(dat, pre + n + ".tga", track(w, h))
+    for dat, pre, p in (("SPEVENT", e, "SPCorner"), ("SPBIKER", b, "BRCorner")):
+        for k in ("UL", "UR", "LL", "LR"): save(dat, pre + p + k + ".tga", corner(k))
+    sticker_set("SPBIKER", None, {"Up": b + "SnglWrenchUp.tga", "Lit": b + "SnglWrenchLit.tga", "Down": b + "SnglWrenchDown.tga"}, 99 * X, 37 * X, "TUNE", BONE, INK, "wrench", seed=70)
+    sticker_set("SPRINFO", None, {"Up": r_ + "SPSaveReplayUp.tga", "Down": r_ + "SPSaveReplayDown.tga", "Lit": r_ + "SPSaveReplayLit.tga"}, 117 * X, 33 * X, "SAVE REPLAY", LIME, INK, seed=71, align="center")
+    bar = Image.new("RGBA", (456 * X, 21 * X), LIME + (255,)); save("SPRINFO", r_ + "InfoBar.tga", bar)
+
 def write_layout(dat, rects):
     p = os.path.join(OUT, dat + ".toml")
     with open(p, "w") as f:
@@ -312,5 +376,5 @@ if __name__ == "__main__":
     photo = sys.argv[1]
     if len(sys.argv) > 2: os.environ["FP_LOGO"] = sys.argv[2]
     os.environ.setdefault("FP_LOGOSTYLE", "asis")
-    main_menu(photo); pulldowns(); widgets()
+    main_menu(photo); pulldowns(); widgets(); sp_base(photo); sp_pages()
     print(len(written), "files in", OUT)

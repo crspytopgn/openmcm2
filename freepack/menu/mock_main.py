@@ -79,6 +79,15 @@ def icon(kind, sz, col):
         d.ellipse([a, a, b, b], outline=c, width=w)
         f = font("archivoblack/ArchivoBlack-Regular.ttf", int(sz * 0.55)); bb = d.textbbox((0, 0), "?", font=f)
         d.text(((sz - bb[2] - bb[0]) / 2, (sz - bb[3] - bb[1]) / 2), "?", font=f, fill=c)
+    elif kind == "pad":
+        d.rounded_rectangle([a, sz * 0.3, b, sz * 0.72], radius=sz * 0.18, fill=c)
+        d.ellipse([a - sz * 0.02, sz * 0.45, a + sz * 0.3, b], fill=c); d.ellipse([b - sz * 0.3, sz * 0.45, b + sz * 0.02, b], fill=c)
+        bg = (0, 0, 0, 0); cx, cy = sz * 0.32, sz * 0.5; t = sz * 0.05
+        d.rectangle([cx - t * 2.5, cy - t, cx + t * 2.5, cy + t], fill=bg); d.rectangle([cx - t, cy - t * 2.5, cx + t, cy + t * 2.5], fill=bg)
+        for dx, dy in ((0.66, 0.42), (0.74, 0.52), (0.66, 0.6), (0.58, 0.52)): d.ellipse([sz * dx - t, sz * dy - t, sz * dx + t, sz * dy + t], fill=bg)
+    elif kind == "back":
+        d.line([b, sz / 2, a + sz * 0.15, sz / 2], fill=c, width=w)
+        d.polygon([(a - 2, sz / 2), (a + sz * 0.3, sz * 0.26), (a + sz * 0.3, sz * 0.74)], fill=c)
     elif kind == "star":
         import math
         pts = [(sz / 2 + (sz * 0.42 if i % 2 == 0 else sz * 0.18) * math.sin(i * math.pi / 5), sz / 2 - (sz * 0.42 if i % 2 == 0 else sz * 0.18) * math.cos(i * math.pi / 5)) for i in range(10)]
