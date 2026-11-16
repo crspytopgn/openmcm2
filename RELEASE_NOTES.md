@@ -1,4 +1,28 @@
-# OpenMCM2 0.5.3
+# OpenMCM2 0.5.4
+
+## New in 0.5.4
+
+* **Desktop and browser race together:** desktop players and players
+  in the browser version can now join the same network races and free
+  roam sessions.
+* **No port forwarding to host:** a race you host on desktop gets a race
+  code, shown in the lobby chat. Players anywhere can join from the
+  server browser, or by typing the code in TCP/IP. Joining by address
+  and on your own network still work as before, and races hosted on
+  0.5.3 still show in the list.
+* **Free roam servers:** host a Practice session in Multiplayer and it
+  becomes a free roam server, with no laps and no time limit. Anyone can
+  drop in by pressing Ready in the lobby and leave whenever they like.
+  It shows in the server browser as "Free roam".
+* **Random checkpoints in Baja:** the Random Gate # box works as it does
+  in the original. A race number from 0 to 999 gives 10 to 30 gates,
+  with the trees cleared round each gate. These races don't save
+  records.
+* **Rider Cam from the rider's eyes:** the view sits at eye height, and
+  your own rider sign is hidden in first person. Helmet Cam is now
+  always there and is no longer an extra.
+* **Launcher links:** links in the launcher open your web browser again,
+  and the Donate card works.
 
 ## New in 0.5.3
 
