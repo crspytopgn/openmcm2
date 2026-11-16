@@ -393,9 +393,13 @@ pub struct More {
     /// (`--leaderboard-url=URL`, `none` for none) also takes the playtime.
     pub leaderboards: bool,
     pub leaderboard_url: String,
-    /// The lobby offers to fetch a host's track or a rider's own skins the
-    /// player is missing (`--lobby-downloads`).
+    /// The lobby fetches a host's track or a rider's own skins the player
+    /// is missing; on unless turned off (`--no-lobby-downloads`).
     pub lobby_downloads: bool,
+    /// Races this player hosts are listed in the server browser (the
+    /// leaderboard server's open races); on unless turned off
+    /// (`--no-list-races`).
+    pub list_races: bool,
     /// The playtime tracker sends anonymous totals (no name) to the
     /// leaderboard server; on unless turned off (`--no-share-playtime`).
     pub share_playtime: bool,
@@ -424,7 +428,8 @@ impl Default for More {
             riders: 0,
             leaderboards: true,
             leaderboard_url: LEADERBOARD_URL.into(),
-            lobby_downloads: false,
+            lobby_downloads: true,
+            list_races: true,
             share_playtime: true,
         }
     }
@@ -458,6 +463,7 @@ impl More {
             }
             "share_playtime" => self.share_playtime = yes,
             "lobby_downloads" => self.lobby_downloads = yes,
+            "list_races" => self.list_races = yes,
             _ => return false,
         }
         true
@@ -466,7 +472,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\nfps_cap={}\nfxaa={}\nsharpen={}\nhelmet_cam={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nshare_playtime={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\nfps_cap={}\nfxaa={}\nsharpen={}\nhelmet_cam={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -481,6 +487,7 @@ impl More {
             b(self.leaderboards),
             if self.leaderboard_url.is_empty() { "none" } else { &self.leaderboard_url },
             b(self.lobby_downloads),
+            b(self.list_races),
             b(self.share_playtime),
         )
     }
@@ -496,9 +503,10 @@ impl More {
             (self.track_filter, "--track-filter"),
             (self.fxaa, "--fxaa"),
             (self.helmet_cam, "--helmet-cam"),
-            (self.lobby_downloads, "--lobby-downloads"),
             (!self.leaderboards, "--no-leaderboards"),
             (!self.share_playtime, "--no-share-playtime"),
+            (!self.lobby_downloads, "--no-lobby-downloads"),
+            (!self.list_races, "--no-list-races"),
         ] {
             if on {
                 a.push(flag.to_string());
@@ -534,7 +542,8 @@ impl More {
             track_filter: has("--track-filter"),
             fxaa: has("--fxaa"),
             helmet_cam: has("--helmet-cam"),
-            lobby_downloads: has("--lobby-downloads"),
+            lobby_downloads: !has("--no-lobby-downloads"),
+            list_races: !has("--no-list-races"),
             leaderboards: !has("--no-leaderboards"),
             share_playtime: !has("--no-share-playtime"),
             ..d.clone()
@@ -640,11 +649,18 @@ impl Settings {
         self.mute_in_background = d.mute_in_background;
         self.screenshot_key = d.screenshot_key;
         // The leaderboard's address is where to send laps, not an extra.
-        // Nor are the leaderboards and sharing playtime, which change
-        // nothing in the game.
+        // Nor are the leaderboards, sharing playtime, lobby downloads and
+        // the server browser, which change nothing in a race.
         let url = std::mem::take(&mut self.more.leaderboard_url);
         let m = &self.more;
-        self.more = More { leaderboard_url: url, leaderboards: m.leaderboards, share_playtime: m.share_playtime, ..More::default() };
+        self.more = More {
+            leaderboard_url: url,
+            leaderboards: m.leaderboards,
+            share_playtime: m.share_playtime,
+            lobby_downloads: m.lobby_downloads,
+            list_races: m.list_races,
+            ..More::default()
+        };
     }
 
     pub fn load() -> Settings {
@@ -663,6 +679,10 @@ impl Settings {
         let (mut antialiasing, mut resolution) = (None, None);
         // Temporal anti-aliasing was an effect of its own, on top of MSAA.
         let mut temporal = false;
+        let version = text
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("version=")?.parse::<u32>().ok())
+            .unwrap_or(1);
         for (k, v) in text.lines().filter_map(|l| l.split_once('=')) {
             let v = v.trim();
             match k.trim() {
@@ -712,13 +732,16 @@ impl Settings {
                 "mute_in_background" => s.mute_in_background = yes(v),
                 "screenshot_key" => s.screenshot_key = yes(v),
                 "opengl" => s.opengl = yes(v),
+                // Before version 4 lobby downloads were off by default
+                // and every file kept that; they start on now.
+                "lobby_downloads" if version < 4 => {}
                 k if s.more.read(k, v) => {}
                 // Files from before version 2 kept the replay blur on by
                 // default; it starts off now, so their setting is dropped.
-                "upgrade.cinematic" if !text.lines().any(|l| l.trim() == "version=2" || l.trim() == "version=3") => {}
+                "upgrade.cinematic" if version < 2 => {}
                 // Before version 3 the bloom and glossy bikes were on by
                 // default; they start off now, so those files' are dropped.
-                "upgrade.bloom" | "upgrade.bikes" if !text.lines().any(|l| l.trim() == "version=3") => {}
+                "upgrade.bloom" | "upgrade.bikes" if version < 3 => {}
                 k => {
                     if let Some(i) = UPGRADES.iter().position(|u| k == format!("upgrade.{}", u.0)) {
                         s.upgrades[i] = yes(v);
@@ -739,7 +762,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=3\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nauto_quality={}\nquality={}\nantialiasing={}\nresolution={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nscreen={}x{}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\nopengl={}\nforgiving_landings={}\n",
+            "version=4\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nauto_quality={}\nquality={}\nantialiasing={}\nresolution={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nscreen={}x{}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\nopengl={}\nforgiving_landings={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -904,6 +927,7 @@ impl Settings {
 
 pub mod laps;
 pub mod playtime;
+pub mod races;
 
 #[cfg(test)]
 mod tests {
@@ -1056,7 +1080,8 @@ mod tests {
             riders: 20,
             leaderboards: false,
             leaderboard_url: "https://example.org/mm2".into(),
-            lobby_downloads: true,
+            lobby_downloads: false,
+            list_races: false,
             share_playtime: false,
         };
         assert_eq!(Settings::parse(&s.text()), s);
@@ -1068,7 +1093,12 @@ mod tests {
         assert!(s.is_original());
         assert_eq!(s.more.leaderboard_url, "https://example.org/mm2");
         assert!(!s.more.share_playtime && !s.more.leaderboards, "not extras: kept");
-        assert!(More::default().share_playtime && More::default().leaderboards, "on unless turned off");
+        assert!(!s.more.lobby_downloads && !s.more.list_races, "not extras: kept");
+        let d = More::default();
+        assert!(d.share_playtime && d.leaderboards && d.lobby_downloads && d.list_races, "on unless turned off");
+        // Files from before 0.5.3 saved lobby downloads off, the old default.
+        assert!(Settings::parse("version=3\nlobby_downloads=0\n").more.lobby_downloads);
+        assert!(!Settings::parse("version=4\nlobby_downloads=0\n").more.lobby_downloads);
         let none = More { leaderboard_url: String::new(), ..More::default() };
         assert_eq!(More::from_args(&none.args()).leaderboard_url, "");
         let kept = Settings { more: none.clone(), ..Settings::default() };

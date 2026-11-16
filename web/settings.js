@@ -84,7 +84,10 @@ export const EXTRAS = [
     { key: "riders", flag: "gate-riders", label: "Riders on the gate", about: "Up to 30 riders in a single race. 0 is the original game's count.", range: [0, 30, 1, ""], off: 0 },
     { key: "no_leaderboards", flag: "no-leaderboards", label: "Keep my laps off the leaderboards", keep: true, about: "The lap leaderboards are on unless you tick this: after a race, your best laps go to the OpenMCM2 leaderboard under your rider name (High Scores, Online shows everyone's)." },
     { key: "no_share_playtime", flag: "no-share-playtime", label: "Don't add my time to everyone's", keep: true, about: "Unless you tick this, how long you play each event, track and bike class is added to everyone's on the OpenMCM2 server, with no name or anything else that says who you are." },
-    { key: "lobby_downloads", flag: "lobby-downloads", label: "Lobby downloads", about: "In a network race, the host's track and other riders' own paints and outfits come over if you don't have them. Everyone needs 0.5.0 or newer." },
+  ]],
+  ["Network races", [
+    { key: "no_lobby_downloads", flag: "no-lobby-downloads", label: "No lobby downloads", keep: true, about: "Lobby downloads are on unless you tick this: in a network race, the host's track and other riders' own paints and outfits come over if you don't have them, and yours go to them." },
+    { key: "no_list_races", flag: "no-list-races", label: "Keep my races out of the server browser", keep: true, about: "Unless you tick this, a race you host shows in everyone's Host or Join list (Multiplayer) with its name, track and riders, so players anywhere can join with a click. Ticked, only people you send the race code or invite link to can join." },
   ]],
 ];
 
@@ -136,7 +139,7 @@ export function save(s) {
 
 /// Whether every extra is off, as the original game played.
 export function isOriginal(s) {
-  // The two sharing choices aren't extras: "Back to the original" keeps them.
+  // The sharing and network choices aren't extras: "Back to the original" keeps them.
   return EXTRAS.every(([, list]) => list.every((e) => e.keep || s[e.key] === (e.range ? e.off : false)));
 }
 

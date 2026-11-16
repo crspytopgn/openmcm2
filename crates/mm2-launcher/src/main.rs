@@ -112,6 +112,9 @@ struct Boards {
     /// Everyone's playtime from the server, once fetched.
     everyone: Option<Result<mm2_settings::playtime::Times, String>>,
     fetching_everyone: Option<Slot<mm2_settings::playtime::Times>>,
+    /// The server browser's open races, once asked for.
+    races: Option<Result<Vec<mm2_settings::races::OpenRace>, String>>,
+    fetching_races: Option<Slot<Vec<mm2_settings::races::OpenRace>>>,
 }
 
 impl Boards {
@@ -142,6 +145,13 @@ impl Boards {
         self.fetching_everyone = Some(everyone);
     }
 
+    fn fetch_races(&mut self, url: &str) {
+        let slot: Slot<Vec<mm2_settings::races::OpenRace>> = Arc::default();
+        let (out, url) = (slot.clone(), url.to_string());
+        std::thread::spawn(move || *out.lock().unwrap() = Some(boards::fetch_races(&url)));
+        self.fetching_races = Some(slot);
+    }
+
     fn show(&mut self, url: &str, board: mm2_settings::laps::Board) {
         let slot: Slot<Vec<(String, u32)>> = Arc::default();
         let (out, url, b) = (slot.clone(), url.to_string(), board.clone());
@@ -162,6 +172,16 @@ impl Boards {
                 Some(Err(e)) => {
                     self.note = Some(format!("Laps not sent yet ({e}). They'll go next time."));
                     self.sending = None;
+                }
+                None => ctx.request_repaint_after(Duration::from_millis(250)),
+            }
+        }
+        if let Some(f) = &self.fetching_races {
+            let got = f.lock().unwrap().take();
+            match got {
+                Some(r) => {
+                    self.races = Some(r);
+                    self.fetching_races = None;
                 }
                 None => ctx.request_repaint_after(Duration::from_millis(250)),
             }
@@ -933,11 +953,70 @@ impl Launcher {
             tile(ui, &mut s.more.all_gear, "All gear in every event", "The bikes and outfits the Pro Circuit gives out, in single races too.");
             tile(ui, &mut s.more.track_filter, "Track filter", "All tracks, the base game's or only the ones you added, on the event page.");
             slider(ui, "Riders on the gate", "Up to 30 riders in a single race. 0 is the original game's count.", &mut s.more.riders, 0..=mm2_settings::RIDERS_MOST, 1.0, "");
-            tile(ui, &mut s.more.lobby_downloads, "Lobby downloads", "In a network race, the host's track and other riders' own paints and outfits come over if you don't have them. Everyone needs 0.5.0 or newer.");
             ui.label(look::weak("Extra art for added tracks goes in the game's RES/ADDONS folder; it never replaces the game's own."));
         });
         self.leaderboard_card(ui);
+        self.network_card(ui);
         ui.label(look::weak("Thanks to Daniel (github.com/dwolp) for many of these, the new launcher, the ray tracing and night races, and the fixes that came with them."));
+    }
+
+    /// Network races: lobby downloads, the server browser and its list.
+    fn network_card(&mut self, ui: &mut egui::Ui) {
+        use look::icon;
+        look::card(ui, icon::ICON_LAN, "Network races", |ui| {
+            let m = &mut self.settings.more;
+            let w = ui.available_width();
+            look::switch_tile(
+                ui,
+                &mut m.lobby_downloads,
+                "Lobby downloads",
+                "On unless you turn it off. In a network race, the host's track and other riders' own paints and outfits come over if you don't have them, and yours go to them. Everyone needs 0.5.0 or newer.",
+                w,
+            );
+            look::switch_tile(
+                ui,
+                &mut m.list_races,
+                "List my races in the server browser",
+                "On unless you turn it off. A race you host shows in everyone's Host or Join list (Multiplayer) with its name, track and riders, so players anywhere can join. The list shows your computer's internet address. It only shows if TCP port 28220 reaches your computer (forwarded on your router); the lobby's chat says if it doesn't. Turn this off to keep your races to people you give the address to.",
+                w,
+            );
+            let url = m.leaderboard_url.trim().to_string();
+            if url.is_empty() {
+                ui.label(look::weak("The server browser uses the leaderboard server, and its address is cleared (Lap leaderboards)."));
+                return;
+            }
+            ui.horizontal(|ui| {
+                let asking = self.boards.fetching_races.is_some();
+                if ui
+                    .add_enabled(!asking, egui::Button::new(if asking { "Looking…" } else { "Show open races" }))
+                    .on_hover_text("The races open in the server browser now. Join one from Multiplayer in the game.")
+                    .clicked()
+                {
+                    self.boards.fetch_races(&url);
+                }
+            });
+            match &self.boards.races {
+                None => {}
+                Some(Err(e)) => {
+                    ui.label(look::weak(e));
+                }
+                Some(Ok(races)) if races.is_empty() => {
+                    ui.label(look::weak("No open races just now. Host one from Multiplayer in the game."));
+                }
+                Some(Ok(races)) => {
+                    egui::Grid::new("open races").striped(true).num_columns(4).show(ui, |ui| {
+                        for r in races.iter().take(50) {
+                            ui.label(&r.name);
+                            ui.label(if r.track.is_empty() { mm2_settings::races::event_name(r.event).to_string() } else { r.track.clone() });
+                            ui.label(format!("{}/8", r.players));
+                            ui.label(if r.racing { "Racing" } else { "In the lobby" });
+                            ui.end_row();
+                        }
+                    });
+                    ui.label(look::weak("Join one from Multiplayer in the game: it's in the Host or Join list."));
+                }
+            }
+        });
     }
 
     fn leaderboard_card(&mut self, ui: &mut egui::Ui) {

@@ -449,6 +449,16 @@ pub struct Session {
     peers: Vec<(u8, Link)>,
     rx: Receiver<In>,
     stop: Arc<AtomicBool>,
+    /// The host's session name, and its track as the game shows it (the
+    /// lobby keeps it up to date), for the server browser.
+    pub name: String,
+    pub title: String,
+    /// The host has started a race and it isn't over.
+    pub racing: bool,
+    /// The host's race in the server browser, if it is listed.
+    listing: Option<crate::servers::Listing>,
+    /// Lines for the lobby's chat: what the server browser said.
+    pub notes: Vec<String>,
     /// In a browser: where the page's news goes, and the next player's
     /// number.
     #[cfg(target_arch = "wasm32")]
@@ -506,6 +516,11 @@ impl Session {
             peers: Vec::new(),
             rx,
             stop,
+            name: name.to_string(),
+            title: String::new(),
+            racing: false,
+            listing: crate::servers::Listing::new(),
+            notes: Vec::new(),
             port,
         })
     }
@@ -532,6 +547,11 @@ impl Session {
             peers: vec![(0, stream)],
             rx,
             stop: Arc::new(AtomicBool::new(false)),
+            name: String::new(),
+            title: String::new(),
+            racing: false,
+            listing: None,
+            notes: Vec::new(),
             port: addr.port(),
         })
     }
@@ -568,6 +588,7 @@ impl Session {
                     return;
                 }
                 Msg::Game(g) => self.game = Some(g.clone()),
+                Msg::Start { .. } => self.racing = true,
                 _ => {}
             }
             self.broadcast(&m, None);
@@ -604,7 +625,32 @@ impl Session {
                 In::Got(from, m) => self.got(from, m, &mut out),
             }
         }
+        self.list();
         out
+    }
+
+    /// Tells the server browser of the host's race, when it's time.
+    fn list(&mut self) {
+        let Some(mut listing) = self.listing.take() else {
+            return;
+        };
+        let race = mm2_settings::races::OpenRace {
+            address: String::new(),
+            name: self.name.clone(),
+            event: self.game.as_ref().map_or(0, |g| g.event as u32),
+            track: self.title.clone(),
+            players: self.players.len() as u32,
+            racing: self.racing,
+            version: env!("CARGO_PKG_VERSION").into(),
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let place = Some(("pc", self.port.to_string()));
+        #[cfg(target_arch = "wasm32")]
+        let place = Some(web::code()).filter(|c| !c.is_empty()).map(|c| ("web", c));
+        if let Some(note) = listing.tick(place, &race) {
+            self.notes.push(note);
+        }
+        self.listing = Some(listing);
     }
 
     fn got(&mut self, from: u8, m: Msg, out: &mut Vec<Heard>) {
@@ -793,6 +839,9 @@ impl Session {
     }
 
     pub fn leave(&mut self) {
+        if let Some(l) = self.listing.take() {
+            l.end();
+        }
         self.broadcast(&Msg::Leave, None);
         self.stop.store(true, Ordering::Relaxed);
         self.peers.clear();
@@ -835,6 +884,38 @@ fn answer_finders(name: String, port: u16, stop: Arc<AtomicBool>) {
 pub struct Found {
     pub name: String,
     pub addr: Addr,
+    /// For a race from the server browser, its list line
+    /// ([`crate::servers::line`]); empty for one found nearby or asked.
+    pub line: String,
+}
+
+impl Found {
+    /// Its line in the Host or Join box's list.
+    pub fn shown(&self) -> String {
+        if self.line.is_empty() { self.name.clone() } else { self.line.clone() }
+    }
+}
+
+/// Adds the server browser's races to `found`, after those found nearby.
+/// Whether the list changed.
+fn add_listed(found: &mut Vec<Found>, browser: &mut crate::servers::Browser) -> bool {
+    if !browser.tick() {
+        return false;
+    }
+    found.retain(|f| f.line.is_empty());
+    // In a steady order, so a picked line stays put as the list updates.
+    let mut races = browser.races.clone();
+    races.sort_by_key(|r| (r.racing, r.name.to_lowercase(), r.address.clone()));
+    for r in &races {
+        #[cfg(not(target_arch = "wasm32"))]
+        let Ok(addr) = r.address.parse::<SocketAddr>() else { continue };
+        #[cfg(target_arch = "wasm32")]
+        let addr = r.address.clone();
+        if !found.iter().any(|f| f.addr == addr) {
+            found.push(Found { name: r.name.clone(), addr, line: crate::servers::line(r) });
+        }
+    }
+    true
 }
 
 /// Looks for sessions: asks the local network, and any addresses in
@@ -847,6 +928,7 @@ pub struct Finder {
     /// Hosts asked directly, by address or name, with or without a port:
     /// `MM2_JOIN`'s and the TCP/IP box's.
     pub hosts: Vec<String>,
+    browser: crate::servers::Browser,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -868,14 +950,16 @@ impl Finder {
             asked: None,
             found: Vec::new(),
             hosts,
+            browser: Default::default(),
         }
     }
 
     /// Asks again if a second has passed, and takes the answers. Whether
     /// the list changed.
     pub fn tick(&mut self) -> bool {
+        let listed = add_listed(&mut self.found, &mut self.browser);
         let Some(sock) = &self.sock else {
-            return false;
+            return listed;
         };
         if self
             .asked
@@ -902,12 +986,17 @@ impl Finder {
             let port = u16::from_le_bytes([buf[4], buf[5]]);
             let name = String::from_utf8_lossy(&buf[6..n]).into_owned();
             let addr = SocketAddr::new(from.ip(), port);
+            // Found nearby: before the server browser's line for it.
+            if let Some(i) = self.found.iter().position(|f| f.addr == addr && !f.line.is_empty()) {
+                self.found.remove(i);
+            }
             if !self.found.iter().any(|f| f.addr == addr) {
-                self.found.push(Found { name, addr });
+                let at = self.found.iter().position(|f| !f.line.is_empty()).unwrap_or(self.found.len());
+                self.found.insert(at, Found { name, addr, line: String::new() });
                 changed = true;
             }
         }
-        changed
+        changed || listed
     }
 }
 
@@ -1145,6 +1234,9 @@ mod web {
         fn find(code: &str);
         /// The hosts that answered: `[code, name]` arrays.
         fn found() -> js_sys::Array;
+        /// The race code being hosted, once the matchmaking server has
+        /// it; empty before.
+        pub(super) fn code() -> String;
     }
 
     /// A data channel, by the page's number for it.
@@ -1174,6 +1266,11 @@ mod web {
                 peers: Vec::new(),
                 rx,
                 stop: Arc::new(AtomicBool::new(false)),
+                name: name.to_string(),
+                title: String::new(),
+                racing: false,
+                listing: crate::servers::Listing::new(),
+                notes: Vec::new(),
                 tx,
                 next: 1,
                 ids: Vec::new(),
@@ -1196,6 +1293,11 @@ mod web {
                 peers: vec![(0, link)],
                 rx,
                 stop: Arc::new(AtomicBool::new(false)),
+                name: String::new(),
+                title: String::new(),
+                racing: false,
+                listing: None,
+                notes: Vec::new(),
                 tx,
                 next: 1,
                 ids: vec![(n, 0)],
@@ -1241,6 +1343,7 @@ mod web {
         pub found: Vec<Found>,
         pub hosts: Vec<String>,
         asked: Vec<String>,
+        browser: crate::servers::Browser,
     }
 
     impl Finder {
@@ -1250,7 +1353,7 @@ mod web {
                 .flat_map(|a| a.split(',').map(|c| c.trim().to_string()).collect::<Vec<_>>())
                 .filter(|a| !a.is_empty())
                 .collect();
-            Finder { found: Vec::new(), hosts, asked: Vec::new() }
+            Finder { found: Vec::new(), hosts, asked: Vec::new(), browser: Default::default() }
         }
 
         pub fn tick(&mut self) -> bool {
@@ -1260,14 +1363,18 @@ mod web {
                     self.asked.push(h.clone());
                 }
             }
-            let mut changed = false;
+            let mut changed = add_listed(&mut self.found, &mut self.browser);
             for f in found().iter() {
                 let f = js_sys::Array::from(&f);
                 let (Some(addr), Some(name)) = (f.get(0).as_string(), f.get(1).as_string()) else {
                     continue;
                 };
+                if let Some(i) = self.found.iter().position(|x| x.addr == addr && !x.line.is_empty()) {
+                    self.found.remove(i);
+                }
                 if !self.found.iter().any(|x| x.addr == addr) {
-                    self.found.push(Found { name, addr });
+                    let at = self.found.iter().position(|x| !x.line.is_empty()).unwrap_or(self.found.len());
+                    self.found.insert(at, Found { name, addr, line: String::new() });
                     changed = true;
                 }
             }

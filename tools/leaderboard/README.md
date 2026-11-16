@@ -32,6 +32,27 @@ in `crates/mm2-settings/src/lib.rs` to it before a release.
   (`total`, `races`, `count`, `players`, `event:N`, `track:NAME`,
   `bike:CC`), and `GET /playtime` gives everyone's added up.
 
+## The server browser
+
+The same worker keeps the open network races for the game's Host or Join
+list. They live in one Durable Object (`Races`, its own small SQLite
+table), which the free plan allows and `npx wrangler deploy` sets up from
+`wrangler.toml`; nothing else needs making.
+
+- `POST /race`: a host's race, every 30 seconds while it is open, as
+  `key<TAB>value` lines: `id` (the host's own random name for the race),
+  `kind` (`pc` or `web`), `port` (a computer's) or `code` (a browser's race
+  code), `name`, `event`, `track`, `players`, `racing`, `version`. The
+  answer is `ok`, `full`, or `closed` when the worker couldn't connect to
+  a computer's race port (it tries once, and again every two minutes).
+- `POST /race/end`: `id<TAB>…`, and the race is off the list.
+- `GET /races?kind=pc` (or `web`): the open races that can be reached, as
+  `address<TAB>name<TAB>event<TAB>track<TAB>players<TAB>racing<TAB>version`
+  lines. A computer's address is the one its word came from, with its port.
+
+A race not heard of for 90 seconds drops off. Each address can list four
+races at once, and the list holds at most 300.
+
 OpenMCM2's own server runs at `https://openmcm2-laps.openmcm2-laps.workers.dev`
 (the default `LEADERBOARD_URL`). To update it after changing `worker.js`,
 run `npx wrangler deploy` here again.
