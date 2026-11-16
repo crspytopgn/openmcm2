@@ -60,7 +60,17 @@ fn play_only(args: &[String]) -> i32 {
         eprintln!("mm2-viewer isn't beside the launcher");
         return 1;
     };
-    match std::process::Command::new(&viewer).args(args).status() {
+    // As the Play button starts it: the saved settings, the game's
+    // folder, and its messages in last-run.log.
+    let settings = Settings::load();
+    let log = settings::user_dir().join("last-run.log");
+    let err = std::fs::File::create(&log).map(Stdio::from).unwrap_or(Stdio::null());
+    let mut cmd = std::process::Command::new(&viewer);
+    cmd.args(settings.args()).args(args).stderr(err);
+    if let Some(g) = &settings.game {
+        cmd.current_dir(g);
+    }
+    match cmd.status() {
         Ok(s) => s.code().unwrap_or(1),
         Err(e) => {
             eprintln!("couldn't start {}: {e}", viewer.display());

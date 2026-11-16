@@ -119,6 +119,8 @@ pub struct Pads {
     centred: HashSet<(GamepadId, u32)>,
     /// The pads a button or stick has been used on.
     touched: HashSet<GamepadId>,
+    /// The pads whose axes at rest have been written to the log.
+    logged: HashSet<GamepadId>,
     /// The pad vibrating: its heavy and light motors, each a steady
     /// effect turned up and down, and the strengths last asked.
     motors: Option<(GamepadId, [Effect; 2], [f32; 2])>,
@@ -141,6 +143,7 @@ impl Pads {
             rest: HashMap::new(),
             centred: HashSet::new(),
             touched: HashSet::new(),
+            logged: HashSet::new(),
             motors: None,
         })
     }
@@ -315,6 +318,22 @@ impl Pads {
         for (id, pad) in self.gilrs.gamepads() {
             let since = *self.first.entry(id).or_insert(now);
             let settling = now.duration_since(since) <= SETTLE;
+            if !settling && self.logged.insert(id) {
+                // For a player's log: what the pad is and where it rests.
+                let axes: Vec<String> = pad
+                    .state()
+                    .axes()
+                    .map(|(code, data)| format!("{:#x}={:+.2}", code.into_u32() & 0xffff, data.value()))
+                    .collect();
+                eprintln!(
+                    "joystick: {} ({:04x}:{:04x}, {:?}) axes at rest: {}",
+                    pad.name(),
+                    pad.vendor_id().unwrap_or(0),
+                    pad.product_id().unwrap_or(0),
+                    pad.mapping_source(),
+                    if axes.is_empty() { "none moved".to_string() } else { axes.join(" ") },
+                );
+            }
             for (code, data) in pad.state().axes() {
                 let key = (id, code.into_u32());
                 let v = data.value();

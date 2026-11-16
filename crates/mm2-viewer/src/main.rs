@@ -3716,6 +3716,8 @@ struct App {
     /// The stick's smoothed steering and when it was last read (the pad
     /// smoothing extra).
     pad_smooth: (f32, Option<Instant>),
+    /// Whether the log has been told of the pad leaning the rider.
+    pad_lean_logged: bool,
     /// The race going on tape, and a tape playing (with the track it
     /// waits for while that loads).
     recording: Option<replay::Recording>,
@@ -3882,6 +3884,7 @@ impl App {
             pointer: (0.0, 0.0),
             pad_click: (false, false),
             pad_smooth: (0.0, None),
+            pad_lean_logged: false,
             recording: None,
             ghost: None,
             replay: None,
@@ -4866,6 +4869,13 @@ impl App {
             steer = self.pad_smooth.0;
         }
         let lean = pull(input::LEAN_FORWARD, -1.0, 0.0) - pull(input::LEAN_BACK, 1.0, 0.0);
+        // For a player's log: the first time the pad leans the rider,
+        // and on which pad.
+        if lean.abs() > 0.2 && !self.pad_lean_logged {
+            self.pad_lean_logged = true;
+            let name = pad.info().map_or_else(String::new, |i| i.name);
+            eprintln!("joystick: lean {lean:+.2} from {name} (map {:?} {:?})", map[input::LEAN_FORWARD], map[input::LEAN_BACK]);
+        }
         if self.analog {
             if steer != 0.0 {
                 c.steer = input::stick_steer(steer);
