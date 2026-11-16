@@ -69,7 +69,6 @@ export const EXTRAS = [
     { key: "centred_display", flag: "centred-display", label: "Race display nearer the middle", about: "On screens wider than 16:9, the race display where it sits on a 16:9 screen." },
     { key: "steady_camera", flag: "steady-camera", label: "Steadier camera", about: "The chase camera rises and dips with the bike more gently." },
     { key: "fov", flag: "fov", label: "Field of view", about: "How wide the riding cameras see. 85° is the original game's.", range: [60, 120, 1, "°"], off: 85 },
-    { key: "helmet_cam", flag: "helmet-cam", label: "Helmet Cam", about: "A camera from the rider's helmet. In a race press F1 to switch it on or off (fn+F1 on most Mac keyboards), or reach it after User Cam with the camera key (C or Numpad 5)." },
   ]],
   ["Controllers and picture", [
     { key: "pad_dead_zone", flag: "pad-dead-zone", label: "Stick dead zone", about: "How far a stick moves before it steers. 4% is the original game's.", range: [0, 50, 1, "%"], off: 4 },

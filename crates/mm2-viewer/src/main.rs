@@ -1437,7 +1437,7 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
             }
             None => [hidden; 3],
         };
-        if !race.player_indicator || race.ghost.is_some() {
+        if !race.player_indicator || race.ghost.is_some() || race.first_person() {
             places[2] = hidden;
         }
         for (object, place) in models.into_iter().zip(places) {
@@ -5429,11 +5429,11 @@ impl ApplicationHandler for App {
                                     r.freeze_camera();
                                 }
                             }
-                            // F1: the Helmet Cam extra, straight in and out
+                            // F1: the Helmet Cam, straight in and out
                             // (on a Mac keyboard, fn+F1 unless the F keys are
                             // set as standard function keys).
                             KeyCode::F1 if self.follow => {
-                                if let Some(name) = self.race.as_mut().and_then(|r| r.toggle_helmet()) {
+                                if let Some(name) = self.race.as_mut().map(|r| r.toggle_helmet()) {
                                     if let Some((_, hud)) = &mut self.hud {
                                         hud.say(name);
                                     }

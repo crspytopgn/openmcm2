@@ -1820,10 +1820,15 @@ impl Race {
         self.chase.next_view()
     }
 
-    /// F1: the Helmet Cam extra on or off; its name, or `None` when the
-    /// extra is off.
-    pub fn toggle_helmet(&mut self) -> Option<&'static str> {
+    /// F1: the Helmet Cam on or off; the view's name.
+    pub fn toggle_helmet(&mut self) -> &'static str {
         self.chase.toggle_helmet()
+    }
+
+    /// The camera is in the player's own eyes (Rider Cam or the Helmet
+    /// Cam), so the player's sign is left out.
+    pub fn first_person(&self) -> bool {
+        self.watching() == self.player && self.chase.first_person()
     }
 
     /// Numpad 0: the camera freezes where it is, or goes back to its view.
