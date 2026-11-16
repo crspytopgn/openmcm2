@@ -1486,7 +1486,9 @@ fn place_cues(race: &Race, track: &Track, cues: &cues::Cues, renderer: &mut Terr
             _ => None,
         }
     } else if let Some(gate) = race.gates.get(me.timing.gate) {
-        Some(gate.centre)
+        // The gate's own place, which stands 2 ft above the ground
+        // (0x48c0a0 aims at the waypoint the course read, 0x405330).
+        Some(gate.centre + Vec3::Y * gates::RAISE)
     } else {
         rejoin.map(|(at, _)| {
             let mut at = at;
