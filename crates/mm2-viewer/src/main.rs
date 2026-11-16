@@ -4878,7 +4878,7 @@ impl App {
         }
         if self.analog {
             if steer != 0.0 {
-                c.steer = input::stick_steer(steer);
+                c.steer = input::stick_steer(steer, crate::tweaks::more().pad_curve);
             }
             if lean != 0.0 {
                 c.lean = lean;

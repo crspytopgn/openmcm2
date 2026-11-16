@@ -235,14 +235,28 @@ pub fn with_pad_extras(mut map: [(i32, i32); crate::profile::ACTIONS]) -> [(i32,
 }
 
 /// A stick's steering is cubed (0x52e3e0, for joystick devices): fine
-/// near the centre, full lock at the edge.
-pub fn stick_steer(x: f32) -> f32 {
-    x * x * x
+/// near the centre, full lock at the edge. The steering curve extra
+/// (`curve`, % of the game's) eases it towards a straight line: the
+/// power runs from 3 at 100% to 1 at 0%.
+pub fn stick_steer(x: f32, curve: u32) -> f32 {
+    if curve >= 100 {
+        return x * x * x;
+    }
+    let power = 1.0 + 2.0 * curve as f32 / 100.0;
+    x.signum() * x.abs().powf(power)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn steering_curve() {
+        assert_eq!(stick_steer(0.5, 100), 0.125);
+        assert!((stick_steer(-0.5, 0) + 0.5).abs() < 1e-6);
+        assert!((stick_steer(0.5, 50) - 0.25).abs() < 1e-6);
+        assert_eq!(stick_steer(1.0, 30), 1.0);
+    }
 
     #[test]
     fn pad_extras_fill_only_free_buttons() {
