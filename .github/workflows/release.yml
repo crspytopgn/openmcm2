@@ -82,6 +82,8 @@ jobs:
               tar czf "$dir.tar.gz" "$dir"
               # The same programs as one AppImage, with icon and menu
               # entry (for the Steam Deck and other Linux handhelds).
+              # appimagetool checks the menu entry with desktop-file-validate.
+              sudo apt-get install -y -q desktop-file-utils >/dev/null
               sh tools/make-appimage.sh "$bin" "$dir.AppImage" ;;
           esac
       - uses: actions/upload-artifact@v4
