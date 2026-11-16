@@ -37,6 +37,39 @@ const ASK: &[u8] = b"MM2?";
 const ANSWER: &[u8] = b"MM2!";
 /// The most players in a session (the lobby's eight names).
 pub const MAX_PLAYERS: usize = 8;
+/// The player number of an empty place in a free roam session's start.
+pub const EMPTY: u8 = 254;
+/// The race mode that is free roam in a session: the game's Practice,
+/// with no laps and no time limit.
+pub const ROAM_MODE: u8 = 0;
+
+/// Whether a session's game is free roam: Practice, in any event but
+/// Moto-Tag (whose IT passes between a set of riders).
+pub fn is_roam(g: &GameInfo) -> bool {
+    g.mode == ROAM_MODE && g.event != 4
+}
+
+/// A free roam session the host is riding in: its game, and which player
+/// rides in each place (none for an empty one). Players drop in when they
+/// press Ready in the lobby and out when they leave the race.
+#[derive(Debug, Clone)]
+pub struct Roam {
+    pub game: GameInfo,
+    pub places: Vec<Option<u8>>,
+}
+
+impl Roam {
+    /// The places as a start's players: an empty place as [`EMPTY`].
+    pub fn players(&self, all: &[Player]) -> Vec<Player> {
+        self.places
+            .iter()
+            .map(|p| {
+                p.and_then(|id| all.iter().find(|q| q.id == id).cloned())
+                    .unwrap_or(Player { id: EMPTY, ..Default::default() })
+            })
+            .collect()
+    }
+}
 
 /// A player's bike and outfit, as the menus give them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -455,6 +488,8 @@ pub struct Session {
     pub title: String,
     /// The host has started a race and it isn't over.
     pub racing: bool,
+    /// The host's free roam session, while it rides in one.
+    pub roam: Option<Roam>,
     /// The host's race in the server browser, if it is listed.
     listing: Option<crate::servers::Listing>,
     /// Lines for the lobby's chat: what the server browser said.
@@ -519,6 +554,7 @@ impl Session {
             name: name.to_string(),
             title: String::new(),
             racing: false,
+            roam: None,
             listing: crate::servers::Listing::new(),
             notes: Vec::new(),
             port,
@@ -550,6 +586,7 @@ impl Session {
             name: String::new(),
             title: String::new(),
             racing: false,
+            roam: None,
             listing: None,
             notes: Vec::new(),
             port: addr.port(),
@@ -588,7 +625,13 @@ impl Session {
                     return;
                 }
                 Msg::Game(g) => self.game = Some(g.clone()),
-                Msg::Start { .. } => self.racing = true,
+                Msg::Start { game, players } => {
+                    self.racing = true;
+                    self.roam = is_roam(game).then(|| Roam {
+                        game: game.clone(),
+                        places: players.iter().map(|p| (p.id != EMPTY).then_some(p.id)).collect(),
+                    });
+                }
                 _ => {}
             }
             self.broadcast(&m, None);
@@ -625,8 +668,49 @@ impl Session {
                 In::Got(from, m) => self.got(from, m, &mut out),
             }
         }
+        if self.host && self.roam.is_some() {
+            self.drop_in_out(&mut out);
+        }
         self.list();
         out
+    }
+
+    /// A free roam session's comings and goings, on the host: a place
+    /// whose player has gone or is no longer ready (back in the lobby) is
+    /// free again, and a ready player not riding takes a free place and is
+    /// sent the start. Everyone riding hears who is where.
+    fn drop_in_out(&mut self, out: &mut Vec<Heard>) {
+        let Some(mut roam) = self.roam.take() else { return };
+        let before = roam.places.clone();
+        let ready = |id: u8, ps: &[Player]| ps.iter().any(|p| p.id == id && p.ready);
+        for place in roam.places.iter_mut().skip(1) {
+            if place.is_some_and(|id| !ready(id, &self.players)) {
+                *place = None;
+            }
+        }
+        for p in self.players.iter().filter(|p| p.ready && p.id != self.me) {
+            if roam.places.contains(&Some(p.id)) {
+                continue;
+            }
+            if let Some(free) = roam.places.iter_mut().skip(1).find(|x| x.is_none()) {
+                *free = Some(p.id);
+            }
+        }
+        if roam.places != before {
+            let start = Msg::Start { game: roam.game.clone(), players: roam.players(&self.players) };
+            // To those riding and those dropping in; the others are in the
+            // lobby, not ready, and would take it as a race to join.
+            let riding: Vec<u8> = roam.places.iter().flatten().copied().filter(|&id| id != self.me).collect();
+            for (id, link) in &mut self.peers {
+                if riding.contains(id) {
+                    let _ = send(link, &start);
+                }
+            }
+            if let Msg::Start { players, game } = start {
+                out.push(Heard::Start { game, players });
+            }
+        }
+        self.roam = Some(roam);
     }
 
     /// Tells the server browser of the host's race, when it's time.
@@ -640,7 +724,8 @@ impl Session {
             event: self.game.as_ref().map_or(0, |g| g.event as u32),
             track: self.title.clone(),
             players: self.players.len() as u32,
-            racing: self.racing,
+            // Free roam is never "racing": anyone can drop in.
+            racing: self.racing && self.roam.is_none(),
             version: env!("CARGO_PKG_VERSION").into(),
         };
         #[cfg(not(target_arch = "wasm32"))]
@@ -1269,6 +1354,7 @@ mod web {
                 name: name.to_string(),
                 title: String::new(),
                 racing: false,
+                roam: None,
                 listing: crate::servers::Listing::new(),
                 notes: Vec::new(),
                 tx,
@@ -1296,6 +1382,7 @@ mod web {
                 name: String::new(),
                 title: String::new(),
                 racing: false,
+                roam: None,
                 listing: None,
                 notes: Vec::new(),
                 tx,

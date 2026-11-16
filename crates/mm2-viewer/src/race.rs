@@ -1792,6 +1792,9 @@ pub struct Race {
     /// The racer that is a ghost race's ghost: played from a tape, nobody
     /// touches it and it takes no place.
     pub ghost: Option<usize>,
+    /// A free roam session's empty places: nobody rides there just now,
+    /// so they aren't drawn, touched or counted (see [`Race::away`]).
+    pub empty: Vec<bool>,
     /// Practice or a ghost race: no flag girl or 30-second man.
     pub practice: bool,
     /// The flag girl at the finish line.
@@ -1903,6 +1906,7 @@ impl Race {
             level: 1,
             supercross: false,
             ghost: None,
+            empty: Vec::new(),
             practice: false,
             flag_girl: Default::default(),
             podium: None,
@@ -1995,7 +1999,9 @@ impl Race {
             self.time += step;
             let racing = self.gate_down();
             let clock = self.clock();
-            let places: Vec<Vec3> = self.racers.iter().map(|r| r.bike.position()).collect();
+            let places: Vec<Vec3> = (0..self.racers.len())
+                .map(|i| if self.away(i) { Vec3::splat(1.0e7) } else { self.racers[i].bike.position() })
+                .collect();
             let going: Vec<Vec3> = self.racers.iter().map(|r| r.bike.velocity()).collect();
             for (i, r) in self.racers.iter_mut().enumerate() {
                 let computer = i != self.player || self.autopilot;
@@ -2203,7 +2209,7 @@ impl Race {
         let mut i = self.watching();
         loop {
             i = if forward { (i + 1) % n } else { (i + n - 1) % n };
-            if Some(i) != self.ghost {
+            if Some(i) != self.ghost && (!self.away(i) || i == self.player) {
                 break;
             }
         }
@@ -2258,7 +2264,9 @@ impl Race {
             r.stunt.trick = trick;
         }
         // A taunt on the tape plays as the rider looked round.
-        let places: Vec<Vec3> = self.racers.iter().map(|r| r.bike.position()).collect();
+        let places: Vec<Vec3> = (0..self.racers.len())
+            .map(|i| if self.away(i) { Vec3::splat(1.0e7) } else { self.racers[i].bike.position() })
+            .collect();
         for (i, r) in self.racers.iter_mut().enumerate() {
             let taunting = matches!(&r.bike, Bike::Taped(t) if t.taunting);
             if !taunting || dt < 0.0 {
@@ -2304,6 +2312,9 @@ impl Race {
         for i in 0..self.racers.len() {
             for j in i + 1..self.racers.len() {
                 let Some(hull) = &hull else { break };
+                if self.away(i) || self.away(j) {
+                    continue;
+                }
                 let (a, b) = self.racers.split_at_mut(j);
                 let (a, b) = (&mut a[i], &mut b[0]);
                 let (Some(was_a), Some(was_b)) = (a.stood, b.stood) else {
@@ -2455,12 +2466,22 @@ impl Race {
         Some((m * 60.0 - self.clock()).max(0.0))
     }
 
+    /// Whether racer `i` is an empty place in a free roam session.
+    pub fn away(&self, i: usize) -> bool {
+        self.empty.get(i).copied().unwrap_or(false)
+    }
+
+    /// How many riders there are: not a ghost or an empty place.
+    pub fn riders(&self) -> usize {
+        (0..self.racers.len()).filter(|&i| Some(i) != self.ghost && !self.away(i)).count()
+    }
+
     /// Every racer's index in finishing order: those who finished by
     /// their time, then the rest by how far round they got.
     pub fn standings(&self) -> Vec<usize> {
         let (course, gates) = (self.course.as_ref(), &self.gates);
         let mut order: Vec<usize> = (0..self.racers.len())
-            .filter(|&i| Some(i) != self.ghost)
+            .filter(|&i| Some(i) != self.ghost && !self.away(i))
             .collect();
         if let Some(t) = &self.tag {
             let points: Vec<f32> = self.racers.iter().map(|r| r.stunt_points).collect();
@@ -2533,7 +2554,7 @@ impl Race {
             Some(t) => format!(
                 "Finished {} of {} in {}{best}",
                 ordinal(self.position()),
-                self.racers.len() - self.ghost.is_some() as usize,
+                self.riders(),
                 time(t)
             ),
             None => format!(
@@ -2541,7 +2562,7 @@ impl Race {
                 (me.laps + 1).min(self.laps),
                 self.laps,
                 ordinal(self.position()),
-                self.racers.len() - self.ghost.is_some() as usize,
+                self.riders(),
                 time(self.clock())
             ),
         }
