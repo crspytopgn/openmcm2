@@ -382,25 +382,67 @@ impl Msg {
     }
 }
 
-/// Where a host is: its address, or in a browser, its race code.
+/// Where a host is: its address (on the local network, or one asked for),
+/// or its race code (through the matchmaking server, as browsers host).
 #[cfg(not(target_arch = "wasm32"))]
-pub type Addr = SocketAddr;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Addr {
+    Ip(SocketAddr),
+    Code(String),
+}
 #[cfg(target_arch = "wasm32")]
 pub type Addr = String;
 
-/// One connection: to a player, or to the host.
 #[cfg(not(target_arch = "wasm32"))]
-type Link = TcpStream;
+impl std::fmt::Display for Addr {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Addr::Ip(a) => write!(f, "{a}"),
+            Addr::Code(c) => write!(f, "race {c}"),
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl std::str::FromStr for Addr {
+    type Err = std::net::AddrParseError;
+    /// A race code, or an address with its port.
+    fn from_str(s: &str) -> Result<Addr, Self::Err> {
+        let s = s.trim();
+        if rtc::is_code(s) {
+            return Ok(Addr::Code(s.to_uppercase()));
+        }
+        s.parse().map(Addr::Ip)
+    }
+}
+
+/// Desktop WebRTC, for races with browsers and without port forwarding.
+#[cfg(not(target_arch = "wasm32"))]
+mod rtc;
+
+/// One connection: to a player, or to the host. A desktop's is a TCP one
+/// (the original's way, on the local network) or a data channel.
+#[cfg(not(target_arch = "wasm32"))]
+enum Link {
+    Tcp(TcpStream),
+    Rtc(rtc::Channel),
+}
 #[cfg(target_arch = "wasm32")]
 use web::Link;
 
-/// Sends one message: its length, then it.
+/// Sends one message: over TCP, its length, then it; a data channel keeps
+/// messages apart.
 #[cfg(not(target_arch = "wasm32"))]
-fn send(stream: &mut TcpStream, m: &Msg) -> io::Result<()> {
+fn send(link: &mut Link, m: &Msg) -> io::Result<()> {
     let body = m.encode();
-    let mut frame = (body.len() as u32).to_le_bytes().to_vec();
-    frame.extend(body);
-    stream.write_all(&frame)
+    match link {
+        Link::Tcp(stream) => {
+            let mut frame = (body.len() as u32).to_le_bytes().to_vec();
+            frame.extend(body);
+            stream.write_all(&frame)
+        }
+        Link::Rtc(ch) => ch.send(body),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -508,6 +550,12 @@ pub struct Session {
     #[cfg(not(target_arch = "wasm32"))]
     #[cfg_attr(not(test), allow(dead_code))]
     pub port: u16,
+    /// A desktop host's place on the matchmaking server, and the race
+    /// code the lobby was last told.
+    #[cfg(not(target_arch = "wasm32"))]
+    rtc: Option<Arc<rtc::Hosting>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    code: String,
 }
 
 impl Session {
@@ -523,7 +571,7 @@ impl Session {
         let stop = Arc::new(AtomicBool::new(false));
         let next = Arc::new(AtomicU8::new(1));
         {
-            let (tx, stop) = (tx.clone(), stop.clone());
+            let (tx, stop, next) = (tx.clone(), stop.clone(), next.clone());
             std::thread::spawn(move || {
                 for stream in listener.incoming() {
                     if stop.load(Ordering::Relaxed) {
@@ -536,13 +584,17 @@ impl Session {
                         continue;
                     };
                     reader(id, read, tx.clone());
-                    if tx.send(In::Joined(id, stream)).is_err() {
+                    if tx.send(In::Joined(id, Link::Tcp(stream))).is_err() {
                         return;
                     }
                 }
             });
         }
         answer_finders(name.to_string(), port, stop.clone());
+        // Browsers and players elsewhere come by the race code (not in the
+        // tests, unless they have a matchmaking server of their own).
+        let rtc = (!cfg!(test) || std::env::var_os("MM2_PEER_SERVER").is_some())
+            .then(|| rtc::host(name.to_string(), next, tx, stop.clone()));
         Ok(Session {
             host: true,
             me: 0,
@@ -558,18 +610,26 @@ impl Session {
             listing: crate::servers::Listing::new(),
             notes: Vec::new(),
             port,
+            rtc,
+            code: String::new(),
         })
     }
 
-    /// Joins the session at `addr` as `me`.
+    /// Joins the session at `addr` (or with that race code) as `me`.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn join(addr: SocketAddr, me: Player) -> io::Result<Session> {
-        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(3))?;
-        stream.set_nodelay(true)?;
+    pub fn join(addr: Addr, me: Player) -> io::Result<Session> {
         let (tx, rx) = channel();
-        reader(0, stream.try_clone()?, tx);
+        let (mut link, port) = match &addr {
+            Addr::Ip(addr) => {
+                let stream = TcpStream::connect_timeout(addr, Duration::from_secs(3))?;
+                stream.set_nodelay(true)?;
+                reader(0, stream.try_clone()?, tx);
+                (Link::Tcp(stream), addr.port())
+            }
+            Addr::Code(code) => (Link::Rtc(rtc::join(code, tx)), 0),
+        };
         send(
-            &mut stream,
+            &mut link,
             &Msg::Hello {
                 name: me.name.clone(),
                 ride: me.ride.clone(),
@@ -580,7 +640,7 @@ impl Session {
             me: u8::MAX,
             players: Vec::new(),
             game: None,
-            peers: vec![(0, stream)],
+            peers: vec![(0, link)],
             rx,
             stop: Arc::new(AtomicBool::new(false)),
             name: String::new(),
@@ -589,7 +649,9 @@ impl Session {
             roam: None,
             listing: None,
             notes: Vec::new(),
-            port: addr.port(),
+            port,
+            rtc: None,
+            code: String::new(),
         })
     }
 
@@ -671,6 +733,10 @@ impl Session {
         if self.host && self.roam.is_some() {
             self.drop_in_out(&mut out);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.host {
+            self.tell_code();
+        }
         self.list();
         out
     }
@@ -713,6 +779,26 @@ impl Session {
         self.roam = Some(roam);
     }
 
+    /// The race code being hosted, once the matchmaking server has it.
+    pub fn code(&self) -> String {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.rtc.as_ref().map(|h| h.code.lock().unwrap().clone()).unwrap_or_default();
+        #[cfg(target_arch = "wasm32")]
+        return web::code();
+    }
+
+    /// Tells the lobby the race code when it comes (or changes).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn tell_code(&mut self) {
+        let code = self.code();
+        if !code.is_empty() && code != self.code {
+            self.notes.push(format!(
+                "Race code: {code}. Players anywhere, in the game or the browser version, can type it in TCP/IP to join."
+            ));
+        }
+        self.code = code;
+    }
+
     /// Tells the server browser of the host's race, when it's time.
     fn list(&mut self) {
         let Some(mut listing) = self.listing.take() else {
@@ -728,8 +814,10 @@ impl Session {
             racing: self.racing && self.roam.is_none(),
             version: env!("CARGO_PKG_VERSION").into(),
         };
+        // Listed by race code, which browsers and players anywhere can
+        // join without port forwarding.
         #[cfg(not(target_arch = "wasm32"))]
-        let place = Some(("pc", self.port.to_string()));
+        let place = Some(self.code()).filter(|c| !c.is_empty()).map(|c| ("web", c));
         #[cfg(target_arch = "wasm32")]
         let place = Some(web::code()).filter(|c| !c.is_empty()).map(|c| ("web", c));
         if let Some(note) = listing.tick(place, &race) {
@@ -993,7 +1081,7 @@ fn add_listed(found: &mut Vec<Found>, browser: &mut crate::servers::Browser) -> 
     races.sort_by_key(|r| (r.racing, r.name.to_lowercase(), r.address.clone()));
     for r in &races {
         #[cfg(not(target_arch = "wasm32"))]
-        let Ok(addr) = r.address.parse::<SocketAddr>() else { continue };
+        let Ok(addr) = r.address.parse::<Addr>() else { continue };
         #[cfg(target_arch = "wasm32")]
         let addr = r.address.clone();
         if !found.iter().any(|f| f.addr == addr) {
@@ -1054,6 +1142,10 @@ impl Finder {
             let _ = sock.send_to(ASK, ("255.255.255.255", PORT));
             let _ = sock.send_to(ASK, ("127.0.0.1", PORT));
             for a in &self.hosts {
+                // A race code: joined through the matchmaking server.
+                if rtc::is_code(a) {
+                    continue;
+                }
                 let a = if a.contains(':') {
                     a.to_string()
                 } else {
@@ -1070,7 +1162,7 @@ impl Finder {
             }
             let port = u16::from_le_bytes([buf[4], buf[5]]);
             let name = String::from_utf8_lossy(&buf[6..n]).into_owned();
-            let addr = SocketAddr::new(from.ip(), port);
+            let addr = Addr::Ip(SocketAddr::new(from.ip(), port));
             // Found nearby: before the server browser's line for it.
             if let Some(i) = self.found.iter().position(|f| f.addr == addr && !f.line.is_empty()) {
                 self.found.remove(i);
@@ -1079,6 +1171,17 @@ impl Finder {
                 let at = self.found.iter().position(|f| !f.line.is_empty()).unwrap_or(self.found.len());
                 self.found.insert(at, Found { name, addr, line: String::new() });
                 changed = true;
+            }
+        }
+        for h in &self.hosts {
+            if let Ok(addr @ Addr::Code(_)) = h.parse::<Addr>() {
+                if !self.found.iter().any(|f| f.addr == addr) {
+                    let Addr::Code(name) = &addr else { continue };
+                    let name = format!("Race {name}");
+                    let at = self.found.iter().position(|f| !f.line.is_empty()).unwrap_or(self.found.len());
+                    self.found.insert(at, Found { name, addr, line: String::new() });
+                    changed = true;
+                }
             }
         }
         changed || listed
@@ -1184,7 +1287,7 @@ mod tests {
         let mut host = Session::host("test", me("Host")).unwrap();
         let port = host.port;
         let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
-        let mut guest = Session::join(addr, me("Guest")).unwrap();
+        let mut guest = Session::join(Addr::Ip(addr), me("Guest")).unwrap();
         let wait = |f: &mut dyn FnMut() -> bool| {
             let start = Instant::now();
             while !f() {
@@ -1241,8 +1344,8 @@ mod tests {
         let mut host = Session::host("files", me("Host")).unwrap();
         let port = host.port;
         let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
-        let mut a = Session::join(addr, me("A")).unwrap();
-        let mut b = Session::join(addr, me("B")).unwrap();
+        let mut a = Session::join(Addr::Ip(addr), me("A")).unwrap();
+        let mut b = Session::join(Addr::Ip(addr), me("B")).unwrap();
         let wait = |f: &mut dyn FnMut() -> bool| {
             let start = Instant::now();
             while !f() {

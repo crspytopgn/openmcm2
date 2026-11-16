@@ -118,19 +118,25 @@ pub fn name(b: &Board) -> String {
     format!("{}, {}, course {}, {}cc", b.track, event_name(b.event), b.course + 1, b.class)
 }
 
-/// The server browser's open races of computers (`GET <address>/races`).
+/// The server browser's open races (`GET <address>/races`): those hosted
+/// by race code (this version's and browsers'), then by address (older
+/// versions').
 pub fn fetch_races(url: &str) -> Result<Vec<mm2_settings::races::OpenRace>, String> {
-    let text = agent()
-        .get(format!("{}/races", base(url)))
-        .query("kind", "pc")
-        .call()
-        .map_err(|e| format!("the server: {e}"))?
-        .body_mut()
-        .with_config()
-        .limit(1 << 20)
-        .read_to_string()
-        .map_err(|e| format!("the server: {e}"))?;
-    Ok(mm2_settings::races::parse(&text))
+    let mut all = Vec::new();
+    for kind in ["web", "pc"] {
+        let text = agent()
+            .get(format!("{}/races", base(url)))
+            .query("kind", kind)
+            .call()
+            .map_err(|e| format!("the server: {e}"))?
+            .body_mut()
+            .with_config()
+            .limit(1 << 20)
+            .read_to_string()
+            .map_err(|e| format!("the server: {e}"))?;
+        all.extend(mm2_settings::races::parse(&text));
+    }
+    Ok(all)
 }
 
 /// The game's event numbers' names.

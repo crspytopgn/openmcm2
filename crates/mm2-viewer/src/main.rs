@@ -2495,13 +2495,23 @@ fn net_test(
     let session = if how == "host" {
         net::Session::host("test", me("Host"))?
     } else {
-        let addr = how.strip_prefix("join:").ok_or("--net host or join:ADDR")?;
+        let addr = how.strip_prefix("join:").ok_or("--net host or join:ADDR (or race code)")?;
         net::Session::join(addr.parse()?, me("Guest"))?
     };
     net::set(Some(session));
     let started = Instant::now();
+    let mut told = String::new();
+    // A host waits a little for its race code, to say it.
+    while how == "host" && started.elapsed().as_secs() < 15 && net::with(|s| s.code()).unwrap_or_default().is_empty() {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
     let n = loop {
-        if started.elapsed().as_secs() > 20 {
+        let code = net::with(|s| s.code()).unwrap_or_default();
+        if code != told {
+            println!("race code {code}");
+            told = code;
+        }
+        if started.elapsed().as_secs() > 40 {
             return Err("nobody came".into());
         }
         let heard = net::with(|s| s.poll()).unwrap_or_default();

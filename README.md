@@ -82,8 +82,8 @@ image (`.iso`, `.bin`, `.img`, `.mdf`, `.nrg`) or a `.zip`, or drop it on
 the page. The files are read on your computer and never uploaded, and the
 page holds no game data. It can remember your game in that browser, saves
 stay there too, and phones and tablets get touch controls. Network races
-work between browsers: the host gets a race code and an invite link to
-share (browser and desktop players can't race each other). To build it
+work between browsers and desktops alike: the host gets a race code and
+an invite link to share, and races show in everyone's server browser. To build it
 yourself:
 
 ```sh

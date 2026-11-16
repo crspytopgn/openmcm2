@@ -977,7 +977,7 @@ impl Launcher {
                 ui,
                 &mut m.list_races,
                 "List my races in the server browser",
-                "On unless you turn it off. A race you host shows in everyone's Host or Join list (Multiplayer) with its name, track and riders, so players anywhere can join. The list shows your computer's internet address. It only shows if TCP port 28220 reaches your computer (forwarded on your router); the lobby's chat says if it doesn't. Turn this off to keep your races to people you give the address to.",
+                "On unless you turn it off. A race you host shows in everyone's Host or Join list (Multiplayer, in the game and the browser version) with its name, track and riders, so players anywhere can join. It's listed by its race code, so no port forwarding is needed. Turn this off to keep your races to people you give the race code to.",
                 w,
             );
             let url = m.leaderboard_url.trim().to_string();
