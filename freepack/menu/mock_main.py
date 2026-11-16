@@ -163,7 +163,7 @@ def main(photo, out):
     d.text((24, H - 40), "ALL-TERRAIN  ·  DIRT  ·  SAND  ·  SNOW", font=spec, fill=INK)
     # big title, right side, knocked out of a rust block
     logo = Image.open(os.environ.get("FP_LOGO", os.path.join(os.path.dirname(__file__), "logo.png"))).convert("RGBA")
-    style = os.environ.get("FP_LOGOSTYLE", "full"); lw = 560 if style != "full" else 700
+    style = os.environ.get("FP_LOGOSTYLE", "full"); lw = {"full": 700, "asis": 640}.get(style, 560)
     logo = logo_style(logo.resize((lw, int(lw * logo.size[1] / logo.size[0])), Image.LANCZOS), style).rotate(2, Image.BICUBIC, expand=True)
     sh = Image.new("RGBA", logo.size, (0, 0, 0, 0)); sh.paste((0, 0, 0, 120), (0, 0), logo.split()[3]); sh = sh.filter(ImageFilter.GaussianBlur(8))
     lx = W - lw - 60; canvas.alpha_composite(sh, (lx + 8, 70 + 12)); canvas.alpha_composite(logo, (lx, 70))
