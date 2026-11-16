@@ -37,6 +37,31 @@ pub fn fits((w, h): (u32, u32), monitor: Option<(u32, u32)>) -> bool {
     monitor.is_none_or(|m| w < m.0 && h <= m.1 - m.1 / 12)
 }
 
+/// "1920x1080" as (1920, 1080).
+pub fn parse_size(v: &str) -> Option<(u32, u32)> {
+    let (w, h) = v.trim().split_once('x')?;
+    Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+}
+
+/// Which of [`SHAPES`] a `width × height` is nearest.
+pub fn shape_of((w, h): (u32, u32)) -> usize {
+    match w as f32 / h.max(1) as f32 {
+        r if r < 1.55 => 0,
+        r if r < 2.1 => 1,
+        _ => 2,
+    }
+}
+
+/// The biggest of `sizes` that fits as a window on `monitor`, or the
+/// second smallest when it isn't known; none when none fit.
+pub fn fitting(sizes: &[(u32, u32, &str)], monitor: Option<(u32, u32)>) -> Option<(u32, u32)> {
+    let best = match monitor {
+        Some(_) => sizes.iter().filter(|z| fits((z.0, z.1), monitor)).last(),
+        None => sizes.get(1),
+    };
+    best.map(|z| (z.0, z.1))
+}
+
 /// The folder the port keeps its saves in (the same as `mm2-viewer`'s),
 /// where the launcher puts the copied game and its settings too.
 pub fn user_dir() -> PathBuf {
@@ -254,6 +279,11 @@ pub struct Settings {
     pub hires: Option<PathBuf>,
     pub use_hires: bool,
     pub enhanced: bool,
+    /// `auto_quality`: the game picks Low, Medium or High each time it
+    /// starts, for the graphics card and the screen (`quality=auto`), in
+    /// place of [`Settings::quality`] and the choices under it. New
+    /// settings start with it; files from before it keep their preset.
+    pub auto: bool,
     pub quality: Quality,
     /// The anti-aliasing ([`ANTIALIASING`]) and the most pixels the scene
     /// is drawn with ([`RESOLUTIONS`]): the preset's unless changed.
@@ -266,6 +296,11 @@ pub struct Settings {
     /// Each of [`UPGRADES`], on or off.
     pub upgrades: Vec<bool>,
     pub fullscreen: bool,
+    /// The full screen's resolution in pixels (`--screen WxH`): (0, 0) is
+    /// the screen's own, drawn without changing the screen's mode.
+    pub screen: (u32, u32),
+    /// The window's size inside, in the screen's points (pixels on most
+    /// screens; half as many each way on a Retina screen).
     pub window: (u32, u32),
     pub vsync: bool,
     /// On a screen wider than 16:9, the race display in a 16:9 middle
@@ -530,6 +565,7 @@ impl Default for Settings {
             hires: None,
             use_hires: true,
             enhanced: false,
+            auto: true,
             quality: Quality::High,
             antialiasing: Quality::High.antialiasing().into(),
             resolution: "auto".into(),
@@ -539,6 +575,7 @@ impl Default for Settings {
             // The High preset's, as the quality is.
             upgrades: UPGRADES.iter().map(|u| Quality::High.has(u.0)).collect(),
             fullscreen: false,
+            screen: (0, 0),
             window: (1024, 768),
             vsync: true,
             centred_display: false,
@@ -632,6 +669,7 @@ impl Settings {
                 "hires" if !v.is_empty() => s.hires = Some(v.into()),
                 "use_hires" => s.use_hires = yes(v),
                 "enhanced" => s.enhanced = yes(v),
+                "auto_quality" => s.auto = yes(v),
                 "quality" => {
                     s.quality = Quality::ALL.into_iter().find(|q| q.name() == v).unwrap_or(Quality::High)
                 }
@@ -646,11 +684,10 @@ impl Settings {
                 "weather" => s.weather = v.into(),
                 "detail" => s.detail = v.parse::<f32>().unwrap_or(0.5).clamp(0.0, 1.0),
                 "fullscreen" => s.fullscreen = yes(v),
+                "screen" => s.screen = parse_size(v).unwrap_or((0, 0)),
                 "window" => {
-                    if let Some((w, h)) = v.split_once('x') {
-                        if let (Ok(w), Ok(h)) = (w.parse(), h.parse()) {
-                            s.window = (w, h);
-                        }
+                    if let Some(z) = parse_size(v).filter(|z| z.0 > 0 && z.1 > 0) {
+                        s.window = z;
                     }
                 }
                 "vsync" => s.vsync = yes(v),
@@ -690,6 +727,10 @@ impl Settings {
         }
         s.antialiasing = if temporal { "taa".into() } else { antialiasing.unwrap_or_else(|| s.quality.antialiasing().into()) };
         s.resolution = resolution.unwrap_or_else(|| "auto".into());
+        // Saved before Auto was offered: the preset picked then.
+        if !text.lines().any(|l| l.split_once('=').is_some_and(|(k, _)| k.trim() == "auto_quality")) {
+            s.auto = false;
+        }
         s
     }
 
@@ -697,11 +738,12 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=3\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nquality={}\nantialiasing={}\nresolution={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\nopengl={}\nforgiving_landings={}\n",
+            "version=3\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nauto_quality={}\nquality={}\nantialiasing={}\nresolution={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nscreen={}x{}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\nopengl={}\nforgiving_landings={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
             b(self.enhanced),
+            b(self.auto),
             self.quality.name(),
             self.antialiasing,
             self.resolution,
@@ -709,6 +751,8 @@ impl Settings {
             self.weather,
             self.detail,
             b(self.fullscreen),
+            self.screen.0,
+            self.screen.1,
             self.window.0,
             self.window.1,
             b(self.vsync),
@@ -750,7 +794,20 @@ impl Settings {
             a.push("--hires".into());
             a.push(h.display().to_string());
         }
-        if self.enhanced {
+        if self.enhanced && self.auto {
+            // The game picks the rest for the computer it's on.
+            let mut list = vec!["quality=auto".to_string()];
+            if !self.time.is_empty() {
+                list.push(format!("time={}", self.time));
+            }
+            if self.weather != "clear" {
+                list.push(format!("weather={}", self.weather));
+            }
+            if (self.detail - 0.5).abs() > 1e-3 {
+                list.push(format!("detail={:.2}", self.detail));
+            }
+            a.push(format!("--enhanced={}", list.join(",")));
+        } else if self.enhanced {
             let mut list = vec![format!("quality={}", self.quality.name())];
             if self.antialiasing != self.quality.antialiasing() {
                 if let Some(a) = ANTIALIASING.iter().find(|a| a.0 == self.antialiasing) {
@@ -779,6 +836,10 @@ impl Settings {
         }
         if self.fullscreen {
             a.push("--fullscreen".into());
+            if self.screen != (0, 0) {
+                a.push("--screen".into());
+                a.push(format!("{}x{}", self.screen.0, self.screen.1));
+            }
         } else {
             a.push("--window".into());
             a.push(format!("{}x{}", self.window.0, self.window.1));
@@ -869,6 +930,7 @@ mod tests {
         assert_eq!(Settings::parse("quality=high\nmsaa=4\nupgrade.taa=1\n").antialiasing, "taa");
         let mut s = Settings::default();
         s.enhanced = true;
+        s.auto = false;
         s.quality = Quality::RayTraced;
         s.antialiasing = s.quality.antialiasing().into();
         s.resolution = "auto".into();
@@ -894,10 +956,12 @@ mod tests {
         let mut s = Settings::default();
         s.game = Some("/x/GAME".into());
         s.enhanced = true;
+        s.auto = false;
         s.upgrades[1] = false;
         s.upgrades[13] = true;
         s.time = "dusk".into();
         s.window = (1920, 1080);
+        s.screen = (1280, 720);
         s.centred_display = true;
         s.difficulty[2][0] = 9;
         s.air_steer = 100;
@@ -936,6 +1000,42 @@ mod tests {
         assert!(!s.is_original());
         s.original();
         assert!(s.is_original());
+    }
+
+    #[test]
+    fn auto_graphics() {
+        // New settings pick for the computer; old files keep their preset.
+        assert!(Settings::default().auto);
+        assert!(!Settings::parse("enhanced=1\nquality=high\n").auto);
+        let mut s = Settings::default();
+        s.enhanced = true;
+        s.time = "dusk".into();
+        assert!(s.args().iter().any(|a| a == "--enhanced=quality=auto,time=dusk"));
+        assert!(Settings::parse(&s.text()).auto);
+        s.auto = false;
+        assert!(!Settings::parse(&s.text()).auto);
+        assert!(s.args().iter().any(|a| a.starts_with("--enhanced=quality=high")));
+    }
+
+    #[test]
+    fn full_screen_resolution() {
+        let mut s = Settings::default();
+        s.fullscreen = true;
+        // The screen's own: no mode change asked for.
+        assert!(s.args().iter().any(|a| a == "--fullscreen"));
+        assert!(!s.args().iter().any(|a| a == "--screen"));
+        s.screen = (1280, 720);
+        let a = s.args();
+        let at = a.iter().position(|a| a == "--screen").unwrap();
+        assert_eq!(a[at + 1], "1280x720");
+        assert_eq!(Settings::parse(&s.text()).screen, (1280, 720));
+        // Files from before it start at the screen's own.
+        assert_eq!(Settings::parse("fullscreen=1\n").screen, (0, 0));
+        // A window keeps its size whatever the full screen's.
+        s.fullscreen = false;
+        assert!(!s.args().iter().any(|a| a == "--screen"));
+        assert_eq!(shape_of((2560, 1080)), 2);
+        assert_eq!(fitting(SHAPES[1].2, Some((1920, 1080))), Some((1600, 900)));
     }
 
     #[test]
