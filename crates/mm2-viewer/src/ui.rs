@@ -1141,6 +1141,11 @@ impl Dlg {
             .is_some_and(|i| self.ctls[i].visible && self.ctls[i].fx.is_none())
     }
 
+    /// Whether a pull-down is on screen at all, opening, down or closing.
+    pub fn is_shown(&self, name: &str) -> bool {
+        self.index(name).is_some_and(|i| self.ctls[i].visible)
+    }
+
     /// Whether a slider is being dragged.
     pub fn is_dragging(&self, name: &str) -> bool {
         self.dragging.is_some() && self.dragging == self.index(name)

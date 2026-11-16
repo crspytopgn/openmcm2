@@ -121,6 +121,7 @@ mod sprites;
 mod tag;
 mod traffic;
 mod ui;
+mod update_note;
 #[cfg(windows)]
 mod winwatch;
 
@@ -200,6 +201,7 @@ fn main() -> Result<(), BoxError> {
         }
         let mut front =
             frontend::Frontend::new(&game).ok_or("the game's UI/MAINMENU.DAT cannot be read")?;
+        update_note::check();
         front.intro();
         return run(App::new(None, None, Some(front)));
     }
@@ -3378,6 +3380,7 @@ async fn menu_screenshot(
     sprites.scale = scale;
     let mut front =
         frontend::Frontend::new(game).ok_or("the game's UI/MAINMENU.DAT cannot be read")?;
+    update_note::from_env();
     let audio = audio::Audio::new();
     if let Some(r) = results {
         front.race_over(r);
