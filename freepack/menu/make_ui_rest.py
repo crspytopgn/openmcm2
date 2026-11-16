@@ -8,6 +8,7 @@ Buttons whose control draws its own caption get a blank face (from
 ui_textmap.tsv, made by mm2-formats' ui_textmap example).
 
 Usage: make_ui_rest.py PHOTO.png UI_LIST.tsv UI_TEXTMAP.tsv
+(FP_PHOTO_LOADSX=stadium.png etc. give a loading screen its own photo.)
 """
 import os, re, sys
 import numpy as np
@@ -116,7 +117,7 @@ def main(photo, list_tsv, text_tsv):
         stem = STATE.sub("", base) if m else base
         text = has_text.get((dat, path.lower()), 0)
         if (w, h) == (640, 480):
-            if dat in LOADS: im = loading(photo, LOADS[dat])
+            if dat in LOADS: im = loading(os.environ.get("FP_PHOTO_" + dat, photo), LOADS[dat])
             elif dat.startswith("INTRO"): im = splash(photo, int(dat[-1]))
             else: im = paper_screen(photo, TITLES.get(dat, dat))
         elif (w, h) == (4, 4): im = U.corner({"ll": "LL", "lr": "LR", "ul": "UL", "ur": "UR", "bl": "LL", "br": "LR"}[re.search(r"(ll|lr|ul|ur|bl|br)corner|corner(ll|lr|ul|ur)", low).group(1) or re.search(r"corner(ll|lr|ul|ur)", low).group(1)] if re.search(r"(ll|lr|ul|ur|bl|br)corner|corner(ll|lr|ul|ur)", low) else "UL")
