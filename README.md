@@ -106,7 +106,8 @@ the game folder, it starts a race on that track straight away.
 default): Up/Down gas and brake, Left/Right steer, W/S lean, Z/X stunts,
 Enter Kahuna, Space taunt, LShift Thrill Cam, LAlt Reverse Cam, LCtrl
 clutch, Backspace back up. In a race Numpad5 (or C) cycles the camera
-views, Home/End zoom, F5 to F10 switch the stats, radar, gauges, sky,
+views (F1 jumps to the Helmet Cam extra when it's on; fn+F1 on most
+Mac keyboards), Home/End zoom, F5 to F10 switch the stats, radar, gauges, sky,
 particles and shadows, [ ] or PgUp/PgDn watch the other riders. In network
 races `/` opens chat. Alt+Enter (Option+Return on a Mac) switches full
 screen.

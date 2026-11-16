@@ -201,6 +201,22 @@ impl Chase {
         self.view.name()
     }
 
+    /// F1, with the Helmet Cam extra on: straight into the Helmet Cam,
+    /// or back out to the view it came from. `None` when the extra is off
+    /// (F1 does nothing in the original's races).
+    pub fn toggle_helmet(&mut self) -> Option<&'static str> {
+        self.toggle_helmet_if(crate::tweaks::more().helmet_cam)
+    }
+
+    fn toggle_helmet_if(&mut self, on: bool) -> Option<&'static str> {
+        if !on {
+            return None;
+        }
+        self.frozen = None;
+        self.helmet = !self.helmet;
+        Some(if self.helmet { HELMET_CAM } else { self.view.name() })
+    }
+
     /// Numpad 0 (0x4679e0's key 0x52): freezes the camera where it is, or
     /// lets it go back to its view. Whether it is frozen now.
     pub fn freeze(&mut self) -> bool {
@@ -469,5 +485,18 @@ mod tests {
         assert_eq!(c.next_view(), View::Chase.name());
         let (moved, _) = c.follow(&bike, CamKeys::default(), &terrain, 0.1);
         assert_ne!(moved, eye);
+    }
+
+    #[test]
+    fn f1_goes_straight_to_the_helmet_cam_and_back() {
+        let mut c = Chase::new(Vec3::ZERO, Vec3::Z);
+        assert_eq!(c.toggle_helmet_if(false), None);
+        assert!(!c.helmet);
+        c.next_view();
+        assert_eq!(c.toggle_helmet_if(true), Some(HELMET_CAM));
+        assert!(c.helmet);
+        assert_eq!(c.toggle_helmet_if(true), Some(View::Slot.name()));
+        assert!(!c.helmet);
+        assert_eq!(c.view, View::Slot);
     }
 }

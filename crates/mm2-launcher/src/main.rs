@@ -795,7 +795,7 @@ impl Launcher {
             tile(ui, &mut s.centred_display, "Race display nearer the middle", "On screens wider than 16:9, the race display where it sits on a 16:9 screen.");
             tile(ui, &mut s.steady_camera, "Steadier camera", "The chase camera rises and dips with the bike more gently.");
             slider(ui, "Field of view", "How wide the riding cameras see. 85° is the original game's.", &mut s.fov, 60..=120, 1.0, "°");
-            tile(ui, &mut s.more.helmet_cam, "Helmet Cam", "A camera from the rider's helmet, after User Cam when you change the view (F1).");
+            tile(ui, &mut s.more.helmet_cam, "Helmet Cam", "A camera from the rider's helmet. In a race press F1 to switch it on or off (fn+F1 on most Mac keyboards), or reach it after User Cam with the camera key (C or Numpad 5).");
         });
         look::card(ui, icon::ICON_SPORTS_ESPORTS, "Controllers, sound and screen", |ui| {
             tile(ui, &mut s.vibration, "Controller vibration", "The pad thumps on landings, knocks over bumps and jolts in crashes.");
