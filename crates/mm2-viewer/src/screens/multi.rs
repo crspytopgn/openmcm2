@@ -370,6 +370,7 @@ impl Multi {
                 host,
                 tag_ball: g.tag_ball,
                 tag_stunts: g.tag_stunts,
+                roam: net::is_roam(info),
             }),
             random_gates: None,
         })
@@ -715,13 +716,20 @@ impl Multi {
         if !self.ready {
             return Go::Stay;
         }
-        // In a session the host starts, once everyone is ready.
+        // In a session the host starts, once everyone is ready. Free roam
+        // starts with those who are, in places for everyone: the others
+        // drop in when they press Ready.
         if net::with(|_| ()).is_some() {
-            if Self::guest() || !net::with(|s| s.all_ready()).unwrap_or(false) {
+            let info = self.game_info(cx.ui);
+            let roam = net::is_roam(&info);
+            if Self::guest() || !(roam || net::with(|s| s.all_ready()).unwrap_or(false)) {
                 return Go::Stay;
             }
-            let info = self.game_info(cx.ui);
-            let players = net::with(|s| s.players.clone()).unwrap_or_default();
+            let mut players = net::with(|s| s.players.clone()).unwrap_or_default();
+            if roam {
+                players.retain(|p| p.ready || p.id == 0);
+                players.resize(net::MAX_PLAYERS, Player { id: net::EMPTY, ..Default::default() });
+            }
             net::with(|s| {
                 s.say(Msg::Start {
                     game: info.clone(),
@@ -792,6 +800,12 @@ impl Multi {
                     }
                 }
                 Heard::Start { game, players } => {
+                    // A free roam session tells those riding who's where;
+                    // it's a race to join only for a ready player in it.
+                    let me = net::with(|s| s.me).unwrap_or(u8::MAX);
+                    if !self.ready || !players.iter().any(|p| p.id == me) {
+                        continue;
+                    }
                     if let Some(setup) = self.net_setup(cx, &game, &players) {
                         return Go::Race(Box::new(setup));
                     }
@@ -845,11 +859,22 @@ impl Multi {
             let info = self.game_info(cx.ui);
             if self.sent.as_ref() != Some(&info) {
                 let event = self.game.event;
-                let title = self.tracks(cx.ui, event).get(self.game.track).map(|t| t.name.clone()).unwrap_or_default();
+                let mut title = self.tracks(cx.ui, event).get(self.game.track).map(|t| t.name.clone()).unwrap_or_default();
+                // The original's Practice: no laps and no time limit, so
+                // the list calls it free roam.
+                if self.game.mode == PRACTICE {
+                    title = format!("Free roam: {title}");
+                }
+                let roam_now = net::is_roam(&info) && !self.sent.as_ref().is_some_and(net::is_roam);
                 net::with(|s| {
                     s.title = title;
                     s.say(Msg::Game(info.clone()))
                 });
+                if roam_now {
+                    let line = "Practice is free roam: no laps, no time limit, and players can drop in any time by pressing Ready, or leave and come back.";
+                    net::with(|s| s.say(Msg::Chat(line.to_string())));
+                    self.say(line.to_string());
+                }
                 self.sent = Some(info);
             }
         }
@@ -1285,7 +1310,10 @@ impl Screen for Multi {
         }
         // Everyone readies again for the next race.
         self.ready = false;
-        net::with(|s| s.racing = false);
+        net::with(|s| {
+            s.racing = false;
+            s.roam = None;
+        });
         net::with(|s| s.say(Msg::Ready(false)));
         self.lobby(cx);
         self.page(cx, 2);

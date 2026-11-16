@@ -136,6 +136,9 @@ pub struct NetRace {
     /// Moto-Tag with the ball, and in stunt mode.
     pub tag_ball: bool,
     pub tag_stunts: bool,
+    /// A free roam session (multiplayer Practice): riders drop in and
+    /// out, and places nobody rides in are empty.
+    pub roam: bool,
 }
 
 /// One rider's line of the Race Info page: name, place, best lap and

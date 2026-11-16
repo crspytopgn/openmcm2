@@ -145,25 +145,41 @@ pub fn taped_like(b: &Bike) -> Bike {
 pub const NET_DELAY: f32 = 0.1;
 pub const NET_SEND: f32 = 1.0 / 20.0;
 
-/// Another machine's bike: its last packets, by its race clock.
+/// Another machine's bike: its last packets, by its race clock, and how
+/// far that clock is from ours (a rider who dropped into a free roam
+/// session started their race later).
 #[derive(Debug, Default)]
 pub struct Remote {
     states: std::collections::VecDeque<(f32, State)>,
+    /// Our race clock less theirs, from their first packet.
+    offset: Option<f32>,
+    /// Our race clock when their last packet came.
+    pub heard: Option<f32>,
 }
 
 impl Remote {
-    pub fn push(&mut self, time: f32, s: State) {
+    /// Their packet from `time` on their clock, heard at `now` on ours.
+    pub fn push(&mut self, time: f32, s: State, now: f32) {
+        // A clock well behind the last: they started a new race.
+        if self.states.back().is_some_and(|b| time < b.0 - 1.0) {
+            self.states.clear();
+            self.offset = None;
+        }
         if self.states.back().is_some_and(|b| b.0 >= time) {
             return;
         }
+        self.offset.get_or_insert(now - time);
+        self.heard = Some(now);
         self.states.push_back((time, s));
         while self.states.len() > 40 {
             self.states.pop_front();
         }
     }
 
-    /// The bike at `time`: between the packets either side, or the last.
+    /// The bike at `time` on our clock: between the packets either side,
+    /// or the last.
     pub fn at(&self, time: f32) -> Option<State> {
+        let time = time - self.offset.unwrap_or(0.0);
         let i = self.states.partition_point(|s| s.0 <= time);
         match (
             i.checked_sub(1).and_then(|k| self.states.get(k)),

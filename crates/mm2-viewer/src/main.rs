@@ -268,7 +268,8 @@ fn main() -> Result<(), BoxError> {
         // `--net host` waits for one player, `--net join:ADDR` joins.
         if let Some(how) = flag("--net") {
             let seconds: f32 = flag("--ride").and_then(|t| t.parse().ok()).unwrap_or(10.0);
-            return net_test(&track, how, seconds, tag_flags);
+            let roam = args.iter().any(|a| a == "--roam");
+            return net_test(&track, how, seconds, tag_flags, roam);
         }
         // Race for a while before taking the picture.
         let mut race = None;
@@ -1308,7 +1309,11 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
     let lamps: Vec<(Vec3, Vec3)> = race
         .racers
         .iter()
-        .map(|r| {
+        .enumerate()
+        .map(|(i, r)| {
+            if race.away(i) {
+                return (Vec3::new(0.0, -1.0e5, 0.0), Vec3::Y);
+            }
             let ahead = r.bike.forward().normalize_or(Vec3::Z);
             let up = r.bike.place().transform_vector3(Vec3::Y).normalize_or(Vec3::Y);
             // Aimed a little down, at the track ahead.
@@ -1361,6 +1366,12 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
                 renderer.set_motion(r.object, BIKE_RIDING, 0.0);
                 renderer.set_blend(r.object, bike);
             }
+        }
+        // An empty place in a free roam session: nobody there to draw.
+        if race.away(i) {
+            let gone = Mat4::from_cols(Vec4::ZERO, Vec4::ZERO, Vec4::ZERO, Vec4::new(0.0, -1.0e5, 0.0, 1.0));
+            renderer.set_object_place(r.object, gone);
+            renderer.set_object_place(r.object + 1, gone);
         }
     }
     if let Some(gate) = track.gate {
@@ -2551,12 +2562,14 @@ fn start_grid(
 
 /// Two copies racing over the network, headless, for testing: each rides
 /// on autopilot for `seconds` of real time and says where the other's
-/// bike is.
+/// bike is. With `roam`, a free roam session: the host starts alone and
+/// the other drops in when it comes and readies.
 fn net_test(
     track: &Track,
     how: &str,
     seconds: f32,
     tag: Option<(f32, bool)>,
+    roam: bool,
 ) -> Result<(), BoxError> {
     let ball = tag.is_some_and(|t| t.1);
     let me = |name: &str| net::Player {
@@ -2567,17 +2580,44 @@ fn net_test(
     let session = if how == "host" {
         net::Session::host("test", me("Host"))?
     } else {
-        let addr = how.strip_prefix("join:").ok_or("--net host or join:ADDR")?;
+        let addr = how.strip_prefix("join:").ok_or("--net host or join:ADDR (or race code)")?;
         net::Session::join(addr.parse()?, me("Guest"))?
     };
     net::set(Some(session));
     let started = Instant::now();
+    let mut told = String::new();
+    // A host waits a little for its race code, to say it.
+    while how == "host" && started.elapsed().as_secs() < 15 && net::with(|s| s.code()).unwrap_or_default().is_empty() {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
     let n = loop {
-        if started.elapsed().as_secs() > 20 {
+        let code = net::with(|s| s.code()).unwrap_or_default();
+        if code != told {
+            println!("race code {code}");
+            told = code;
+        }
+        if started.elapsed().as_secs() > 40 {
             return Err("nobody came".into());
         }
         let heard = net::with(|s| s.poll()).unwrap_or_default();
         let (host, players, me) = net::with(|s| (s.host, s.players.clone(), s.me)).unwrap();
+        if heard.contains(&net::Heard::Players) && !host {
+            net::with(|s| s.say(net::Msg::Ready(true)));
+        }
+        if host && roam {
+            let mut places = players.clone();
+            places.resize(net::MAX_PLAYERS, net::Player { id: net::EMPTY, ..Default::default() });
+            let game = net::GameInfo { mode: net::ROAM_MODE, event: 2, ..Default::default() };
+            net::with(|s| s.say(net::Msg::Start { game, players: places }));
+            break frontend::NetRace {
+                me: 0,
+                humans: net::MAX_PLAYERS,
+                host: true,
+                tag_ball: false,
+                tag_stunts: false,
+                roam: true,
+            };
+        }
         if host && players.len() >= 2 {
             net::with(|s| {
                 s.say(net::Msg::Start {
@@ -2591,6 +2631,7 @@ fn net_test(
                 host: true,
                 tag_ball: ball,
                 tag_stunts: false,
+                roam: false,
             };
         }
         if let Some(net::Heard::Start { players, .. }) = heard
@@ -2598,12 +2639,14 @@ fn net_test(
             .find(|h| matches!(h, net::Heard::Start { .. }))
         {
             let at = players.iter().position(|p| p.id == me).unwrap_or(0);
+            eprintln!("dropped in at place {at} of {}", players.len());
             break frontend::NetRace {
                 me: at,
                 humans: players.len(),
                 host: false,
                 tag_ball: ball,
                 tag_stunts: false,
+                roam,
             };
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -2641,8 +2684,9 @@ fn net_test(
     }
     for (i, racer) in r.racers.iter().enumerate() {
         let p = racer.bike.position();
-        let whose = if owned(n, i) { "mine" } else { "theirs" };
-        eprintln!("racer {i} ({whose}) at {:.1},{:.1},{:.1}", p.x, p.y, p.z);
+        let whose = if owned(n, i) { "mine" } else if r.away(i) { "empty" } else { "theirs" };
+        let name = r.names.get(i).cloned().unwrap_or_default();
+        eprintln!("racer {i} ({whose}) {name} at {:.1},{:.1},{:.1}", p.x, p.y, p.z);
     }
     if let Some(t) = &r.tag {
         let times: Vec<String> = (0..r.racers.len())
@@ -2653,6 +2697,10 @@ fn net_test(
     net::set(None);
     Ok(())
 }
+
+/// How long a free roam rider can go unheard before their place counts as
+/// empty, s.
+const ROAM_GONE: f32 = 2.0;
 
 /// Whether this machine moves racer `i` in a network race: its player's,
 /// and the host's computer riders on the host.
@@ -2675,6 +2723,16 @@ fn net_race(
         if let net::Heard::Chat(line) = &h {
             chat.push(line.clone());
         }
+        // Free roam: who rides in each place now, for their names.
+        if let (true, net::Heard::Start { players, .. }) = (n.roam, &h) {
+            for (i, p) in players.iter().enumerate() {
+                if i != n.me && i < n.humans {
+                    if let Some(name) = race.names.get_mut(i) {
+                        *name = p.name.clone();
+                    }
+                }
+            }
+        }
         if let net::Heard::Bike {
             racer, kind, data, ..
         } = &h
@@ -2694,11 +2752,18 @@ fn net_race(
                 remote.get_mut(i),
                 owned(n, i),
             ) {
-                rm.push(time, st);
+                rm.push(time, st, race.time);
             }
         }
     }
     let at = race.time - replay::NET_DELAY;
+    if n.roam {
+        // A place is empty while nobody there has been heard of for a
+        // couple of seconds: not come yet, or gone.
+        race.empty = (0..race.racers.len())
+            .map(|i| !owned(n, i) && remote.get(i).and_then(|r| r.heard).is_none_or(|t| race.time - t > ROAM_GONE))
+            .collect();
+    }
     for (i, rm) in remote.iter().enumerate() {
         if owned(n, i) {
             continue;

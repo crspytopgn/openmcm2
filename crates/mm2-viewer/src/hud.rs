@@ -358,7 +358,7 @@ impl Hud {
         }
         let order = race.standings();
         for (i, r) in race.racers.iter().enumerate() {
-            if i == race.player || Some(i) == race.ghost {
+            if i == race.player || Some(i) == race.ghost || race.away(i) {
                 continue;
             }
             let alpha = self.labels.get(i).map_or(1.0, |l| l.alpha);
@@ -501,7 +501,7 @@ impl Hud {
                 "{} {} / {}",
                 ui.lang(2101),
                 race.position(),
-                race.racers.len() - race.ghost.is_some() as usize
+                race.riders()
             ),
             lap,
             format!(
@@ -732,7 +732,7 @@ impl Hud {
         let scale = RADAR_RIM / (RADAR_FEET * self.zoom);
         let lap_race = race.gates.is_empty() && !race.stunt_event && race.tag.is_none();
         for (i, r) in race.racers.iter().enumerate() {
-            if i == race.player {
+            if i == race.player || race.away(i) {
                 continue;
             }
             let rel = r.bike.position() - at;

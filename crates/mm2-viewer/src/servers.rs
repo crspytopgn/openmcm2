@@ -93,13 +93,20 @@ impl Listing {
     }
 }
 
+/// The races a player can join: those hosted by race code (browsers' and
+/// this version's), and on a desktop also those hosted by address (older
+/// versions').
+const KINDS: &[&str] = if cfg!(target_arch = "wasm32") { &["web"] } else { &["web", "pc"] };
+
 /// The open races, fetched while the Host or Join box is up.
 #[derive(Default)]
 pub struct Browser {
     /// Another server than the player's (the tests').
     server: Option<String>,
     asked: Option<Instant>,
-    reply: Option<Reply>,
+    /// The answers on their way, and the races each kind had.
+    replies: Vec<(usize, Reply)>,
+    got: [Vec<OpenRace>; 2],
     pub races: Vec<OpenRace>,
 }
 
@@ -111,21 +118,26 @@ impl Browser {
             return false;
         };
         let mut changed = false;
-        if let Some(r) = self.reply.as_ref().and_then(online::take) {
-            self.reply = None;
+        let mut i = 0;
+        while i < self.replies.len() {
+            let Some(r) = online::take(&self.replies[i].1) else {
+                i += 1;
+                continue;
+            };
+            let (kind, _) = self.replies.remove(i);
             match r {
-                Ok(text) => {
-                    let races = races::parse(&text);
-                    changed = races != self.races;
-                    self.races = races;
-                }
+                Ok(text) => self.got[kind] = races::parse(&text),
                 Err(e) => eprintln!("the server browser: {e}"),
             }
+            let races: Vec<OpenRace> = self.got.concat();
+            changed |= races != self.races;
+            self.races = races;
         }
-        if self.reply.is_none() && self.asked.is_none_or(|t| t.elapsed() > LOOK_EVERY) {
+        if self.replies.is_empty() && self.asked.is_none_or(|t| t.elapsed() > LOOK_EVERY) {
             self.asked = Some(Instant::now());
-            let kind = if cfg!(target_arch = "wasm32") { "web" } else { "pc" };
-            self.reply = Some(online::get(format!("{url}/races?kind={kind}")));
+            for (k, kind) in KINDS.iter().enumerate() {
+                self.replies.push((k, online::get(format!("{url}/races?kind={kind}"))));
+            }
         }
         changed
     }
