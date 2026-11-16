@@ -1,0 +1,38 @@
+# Every third-party file the Free Pack is built from. Only CC0 sources.
+# `tools/fetch.py` downloads these into cache/, and CREDITS.md is made
+# from this list. Nothing from Motocross Madness 2 is used.
+
+[sky]
+# Stock sky name -> Poly Haven HDRI (CC0). Picked to match each stock
+# sky's mood (clear, hazy, overcast, dusk), not its picture.
+Burn03  = "kloofendal_misty_morning_puresky"
+Terra01 = "farm_field_puresky"
+Terra03 = "citrus_orchard_road_puresky"
+Terra04 = "overcast_soil_puresky"
+Terra05 = "kloofendal_overcast_puresky"
+Terra06 = "kloofendal_28d_misty_puresky"
+Terra09 = "qwantani_mid_morning_puresky"
+Terra11 = "belfast_sunset_puresky"
+Terra12 = "kloofendal_43d_clear_puresky"
+Terra15 = "mud_road_puresky"
+Terra16 = "industrial_sunset_02_puresky"
+Terra17 = "qwantani_dusk_2_puresky"
+Terra18 = "kloofendal_48d_partly_cloudy_puresky"
+wind01  = "sunflowers_puresky"
+
+[materials]
+# ambientCG ids (CC0), 2K JPG.
+ambientcg = [
+  "Ground051", "Ground048", "Ground067", "Ground036", "Ground037",
+  "Ground080", "Ground054", "Ground085", "Grass004",
+  "Concrete034", "Plastic010", "Wood049", "Fabric030", "MetalPlates006",
+  "ThatchedRoof001A", "ThatchedRoof002A", "Rubber004", "Fence007A",
+  "CorrugatedSteel007A", "Wood087", "PaintedMetal004",
+]
+
+[models]
+# Poly Haven models (CC0), 1K glTF.
+polyhaven = [
+  "fir_tree_01", "island_tree_02", "tree_small_02", "grass_medium_01",
+  "rock_moss_set_01",
+]
