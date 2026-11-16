@@ -1,9 +1,9 @@
 # OpenMCM2 logo
 
-The number plate logo: chrome lettering on a black MX number plate with a
-yellow edge, in the spirit of 2000s motocross graphics. An original
+The number plate logo: chrome lettering on a black MX number plate with an
+acid lime edge, in the spirit of 2000s motocross graphics. An original
 drawing (nothing from the Motocross Madness 2 box art or logo). Colours:
-plate `#15191f`, yellow `#ffd400`, orange `#e8692a`, outline `#0c0f14`,
+plate `#15191f`, acid lime `#b4ff1a`, outline `#0c0f14`,
 chrome greys. Lettering is Archivo Expanded Black Italic (SIL Open Font
 License), turned into outlines.
 
