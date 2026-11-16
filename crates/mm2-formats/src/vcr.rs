@@ -68,6 +68,11 @@ pub mod setting {
     /// The track's name, a string.
     pub const TRACK: usize = 0x36;
     pub const TRACK_LEN: usize = 32;
+    /// The Random Gate box (a byte), its gate count (a byte) and its race
+    /// number (game +0x2d9c, +0x2d9d, +0x2da0).
+    pub const RANDOM_GATES: usize = 0x2c;
+    pub const GATE_COUNT: usize = 0x2d;
+    pub const GATE_SEED: usize = 0x30;
     pub const TAG_MINUTES: usize = 0x140;
     pub const TAG_BALL: usize = 0x144;
     pub const TAG_STUNTS: usize = 0x148;
@@ -173,6 +178,20 @@ impl Tape {
 
     pub fn set_course(&mut self, course: usize) {
         self.settings[setting::COURSE] = course as u8;
+    }
+
+    /// A Baja race on random gates: how many, and the race number.
+    pub fn random_gates(&self) -> Option<(u32, u32)> {
+        let s = &self.settings;
+        (s.len() > setting::GATE_SEED + 3 && s[setting::RANDOM_GATES] != 0)
+            .then(|| (s[setting::GATE_COUNT] as u32, self.setting(setting::GATE_SEED)))
+    }
+
+    pub fn set_random_gates(&mut self, gates: Option<(u32, u32)>) {
+        let (on, count, seed) = gates.map_or((0, 0, 0), |(n, seed)| (1, n.min(255) as u8, seed));
+        self.settings[setting::RANDOM_GATES] = on;
+        self.settings[setting::GATE_COUNT] = count;
+        self.set_setting(setting::GATE_SEED, seed);
     }
 
     pub fn track(&self) -> String {

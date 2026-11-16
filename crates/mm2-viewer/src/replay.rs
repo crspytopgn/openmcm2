@@ -208,6 +208,8 @@ pub struct Heading {
     pub event: u32,
     pub mode: u32,
     pub laps: u32,
+    /// A Baja race on random gates: how many, and the race number.
+    pub random_gates: Option<(u32, u32)>,
     pub riders: Vec<vcr::Rider>,
 }
 
@@ -232,6 +234,7 @@ pub fn header(h: Heading) -> Tape {
         tape.riders.len().saturating_sub(1) as u32,
     );
     tape.set_course(h.course);
+    tape.set_random_gates(h.random_gates);
     tape.description = date();
     tape
 }

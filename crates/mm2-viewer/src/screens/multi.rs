@@ -372,6 +372,7 @@ impl Multi {
                 tag_stunts: g.tag_stunts,
                 roam: net::is_roam(info),
             }),
+            random_gates: None,
         })
     }
 
@@ -760,6 +761,7 @@ impl Multi {
             rides: Vec::new(),
             ghost: None,
             net: None,
+            random_gates: None,
         }))
     }
 

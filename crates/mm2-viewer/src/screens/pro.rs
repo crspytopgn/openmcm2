@@ -659,6 +659,7 @@ impl Pro {
             rides: self.data.rides(&c),
             ghost: None,
             net: None,
+            random_gates: None,
         }))
     }
 
