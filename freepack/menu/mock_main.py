@@ -134,16 +134,13 @@ def main(photo, out):
     d.line([24, 42, band_w - 40, 42], fill=INK, width=1)
     d.text((24, H - 40), "ALL-TERRAIN  ·  DIRT  ·  SAND  ·  SNOW", font=spec, fill=INK)
     # big title, right side, knocked out of a rust block
-    big = font("archivoblack/ArchivoBlack-Regular.ttf", 112)
-    t1 = Image.new("RGBA", (640, 300), (0, 0, 0, 0)); td = ImageDraw.Draw(t1)
-    td.rectangle([0, 18, 560, 150], fill=RUST + (240,))
-    td.text((22, 6), "OPEN", font=big, fill=BONE)
-    td.text((22, 128), "MCM2", font=big, fill=(245, 242, 232))
-    t1 = t1.rotate(-3, Image.BICUBIC, expand=True)
-    canvas.alpha_composite(t1, (W - 640, 40))
+    logo = Image.open(os.environ.get("FP_LOGO", os.path.join(os.path.dirname(__file__), "logo.png"))).convert("RGBA")
+    logo = logo.resize((700, int(700 * logo.size[1] / logo.size[0])), Image.LANCZOS).rotate(2, Image.BICUBIC, expand=True)
+    sh = Image.new("RGBA", logo.size, (0, 0, 0, 0)); sh.paste((0, 0, 0, 120), (0, 0), logo.split()[3]); sh = sh.filter(ImageFilter.GaussianBlur(8))
+    canvas.alpha_composite(sh, (W - 730 + 8, 70 + 12)); canvas.alpha_composite(logo, (W - 730, 70))
     tag = font("barlowcondensed/BarlowCondensed-Bold.ttf", 30)
-    d.text((W - 600, 360), "RIDE IT LIKE YOU STOLE IT.", font=tag, fill=BONE)
-    d.text((W - 600, 396), "No disc. No catch. Just dirt.", font=spec, fill=(220, 214, 200))
+    d.text((W - 640, 330), "RIDE IT LIKE YOU STOLE IT.", font=tag, fill=BONE)
+    d.text((W - 640, 366), "No disc. No catch. Just dirt.", font=spec, fill=(220, 214, 200))
     # buttons at stock rects (x2), as stickers / tape labels
     btn = font("barlowcondensed/BarlowCondensed-Bold.ttf", 58)
     left = [("SINGLE", "flag", INK, BONE, "01 / RACE"), ("MULTI", "helmets", BONE, INK, "02 / ONLINE"),
@@ -151,11 +148,13 @@ def main(photo, out):
             ("SCORES", "trophy", RUST, BONE, "05 / RECORDS"), ("REPLAY", "replay", BONE, INK, "06 / TAPES"),
             ("EXIT", "exit", INK, BONE, None)]
     for i, (t, ico, bgc, fg, sub) in enumerate(left):
-        st = sticker(t, 330, 108, bgc + (255,), fg, btn, float(rng.uniform(-3.5, 3.5)), sub, ico)
-        canvas.alpha_composite(st, (40 + (i % 2) * 22, 70 + i * 124))
+        st = sticker(t, 330, 96, bgc + (255,), fg, btn, float(rng.uniform(-3.5, 3.5)), sub, ico)
+        canvas.alpha_composite(st, (40 + (i % 2) * 22, 56 + i * 121))
     for j, (t, ico, bgc, fg) in enumerate([("HELP", "help", BONE, INK), ("CREDITS", "star", OLIVE, BONE)]):
         st = sticker(t, 300, 100, bgc + (255,), fg, btn, float(rng.uniform(-3, 3)), None, ico)
         canvas.alpha_composite(st, (W - 380, 640 + j * 132))
+    d = ImageDraw.Draw(canvas)
+    d.text((24, H - 40), "ALL-TERRAIN  ·  DIRT  ·  SAND  ·  SNOW", font=spec, fill=INK)
     # lit state: tape across SINGLE
     tp = tape(150, 34).rotate(-12, expand=True)
     canvas.alpha_composite(tp, (300, 52))
