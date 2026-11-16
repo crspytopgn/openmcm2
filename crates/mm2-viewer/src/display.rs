@@ -74,14 +74,21 @@ pub fn request(mode: Mode) {
 
 /// Each frame: notes the window, and makes the change asked for.
 pub fn tick(window: &Window) {
-    let monitor = window.current_monitor().map(|m| (m.size().width, m.size().height));
+    // In points, as the launcher and `--window` count a window: pixels on
+    // most screens, a half each way on a Retina screen.
+    let scale = window.scale_factor();
+    let points = |z: winit::dpi::PhysicalSize<u32>| {
+        let z = z.to_logical::<f64>(scale);
+        (z.width.round() as u32, z.height.round() as u32)
+    };
+    let monitor = window.current_monitor().map(|m| points(m.size()));
     let mut s = STATE.lock().unwrap();
     s.monitor = monitor;
     s.now = match window.fullscreen() {
         Some(_) => Mode::Full,
         None => {
-            let size = window.inner_size();
-            Mode::Window(size.width, size.height)
+            let (w, h) = points(window.inner_size());
+            Mode::Window(w, h)
         }
     };
     let Some(mode) = s.asked.take() else {
@@ -94,13 +101,14 @@ pub fn tick(window: &Window) {
         Mode::Full => window.set_fullscreen(Some(Fullscreen::Borderless(None))),
         Mode::Window(w, h) => {
             window.set_fullscreen(None);
-            let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(w, h));
+            let _ = window.request_inner_size(winit::dpi::LogicalSize::new(w, h));
             // In the middle of the screen, the title bar a little higher
             // to make room for it.
-            if let Some((mw, mh)) = monitor {
-                let at = window.current_monitor().map_or((0, 0), |m| (m.position().x, m.position().y));
-                let x = at.0 + (mw as i32 - w as i32) / 2;
-                let y = at.1 + ((mh as i32 - h as i32) / 2 - 20).max(0);
+            if let Some(m) = window.current_monitor() {
+                let (mw, mh) = (m.size().width as f64, m.size().height as f64);
+                let (pw, ph) = (w as f64 * scale, h as f64 * scale);
+                let x = m.position().x + ((mw - pw) / 2.0) as i32;
+                let y = m.position().y + ((mh - ph) / 2.0 - 20.0 * scale).max(0.0) as i32;
                 window.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
             }
         }

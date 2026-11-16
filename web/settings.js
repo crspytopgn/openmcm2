@@ -35,14 +35,15 @@ export const UPGRADES = [
 // In a browser, Ultra draws as High does (the game caps both: see
 // graphics::Enhanced::for_browser), so it isn't offered. Medium is the
 // default: High has stalled a whole Mac in Safari.
-const QUALITIES = [["low", "Low"], ["medium", "Medium (recommended)"], ["high", "High (a fast computer)"]];
+const QUALITIES = [["auto", "Auto (picks for your computer)"], ["low", "Low"], ["medium", "Medium"], ["high", "High (a fast computer)"]];
 // Whether a quality preset keeps an upgrade on (Quality::has).
 function presetHas(quality, name) {
+  if (quality === "auto") quality = "medium"; // until the game knows the graphics card
   const off = { low: ["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr"], medium: ["shafts", "smooth", "gtao", "ssr"] }[quality] || [];
   return !off.includes(name) && UPGRADES.some(([n, , on]) => n === name && on);
 }
 
-const ABOUT_QUALITY = "A preset for the effects below. Medium suits most computers in a browser; High needs a fast one. You can change any effect after.";
+const ABOUT_QUALITY = "A preset for the effects below. Auto looks at your graphics card when the game starts and picks Low, Medium or High for it. Medium suits most computers in a browser; High needs a fast one. Changing an effect below picks Medium with that change.";
 const ABOUT_TIME = "Where the sun is: the track's own, or an hour of your choice.";
 const ABOUT_WEATHER = "Clear, overcast or rain, for looks only: the riding is the same.";
 const ABOUT_DETAIL = "How strongly the grain of the photo ground shows.";
@@ -68,7 +69,7 @@ export const EXTRAS = [
     { key: "centred_display", flag: "centred-display", label: "Race display nearer the middle", about: "On screens wider than 16:9, the race display where it sits on a 16:9 screen." },
     { key: "steady_camera", flag: "steady-camera", label: "Steadier camera", about: "The chase camera rises and dips with the bike more gently." },
     { key: "fov", flag: "fov", label: "Field of view", about: "How wide the riding cameras see. 85° is the original game's.", range: [60, 120, 1, "°"], off: 85 },
-    { key: "helmet_cam", flag: "helmet-cam", label: "Helmet Cam", about: "A camera from the rider's helmet, after User Cam when you change the view (F1)." },
+    { key: "helmet_cam", flag: "helmet-cam", label: "Helmet Cam", about: "A camera from the rider's helmet. In a race press F1 to switch it on or off (fn+F1 on most Mac keyboards), or reach it after User Cam with the camera key (C or Numpad 5)." },
   ]],
   ["Controllers and picture", [
     { key: "pad_dead_zone", flag: "pad-dead-zone", label: "Stick dead zone", about: "How far a stick moves before it steers. 4% is the original game's.", range: [0, 50, 1, "%"], off: 4 },
@@ -78,7 +79,6 @@ export const EXTRAS = [
     { key: "sharpen", flag: "sharpen", label: "Sharpening", about: "Brings out detail in the race picture, in either look. 0% is the original game's.", range: [0, 100, 5, "%"], off: 0 },
   ]],
   ["Tracks, bikes and riders", [
-    { key: "own_skins", flag: "own-skins", label: "Your own paints and outfits", about: "Every .tga picture in the game's BIKES and RIDERS folders is a bike paint or outfit to pick, named after its file." },
     { key: "all_gear", flag: "all-gear", label: "All gear in every event", about: "The bikes and outfits the Pro Circuit gives out, in single races too." },
     { key: "track_filter", flag: "track-filter", label: "Track filter", about: "All tracks, the base game's or only the ones you added, on the event page." },
     { key: "riders", flag: "gate-riders", label: "Riders on the gate", about: "Up to 30 riders in a single race. 0 is the original game's count.", range: [0, 30, 1, ""], off: 0 },
@@ -100,7 +100,7 @@ export function setQuality(s, q) {
 export function defaults() {
   const s = {
     enhanced: false,
-    quality: "medium",
+    quality: "auto",
     time: "",
     weather: "clear",
     detail: 0.5,
@@ -153,7 +153,8 @@ export function args(s) {
   const a = [];
   if (s.enhanced) {
     const list = [`quality=${s.quality}`];
-    for (const [n] of UPGRADES) {
+    // Auto picks the effects itself.
+    if (s.quality !== "auto") for (const [n] of UPGRADES) {
       if (!!s.upgrades[n] !== presetHas(s.quality, n)) list.push(s.upgrades[n] ? n : `no-${n}`);
     }
     if (s.time) list.push(`time=${s.time}`);
@@ -248,7 +249,10 @@ export function render(lookBox, box, s, changed) {
     for (const [n, text, , about] of UPGRADES) {
       list.append(checkbox(text, about, !!s.upgrades[n], (on) => {
         s.upgrades[n] = on;
-        set("upgrades", s.upgrades);
+        // Under Auto, changing an effect means choosing yourself.
+        const wasAuto = s.quality === "auto";
+        if (wasAuto) s.quality = "medium";
+        set("upgrades", s.upgrades, wasAuto);
       }));
     }
     effects.append(list);

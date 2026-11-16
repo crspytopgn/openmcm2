@@ -11,7 +11,8 @@ use super::{options::Options, popup, Cx, Go, MsgBox, Screen};
 use crate::frontend::{
     list_tracks, preview_image, EventKind, RaceResults, Setup, TrackEntry, PRACTICE,
 };
-use crate::procircuit::{self as pc, Careers, Circuit, Data, Finish, Rng};
+use crate::procircuit::{self as pc, class_fits, Careers, Circuit, Data, Finish, Rng, OWN_SIZES};
+use super::options::engine_class;
 use crate::roster::Ride;
 use crate::ui::{Dlg, Event, Gfx, Ui};
 use std::collections::HashMap;
@@ -571,9 +572,26 @@ impl Pro {
             outfits.iter().map(|o| o.name.clone()).collect(),
             outfit,
         );
-        d.set_items("DDLEngineSize", vec![format!("{}cc", p.cc)], 0);
-        d.enable("DDLEngineSize", false);
-        d.enable("TxtEngineSize", false);
+        // A paint from the BIKES folder takes any engine size of the
+        // class (0x4daf3c, 0x4dc1ca); the makers' bikes show their own.
+        let own = bikes.get(bike).is_some_and(|b| b.own() && b.file.eq_ignore_ascii_case(&p.paint));
+        if own {
+            let sizes: Vec<(u32, bool)> = OWN_SIZES
+                .iter()
+                .copied()
+                .filter(|s| class_fits(c.class, engine_class(s.0)))
+                .collect();
+            let at = sizes.iter().position(|s| s.0 == p.cc).unwrap_or(0);
+            let names = sizes
+                .iter()
+                .map(|&(cc, four)| format!("{cc}cc {}-stroke", if four { 4 } else { 2 }))
+                .collect();
+            d.set_items("DDLEngineSize", names, at);
+        } else {
+            d.set_items("DDLEngineSize", vec![format!("{}cc", p.cc)], 0);
+        }
+        d.enable("DDLEngineSize", own);
+        d.enable("TxtEngineSize", own);
         d.enable("ButWrench", false);
         d.set_on("ChkAutoRotate", true);
         d.set_text("EditPlateNumber", plate.to_string());
@@ -1017,12 +1035,36 @@ impl Pro {
                     page.select(list, at);
                     let picks = (page.selected("DDLBikes"), page.selected("DDLRiders"));
                     self.pick_ride(picks.0, picks.1);
+                    if list == "DDLBikes" {
+                        self.page(cx, 1);
+                    }
                 }
                 _ => {}
             },
+            Event::Selected(n, line) if tab == 1 && n.eq_ignore_ascii_case("DDLEngineSize") => {
+                if let Some(c) = self.c.as_mut() {
+                    let class = c.class;
+                    let size = OWN_SIZES
+                        .iter()
+                        .copied()
+                        .filter(|s| class_fits(class, engine_class(s.0)))
+                        .nth(line);
+                    let r = &mut c.riders[0];
+                    let own = self.data.own_bikes.iter().any(|b| b.file.eq_ignore_ascii_case(&r.paint));
+                    if let (true, Some((cc, four))) = (own, size) {
+                        (r.cc, r.four_stroke) = (cc, four);
+                    }
+                }
+                self.save();
+            }
             Event::Selected(n, _) if tab == 1 && n.to_ascii_lowercase().starts_with("ddl") => {
                 let picks = (page.selected("DDLBikes"), page.selected("DDLRiders"));
+                let bike_was = self.c.as_ref().map(|c| c.player().paint.clone());
                 self.pick_ride(picks.0, picks.1);
+                // The engine size list follows the bike.
+                if bike_was != self.c.as_ref().map(|c| c.player().paint.clone()) {
+                    self.page(cx, 1);
+                }
             }
             Event::Released(n) if n.eq_ignore_ascii_case("EditPlateNumber") => {
                 let text = page

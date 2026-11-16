@@ -17,7 +17,7 @@ mod update;
 
 use eframe::egui;
 use game::Source;
-use settings::{Quality, Settings, ANTIALIASING, SHAPES, UPGRADES};
+use settings::{fits, fitting, shape_of, Quality, Settings, ANTIALIASING, SHAPES, UPGRADES};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -25,6 +25,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// The window icon and the logo at the top (drawn from `assets/icon/*.svg`).
+/// Where the Updates page's Donate button goes.
+const SPONSOR_URL: &str = "https://github.com/sponsors/crspytopgn";
+
 const ICON_PNG: &[u8] = include_bytes!("../../../assets/icon/icon-256.png");
 const LOGO_PNG: &[u8] = include_bytes!("../../../assets/icon/logo-dark.png");
 
@@ -724,7 +727,12 @@ impl Launcher {
         let mut go = false;
         look::card(ui, look::icon::ICON_PALETTE, "Look", |ui| {
             let mut parts: Vec<String> = Vec::new();
-            if s.enhanced {
+            if s.enhanced && s.auto {
+                parts.push(match auto_last() {
+                    Some((q, _)) => format!("Auto preset (last: {q})"),
+                    None => "Auto preset".into(),
+                });
+            } else if s.enhanced {
                 let preset = preset_of(s);
                 parts.push(preset.map_or("Custom preset".to_string(), |q| format!("{} preset", q.label())));
                 let traced = UPGRADES.iter().zip(&s.upgrades).any(|(u, on)| u.0 == "raytracing" && *on);
@@ -751,18 +759,126 @@ impl Launcher {
         }
     }
 
-    /// How the game starts: full screen or a window, chosen in the game
-    /// (Options, Graphics, Display Resolution) and saved here.
+    /// How the game starts: full screen (at the screen's own resolution or
+    /// one picked) or a window of a picked shape and size. The game's
+    /// Options, Graphics, Display Resolution changes the same settings.
     fn display_card(&mut self, ui: &mut egui::Ui) {
-        let s = &self.settings;
+        use look::Choice;
+        // The screen the launcher is on, in points (as windows are sized)
+        // and in pixels (as the screen's resolutions are).
+        let (points, pixels) = ui.ctx().input(|i| {
+            let v = i.viewport();
+            let round = |m: egui::Vec2| (m.x.round() as u32, m.y.round() as u32);
+            (v.monitor_size.map(round), v.monitor_size.map(|m| round(m * v.native_pixels_per_point.unwrap_or(1.0))))
+        });
+        let s = &mut self.settings;
         look::card(ui, look::icon::ICON_MONITOR, "Display", |ui| {
-            let now = match s.fullscreen {
-                true => "The game starts full screen.".to_string(),
-                false => format!("The game starts in a {} window.", size_text(s.window)),
-            };
-            ui.label(now);
+            let modes = [
+                Choice::new(true, "Full screen").icon(look::icon::ICON_FULLSCREEN).hover(
+                    "The game fills the whole screen. Recommended: the smoothest picture.",
+                ),
+                Choice::new(false, "In a window").icon(look::icon::ICON_WEB_ASSET).hover(
+                    "The game in a window of the size picked below, with the rest of the screen showing round it.",
+                ),
+            ];
+            if let Some(full) = look::segmented(ui, s.fullscreen, &modes) {
+                s.fullscreen = full;
+            }
+            ui.add_space(6.0);
+            if s.fullscreen {
+                let named = look::label(
+                    ui,
+                    "Resolution",
+                    "How many pixels the full screen has. Your screen's own is the sharpest and switches fastest; a lower one can run faster on an older computer.",
+                );
+                // The sizes the screen is big enough for, by shape.
+                let own = match pixels {
+                    Some(m) => format!("Your screen's own ({})", size_text(m)),
+                    None => "Your screen's own".into(),
+                };
+                let shown = if s.screen == (0, 0) { own.clone() } else { size_text(s.screen) };
+                egui::ComboBox::from_id_salt("screen")
+                    .selected_text(shown)
+                    .width(300.0)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut s.screen, (0, 0), own)
+                            .on_hover_text("The screen stays as it is, and the game draws at its full sharpness.");
+                        for (name, about, sizes) in SHAPES.iter() {
+                            let sizes: Vec<_> = sizes.iter().filter(|z| pixels.is_none_or(|m| z.0 <= m.0 && z.1 <= m.1) && Some((z.0, z.1)) != pixels).collect();
+                            if sizes.is_empty() {
+                                continue;
+                            }
+                            ui.label(look::weak(*name));
+                            for z in sizes {
+                                ui.selectable_value(&mut s.screen, (z.0, z.1), size_text((z.0, z.1)))
+                                    .on_hover_text(format!("{about} The screen switches to {} × {} while you play, if it can.", z.0, z.1));
+                            }
+                        }
+                    })
+                    .response
+                    .labelled_by(named)
+                    .on_hover_text("How many pixels the full screen has while you play.");
+                let note = match (s.screen, pixels) {
+                    ((0, 0), Some(m)) if m.0 * 5 > m.1 * 12 => {
+                        "Super ultrawide: the race is drawn 21:9 in the middle, with black bars at the sides.".to_string()
+                    }
+                    ((0, 0), Some(m)) => format!("{}: {}", SHAPES[shape_of(m)].0, SHAPES[shape_of(m)].1),
+                    ((0, 0), None) => "The screen as it is.".into(),
+                    (z, _) => format!(
+                        "The screen switches to {} × {} while you play, and back after. If it can't show that, the game uses the screen's own.",
+                        z.0, z.1
+                    ),
+                };
+                ui.add(egui::Label::new(look::weak(note)).wrap());
+            } else {
+                // A window as big as the screen is full screen done worse:
+                // a size that doesn't fit gives way to the biggest that does.
+                if !fits(s.window, points) {
+                    s.window = fitting(SHAPES[shape_of(s.window)].2, points)
+                        .or_else(|| SHAPES.iter().rev().find_map(|z| fitting(z.2, points)))
+                        .unwrap_or((1024, 768));
+                }
+                let shape = shape_of(s.window);
+                look::label(ui, "Shape", "The window's shape. The race shows more to the sides on a wider one.");
+                let shapes: Vec<_> = SHAPES
+                    .iter()
+                    .enumerate()
+                    .map(|(k, (name, about, sizes))| {
+                        let hover = match fitting(sizes, points) {
+                            Some(_) => about.to_string(),
+                            None => format!("{about} Too big for a window on your screen: use Full screen."),
+                        };
+                        Choice::new(k, *name).hover(hover)
+                    })
+                    .collect();
+                if let Some(k) = look::segmented(ui, shape, &shapes) {
+                    if let (true, Some(size)) = (k != shape, fitting(SHAPES[k].2, points)) {
+                        s.window = size;
+                    }
+                }
+                ui.add_space(6.0);
+                let named = look::label(ui, "Size", "The window's size inside, without its title bar.");
+                egui::ComboBox::from_id_salt("size")
+                    .selected_text(size_text(s.window))
+                    .width(300.0)
+                    .show_ui(ui, |ui| {
+                        for &(w, h, _) in SHAPES[shape].2.iter().filter(|z| fits((z.0, z.1), points)) {
+                            ui.selectable_value(&mut s.window, (w, h), size_text((w, h)))
+                                .on_hover_text(format!("A window {w} wide and {h} high."));
+                        }
+                    })
+                    .response
+                    .labelled_by(named)
+                    .on_hover_text("Only the sizes that fit on your screen with room for the title bar.");
+                if points != pixels {
+                    ui.add(egui::Label::new(look::weak(
+                        "Sizes are in your screen's points, as your system counts them; the game still draws at full sharpness.",
+                    )).wrap());
+                }
+            }
+            ui.add_space(4.0);
             ui.add(egui::Label::new(look::weak(
-                "Change it in the game: Options, Graphics, Display Resolution. Alt+Enter switches to full screen and back while playing.",
+                "Alt+Enter switches between full screen and a window while playing. The game's Options, Graphics, Display Resolution changes these too.",
             )).wrap());
         });
     }
@@ -815,7 +931,7 @@ impl Launcher {
             tile(ui, &mut s.centred_display, "Race display nearer the middle", "On screens wider than 16:9, the race display where it sits on a 16:9 screen.");
             tile(ui, &mut s.steady_camera, "Steadier camera", "The chase camera rises and dips with the bike more gently.");
             slider(ui, "Field of view", "How wide the riding cameras see. 85° is the original game's.", &mut s.fov, 60..=120, 1.0, "°");
-            tile(ui, &mut s.more.helmet_cam, "Helmet Cam", "A camera from the rider's helmet, after User Cam when you change the view (F1).");
+            tile(ui, &mut s.more.helmet_cam, "Helmet Cam", "A camera from the rider's helmet. In a race press F1 to switch it on or off (fn+F1 on most Mac keyboards), or reach it after User Cam with the camera key (C or Numpad 5).");
         });
         look::card(ui, icon::ICON_SPORTS_ESPORTS, "Controllers, sound and screen", |ui| {
             tile(ui, &mut s.vibration, "Controller vibration", "The pad thumps on landings, knocks over bumps and jolts in crashes.");
@@ -834,7 +950,6 @@ impl Launcher {
             slider(ui, "Sharpening", "Brings out detail in the race picture, in either look. 0% is the original game's.", &mut s.more.sharpen, 0..=100, 5.0, "%");
         });
         look::card(ui, icon::ICON_TWO_WHEELER, "Tracks, bikes and riders", |ui| {
-            tile(ui, &mut s.more.own_skins, "Your own paints and outfits", "Every .tga picture in the game's BIKES and RIDERS folders is a bike paint or outfit to pick, named after its file. Bike paints follow BIKE01.TGA's layout.");
             tile(ui, &mut s.more.all_gear, "All gear in every event", "The bikes and outfits the Pro Circuit gives out, in single races too.");
             tile(ui, &mut s.more.track_filter, "Track filter", "All tracks, the base game's or only the ones you added, on the event page.");
             slider(ui, "Riders on the gate", "Up to 30 riders in a single race. 0 is the original game's count.", &mut s.more.riders, 0..=mm2_settings::RIDERS_MOST, 1.0, "");
@@ -997,17 +1112,27 @@ impl Launcher {
                 if let Some(q) = shown {
                     s.quality = q;
                 }
-                let mut choices: Vec<_> = Quality::ALL.iter().map(|&q| Choice::new(Some(q), q.label()).hover(preset_text(q))).collect();
-                if shown.is_none() {
+                // Auto stands first, as its own pick (`Some(None)`).
+                const AUTO: Option<Option<Quality>> = Some(None);
+                let current = if s.auto { AUTO } else { shown.map(Some) };
+                let mut choices: Vec<_> = std::iter::once(Choice::new(AUTO, "Auto").icon(icon::ICON_AUTO_MODE).hover(AUTO_TEXT))
+                    .chain(Quality::ALL.iter().map(|&q| Choice::new(Some(Some(q)), q.label()).hover(preset_text(q))))
+                    .collect();
+                if shown.is_none() && !s.auto {
                     choices.push(
                         Choice::new(None, "Custom")
                             .icon(icon::ICON_TUNE)
                             .hover(format!("Your own mix, changed from the {} preset. Pick a preset to go back to its settings.", s.quality.label())),
                     );
                 }
-                if let Some(Some(q)) = look::segmented(ui, shown, &choices) {
+                let picked = look::segmented(ui, current, &choices);
+                if picked == Some(AUTO) {
+                    s.auto = true;
+                }
+                if let Some(Some(Some(q))) = picked {
                     // A preset sets the effects, the anti-aliasing and the
                     // resolution; any can be changed after.
+                    s.auto = false;
                     s.quality = q;
                     for (u, on) in UPGRADES.iter().zip(s.upgrades.iter_mut()) {
                         *on = q.has(u.0);
@@ -1016,6 +1141,10 @@ impl Launcher {
                     s.resolution = "auto".into();
                 }
                 let about = match preset_of(s) {
+                    _ if s.auto => match auto_last() {
+                        Some((q, card)) => format!("{AUTO_TEXT} Last time it picked {q} for your {card}."),
+                        None => format!("{AUTO_TEXT} It says what it picked here after the game's first start."),
+                    },
                     Some(q) => format!("{} Change any of the settings below and it becomes Custom.", preset_text(q)),
                     None => format!(
                         "Custom: your own mix of the settings below, changed from the {} preset. Pick a preset to go back to its settings.",
@@ -1024,6 +1153,8 @@ impl Launcher {
                 };
                 ui.add(egui::Label::new(look::weak(about)).wrap());
             });
+            // Under Auto, changing what it picks means picking yourself.
+            let before = (s.antialiasing.clone(), s.resolution.clone(), s.upgrades.clone());
             look::card(ui, icon::ICON_IMAGE, "Picture", |ui| {
                 look::label(
                     ui,
@@ -1103,6 +1234,9 @@ impl Launcher {
                     });
                 }
             });
+            if s.auto && before != (s.antialiasing.clone(), s.resolution.clone(), s.upgrades.clone()) {
+                s.auto = false;
+            }
         }
         if !cfg!(target_os = "macos") {
             look::card(ui, icon::ICON_MEMORY, "Graphics card", |ui| {
@@ -1234,6 +1368,13 @@ impl Launcher {
                     _ => {}
                 }
             });
+        });
+        look::card(ui, look::icon::ICON_FAVORITE, "Enjoying OpenMCM2?", |ui| {
+            ui.add(egui::Label::new("Want more updates? OpenMCM2 is free and always will be. If you enjoy it, a small donation helps keep the updates coming.").wrap());
+            let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_FAVORITE, "Donate on GitHub")).color(egui::Color32::WHITE)).fill(look::ACCENT);
+            if ui.add(b).on_hover_text(SPONSOR_URL).clicked() {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(SPONSOR_URL));
+            }
         });
         look::card(ui, look::icon::ICON_INFO, "Command line", |ui| {
             ui.label(look::weak("What the Play button starts, for a shortcut of your own or to report a problem."));
@@ -1402,6 +1543,19 @@ fn preset_of(s: &Settings) -> Option<Quality> {
     Quality::ALL.into_iter().find(|&q| is_preset(s, q))
 }
 
+/// What the Auto preset does, for its hover text.
+const AUTO_TEXT: &str = "Auto: each time the game starts it looks at your graphics card and screen and picks Low, Medium or High to keep the racing smooth. Change any setting below to choose yourself.";
+
+/// What Auto picked when the game last started, and for which card, as
+/// the game left it in `auto-graphics.txt`.
+fn auto_last() -> Option<(String, String)> {
+    let text = std::fs::read_to_string(settings::user_dir().join("auto-graphics.txt")).ok()?;
+    let get = |k: &str| text.lines().find_map(|l| l.strip_prefix(k).map(str::trim).map(String::from));
+    let q = get("quality=")?;
+    let q = Quality::ALL.into_iter().find(|x| x.name() == q).map_or(q, |x| x.label().to_string());
+    Some((q, get("card=").unwrap_or_else(|| "graphics card".into())))
+}
+
 /// A line on what each effect ([`UPGRADES`]) does, for its switch.
 fn effect_about(name: &str) -> &'static str {
     match name {
@@ -1471,6 +1625,8 @@ mod shots {
             ("extras", Page::Extras, true, 3100.0),
             ("graphics_small", Page::Graphics, true, 520.0),
             ("graphics_custom", Page::Graphics, true, 520.0),
+            ("graphics_auto", Page::Graphics, true, 520.0),
+            ("play_full", Page::Play, true, 1300.0),
         ] {
             let width = if name.ends_with("small") { 760.0 } else { 1000.0 };
             let custom = name.ends_with("custom");
@@ -1478,6 +1634,8 @@ mod shots {
             s.enhanced = enhanced;
             s.game = Some("C:/Games/Motocross Madness 2/GAME".into());
             s.quality = Quality::RayTraced;
+            s.auto = name == "graphics_auto";
+            s.fullscreen = name == "play_full";
             s.antialiasing = "taa".into();
             s.resolution = "75%".into();
             s.time = "night".into();

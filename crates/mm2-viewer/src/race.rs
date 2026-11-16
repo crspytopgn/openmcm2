@@ -623,8 +623,8 @@ impl Bike {
                 // tyres are never probed, so 0x48f390's clearance test
                 // passes; it is held clear here.
                 None => crate::riding::Inputs {
-                    steer: -b.rider.steer,
-                    lean: b.rider.lean,
+                    steer: -b.drawn_bars().0,
+                    lean: b.drawn_bars().1,
                     computer: true,
                     bike: PoseInputs {
                         airborne: b.rider.airborne,
@@ -808,12 +808,27 @@ pub struct Computer {
     /// frames of [`AI_FRAME`] and are drawn between them.
     was: Option<(Vec3, glam::Quat)>,
     blend: f32,
+    /// The bars and the rider's weight before its last frame, so the
+    /// rider's riding motions move between frames as the bike does,
+    /// rather than jumping at the computer's 36 frames a second on a
+    /// faster screen.
+    was_bars: (f32, f32),
 }
 
 impl Computer {
     fn place(&self) -> Mat4 {
         let r = &self.rider;
         crate::objects::orientation(r.look.into(), r.up.into(), Vec3::ONE, r.position.into())
+    }
+
+    /// The bars and the weight to pose the rider with between its frames.
+    fn drawn_bars(&self) -> (f32, f32) {
+        let now = (self.rider.steer, self.rider.lean);
+        if self.was.is_none() {
+            return now;
+        }
+        let (from, k) = (self.was_bars, self.blend);
+        (from.0 + (now.0 - from.0) * k, from.1 + (now.1 - from.1) * k)
     }
 
     /// Where to draw the model between its frames.
@@ -1040,6 +1055,7 @@ impl Racer {
                     wreck: None,
                     thrown: false,
                     was: None,
+                    was_bars: (0.0, 0.0),
                     blend: 1.0,
                 }))
             },
@@ -1618,6 +1634,7 @@ impl Racer {
         let place = c.place();
         let (_, turn, at) = place.to_scale_rotation_translation();
         c.was = Some((at, turn));
+        c.was_bars = (c.rider.steer, c.rider.lean);
         // Off the start, the line runs from the rider's place across the
         // gate into its own lane.
         let lane = c.rider.lane;
@@ -1801,6 +1818,12 @@ impl Race {
     /// The next camera view (Numpad 5), and its name.
     pub fn next_view(&mut self) -> &'static str {
         self.chase.next_view()
+    }
+
+    /// F1: the Helmet Cam extra on or off; its name, or `None` when the
+    /// extra is off.
+    pub fn toggle_helmet(&mut self) -> Option<&'static str> {
+        self.chase.toggle_helmet()
     }
 
     /// Numpad 0: the camera freezes where it is, or goes back to its view.

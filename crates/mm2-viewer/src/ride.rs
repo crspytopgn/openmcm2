@@ -201,6 +201,22 @@ impl Chase {
         self.view.name()
     }
 
+    /// F1, with the Helmet Cam extra on: straight into the Helmet Cam,
+    /// or back out to the view it came from. `None` when the extra is off
+    /// (F1 does nothing in the original's races).
+    pub fn toggle_helmet(&mut self) -> Option<&'static str> {
+        self.toggle_helmet_if(crate::tweaks::more().helmet_cam)
+    }
+
+    fn toggle_helmet_if(&mut self, on: bool) -> Option<&'static str> {
+        if !on {
+            return None;
+        }
+        self.frozen = None;
+        self.helmet = !self.helmet;
+        Some(if self.helmet { HELMET_CAM } else { self.view.name() })
+    }
+
     /// Numpad 0 (0x4679e0's key 0x52): freezes the camera where it is, or
     /// lets it go back to its view. Whether it is frozen now.
     pub fn freeze(&mut self) -> bool {
@@ -358,18 +374,21 @@ impl Chase {
 pub const HELMET_CAM: &str = "Helmet Cam";
 
 impl Chase {
-    /// The rider's eyes above and ahead of the bike's centre, ft.
-    const HELMET_UP: f32 = 4.2;
-    const HELMET_AHEAD: f32 = 0.3;
-    /// How long the neck takes to follow the bike's bumps, s, up and down
-    /// apart from along the ground.
+    /// The rider's eyes above and ahead of the bike's centre, ft: just in
+    /// front of the goggles (the rider's `Head` frame sits about 5.3 to
+    /// 5.5 ft up and 0.4 to 1 ft back while riding), so the bars, the
+    /// gloves and the front of the bike are in view below.
+    const HELMET_UP: f32 = 5.0;
+    const HELMET_AHEAD: f32 = 0.1;
+    /// How long the neck takes to follow the bike's bumps up and down, s.
     const NECK_RISE: f32 = 0.09;
-    const NECK_ALONG: f32 = 0.015;
     /// How much the look leans from where the bike points to where it is
     /// going (into a slide or a corner).
     const INTO_TURN: f32 = 0.3;
     /// How far the look dips below level, so the bars sit low in view.
-    const LOOK_DOWN: f32 = 0.22;
+    const LOOK_DOWN: f32 = 0.5;
+    /// How much of the bike's pitch the look takes.
+    const PITCH_WITH_BIKE: f32 = 0.9;
 
     /// The Helmet Cam: from the rider's helmet, the head held as a neck
     /// holds it (bumps softened, the horizon level), looking where the
@@ -378,23 +397,30 @@ impl Chase {
     fn helmet_view(&mut self, bike: &Followed, terrain: &Terrain, dt: f32) -> (Vec3, Vec3) {
         let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z).normalize_or(self.yaw);
         let forward = flat(bike.forward);
-        let want = bike.position + bike.up * Self::HELMET_UP + forward * Self::HELMET_AHEAD;
-        let along = 1.0 - (-dt / Self::NECK_ALONG).exp();
+        // `forward` is level; the bike's own nose, tipped with its up.
+        let nose = (forward - bike.up * forward.dot(bike.up)).normalize_or(forward);
+        let want = bike.position + bike.up * Self::HELMET_UP + nose * Self::HELMET_AHEAD;
         let rise = 1.0 - (-dt / Self::NECK_RISE).exp();
         // A long way off (a restart, a reset): straight there.
         if self.head.distance(want) > 20.0 {
             self.head = want;
         }
-        self.head.x += (want.x - self.head.x) * along;
-        self.head.z += (want.z - self.head.z) * along;
+        // Along the ground the eye stays with the head: any lag at speed
+        // puts it inside the rider's own helmet.
+        self.head.x = want.x;
+        self.head.z = want.z;
+        // Carried with the bike's climb first, so a long slope leaves no
+        // lag (which would sink the eye into the bike), only the bumps.
+        self.head.y += bike.velocity.y * dt;
         self.head.y += (want.y - self.head.y) * rise;
+        self.head.y = self.head.y.clamp(want.y - 0.6, want.y + 0.6);
         let floor = ground(terrain, self.head.x, self.head.z) + 0.5;
         self.head.y = self.head.y.max(floor);
         let going = if bike.speed > 5.0 { flat(bike.velocity) } else { forward };
         let look = forward.lerp(going, Self::INTO_TURN).normalize_or(forward);
-        // The pitch follows the bike's, halved, so the view tips over
-        // crests and dips without the horizon swinging about.
-        let pitch = bike.forward.y.clamp(-0.9, 0.9) * 0.5 - Self::LOOK_DOWN;
+        // The pitch follows most of the bike's, so the bars stay put in
+        // view over crests and dips as the rider's head would keep them.
+        let pitch = nose.y.clamp(-0.9, 0.9) * Self::PITCH_WITH_BIKE - Self::LOOK_DOWN;
         let dir = (look + Vec3::Y * pitch).normalize_or(look);
         self.eye = self.head;
         self.target = self.head + dir * 30.0;
@@ -469,5 +495,18 @@ mod tests {
         assert_eq!(c.next_view(), View::Chase.name());
         let (moved, _) = c.follow(&bike, CamKeys::default(), &terrain, 0.1);
         assert_ne!(moved, eye);
+    }
+
+    #[test]
+    fn f1_goes_straight_to_the_helmet_cam_and_back() {
+        let mut c = Chase::new(Vec3::ZERO, Vec3::Z);
+        assert_eq!(c.toggle_helmet_if(false), None);
+        assert!(!c.helmet);
+        c.next_view();
+        assert_eq!(c.toggle_helmet_if(true), Some(HELMET_CAM));
+        assert!(c.helmet);
+        assert_eq!(c.toggle_helmet_if(true), Some(View::Slot.name()));
+        assert!(!c.helmet);
+        assert_eq!(c.view, View::Slot);
     }
 }
