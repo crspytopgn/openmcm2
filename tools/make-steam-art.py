@@ -12,11 +12,14 @@ from PIL import Image, ImageDraw, ImageFilter
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "assets" / "steam"
 SHOTS = ROOT / "site" / "img"
-LOGO = ROOT / "assets" / "icon" / "openmcm2-dark.svg"
+LOGO = ROOT / "assets" / "icon" / "openmcm2-worn.png"
 ICON = ROOT / "assets" / "icon" / "app-icon.svg"
 
 
 def svg(path, width):
+    if path.suffix == ".png":
+        im = Image.open(path).convert("RGBA")
+        return im.resize((width, round(width * im.height / im.width)), Image.LANCZOS)
     png = cairosvg.svg2png(url=str(path), output_width=width)
     return Image.open(io.BytesIO(png)).convert("RGBA")
 
@@ -39,7 +42,7 @@ def shade(im, top, bottom):
         a = max(top * (1 - t / 0.45) if t < 0.45 else 0, bottom * ((t - 0.5) / 0.5) if t > 0.5 else 0)
         mask.putpixel((0, y), int(255 * min(1, a)))
     mask = mask.resize((w, h))
-    dark = Image.new("RGB", (w, h), (14, 20, 28))
+    dark = Image.new("RGB", (w, h), (18, 17, 16))
     return Image.composite(dark, im, mask)
 
 

@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/icon/openmcm2-dark.svg">
-  <img src="assets/icon/openmcm2.svg" alt="OpenMCM2" width="420">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/icon/openmcm2-worn.png">
+  <img src="assets/icon/openmcm2-worn.png" alt="OpenMCM2" width="420">
 </picture>
 
 # OpenMCM2
