@@ -1,4 +1,37 @@
-# OpenMCM2 0.5.4
+# OpenMCM2 0.5.5
+
+## New in 0.5.5
+
+* **Steam Deck and Steam Machine:** a new single-file Linux AppImage,
+  with its icon and menu entry built in. Make it executable, open it, and
+  add it to Steam as a non-Steam game. The release also has
+  `openmcm2-steam-artwork.zip` with a cover, banner, logo and icon for
+  Steam's library. Set the launch option to `--play` to skip the launcher.
+  See the Steam Deck guide in `docs/steam-deck.md`.
+* **Every action on your controller:** game pads now have buttons for
+  everything: LB looks back, RB is the clutch, the stick clicks are Kahuna
+  and Thrill Cam, and the D-pad's left and down are taunt and back up. In
+  a race, D-pad up changes the camera, D-pad right is the Helmet Cam,
+  View gets you back on the bike and Menu leaves the race. Anything you've
+  bound yourself stays as it is.
+* **No more leaning on its own:** a stick or trigger that isn't centred
+  when the game starts, or a controller you haven't touched, no longer
+  steers or leans the rider.
+* **Menus with a controller:** in the game's menus the D-pad jumps from
+  button to button, and the launcher can be used with a pad too.
+* **Stick steering curve:** a new setting in Extras. The original game
+  makes a stick's steering gentle near the middle and steep at the edge,
+  which can feel all-or-nothing on a short stick. Turn it down for
+  steering that follows the stick more evenly. 100% is the original.
+* **Update note in the game:** if you start the game without the
+  launcher, the main menu now tells you when a new version is out.
+* **Easier online races:** Start in the lobby now readies the host and
+  starts the race. The Host or Join list groups online races, free roam
+  and your own network, and Internet opens that list straight away.
+* **A livelier Helmet Cam:** it looks further up the track with a wider
+  view, leans with the bike, looks into turns, dips on landings, and no
+  longer shows your own rider (your shadow stays). The Rider Cam hides
+  your rider too.
 
 ## New in 0.5.4
 
