@@ -7,3 +7,13 @@ compatibility_date = "2025-01-01"
 [[kv_namespaces]]
 binding = "LAPS"
 id = "PUT-THE-NAMESPACE-ID-HERE"
+
+# The server browser's open races (worker.js, Races): one Durable Object
+# with its own SQLite table, which the free plan allows.
+[[durable_objects.bindings]]
+name = "RACES"
+class_name = "Races"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Races"]

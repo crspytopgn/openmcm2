@@ -8,7 +8,8 @@
 //!
 //! The game played over DirectPlay; the port plays over its own network
 //! code (`net`): the Host or Join box lists the sessions found on the
-//! local network, the host's Event and Options pages go to everyone, and
+//! local network and the open races of the server browser (`servers`),
+//! the host's Event and Options pages go to everyone, and
 //! the host starts the race once every player is ready.
 
 use super::{options::Options, popup, Cx, Go, Screen};
@@ -146,8 +147,9 @@ pub struct Multi {
     results: RaceResults,
     /// Looking for sessions, while the Host or Join box is up.
     finder: Option<net::Finder>,
-    /// The session line picked.
-    picked: Option<usize>,
+    /// The session picked, by where it is (the list's lines move as it
+    /// updates).
+    picked: Option<net::Addr>,
     /// The host's game as last sent.
     sent: Option<GameInfo>,
     /// The lobby downloads extra: what is coming and going, and the
@@ -832,13 +834,22 @@ impl Multi {
             }
             self.share.pump();
         }
-        // The host's choices go to everyone as they change.
+        // The host's choices go to everyone as they change, and the
+        // track's name to the server browser.
         if net::with(|s| s.host).unwrap_or(false) {
             let info = self.game_info(cx.ui);
             if self.sent.as_ref() != Some(&info) {
-                net::with(|s| s.say(Msg::Game(info.clone())));
+                let event = self.game.event;
+                let title = self.tracks(cx.ui, event).get(self.game.track).map(|t| t.name.clone()).unwrap_or_default();
+                net::with(|s| {
+                    s.title = title;
+                    s.say(Msg::Game(info.clone()))
+                });
                 self.sent = Some(info);
             }
+        }
+        for line in net::with(|s| std::mem::take(&mut s.notes)).unwrap_or_default() {
+            self.say(line);
         }
         Go::Stay
     }
@@ -923,7 +934,7 @@ impl Multi {
         }
         if let Event::Selected(n, line) = &e {
             if n.eq_ignore_ascii_case("LstSessions") {
-                self.picked = Some(*line);
+                self.picked = self.finder.as_ref().and_then(|f| f.found.get(*line)).map(|f| f.addr.clone());
                 dlg.enable("ButJoin", true);
                 dlg.set_color("ButJoin", READY);
             }
@@ -932,7 +943,8 @@ impl Multi {
         if clicked("ButJoin") {
             let found = self
                 .picked
-                .and_then(|i| self.finder.as_ref()?.found.get(i).cloned());
+                .as_ref()
+                .and_then(|a| self.finder.as_ref()?.found.iter().find(|f| f.addr == *a).cloned());
             if let Some(f) = found {
                 match net::Session::join(f.addr.clone(), self.me(cx)) {
                     Ok(s) => {
@@ -1231,8 +1243,14 @@ impl Screen for Multi {
     fn tick(&mut self, cx: &mut Cx) -> Go {
         if let (View::HostJoin { dlg, .. }, Some(f)) = (&mut self.view, &mut self.finder) {
             if f.tick() {
-                let names = f.found.iter().map(|s| s.name.clone()).collect();
-                dlg.set_items("LstSessions", names, self.picked.unwrap_or(0));
+                let lines = f.found.iter().map(|s| s.shown()).collect();
+                let at = self.picked.as_ref().and_then(|a| f.found.iter().position(|s| s.addr == *a));
+                if at.is_none() && self.picked.take().is_some() {
+                    // The picked race has gone.
+                    dlg.enable("ButJoin", false);
+                    dlg.set_color("ButJoin", NOT_READY);
+                }
+                dlg.set_items("LstSessions", lines, at.unwrap_or(0));
                 dlg.set_selectable("LstSessions", true);
             }
             return Go::Stay;
@@ -1252,6 +1270,7 @@ impl Screen for Multi {
         }
         // Everyone readies again for the next race.
         self.ready = false;
+        net::with(|s| s.racing = false);
         net::with(|s| s.say(Msg::Ready(false)));
         self.lobby(cx);
         self.page(cx, 2);

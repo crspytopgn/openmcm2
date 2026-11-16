@@ -22,6 +22,7 @@ function peerjs() {
 }
 
 let peer = null; // ours: the host's, or a joiner's
+let hosting = ""; // the race code, once the matchmaking server has it
 const links = new Map(); // number -> { conn, queue }
 let nextLink = 1;
 let events = [];
@@ -85,6 +86,7 @@ async function host(name) {
   const code = newCode();
   peer = new Peer(PREFIX + code.toLowerCase());
   peer.on("open", () => {
+    hosting = code;
     const url = new URL(location.href);
     url.search = "?join=" + code;
     show(`Hosting "${name}". Race code: ${code}`, url.href);
@@ -157,6 +159,7 @@ function stop() {
   events = [];
   peer?.destroy();
   peer = null;
+  hosting = "";
   show(null);
 }
 
@@ -179,7 +182,13 @@ function found() {
   return foundList;
 }
 
-globalThis.mm2net = { host, join, send, stop, poll, find, found };
+// The race code being hosted, for the server browser (empty before the
+// matchmaking server has it).
+function code() {
+  return hosting;
+}
+
+globalThis.mm2net = { host, join, send, stop, poll, find, found, code };
 
 // Opened from an invite link: say how to get in.
 const invited = new URLSearchParams(location.search).get("join");

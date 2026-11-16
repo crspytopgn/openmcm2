@@ -19,21 +19,28 @@ pub fn address() -> Option<String> {
 }
 
 pub fn get(url: String) -> Reply {
-    request(url, None)
+    request(url, None, false)
 }
 
 pub fn post(url: String, body: String) -> Reply {
-    request(url, Some(body))
+    request(url, Some(body), false)
+}
+
+/// A post over IPv4 only, on a computer: the server browser lists a race
+/// at the address its word came from, and the game hosts on IPv4.
+pub fn post_v4(url: String, body: String) -> Reply {
+    request(url, Some(body), true)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn request(url: String, body: Option<String>) -> Reply {
+fn request(url: String, body: Option<String>, v4: bool) -> Reply {
     let reply: Reply = Arc::default();
     let out = reply.clone();
     std::thread::spawn(move || {
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(std::time::Duration::from_secs(20)))
             .user_agent(concat!("OpenMCM2/", env!("CARGO_PKG_VERSION")))
+            .ip_family(if v4 { ureq::config::IpFamily::Ipv4Only } else { ureq::config::IpFamily::Any })
             .build()
             .into();
         let sent = match body {
@@ -49,7 +56,7 @@ fn request(url: String, body: Option<String>) -> Reply {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn request(url: String, body: Option<String>) -> Reply {
+fn request(url: String, body: Option<String>, _v4: bool) -> Reply {
     use wasm_bindgen::JsCast;
     let reply: Reply = Arc::default();
     let out = reply.clone();
