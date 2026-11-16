@@ -268,6 +268,82 @@ def podium(lo, hi, name):
     box(Vector((lo.x, bt, base)), Vector((hi.x, hi.y, hi.z)), steel(), uv_scale=4)
     _banner_quad(Vector((lo.x + 0.3, bt - 0.03, base + (hi.z - base) * 0.35)), Vector((hi.x - 0.3, bt - 0.03, hi.z - 0.3)), brand_mat(name), -1)
 
+def concrete(): return acg("Concrete034", 0.12, ramp=((0.22, 0.21, 0.2), (0.55, 0.54, 0.52)), name="concrete")
+def siding(): return acg("CorrugatedSteel007A", 0.2, ramp=((0.25, 0.26, 0.27), (0.62, 0.63, 0.62)), metal=0.4, name="siding")
+def roofing(): return acg("CorrugatedSteel007A", 0.2, ramp=((0.12, 0.08, 0.06), (0.36, 0.2, 0.14)), metal=0.3, name="roofing")
+
+def pole(lo, hi, name):
+    d = hi - lo; ax = max(range(3), key=lambda i: d[i]); c = (lo + hi) / 2
+    a = c.copy(); b = c.copy(); a[ax] = lo[ax]; b[ax] = hi[ax]
+    r = max(0.15, min(sorted(d)[1], 1.6) / 2)
+    cyl(a, b, r, galv(), 10)
+
+def startgate(lo, hi, name):
+    cy = (lo.y + hi.y) / 2; base = lo.z
+    box(Vector((lo.x, cy - 0.4, base)), Vector((hi.x, cy + 0.4, base + 0.3)), steel(), uv_scale=3)
+    n = max(1, int((hi.x - lo.x) / 3.2))
+    w = (hi.x - lo.x) / n
+    for i in range(n):
+        x0 = lo.x + i * w + 0.15
+        box(Vector((x0, cy - 0.06, base + 0.3)), Vector((x0 + w - 0.3, cy + 0.06, hi.z)), flat("gate_grey", (0.38, 0.39, 0.4), 0.5, 0.6))
+
+def retainwall(lo, hi, name):
+    box(lo, hi, concrete(), bevel=0.1, uv_scale=8)
+
+def watertower(lo, hi, name):
+    c = (lo + hi) / 2; R = min(hi.x - lo.x, hi.y - lo.y) / 2; tank0 = lo.z + (hi.z - lo.z) * 0.6
+    for k in range(4):
+        a = math.pi / 4 + k * math.pi / 2
+        cyl((c.x + math.cos(a) * R * 0.9, c.y + math.sin(a) * R * 0.9, lo.z), (c.x + math.cos(a) * R * 0.6, c.y + math.sin(a) * R * 0.6, tank0), 0.5, steel(), 10)
+    cyl((c.x, c.y, tank0), (c.x, c.y, hi.z - R * 0.4), R * 0.85, flat("tank", (0.55, 0.56, 0.55), 0.6, 0.4), 32)
+    cyl((c.x, c.y, hi.z - R * 0.4), (c.x, c.y, hi.z), R * 0.85, flat("tank", (0.55, 0.56, 0.55), 0.6, 0.4), 32, r2=0.3)
+
+def helipad(lo, hi, name):
+    box(lo, hi, concrete(), uv_scale=10)
+    c = (lo + hi) / 2; m = flat("paint_white", (0.75, 0.75, 0.72), 0.7)
+    w = (hi.x - lo.x) * 0.3
+    for a, b in (((c.x - w / 2, c.y - w * 0.6), (c.x - w / 2 + 2, c.y + w * 0.6)), ((c.x + w / 2 - 2, c.y - w * 0.6), (c.x + w / 2, c.y + w * 0.6)), ((c.x - w / 2, c.y - 1), (c.x + w / 2, c.y + 1))):
+        box(Vector((a[0], a[1], hi.z)), Vector((b[0], b[1], hi.z + 0.05)), m)
+
+def building(lo, hi, name):
+    wall_top = lo.z + (hi.z - max(lo.z, 0)) * 0.7
+    box(Vector((lo.x + 0.5, lo.y + 0.5, lo.z)), Vector((hi.x - 0.5, hi.y - 0.5, wall_top)), siding(), uv_scale=8)
+    # pitched roof along the longer side
+    bm = bmesh.new(); long_x = (hi.x - lo.x) >= (hi.y - lo.y)
+    if long_x:
+        pts = [(lo.x, lo.y, wall_top), (hi.x, lo.y, wall_top), (hi.x, (lo.y + hi.y) / 2, hi.z), (lo.x, (lo.y + hi.y) / 2, hi.z), (lo.x, hi.y, wall_top), (hi.x, hi.y, wall_top)]
+        v = [bm.verts.new(p) for p in pts]; bm.faces.new((v[0], v[1], v[2], v[3])); bm.faces.new((v[3], v[2], v[5], v[4]))
+        bm.faces.new((v[0], v[3], v[4])); bm.faces.new((v[1], v[5], v[2]))
+    else:
+        pts = [(lo.x, lo.y, wall_top), (lo.x, hi.y, wall_top), ((lo.x + hi.x) / 2, hi.y, hi.z), ((lo.x + hi.x) / 2, lo.y, hi.z), (hi.x, lo.y, wall_top), (hi.x, hi.y, wall_top)]
+        v = [bm.verts.new(p) for p in pts]; bm.faces.new((v[0], v[3], v[2], v[1])); bm.faces.new((v[3], v[4], v[5], v[2]))
+        bm.faces.new((v[0], v[4], v[3])); bm.faces.new((v[1], v[2], v[5]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces); _box_uv(bm, 8)
+    me = bpy.data.meshes.new("roof"); bm.to_mesh(me); bm.free()
+    o = bpy.data.objects.new("roof", me); bpy.context.scene.collection.objects.link(o); me.materials.append(roofing())
+    s_ = o.modifiers.new("s", "SOLIDIFY"); s_.thickness = 0.3
+    # a door and two windows on the -Y face
+    dx = (lo.x + hi.x) / 2
+    box(Vector((dx - 2, lo.y + 0.4, lo.z)), Vector((dx + 2, lo.y + 0.55, lo.z + 7)), wood(), uv_scale=3)
+    for wx in (lo.x + (hi.x - lo.x) * 0.22, hi.x - (hi.x - lo.x) * 0.22):
+        box(Vector((wx - 2, lo.y + 0.4, lo.z + 3.5)), Vector((wx + 2, lo.y + 0.55, lo.z + 6.5)), flat("window", (0.05, 0.06, 0.07), 0.2, 0.0))
+
+def dome(lo, hi, name):
+    """Stadium shell: a low dome seen from inside, dark, with a ring wall."""
+    c = (lo + hi) / 2; R = (hi.x - lo.x) / 2; H = hi.z - max(lo.z, 0); base = max(lo.z, 0)
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=64, ring_count=24, radius=1, location=(c.x, c.y, base))
+    o = bpy.context.object; o.scale = (R, R, H)
+    bm = bmesh.new(); bm.from_mesh(o.data)
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z < -0.001], context="VERTS")
+    bmesh.ops.reverse_faces(bm, faces=bm.faces); _box_uv(bm, 0.02)
+    bm.to_mesh(o.data); bm.free(); o.data.materials.append(acg("MetalPlates006", 1.0, ramp=((0.03, 0.03, 0.035), (0.12, 0.12, 0.13)), name="dome_roof"))
+    bpy.ops.object.shade_smooth()
+    # light rings hanging from the roof
+    for k in range(3):
+        r = R * (0.15 + 0.12 * k); z = base + H * (0.82 - 0.05 * k)
+        bpy.ops.mesh.primitive_torus_add(major_radius=r, minor_radius=2.0, major_segments=48, minor_segments=6, location=(c.x, c.y, z))
+        bpy.context.object.data.materials.append(steel())
+
 def generic(lo, hi, name):
     # unknown prop: a tarp-covered stack of crates in the same footprint
     box(lo, hi, canvas((0.28, 0.32, 0.26)), bevel=min(hi - lo) * 0.08, uv_scale=6)
@@ -280,12 +356,22 @@ RULES = [
     (r"^(fox\d+|.*hb)$", single_bale), (r"^billboard", billboard), (r"^gianttire", giant_tyre),
     (r"^cameraplatform", camera_platform), (r"^rail$", rail), (r"^50gal$|^trash_can", drum),
     (r"^crate", crate), (r"^tent0", tent), (r"^fence_chlink(short)?$", chainlink), (r"^waypnt$", waypoint),
-    (r"^podium$", podium),
+    (r"^podium$", podium), (r"^startgate$", startgate), (r"^retainwall", retainwall),
+    (r"^watertower$", watertower), (r"^helipad$", helipad), (r"^asdome", dome),
+    (r"^(cabin|farmhouse|garage0\d|hut|office01|main_office|rangerstation.*|quonset|gasstation|radiostation|miningbldg01|station|hanger)$", building),
 ]
 
 def build(name, lo_g, hi_g):
     reset(); lo, hi = B(lo_g, hi_g)
     fn = next((f for p, f in RULES if re.match(p, name)), generic)
+    d = sorted(hi - lo)
+    if fn is generic and d[1] < 3.0: fn = pole
+    if fn is generic and d[1] > 40:
+        # big buildings and stadium shells: a box would block the track, so
+        # these stay out until each has its own model
+        p = os.path.join(BUILD, "objects", name + ".glb")
+        if os.path.exists(p): os.remove(p)
+        return "missing"
     fn(lo, hi, name)
     o = join_all(name)
     path = os.path.join(BUILD, "objects", name + ".glb"); export(path)
