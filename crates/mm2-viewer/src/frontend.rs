@@ -124,6 +124,8 @@ pub struct Setup {
     /// A network race: which racer is this player's, and which are other
     /// players' (the rest are the host's computer riders).
     pub net: Option<NetRace>,
+    /// A Baja race on random gates (the event page's Random Gate box).
+    pub random_gates: Option<crate::gates::RandomGates>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,6 +228,11 @@ pub struct Frontend {
     plate: String,
     /// The plate number box has the keyboard.
     typing: bool,
+    /// The event page's Random Gate box (Baja): ticked, how many gates
+    /// and the race number (0x44f5a0).
+    random_gates: bool,
+    gate_count: u32,
+    seed: u32,
     /// The player's profile and the boxes the main menu's profile
     /// buttons open.
     user: screens::User,
@@ -398,6 +405,9 @@ impl Frontend {
             outfit: 0,
             plate: "107".into(),
             typing: false,
+            random_gates: false,
+            gate_count: crate::gates::RandomGates::FEWEST,
+            seed: 0,
             user,
             boxes: profiles::Profiles::default(),
             ghost_ask: None,
@@ -627,6 +637,7 @@ impl Frontend {
             rides: Vec::new(),
             ghost: Some(path.to_path_buf()),
             net: None,
+            random_gates: None,
         })
     }
 
@@ -1159,6 +1170,16 @@ impl Frontend {
             }
             return;
         }
+        // The race number box takes digits only.
+        if let Screen::Single { page, .. } = &mut self.screen {
+            if page.editing() == Some("EditSeed") {
+                if c.is_ascii_digit() || matches!(c, '\u{8}' | '\r' | '\n' | '\t') {
+                    page.type_char(c);
+                    self.read_event_page();
+                }
+                return;
+            }
+        }
         if !self.typing {
             return;
         }
@@ -1312,6 +1333,26 @@ impl Frontend {
             "opponentsrightarrow" => step(page, "OpponentsListBox", 1),
             "racesleftarrow" => step(page, "RacesListBox", -1),
             "racesrightarrow" => step(page, "RacesListBox", 1),
+            "randomgatesleftarrow" => step(page, "LstNumGates", -1),
+            "randomgatesrightarrow" => step(page, "LstNumGates", 1),
+            "chkrandomgates" => {
+                let on = page.get("ChkRandomGates").is_some_and(|c| c.on);
+                enable_seed_box(page, on);
+            }
+            // The race number's arrows go round 0 to 999 (0x44ec50).
+            "seedleft" | "seedright" => {
+                let last = crate::gates::RandomGates::LAST_SEED as i32;
+                let n: i32 = page.get("EditSeed").and_then(|c| c.text.as_deref()).and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+                let n = if name == "seedleft" {
+                    if n - 1 < 0 { last } else { n - 1 }
+                } else if n + 1 > last {
+                    0
+                } else {
+                    n + 1
+                };
+                page.edit(None);
+                page.set_text("EditSeed", n.to_string());
+            }
             "trackleft" | "trackright" => {
                 let count = page.get("DDLTextBox").map_or(0, |c| c.items.len());
                 if count > 0 {
@@ -1411,6 +1452,15 @@ impl Frontend {
         }
         self.track = page.selected("DDLTextBox");
         self.ghost = page.selected("DDLGhostRaces");
+        if page.index("ChkRandomGates").is_some() {
+            self.random_gates = page.get("ChkRandomGates").is_some_and(|c| c.on);
+            if let Some(n) = item("LstNumGates") {
+                self.gate_count = n;
+            }
+            if let Some(n) = page.get("EditSeed").and_then(|c| c.text.as_deref()).and_then(|t| t.trim().parse::<u32>().ok()) {
+                self.seed = n.min(crate::gates::RandomGates::LAST_SEED);
+            }
+        }
         if page.index("TimeList").is_some() {
             let time = mm2_settings::TIMES[page.selected("TimeList").min(mm2_settings::TIMES.len() - 1)].0;
             let weather = mm2_settings::WEATHERS[page.selected("WeatherList").min(mm2_settings::WEATHERS.len() - 1)].0;
@@ -1545,8 +1595,21 @@ impl Frontend {
         page.show_group(1011, mode != GHOST);
         page.show("LapsControlBox", mode != 0 && mode != GHOST);
         page.show("racesControlBox", mode == 2);
-        // Random gates are for Baja races.
+        // Random gates are for Baja races (0x44f2c0): 10 to 30 of them,
+        // the count, the race number and its arrows greyed while the box
+        // is not ticked.
         page.show("WaypointBox", event == EventKind::Baja && mode != GHOST);
+        use crate::gates::RandomGates;
+        page.set_items(
+            "LstNumGates",
+            (RandomGates::FEWEST..=RandomGates::MOST).map(|n| n.to_string()).collect(),
+            (self.gate_count.clamp(RandomGates::FEWEST, RandomGates::MOST) - RandomGates::FEWEST) as usize,
+        );
+        page.set_on("ChkRandomGates", self.random_gates);
+        if page.editing() != Some("EditSeed") {
+            page.set_text("EditSeed", self.seed.to_string());
+        }
+        enable_seed_box(page, self.random_gates);
         page.show("ChkTreeCollision", true);
         for (i, name) in LEVELS.iter().enumerate() {
             page.set_on(name, i == self.level);
@@ -1632,6 +1695,8 @@ impl Frontend {
                 _ => None,
             },
             net: None,
+            random_gates: (self.event == EventKind::Baja && self.mode != GHOST && self.random_gates)
+                .then_some(crate::gates::RandomGates { count: self.gate_count, seed: self.seed }),
         })
     }
 
@@ -1833,4 +1898,15 @@ pub fn preview_image(t: &TrackEntry) -> Option<tga::Image> {
         .iter()
         .find(|e| e.name.eq_ignore_ascii_case(&t.preview))?;
     tga::parse(ar.data(entry)).ok()
+}
+
+/// The Random Gate box's count, race number and their arrows, greyed while
+/// the box is not ticked (group 111, 0x46f9b0).
+fn enable_seed_box(page: &mut Dlg, on: bool) {
+    for name in ["LstNumGates", "RandomGatesLeftArrow", "RandomGatesRightArrow", "EditSeed", "SeedLeft", "SeedRight", "rbwLabel1"] {
+        page.enable(name, on);
+    }
+    if !on && page.editing() == Some("EditSeed") {
+        page.edit(None);
+    }
 }

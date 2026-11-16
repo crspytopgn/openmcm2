@@ -223,7 +223,12 @@ fn main() -> Result<(), BoxError> {
         .or(tape.as_ref().map(|t| t.tape.course()))
         .unwrap_or(0);
     let ghost = args.iter().any(|a| a == "--ghost").then_some(1);
-    let mut track = load_track(path, course, riders, Vec::new(), PLAYER, ghost)?;
+    // `--random-gates COUNT:RACE` lays a Baja track's gates out at random.
+    let random = flag("--random-gates").and_then(|v| {
+        let (n, seed) = v.split_once(':').unwrap_or((v, "0"));
+        Some(gates::RandomGates { count: n.parse().ok()?, seed: seed.parse().ok()? })
+    });
+    let mut track = load_track(path, course, riders, Vec::new(), PLAYER, ghost, random)?;
     if let Some(out) = flag("--screenshot") {
         let (w, h) = flag("--size")
             .and_then(|s| s.split_once('x'))
@@ -362,6 +367,7 @@ fn main() -> Result<(), BoxError> {
                     event: 2,
                     mode: 0,
                     laps,
+                    random_gates: None,
                     riders: (0..r.racers.len())
                         .map(|i| mm2_formats::vcr::Rider {
                             id: i as u32,
@@ -1613,6 +1619,7 @@ fn load_track(
     rides: Vec<Option<roster::Ride>>,
     me: usize,
     ghost: Option<usize>,
+    random_gates: Option<gates::RandomGates>,
 ) -> Result<Track, BoxError> {
     let ride = rides.get(me).cloned().flatten();
     load_step();
@@ -1642,15 +1649,54 @@ fn load_track(
         .and_then(|stem| archive.get(&format!("{stem}.wpt")))
         .map(|b| gates::Waypoints::parse(&String::from_utf8_lossy(b)))
         .unwrap_or_default();
+    // Or, with the Random Gate box ticked, gates laid out at random over
+    // the terrain (0x405330), and no course line for anyone to follow.
+    let random = random_gates.and_then(|r| {
+        // The solid objects (those with a shape in `COLSEG.RES`) a gate's
+        // 15 ft box must miss; ours count each as a 10 ft box round its
+        // place, for its own size.
+        let solid = solid_models(path);
+        let solids: Vec<[f32; 2]> = scene
+            .as_ref()
+            .map(|s| {
+                s.models
+                    .iter()
+                    .filter(|m| solid.contains(&model_stem(&m.model)))
+                    .map(|m| [m.position[0], m.position[2]])
+                    .collect()
+            })
+            .unwrap_or_default();
+        let reach = gates::CLEAR + 10.0;
+        let near = |x: f32, z: f32| solids.iter().any(|p| (p[0] - x).abs() < reach && (p[1] - z).abs() < reach);
+        let w = gates::Waypoints::random(
+            r,
+            (terrain.size - 1) as f32 * terrain.scale,
+            terrain.scale,
+            |x, z| ride::normal(&terrain, Vec3::new(x, 0.0, z)),
+            |x, z| ride::ground(&terrain, x, z),
+            near,
+        );
+        eprintln!("{} random gates from race #{}", w.points.len(), r.seed);
+        (w.points.len() >= 2).then_some(w)
+    });
+    let random_course = random.is_some();
+    let (waypoints, course) = match random {
+        Some(w) => (w, None),
+        None => (waypoints, course),
+    };
     let gate_list = waypoints.gates(|x, z| ride::ground(&terrain, x, z));
     load_step();
     // A course with no start line starts at its last gate, the finish
     // arch: the original's lone rider stands 7.96 ft through it and
     // 0.78 ft right of its middle (all six Baja and Enduro tapes).
-    if course.as_ref().is_some_and(|c| c.start.is_none()) {
+    if random_course || course.as_ref().is_some_and(|c| c.start.is_none()) {
         if let Some(last) = gate_list.last() {
             start = Start {
-                position: Vec3::new(last.position.x, start.position.y, last.position.z),
+                position: Vec3::new(
+                    last.position.x,
+                    if random_course { ride::ground(&terrain, last.position.x, last.position.z) } else { start.position.y },
+                    last.position.z,
+                ),
                 direction: last.look,
                 grid: Some((-7.96, -0.78)),
             };
@@ -1835,8 +1881,22 @@ fn load_track(
             }) {
                 match read_archive(&res.join("ECO.RES")) {
                     Ok(bytes) => {
-                        let (placed, solid, far) =
+                        let (mut placed, mut solid, mut far) =
                             eco::place(&eco, &rs2::Archive::parse(&bytes)?, &terrain);
+                        // Random gates take out the trees within 150 ft
+                        // of each gate (0x460c50).
+                        if random_course {
+                            let r = gates::TREES_CLEARED;
+                            let clear = |p: Vec3| {
+                                !gate_list.iter().any(|g| (g.position.x - p.x).abs() < r && (g.position.z - p.z).abs() < r)
+                            };
+                            let keep: Vec<bool> = placed.iter().map(|p| clear(Vec3::from(p.position))).collect();
+                            let mut k = keep.iter();
+                            placed.retain(|_| *k.next().unwrap());
+                            let mut k = keep.iter();
+                            far.retain(|_| *k.next().unwrap());
+                            solid.retain(|t| clear(t.base));
+                        }
                         eprintln!("{} trees and bushes, {} trunks", placed.len(), solid.len());
                         trees = statics.len()..statics.len() + placed.len();
                         billboards = far;
@@ -2221,6 +2281,31 @@ fn trick_motions(bike_res: &rs2::Archive, bike: &str) -> Vec<Option<race::TrickM
 
 /// The start line from the track definition (`.tdf`), or the scene's
 /// default start when there is none.
+/// A model's name without its extension, in lower case.
+fn model_stem(name: &str) -> String {
+    name.rsplit_once('.').map_or(name, |(s, _)| s).trim().to_ascii_lowercase()
+}
+
+/// The models that have a collision shape in the game's `RES/COLSEG.RES`.
+fn solid_models(track: &Path) -> std::collections::HashSet<String> {
+    track
+        .ancestors()
+        .map(|dir| dir.join("RES").join("COLSEG.RES"))
+        .find(|p| fs::is_file(p))
+        .and_then(|p| read_archive(&p).ok())
+        .and_then(|b| {
+            let ar = rs2::Archive::parse(&b).ok()?;
+            Some(
+                ar.entries()
+                    .iter()
+                    .filter(|e| e.name.to_ascii_lowercase().ends_with(".col"))
+                    .map(|e| model_stem(&e.name))
+                    .collect(),
+            )
+        })
+        .unwrap_or_default()
+}
+
 fn race_start(
     archive: &rs2::Archive,
     scene: Option<&scn::Scene>,
@@ -2768,6 +2853,7 @@ fn heading(setup: &frontend::Setup, race: &Race) -> replay::Heading {
         event: setup.event as u32,
         mode: setup.mode,
         laps: setup.laps,
+        random_gates: setup.random_gates.map(|r| (r.count, r.seed)),
         riders,
     }
 }
@@ -2831,6 +2917,10 @@ fn replay_setup(game: &Path, tape: &mm2_formats::vcr::Tape) -> Option<frontend::
         rides,
         ghost: None,
         net: None,
+        random_gates: tape
+            .random_gates()
+            .filter(|_| event == frontend::EventKind::Baja)
+            .map(|(count, seed)| gates::RandomGates { count, seed }),
     })
 }
 
@@ -3908,8 +3998,9 @@ impl App {
             rides[1] = setup.ride.clone();
         }
         LOAD_STEPS.store(0, std::sync::atomic::Ordering::Relaxed);
+        let random = setup.random_gates;
         let job = job::Job::spawn(move || {
-            load_track(&path, course, riders, rides, me, ghost.then_some(1)).map_err(|e| e.to_string())
+            load_track(&path, course, riders, rides, me, ghost.then_some(1), random).map_err(|e| e.to_string())
         });
         self.loading = Some(Loading {
             setup,
@@ -3937,7 +4028,8 @@ impl App {
                 };
                 self.net = setup.net;
                 self.event = Some(setup.event);
-                let counts = !practice && setup.net.is_none() && self.tape.is_none();
+                // A race on random gates goes in no records (0x49d180).
+                let counts = !practice && setup.net.is_none() && self.tape.is_none() && setup.random_gates.is_none();
                 self.records = counts.then(|| screens::records::Entry {
                     event: setup.event as u32,
                     track: setup.track.clone(),
