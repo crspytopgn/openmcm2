@@ -4155,17 +4155,19 @@ impl App {
             }
         }
         // The laps that count go on the lap leaderboards: from the second
-        // (the first starts from the gate), and in the lap races not with
-        // much of it off the course.
+        // (the first starts from the gate), and in Nationals and
+        // Supercross not with much of it off the course. Baja and Enduro
+        // are ridden between checkpoints, away from the course's line.
         if let (Some((board, title)), Some(race), Some((ui, _)), Some(f)) = (self.lap_board.take(), &self.race, &self.hud, &self.front) {
             let me = &race.racers[race.player];
+            let kept_on = mm2_settings::laps::keeps_on_course(board.event);
             let rider = rider_name(race, ui, race.player);
             let laps: Vec<_> = me
                 .lap_times
                 .iter()
                 .enumerate()
                 .skip(1)
-                .filter(|&(i, _)| me.lap_off.get(i).is_none_or(|&off| off <= mm2_settings::laps::MOST_OFF_COURSE))
+                .filter(|&(i, _)| !kept_on || me.lap_off.get(i).is_none_or(|&off| off <= mm2_settings::laps::MOST_OFF_COURSE))
                 .map(|(_, &t)| mm2_settings::laps::Lap { board: board.clone(), rider: rider.clone(), ms: (t * 1000.0).round() as u32, title: title.clone() })
                 .filter(|l| l.ms >= mm2_settings::laps::SHORTEST)
                 .collect();
