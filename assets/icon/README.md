@@ -11,8 +11,8 @@ License), turned into outlines.
   own background, so both files are the same and work on light and dark.
 - `wordmark.svg`: just the chrome lettering, for tight spaces like the
   site's top bar.
-- `app-icon.svg`: the app icon (1024 grid), a chrome number 2 on the plate;
-  `app-icon-small.svg` fills the tile with a thicker edge, for 64 px and below.
+- `app-icon.svg`: the app icon (1024 grid), a dirt bike wheel with a chrome rim and 18 spokes;
+  `app-icon-small.svg` has thicker spokes and fewer knobs, for 64 px and below.
 - `icon-256.png`: window icon for the launcher and the game.
 - `logo-dark.png`: the logo at the top of the launcher.
 - `openmcm2.ico`: Windows .exe icon (16 to 256 px), added by each crate's `build.rs`.
