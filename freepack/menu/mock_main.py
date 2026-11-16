@@ -13,7 +13,7 @@ def font(rel, size, var=None):
     return f
 S = 2; W, H = 640 * S, 480 * S
 rng = np.random.default_rng(3)
-LIME = (172, 236, 40); BONE = (232, 226, 210); INK = (24, 22, 20); RUST = (176, 74, 38); OLIVE = (92, 98, 70); SKY = (120, 140, 150)
+LIME = (163, 194, 74); BONE = (232, 226, 210); INK = (24, 22, 20); RUST = (176, 74, 38); OLIVE = (92, 98, 70); SKY = (120, 140, 150)
 
 def grain(img, amt=10):
     a = np.asarray(img.convert("RGB"), np.float32)
@@ -109,6 +109,34 @@ def sticker(text, w, h, bg, fg, f, rot, sub=None, ico=None):
     out.alpha_composite(sh, (5, 6)); out.alpha_composite(im, (0, 0))
     return out.rotate(rot, Image.BICUBIC, expand=True)
 
+def wear(im, amount=0.06, seed=5):
+    """Scuffed print: speckle holes and a slightly worn edge."""
+    r = np.random.default_rng(seed); a = np.asarray(im).astype(np.float32)
+    n = np.asarray(Image.fromarray((r.random(a.shape[:2]) * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(1.2)), np.float32) / 255
+    hole = n > (1 - amount * 0.5) * 0.62 + 0.38 * (1 - amount)
+    a[..., 3] = np.where(hole, a[..., 3] * 0.15, a[..., 3])
+    return Image.fromarray(a.astype(np.uint8))
+
+def logo_style(logo, style):
+    a = np.asarray(logo).astype(np.float32) / 255; rgb, al = a[..., :3], a[..., 3:]
+    lum = rgb @ [0.3, 0.59, 0.11]
+    if style == "faded":
+        # sun-faded decal: half the saturation, lime knocked back to the olive family, warm paper tint
+        rgb = rgb * 0.55 + lum[..., None] * 0.45
+        rgb = rgb * [0.97, 0.95, 0.86] + 0.04
+        out = Image.fromarray((np.concatenate([np.clip(rgb, 0, 1), al], -1) * 255).astype(np.uint8))
+        return wear(out, 0.05)
+    if style == "ink":
+        # two-colour screen print on a bone sticker: dark plate becomes ink, chrome and lime become paper and olive
+        ink = np.array(INK) / 255; bone = np.array(BONE) / 255; ol = np.array(OLIVE) / 255
+        lime = (rgb[..., 1] > 0.6) & (rgb[..., 0] < 0.85) & (rgb[..., 2] < 0.4)
+        base = np.where(lum[..., None] < 0.25, ink, bone)
+        base = np.where(lime[..., None], ol, base)
+        out = Image.fromarray((np.concatenate([base, al], -1) * 255).astype(np.uint8))
+        return wear(out, 0.08)
+    if style == "print": return wear(logo, 0.04)
+    return logo
+
 def main(photo, out):
     bg = Image.open(photo).convert("RGB")
     bg = ImageOps.fit(bg, (W, H), centering=(0.55, 0.45))
@@ -135,9 +163,13 @@ def main(photo, out):
     d.text((24, H - 40), "ALL-TERRAIN  ·  DIRT  ·  SAND  ·  SNOW", font=spec, fill=INK)
     # big title, right side, knocked out of a rust block
     logo = Image.open(os.environ.get("FP_LOGO", os.path.join(os.path.dirname(__file__), "logo.png"))).convert("RGBA")
-    logo = logo.resize((700, int(700 * logo.size[1] / logo.size[0])), Image.LANCZOS).rotate(2, Image.BICUBIC, expand=True)
+    style = os.environ.get("FP_LOGOSTYLE", "full"); lw = 560 if style != "full" else 700
+    logo = logo_style(logo.resize((lw, int(lw * logo.size[1] / logo.size[0])), Image.LANCZOS), style).rotate(2, Image.BICUBIC, expand=True)
     sh = Image.new("RGBA", logo.size, (0, 0, 0, 0)); sh.paste((0, 0, 0, 120), (0, 0), logo.split()[3]); sh = sh.filter(ImageFilter.GaussianBlur(8))
-    canvas.alpha_composite(sh, (W - 730 + 8, 70 + 12)); canvas.alpha_composite(logo, (W - 730, 70))
+    lx = W - lw - 60; canvas.alpha_composite(sh, (lx + 8, 70 + 12)); canvas.alpha_composite(logo, (lx, 70))
+    if style != "full":
+        for tx, ty, rot in ((lx - 20, 60, 35), (lx + lw - 70, 70 + logo.size[1] - 40, 30)):
+            canvas.alpha_composite(tape(110, 30).rotate(rot, expand=True), (tx, ty))
     tag = font("barlowcondensed/BarlowCondensed-Bold.ttf", 30)
     d.text((W - 640, 330), "RIDE IT LIKE YOU STOLE IT.", font=tag, fill=BONE)
     d.text((W - 640, 366), "No disc. No catch. Just dirt.", font=spec, fill=(220, 214, 200))
