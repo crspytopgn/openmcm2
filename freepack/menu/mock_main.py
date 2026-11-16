@@ -178,7 +178,7 @@ def compose_bg(photo):
     sh = Image.new("RGBA", logo.size, (0, 0, 0, 0)); sh.paste((0, 0, 0, 120), (0, 0), logo.split()[3]); sh = sh.filter(ImageFilter.GaussianBlur(8))
     lx = W - lw - 60; canvas.alpha_composite(sh, (lx + 8, 70 + 12)); canvas.alpha_composite(logo, (lx, 70))
     if style != "full":
-        for tx, ty, rot in ((lx - 20, 60, 35), (lx + lw - 70, 70 + logo.size[1] - 40, 30)):
+        for tx, ty, rot in ((lx - 20, 60, 35), (lx + lw - 100, 70 + logo.size[1] - 75, 30)):
             canvas.alpha_composite(tape(110, 30).rotate(rot, expand=True), (tx, ty))
     tag = font("barlowcondensed/BarlowCondensed-Bold.ttf", 30)
     ty = 70 + logo.size[1] + 18; tx = lx + 10

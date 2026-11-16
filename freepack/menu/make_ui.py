@@ -235,7 +235,7 @@ def main_menu(photo):
                                            ("IPX", "LAN", None, (INK, BONE), (112, 48)), ("Cable", "CABLE", None, (INK, BONE), (112, 37)), ("Modem", "MODEM", None, (INK, BONE), (111, 37))):
         sticker_set(dat, None, "01_Main\\" + stem + "{s}.tga", w * X, h * X, text, b, f, ico, None, float(r.uniform(-2, 2)), seed=40 + len(stem), align="center")
     # profile pull-down buttons
-    for k, text in enumerate(("NEW", "LOAD", "REMOVE", "CANCEL"), 1):
+    for k, text in enumerate(("", "", "", ""), 1):  # the game draws these labels itself
         b, f = (LIME, INK) if k == 2 else (BONE, INK)
         sticker_set(dat, None, "01_Main\\UserButton0%d{s}.tga" % k, 117 * X, 34 * X, text, b, f, seed=50 + k, align="center")
     for s in ("Up", "Lit", "Down"):
@@ -362,7 +362,7 @@ def sp_pages():
     for dat, pre, p in (("SPEVENT", e, "SPCorner"), ("SPBIKER", b, "BRCorner")):
         for k in ("UL", "UR", "LL", "LR"): save(dat, pre + p + k + ".tga", corner(k))
     sticker_set("SPBIKER", None, {"Up": b + "SnglWrenchUp.tga", "Lit": b + "SnglWrenchLit.tga", "Down": b + "SnglWrenchDown.tga"}, 99 * X, 37 * X, "TUNE", BONE, INK, "wrench", seed=70)
-    sticker_set("SPRINFO", None, {"Up": r_ + "SPSaveReplayUp.tga", "Down": r_ + "SPSaveReplayDown.tga", "Lit": r_ + "SPSaveReplayLit.tga"}, 117 * X, 33 * X, "SAVE REPLAY", LIME, INK, seed=71, align="center")
+    sticker_set("SPRINFO", None, {"Up": r_ + "SPSaveReplayUp.tga", "Down": r_ + "SPSaveReplayDown.tga", "Lit": r_ + "SPSaveReplayLit.tga"}, 117 * X, 33 * X, "", LIME, INK, seed=71, align="center")
     bar = Image.new("RGBA", (456 * X, 21 * X), LIME + (255,)); save("SPRINFO", r_ + "InfoBar.tga", bar)
 
 def write_layout(dat, rects):
