@@ -1,4 +1,42 @@
-# OpenMCM2 0.5.2
+# OpenMCM2 0.5.3
+
+## New in 0.5.3
+
+* **Server browser:** Multiplayer's Host or Join list now shows open
+  races from everywhere, under the ones on your own network, with their
+  track and how many riders are in. Pick one and press Join. It works on
+  desktop and in the browser (desktop and browser races are listed
+  apart, as they can't race each other yet).
+* **Your hosted races are listed for you:** a race you host goes in the
+  list while it's open. On desktop it only shows if other players can
+  reach your computer; if they can't, the lobby chat tells you to
+  forward TCP port 28220 on your router. To keep your races to people
+  you invite, turn off "List my races in the server browser" (launcher,
+  Extras, Network races) or tick "Keep my races out of the server
+  browser" in the browser's settings. The launcher's Network races card
+  also shows the open races.
+* **Lobby downloads on by default:** in a network race, the host's track
+  and other riders' own paints and outfits come over if you don't have
+  them. Turn it off in the same Network races card, or with "No lobby
+  downloads" in the browser.
+* **Baja and Enduro on the leaderboards:** their laps never made it on
+  before; now they do.
+* **Baja checkpoint arrow and radar:** the arrow points at the gate
+  itself, and the radar shows gates and riders as the original does.
+* **Helmet Cam:** F1 now switches it on and off in a race (fn+F1 on a
+  Mac keyboard), and the view sits at the rider's goggles, with the bars
+  and the track in view.
+* **Custom Engine Size:** unlocked as in the original when you pick one
+  of the game's own .tga paints (such as BIKE01), in single races,
+  multiplayer and the Pro Circuit.
+* **Screen and window size in the launcher:** pick full screen (your
+  screen's own resolution or another) or a window and its size. A new
+  Auto graphics preset picks Low, Medium or High for your computer.
+* **Smoother at 4K:** less work for the graphics card each frame, frame
+  times evened out to the screen, and the computer riders move smoothly
+  between their steps. The picture is the same as before.
+* **Support the project:** the launcher's Updates page has a small
+  Donate on GitHub card.
 
 ## New in 0.5.2
 
