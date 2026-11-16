@@ -444,11 +444,13 @@ impl Frontend {
         };
         profiles::fill(&mut cx, d);
         // The connections DirectPlay offered (`0x44c1d0`): the port has
-        // its own TCP/IP play to come, and none of the others.
+        // its own TCP/IP play, and the Gaming Zone's place (long closed)
+        // opens the online races: the server browser.
+        d.set_tip("ButZone", "Online races: join races and free roam servers from everywhere, or host your own");
         for (name, on) in [
             ("ButTCP", true),
             ("ButIPX", false),
-            ("ButZone", false),
+            ("ButZone", true),
             ("ButCable", false),
             ("ButModem", false),
         ] {
@@ -925,6 +927,12 @@ impl Frontend {
                     "menuhighscore" => {
                         if let Some(h) = screens::records::HighScores::open(&mut cx) {
                             self.screen = Screen::Extra(Box::new(h));
+                        }
+                        return Next::Stay;
+                    }
+                    "butzone" => {
+                        if let Some(m) = screens::multi::Multi::open_online(&mut cx) {
+                            self.screen = Screen::Extra(Box::new(m));
                         }
                         return Next::Stay;
                     }
