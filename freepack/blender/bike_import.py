@@ -178,11 +178,26 @@ def livery(nodes, paint, png):
         # number plates: the front plate and the flat side panels under the seat get the "plate"
         # material (same picture), where the engine prints the rider's number
         PL = bpy.data.materials.get("plate")
-        if PL is None: PL = L.copy(); PL.name = "plate"
+        if PL is None:   # plain plate background; the engine prints the number over the plate's own 0..1 UVs
+            PL = bpy.data.materials.new("plate"); PL.use_nodes = True; pb = PL.node_tree.nodes["Principled BSDF"]
+            pb.inputs["Base Color"].default_value = (0.9, 0.9, 0.88, 1); pb.inputs["Roughness"].default_value = 0.45
         if PL.name not in [m.name for m in me.materials if m]: me.materials.append(PL)
         pi = [m.name for m in me.materials].index(PL.name)
-        for f in Z.get("plate", []) + [f for f in Z.get("side", []) if abs((mw.to_3x3() @ f.normal).normalized().x) > 0.6 and (mw @ f.center).y < -0.3]:
-            f.material_index = pi
+        side = [f for f in Z.get("side", []) if abs((mw.to_3x3() @ f.normal).normalized().x) > 0.6 and (mw @ f.center).y < -0.3]
+        groups_ = [("front", Z.get("plate", [])), ("left", [f for f in side if (mw @ f.center).x < 0]), ("right", [f for f in side if (mw @ f.center).x >= 0])]
+        for kind, fs in groups_:
+            if not fs: continue
+            pts = [mw @ me.vertices[v].co for f in fs for v in f.vertices]
+            ax_u = (lambda p: p.x) if kind == "front" else (lambda p: p.y)
+            u0, u1 = min(map(ax_u, pts)), max(map(ax_u, pts)); z0, z1 = min(p.z for p in pts), max(p.z for p in pts)
+            for f in fs:
+                f.material_index = pi
+                for li in f.loop_indices:
+                    p = mw @ me.vertices[me.loops[li].vertex_index].co
+                    u = (ax_u(p) - u0) / (u1 - u0 + 1e-6)
+                    if kind == "left": u = 1 - u      # read left to right from outside on both sides
+                    if kind == "front": u = 1 - u     # the front plate is seen from ahead (looking back along -y)
+                    uvl.data[li].uv = (u, (p.z - z0) / (z1 - z0 + 1e-6))
 
 # real-world finishes for models that ship untextured, by material-name keyword (first match wins)
 FINISH = {"sonnie": [

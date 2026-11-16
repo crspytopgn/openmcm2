@@ -1,11 +1,13 @@
 """Fit a third-party CC0/CC-BY model into a stock object's bounds.
 
     python blender/fit_import.py SRC.glb STOCKNAME [--rot=DEG] [--cap=FACES] [--tex=1024] [--stretch]
+                                 [--by=x|y|z] [--hue=LO:HI:TO[:SAT]/...] [--blot=IMG:X0,Y0,X1,Y1/...] [--keep-alpha]
 
 Joins the model, optionally thins it to FACES, turns it DEG about the vertical
 (by default its long side follows the bounds' long side), scales it to sit in
 the stock bounds (uniform unless --stretch) and stands it on the bounds floor.
-Writes build/objects/STOCKNAME.glb. Only sizes come from the stock list.
+Materials are made opaque, --hue moves a maker's paint colours and --blot paints
+over maker decals. Writes build/objects/STOCKNAME.glb. Only sizes come from the stock list.
 """
 import os, sys, math
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -25,6 +27,71 @@ def stock_bounds(name):
         if n == name:
             v = list(map(float, v[:6])); return Vector((v[0], v[2], v[1])), Vector((v[3], v[5], v[4]))
     raise SystemExit(f"{name} not in stock_sizes.tsv")
+
+def opaque():
+    """Imports often flag solid parts as alpha-hashed; the game draws them solid."""
+    for m in bpy.data.materials:
+        if not m.node_tree: continue
+        for n in m.node_tree.nodes:
+            if n.type == "BSDF_PRINCIPLED":
+                for l in list(n.inputs["Alpha"].links): m.node_tree.links.remove(l)
+                n.inputs["Alpha"].default_value = 1.0
+        if hasattr(m, "blend_method"): m.blend_method = "OPAQUE"
+
+def base_images():
+    out = []
+    for m in bpy.data.materials:
+        if not m.node_tree: continue
+        b = next((n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        l = b and b.inputs["Base Color"].links
+        if l and l[0].from_node.type == "TEX_IMAGE" and l[0].from_node.image not in out: out.append(l[0].from_node.image)
+    return out
+
+def pixels(im):
+    import numpy as np
+    a = np.empty(im.size[0] * im.size[1] * 4, np.float32); im.pixels.foreach_get(a)
+    return a.reshape(im.size[1], im.size[0], 4)
+
+def store(im, a):
+    im.pixels.foreach_set(a.ravel()); im.update(); im.pack()
+
+def recolor(spec):
+    """--hue=LO:HI:TO[:SAT]/... moves hues in LO..HI degrees to TO (and scales
+    saturation by SAT), to take a real maker's paint scheme off a model."""
+    import numpy as np, colorsys
+    rules = [list(map(float, r.split(":"))) for r in spec.split("/")]
+    for im in base_images():
+        a = pixels(im); rgb = a[..., :3]
+        mx = rgb.max(-1); mn = rgb.min(-1); d = mx - mn + 1e-6
+        r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+        h = np.where(mx == r, (g - b) / d % 6, np.where(mx == g, (b - r) / d + 2, (r - g) / d + 4)) * 60
+        s = np.where(mx > 0, (mx - mn) / (mx + 1e-6), 0); v = mx
+        for lo, hi, to, *k in rules:
+            m = (h >= lo) & (h <= hi) & (s > 0.15)
+            h = np.where(m, to, h); s = np.where(m, np.clip(s * (k[0] if k else 1), 0, 1), s)
+        c = v * s; x = c * (1 - abs((h / 60) % 2 - 1)); z = np.zeros_like(c); i = (h // 60).astype(int) % 6
+        rr = np.select([i == 0, i == 1, i == 2, i == 3, i == 4, i == 5], [c, x, z, z, x, c])
+        gg = np.select([i == 0, i == 1, i == 2, i == 3, i == 4, i == 5], [x, c, c, x, z, z])
+        bb = np.select([i == 0, i == 1, i == 2, i == 3, i == 4, i == 5], [z, z, x, c, c, x])
+        a[..., 0], a[..., 1], a[..., 2] = rr + v - c, gg + v - c, bb + v - c
+        store(im, a)
+
+def blot(spec):
+    """--blot=IMG:X0,Y0,X1,Y1/... paints over a maker's decal (box in 0..1
+    image coords, y down) with the colour around it."""
+    import numpy as np
+    ims = {im.name: im for im in base_images()}
+    for r in spec.split("/"):
+        nm, box = r.split(":"); im = list(ims.values())[int(nm)] if nm.isdigit() else ims[nm]
+        a = pixels(im); H, W = a.shape[:2]
+        x0, y0, x1, y1 = [float(t) for t in box.split(",")]
+        c0, c1 = int(x0 * W), int(x1 * W); r1, r0 = H - int(y0 * H), H - int(y1 * H)   # pixels are bottom-up
+        p = 3; ring = np.concatenate([a[max(r0 - p, 0):r0, c0:c1].reshape(-1, 4), a[r1:r1 + p, c0:c1].reshape(-1, 4),
+                                     a[r0:r1, max(c0 - p, 0):c0].reshape(-1, 4), a[r0:r1, c1:c1 + p].reshape(-1, 4)])
+        a[r0:r1, c0:c1] = np.median(ring, 0)
+        noise = (np.random.default_rng(0).random((r1 - r0, c1 - c0, 1)) - 0.5) * 0.04
+        a[r0:r1, c0:c1, :3] += noise
+        store(im, a)
 
 def main(src, name):
     lo, hi = stock_bounds(name)
@@ -59,6 +126,9 @@ def main(src, name):
     vs = [v.co for v in me.vertices]; a = Vector(map(min, *vs)); b = Vector(map(max, *vs))
     c = Vector(((lo.x + hi.x - a.x - b.x) / 2, (lo.y + hi.y - a.y - b.y) / 2, lo.z - a.z))
     me.transform(Matrix.Translation(c))
+    if "--keep-alpha" not in sys.argv: opaque()
+    if opt("hue"): recolor(opt("hue"))
+    if opt("blot"): blot(opt("blot"))
     tex = int(opt("tex", "1024"))
     for im in bpy.data.images:
         if im.size[0] > tex or im.size[1] > tex:

@@ -14,7 +14,7 @@ from objects import wood, steel, galv, concrete, siding, roofing, glass, rubber,
 V = Vector
 def T(mid, tile, **kw): return acg(mid, 1.0 / tile, name=kw.pop("name", f"{mid}_{tile}_{kw.get('ramp')}_{kw.get('tint')}"), **kw)
 def bricks(): return T("Bricks059", 6)
-def stone(): return T("Rock035", 8)
+def stone(): return T("Rock035", 8, ramp=((0.3, 0.28, 0.25), (0.74, 0.7, 0.62)), name="stone_light")
 def rock(): return T("Rock030", 12)
 def planks(): return T("Planks023A", 6)
 def oldwood(): return T("Planks012", 6)
@@ -40,6 +40,39 @@ def mesh(name, verts, faces, mat, uv_s=1.0, smooth=False):
     me = bpy.data.meshes.new(name); bm.to_mesh(me); bm.free()
     for p in me.polygons: p.use_smooth = smooth
     o = bpy.data.objects.new(name, me); bpy.context.scene.collection.objects.link(o); me.materials.append(mat); return o
+
+def decal(p0, p1, p2, p3, mat, name="decal"):
+    """A quad with the whole picture on it (0..1 UVs), p0 bottom-left, counter-clockwise."""
+    o = mesh(name, [p0, p1, p2, p3], [[0, 1, 2, 3]], mat)
+    me = o.data; uv = me.uv_layers[0]; pts = [p0, p1, p2, p3]
+    if me.polygons and me.polygons[0].normal.dot((p1 - p0).cross(p3 - p0)) < 0: me.flip_normals()
+    for l in me.loops:   # by position, since normal fixing may reorder the loop
+        k = min(range(4), key=lambda i: (me.vertices[l.vertex_index].co - pts[i]).length); uv.data[l.index].uv = [(0, 0), (1, 0), (1, 1), (0, 1)][k]
+    return o
+
+def front_decal(lo, hi, mat, inset=0.0, z0=None, z1=None, x0=None, x1=None, name="decal"):
+    """Decal on the -y face of a box."""
+    y = lo.y - 0.015; a = lo.x + inset if x0 is None else x0; b = hi.x - inset if x1 is None else x1
+    za = lo.z + inset if z0 is None else z0; zb = hi.z - inset if z1 is None else z1
+    return decal(V((a, y, za)), V((b, y, za)), V((b, y, zb)), V((a, y, zb)), mat, name)
+
+def painted_tex(key, size, draw, rough=0.5):
+    """Make (once) and load a small painted texture: draw(ImageDraw, w, h, font)."""
+    import os
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    from common import BUILD, image_mat
+    p = os.path.join(BUILD, "tex", f"{key}.png")
+    if not os.path.exists(p):
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        im = Image.new("RGB", size, (0, 0, 0)); d = ImageDraw.Draw(im)
+        font = lambda n: ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", n)
+        draw(d, size[0], size[1], font)
+        rnd = random.Random(key); px = im.load()   # light grime so it isn't clean vector art
+        for _ in range(size[0] * size[1] // 40):
+            x, y = rnd.randrange(size[0]), rnd.randrange(size[1]); r, g, b = px[x, y]; k = rnd.uniform(0.9, 1.0)
+            px[x, y] = (int(r * k), int(g * k), int(b * k))
+        im = im.filter(ImageFilter.GaussianBlur(0.6)); im.save(p)
+    return image_mat(p, key, rough)
 
 def prism(pts2, y0, y1, mat, axis="y", uv_s=1.0):
     """Extrude a 2D outline [(a, z)] between y0 and y1 along an axis (x or y)."""
@@ -136,7 +169,8 @@ def house(lo, hi, wall, roof, base=None, base_h=0.0, wall_frac=0.62, rows=None, 
     zt = z0 + H * (1.0 if flat_roof else wall_frac)
     box(V((lo.x + 0.3, lo.y + 0.3, z0)), V((hi.x - 0.3, hi.y - 0.3, zt)), wall)
     floors = rows or max(1, int((zt - z0) / 11))
-    windows(V((lo.x + 0.3, lo.y + 0.3, 0)), V((hi.x - 0.3, hi.y - 0.3, 0)), z0 + 1.5, zt - 1.0, floors, trim, every=max(9.0, (hi.x - lo.x) / 18))
+    small = min(hi.x - lo.x, hi.y - lo.y) < 10
+    if not small: windows(V((lo.x + 0.3, lo.y + 0.3, 0)), V((hi.x - 0.3, hi.y - 0.3, 0)), z0 + 1.5, zt - 1.0, floors, trim, every=max(9.0, (hi.x - lo.x) / 18))
     if flat_roof:
         box(V((lo.x, lo.y, zt)), V((hi.x, hi.y, zt + 0.6)), conc())
         for (a, b) in ((V((lo.x, lo.y, zt)), V((hi.x, lo.y + 1, zt + 3))), (V((lo.x, hi.y - 1, zt)), V((hi.x, hi.y, zt + 3))),
@@ -146,8 +180,8 @@ def house(lo, hi, wall, roof, base=None, base_h=0.0, wall_frac=0.62, rows=None, 
         gable_ends(V((lo.x + 0.3, lo.y + 0.3, 0)), V((hi.x - 0.3, hi.y - 0.3, 0)), zt, hi.z - 0.6, wall)
         gable_roof(V((lo.x + 1.5, lo.y + 1.5, 0)), V((hi.x - 1.5, hi.y - 1.5, 0)), zt, hi.z - 0.6, roof, over=1.5)
     if door:
-        dx = (lo.x + hi.x) / 2
-        box(V((dx - 2.2, lo.y + 0.05, z0)), V((dx + 2.2, lo.y + 0.35, z0 + min(7.5, (zt - z0) * 0.8))), paintm((0.3, 0.18, 0.1), "door", 0.6, 0.0))
+        dx = (lo.x + hi.x) / 2; dw = min(2.2, (hi.x - lo.x) * 0.3)
+        box(V((dx - dw, lo.y + 0.05, z0)), V((dx + dw, lo.y + 0.35, z0 + min(7.0, (zt - z0) * 0.85))), oldwood() if small else paintm((0.3, 0.18, 0.1), "door", 0.6, 0.0))
 
 # ---------------- buildings ----------------
 def b_lodge(lo, hi, name):
@@ -221,7 +255,7 @@ def b_observatory(lo, hi, name):
 def dome_shell(c, R, kz=1.0, slit=True):
     prof = [(R * math.cos(t), R * kz * math.sin(t)) for t in [math.pi / 2 * i / 16 for i in range(17)]]
     prof[-1] = (0.01, R * kz)
-    lathe(prof, c, acg("MetalPlates006", 0.08, tint=(0.82, 0.83, 0.85), rough=0.35, metal=0.9, name="domemetal"), 64)
+    lathe(prof, c, acg("MetalPlates006", 0.08, ramp=((0.55, 0.56, 0.58), (0.86, 0.87, 0.88)), rough=0.45, metal=0.35, name="domemetal"), 64)
     if slit:   # observing slit: a dark strip over the top
         w = R * 0.12
         pts = []
@@ -235,7 +269,7 @@ def b_dome(lo, hi, name):
 
 def b_pyramid(lo, hi, name):
     c = (lo + hi) / 2; W = min(hi.x - lo.x, hi.y - lo.y); H = hi.z - lo.z; n = max(12, int(H / 3.2))
-    m = acg("Rock035", 1 / 10.0, tint=(1.2, 1.02, 0.76), name="sandstone")
+    m = acg("PavingStones092", 1 / 8.0, ramp=((0.42, 0.33, 0.22), (0.86, 0.74, 0.55)), name="sandstone")
     for k in range(n):
         w = W * (1 - k / n); z0 = lo.z + H * k / n
         box(V((c.x - w / 2, c.y - w / 2, z0)), V((c.x + w / 2, c.y + w / 2, z0 + H / n)), m)
@@ -560,27 +594,49 @@ def b_headframe(lo, hi, name):
 
 # ---------------- yard props ----------------
 def b_container(lo, hi, name):
-    rgb = paint_for(name) if callable(paint_for) else (0.55, 0.12, 0.08)
-    col = random.Random(name).choice([(0.55, 0.12, 0.08), (0.12, 0.28, 0.45), (0.2, 0.36, 0.2), (0.6, 0.45, 0.1), (0.4, 0.4, 0.42)])
-    box(lo, hi, corr(col))
-    ax = long_axis(lo, hi)
-    for a in ((lo.x, hi.x) if ax == "x" else (lo.y, hi.y)):
-        for s in ((lo.y, hi.y) if ax == "x" else (lo.x, hi.x)):
-            p = V((a, s, 0)) if ax == "x" else V((s, a, 0))
-            box(V((p.x - 0.4, p.y - 0.4, lo.z)), V((p.x + 0.4, p.y + 0.4, hi.z)), paintm(tuple(x * 0.7 for x in col), f"cont{col}"))
+    """Shipping container: painted steel box with ribbed sides, corner posts, cargo doors."""
+    col = random.Random(name).choice([(0.5, 0.11, 0.07), (0.1, 0.24, 0.4), (0.18, 0.32, 0.18), (0.55, 0.42, 0.1), (0.38, 0.38, 0.4)])
+    pm = paintm(col, f"cont{col}", 0.55, 0.35)
+    dk = paintm(tuple(c * 0.6 for c in col), f"contdk{col}", 0.5, 0.4)
+    ax = long_axis(lo, hi); box(V((lo.x + 0.15, lo.y + 0.15, lo.z + 0.1)), V((hi.x - 0.15, hi.y - 0.15, hi.z - 0.1)), pm)
+    L0, L1 = (lo.x, hi.x) if ax == "x" else (lo.y, hi.y)
+    n = int((L1 - L0) / 1.1)
+    for k in range(n):
+        a = L0 + 0.6 + (L1 - L0 - 1.2) * k / max(n - 1, 1)
+        for s_ in ((lo.y, lo.y + 0.18), (hi.y - 0.18, hi.y)) if ax == "x" else ((lo.x, lo.x + 0.18), (hi.x - 0.18, hi.x)):
+            p0, p1 = (V((a - 0.25, s_[0], lo.z + 0.4)), V((a + 0.25, s_[1], hi.z - 0.4))) if ax == "x" else (V((s_[0], a - 0.25, lo.z + 0.4)), V((s_[1], a + 0.25, hi.z - 0.4)))
+            box(p0, p1, pm)
+    for a in (L0, L1 - 0.6):
+        for s_ in ((lo.y, hi.y - 0.6) if ax == "x" else (lo.x, hi.x - 0.6)):
+            p0 = V((a, s_, lo.z)) if ax == "x" else V((s_, a, lo.z)); box(p0, p0 + V((0.6, 0.6, hi.z - lo.z)), dk)
+    for s_ in (0.3, 0.6):   # door locking bars at one end
+        for t in (0.25, 0.4, 0.6, 0.75):
+            if ax == "x": y = lo.y + (hi.y - lo.y) * t; cyl(V((hi.x + 0.05, y, lo.z + 0.5)), V((hi.x + 0.05, y, hi.z - 0.5)), 0.06, galv(), 6)
+            else: x = lo.x + (hi.x - lo.x) * t; cyl(V((x, hi.y + 0.05, lo.z + 0.5)), V((x, hi.y + 0.05, hi.z - 0.5)), 0.06, galv(), 6)
+        break
 
 def b_tank(lo, hi, name):
     c = (lo + hi) / 2; W, D, H = hi - lo
-    if H < 0.6 * min(W, D) and max(W, D) > 2.2 * min(W, D):   # horizontal capsule (propane)
+    if "propane" in name:   # horizontal capsule
         ax = long_axis(lo, hi); r = H / 2 * 0.9; L = max(W, D)
         a, b = (V((lo.x + r, c.y, lo.z + r)), V((hi.x - r, c.y, lo.z + r))) if ax == "x" else (V((c.x, lo.y + r, lo.z + r)), V((c.x, hi.y - r, lo.z + r)))
         cyl(a, b, r, paintm((0.88, 0.88, 0.86), "tankwhite", 0.35, 0.2), 24, cap=False)
         for p in (a, b):
             bpy.ops.mesh.primitive_uv_sphere_add(radius=r, location=p, segments=24, ring_count=12); bpy.context.object.data.materials.append(paintm((0.88, 0.88, 0.86), "tankwhite", 0.35, 0.2))
+            bpy.ops.object.shade_smooth()
+        for p in (a.lerp(b, 0.2), a.lerp(b, 0.8)):   # saddle legs on a slab
+            box(V((p.x - 0.35, p.y - 0.35, lo.z)) if ax == "x" else V((p.x - r * 0.7, p.y - 0.35, lo.z)), V((p.x + 0.35, p.y + 0.35, lo.z + r * 0.5)) if ax == "x" else V((p.x + r * 0.7, p.y + 0.35, lo.z + r * 0.5)), steel())
+        top = a.lerp(b, 0.5) + V((0, 0, r)); cyl(top - V((0, 0, 0.1)), top + V((0, 0, r * 0.25)), r * 0.25, steel(), 12)
         return
-    R = min(W, D) / 2
-    cyl(V((c.x, c.y, lo.z)), V((c.x, c.y, hi.z - R * 0.08)), R, corr((0.6, 0.6, 0.58)), 48)
-    cyl(V((c.x, c.y, hi.z - R * 0.08)), V((c.x, c.y, hi.z)), R, corr((0.6, 0.6, 0.58)), 48, r2=R * 0.1)
+    R = min(W, D) / 2; n = 160; zt = hi.z - R * 0.12; vs, fs = [], []
+    for j in range(n):   # corrugated wall: radius ripples around
+        a = 2 * math.pi * j / n; r = R * (1 + 0.012 * math.cos(j * math.pi / 2 * 2))
+        vs += [V((c.x + r * math.cos(a), c.y + r * math.sin(a), lo.z)), V((c.x + r * math.cos(a), c.y + r * math.sin(a), zt))]
+    for j in range(n): fs.append([2 * j, 2 * ((j + 1) % n), 2 * ((j + 1) % n) + 1, 2 * j + 1])
+    tm = flat("tankgalv2", (0.6, 0.61, 0.6), 0.42, 0.75)
+    mesh("tankwall", vs, fs, tm, smooth=True)
+    for k in range(1, int((zt - lo.z) / 4) + 1): cyl(V((c.x, c.y, lo.z + k * 4 - 0.1)), V((c.x, c.y, lo.z + k * 4 + 0.1)), R * 1.015, tm, 64, cap=False)
+    cyl(V((c.x, c.y, zt)), V((c.x, c.y, hi.z)), R * 1.01, tm, 64, r2=R * 0.08)
     for k in range(int(H / 1.2)): box(V((c.x + R, c.y - 0.8, lo.z + k * 1.2)), V((c.x + R + 0.6, c.y + 0.8, lo.z + k * 1.2 + 0.15)), galv())
 
 def b_finish(lo, hi, name):
@@ -650,8 +706,27 @@ def b_windpump(lo, hi, name):
 def b_hut(lo, hi, name):
     """Small huts by kind: outhouse, porta-potty, doghouse, pump shack, sheds, blinds."""
     if "toilet" in name:
-        box(lo, V((hi.x, hi.y, hi.z - 0.6)), plastic((0.2, 0.38, 0.6), "portablue")); box(V((lo.x - 0.1, lo.y - 0.1, hi.z - 0.6)), V((hi.x + 0.1, hi.y + 0.1, hi.z)), plastic((0.85, 0.85, 0.83), "portawhite")); return
-    wall = oldwood() if re.search(r"outhouse|duck|still|doghouse", name) else (sidingw() if "pump" in name else corr((0.5, 0.5, 0.48)))
+        b = plastic((0.16, 0.32, 0.52), "portablue"); wt = plastic((0.85, 0.85, 0.83), "portawhite"); W, D, H = hi - lo
+        box(lo, V((hi.x, hi.y, hi.z - 0.6)), b, bevel=0.06)
+        for k in range(1, 6):   # moulded ribs on the sides
+            for x in (lo.x - 0.04, hi.x - 0.04): box(V((x, lo.y + D * k / 6 - 0.06, lo.z + 0.2)), V((x + 0.08, lo.y + D * k / 6 + 0.06, hi.z - 0.9)), b)
+        def door(d, w, h, F):
+            d.rectangle([0, 0, w, h], fill=(42, 82, 132)); d.rectangle([10, 10, w - 10, h - 10], outline=(30, 60, 100), width=6)
+            for k in range(5): d.rectangle([w * 0.2, h * (0.06 + k * 0.025), w * 0.8, h * (0.07 + k * 0.025)], fill=(25, 50, 85))
+            d.rectangle([w * 0.62, h * 0.48, w * 0.86, h * 0.53], fill=(30, 140, 50)); d.text((w * 0.63, h * 0.485), "VACANT", font=F(14), fill=(235, 240, 230))
+            d.rounded_rectangle([w * 0.72, h * 0.56, w * 0.82, h * 0.6], radius=5, fill=(200, 200, 195))
+            d.rectangle([w * 0.14, h * 0.9, w * 0.3, h * 0.93], fill=(25, 50, 85)); d.rectangle([w * 0.7, h * 0.9, w * 0.86, h * 0.93], fill=(25, 50, 85))
+        front_decal(lo, V((hi.x, hi.y, hi.z - 0.6)), painted_tex("porta_door", (256, 640), door, 0.45), inset=0.12)
+        box(V((lo.x - 0.1, lo.y - 0.1, hi.z - 0.6)), V((hi.x + 0.1, hi.y + 0.1, hi.z - 0.25)), wt, bevel=0.05)
+        box(V((lo.x + 0.2, lo.y + 0.2, hi.z - 0.25)), V((hi.x - 0.2, hi.y - 0.2, hi.z)), wt, bevel=0.1)
+        cyl(V((hi.x - 0.5, hi.y - 0.5, hi.z - 0.3)), V((hi.x - 0.5, hi.y - 0.5, hi.z + 0.0)), 0.18, plastic((0.1, 0.1, 0.1), "black_plastic"), 10); return
+    if "doghouse" in name:
+        W, D, H = hi - lo; z1 = lo.z + H * 0.55
+        box(V((lo.x + 0.2, lo.y + 0.2, lo.z)), V((hi.x - 0.2, hi.y - 0.2, z1)), oldwood())
+        gable_ends(V((lo.x + 0.2, lo.y + 0.2, 0)), V((hi.x - 0.2, hi.y - 0.2, 0)), z1, hi.z - 0.1, oldwood(), along="y")
+        gable_roof(V((lo.x + 0.3, lo.y + 0.3, 0)), V((hi.x - 0.3, hi.y - 0.3, 0)), z1, hi.z - 0.1, roofing(), over=0.3, along="y")
+        c = (lo.x + hi.x) / 2; box(V((c - W * 0.18, lo.y + 0.12, lo.z)), V((c + W * 0.18, lo.y + 0.22, lo.z + H * 0.45)), paintm((0.02, 0.02, 0.02), "dark")); return
+    wall = oldwood() if re.search(r"outhouse|duck|still", name) else (sidingw() if "pump" in name else corr((0.5, 0.5, 0.48)))
     house(lo, hi, wall, roofing(), wall_frac=0.72, rows=1, door=("doghouse" not in name))
 
 def b_carport(lo, hi, name):
@@ -672,6 +747,24 @@ def b_table(lo, hi, name):
     if "picnic" in name:
         for y in (lo.y - 1.2, hi.y + 0.2): box(V((lo.x, y, lo.z + H * 0.55)), V((hi.x, y + 1.0, lo.z + H * 0.6)), wood())
 
+def b_toolchest(lo, hi, name):
+    """Rolling tool chest: drawer stack on casters with a lid box on top."""
+    def draw(d, w, h, F):
+        d.rectangle([0, 0, w, h], fill=(150, 22, 18)); y = 6; k = 0
+        for hh in (52, 52, 64, 64, 80, 80, 110):
+            d.rectangle([6, y, w - 6, y + hh - 6], fill=(170, 28, 22), outline=(60, 10, 8), width=3)
+            d.rounded_rectangle([w * 0.2, y + hh * 0.3, w * 0.8, y + hh * 0.3 + 10], radius=4, fill=(200, 200, 196)); y += hh
+        d.rectangle([0, y, w, h], fill=(120, 18, 14))
+    m = paintm((0.58, 0.08, 0.06), "toolred", 0.35, 0.4); W, D, H = hi - lo; r = min(0.35, H * 0.08)
+    body = V((hi.x, hi.y, lo.z + H * 0.72))
+    box(V((lo.x, lo.y, lo.z + 2 * r)), body, m, bevel=0.04)
+    front_decal(V((lo.x, lo.y, lo.z + 2 * r)), body, painted_tex("toolchest", (256, 512), draw, 0.4), inset=0.04)
+    box(V((lo.x + 0.05, lo.y + 0.05, body.z + 0.02)), V((hi.x - 0.05, hi.y - 0.05, hi.z)), m, bevel=0.04)
+    box(V((lo.x + 0.05, lo.y - 0.02, hi.z - (hi.z - body.z) * 0.5)), V((hi.x - 0.05, lo.y + 0.02, hi.z - (hi.z - body.z) * 0.45)), steel())
+    for x in (lo.x + r, hi.x - r):
+        for y in (lo.y + r, hi.y - r): cyl(V((x - r * 0.4, y, lo.z + r)), V((x + r * 0.4, y, lo.z + r)), r, rubber(), 12)
+    cyl(V((lo.x - 0.25, lo.y + D * 0.3, lo.z + H * 0.6)), V((lo.x - 0.25, hi.y - D * 0.3, lo.z + H * 0.6)), 0.06, steel(), 8)
+
 def b_crate_pile(lo, hi, name):
     rnd = random.Random(name); m = plywood() if "boxes" in name or "green" in name or "cabinet" in name or "toolbox" in name else acg("Fabric030", 0.3, ramp=((0.33, 0.27, 0.18), (0.62, 0.52, 0.36)), name="burlap")
     if "green" in name: m = plastic((0.2, 0.38, 0.22), "greenbox")
@@ -681,11 +774,36 @@ def b_crate_pile(lo, hi, name):
     for k in range(n):
         x0 = lo.x + W * k / n; box(V((x0 + 0.05, lo.y, lo.z)), V((x0 + W / n - 0.05, hi.y, hi.z - rnd.uniform(0, H * 0.3))), m, bevel=0.06 if "sacks" not in name else 0.25)
 
+def vend_front(kind):
+    def draw(d, w, h, F):
+        if kind == "soda":
+            d.rectangle([0, 0, w, h], fill=(150, 18, 16))
+            d.rectangle([0, int(h * 0.06), w, int(h * 0.2)], fill=(236, 234, 228))
+            t = "FIZZ"; f = F(int(h * 0.11)); d.text(((w * 0.66 - d.textlength(t, font=f)) / 2, h * 0.065), t, font=f, fill=(150, 18, 16))
+            d.rectangle([int(w * 0.06), int(h * 0.26), int(w * 0.64), int(h * 0.78)], fill=(225, 228, 222))
+            for r in range(5):
+                for c in range(6):
+                    x = w * 0.09 + c * w * 0.09; y = h * 0.29 + r * h * 0.095
+                    col = [(170, 25, 20), (40, 90, 160), (230, 150, 20), (60, 140, 60), (120, 30, 110), (30, 30, 30)][(r + c) % 6]
+                    d.rounded_rectangle([x, y, x + w * 0.06, y + h * 0.075], radius=4, fill=col)
+                    d.rectangle([x, y + h * 0.077, x + w * 0.07, y + h * 0.083], fill=(110, 110, 108))
+        else:
+            d.rectangle([0, 0, w, h], fill=(36, 34, 36))
+            d.rectangle([int(w * 0.06), int(h * 0.08), int(w * 0.64), int(h * 0.5)], fill=(92, 58, 34))
+            f = F(int(h * 0.07)); d.text((w * 0.1, h * 0.12), "HOT", font=f, fill=(240, 226, 196)); d.text((w * 0.1, h * 0.21), "COFFEE", font=f, fill=(240, 226, 196))
+            d.ellipse([w * 0.3, h * 0.32, w * 0.5, h * 0.46], fill=(240, 236, 228)); d.ellipse([w * 0.33, h * 0.33, w * 0.47, h * 0.37], fill=(70, 40, 22))
+            d.rectangle([int(w * 0.2), int(h * 0.6), int(w * 0.5), int(h * 0.8)], fill=(12, 12, 12))
+        d.rectangle([int(w * 0.7), int(h * 0.26), int(w * 0.94), int(h * 0.7)], fill=(30, 30, 32))
+        for k in range(8): d.rectangle([w * 0.74, h * (0.29 + k * 0.05), w * 0.9, h * (0.32 + k * 0.05)], fill=(190, 190, 186))
+        d.rectangle([w * 0.78, h * 0.71, w * 0.86, h * 0.73], fill=(10, 10, 10))
+        d.rectangle([int(w * 0.12), int(h * 0.84), int(w * 0.58), int(h * 0.93)], fill=(14, 14, 14))
+    return painted_tex(f"vend_{kind}", (512, 1024), draw, 0.35)
+
 def b_machine(lo, hi, name):
-    col = (0.65, 0.08, 0.07) if "soda" in name else (0.18, 0.18, 0.2)
-    box(lo, hi, paintm(col, f"vend{col}", 0.35, 0.3), bevel=0.08)
-    box(V((lo.x + (hi.x - lo.x) * 0.1, lo.y - 0.02, lo.z + (hi.z - lo.z) * 0.35)), V((lo.x + (hi.x - lo.x) * 0.65, lo.y + 0.05, hi.z - (hi.z - lo.z) * 0.1)), emit("vendlight", (0.85, 0.85, 0.8)))
-    if "snow" in name: box(V((lo.x, lo.y, hi.z - 0.3)), V((hi.x, hi.y, hi.z)), flat("snow", (0.92, 0.93, 0.95), 0.6))
+    kind = "soda" if "soda" in name else "coffee"; col = (0.55, 0.07, 0.06) if kind == "soda" else (0.14, 0.13, 0.14)
+    box(lo, hi, paintm(col, f"vend{col}", 0.35, 0.3), bevel=0.05)
+    front_decal(lo, hi, vend_front(kind), inset=0.06)
+    if "snow" in name: box(V((lo.x, lo.y, hi.z - 0.3)), V((hi.x, hi.y, hi.z + 0.05)), flat("snow", (0.92, 0.93, 0.95), 0.6), bevel=0.1)
 
 def b_fridge(lo, hi, name): box(lo, hi, paintm((0.86, 0.86, 0.84), "fridgewhite", 0.3, 0.1), bevel=0.12)
 
@@ -701,11 +819,13 @@ def b_pallet(lo, hi, name):
     for y in (lo.y, (lo.y + hi.y) / 2 - 0.2, hi.y - 0.4): box(V((lo.x, y, lo.z)), V((hi.x, y + 0.4, top - 0.08)), wood())
 
 def b_steps(lo, hi, name):
-    n = 4; ax = long_axis(lo, hi)
-    for k in range(n):
-        z = lo.z + (hi.z - lo.z) * (k + 1) / n
-        if ax == "y": box(V((lo.x, lo.y + (hi.y - lo.y) * k / n, lo.z)), V((hi.x, hi.y, z)), conc())
-        else: box(V((lo.x + (hi.x - lo.x) * k / n, lo.y, lo.z)), V((hi.x, hi.y, z)), conc())
+    n = 4; ax = long_axis(lo, hi); H = hi.z - lo.z
+    a0, a1 = (lo.y, hi.y) if ax == "y" else (lo.x, hi.x); L = a1 - a0
+    pts = [(a0, lo.z), (a1, lo.z)]
+    for k in range(n, 0, -1): pts += [(a1 - L * (n - k) / n, lo.z + H * k / n), (a1 - L * (n - k + 1) / n, lo.z + H * k / n)]
+    pts = [pts[0], pts[1]] + pts[2:]
+    # prism wants (a, z) along its own axis; build across the short side
+    prism(pts, lo.x, hi.x, conc(), axis="x") if ax == "y" else prism(pts, lo.y, hi.y, conc(), axis="y")
 
 def b_jersey(lo, hi, name):
     """Road block: a row of concrete jersey barriers with an orange board on top."""
@@ -743,8 +863,13 @@ def b_metalarch(lo, hi, name):
 def b_podium_truck(lo, hi, name):
     box(V((lo.x, lo.y, lo.z)), V((hi.x, hi.y, lo.z + 3.6)), corr((0.18, 0.2, 0.24)))
     box(V((lo.x, lo.y, lo.z + 3.6)), V((hi.x, hi.y, lo.z + 4)), plates())
-    for f, h in ((0.5, 3.0), (0.3, 2.0), (0.7, 1.2)):
-        x = lo.x + (hi.x - lo.x) * f; box(V((x - 3, lo.y + 4, lo.z + 4)), V((x + 3, lo.y + 10, lo.z + 4 + h)), paintm((0.85, 0.85, 0.83), "podwhite"))
+    for f, h, t in ((0.5, 3.0, "1"), (0.3, 2.0, "2"), (0.7, 1.2, "3")):
+        x = lo.x + (hi.x - lo.x) * f; a, b = V((x - 3, lo.y + 4, lo.z + 4)), V((x + 3, lo.y + 10, lo.z + 4 + h))
+        box(a, b, paintm((0.85, 0.85, 0.83), "podwhite"), bevel=0.05)
+        def num(d, w, hh, F, t=t):
+            d.rectangle([0, 0, w, hh], fill=(222, 222, 218)); d.rectangle([0, 0, w, hh * 0.12], fill=(170, 24, 20))
+            f = F(int(hh * 0.7)); d.text(((w - d.textlength(t, font=f)) / 2, hh * 0.15), t, font=f, fill=(24, 24, 26))
+        front_decal(a, b, painted_tex(f"podium_{t}", (256, int(256 * h / 6) or 64), num, 0.5), inset=0.0)
     for x in (lo.x + 4, hi.x - 4):
         for y in (lo.y + 2, hi.y - 2): cyl(V((x - 0.8, y, lo.z + 1.6)), V((x + 0.8, y, lo.z + 1.6)), 1.6, tyre_mat(), 20)
 
@@ -761,6 +886,56 @@ def b_scarecrow(lo, hi, name):
     box(V((c.x - 0.8, c.y - 0.4, hi.z - 5)), V((c.x + 0.8, c.y + 0.4, hi.z - 2.4)), acg("Fabric030", 0.3, ramp=((0.25, 0.18, 0.1), (0.55, 0.4, 0.22)), name="sackcloth"))
     bpy.ops.mesh.primitive_uv_sphere_add(radius=0.6, location=(c.x, c.y, hi.z - 1.6)); bpy.context.object.data.materials.append(acg("Fabric030", 0.3, ramp=((0.45, 0.38, 0.2), (0.75, 0.66, 0.4)), name="burlaphead"))
     cyl(V((c.x, c.y, hi.z - 1.2)), V((c.x, c.y, hi.z - 0.9)), 1.1, acg("ThatchedRoof001A", 0.5, ramp=((0.25, 0.18, 0.06), (0.7, 0.55, 0.25)), name="strawhat"), 16, r2=0.5)
+
+def b_scraper(lo, hi, name):
+    """Motor scraper: tractor unit with cab, gooseneck, open bowl with apron
+    and cutting edge, rear engine. Worn yellow paint, built along its long side."""
+    W, D, H = hi - lo; ax = long_axis(lo, hi)
+    P = (lambda a, s, z: V((a, s, z))) if ax == "x" else (lambda a, s, z: V((s, a, z)))
+    L0, L1 = (lo.x, hi.x) if ax == "x" else (lo.y, hi.y); S0, S1 = (lo.y, hi.y) if ax == "x" else (lo.x, hi.x)
+    if ax == "y": L0, L1 = L1, L0   # front at +y
+    L = L1 - L0; S = S1 - S0; sc = S0 + S / 2
+    paint = acg("PaintedMetal004", 0.08, ramp=((0.62, 0.44, 0.06), (0.86, 0.62, 0.09)), rough=0.5, metal=0.25, name="scraper_yellow2")
+    dark = acg("MetalPlates006", 0.3, ramp=((0.04, 0.04, 0.04), (0.25, 0.24, 0.22)), rough=0.6, metal=0.6, name="scraper_dark")
+    edge = acg("Rust004", 0.4, ramp=((0.15, 0.13, 0.11), (0.5, 0.47, 0.43)), rough=0.5, metal=0.8, name="scraper_edge")
+    tyre = acg("Rubber004", 0.5, ramp=((0.02, 0.02, 0.02), (0.14, 0.13, 0.12)), rough=0.9, name="scraper_tyre")
+    def bx(a0, a1, s0, s1, z0, z1, m, bev=0.08):
+        p, q = P(L0 + L * a0, S0 + S * s0, lo.z + z0), P(L0 + L * a1, S0 + S * s1, lo.z + z1); box(V(map(min, p, q)), V(map(max, p, q)), m, bevel=bev)
+    def wheel(a, s, r, w):
+        p = P(L0 + L * a, S0 + S * s, lo.z + r); d = (V((0, w / 2, 0)) if ax == "x" else V((w / 2, 0, 0)))
+        cyl(p - d, p + d, r, tyre, 32); cyl(p - d * 0.6, p + d * 0.6, r * 0.97, tyre, 32)
+        sd = 1.0 if s > 0.5 else -1.0
+        cyl(p + d * sd, p + d * sd * 1.08, r * 0.55, paint, 20); cyl(p + d * sd * 1.08, p + d * sd * 1.2, r * 0.18, dark, 12)
+    R = min(H * 0.24, S * 0.2)
+    # tractor unit (front ~25%): hood, grille, cab with pillars and glass
+    bx(0.80, 1.0, 0.28, 0.72, R * 0.8, R * 2.0, paint); bx(0.985, 1.0, 0.33, 0.67, R * 0.95, R * 1.85, dark, 0.02)
+    for k in range(6): bx(0.99, 1.005, 0.35 + k * 0.05, 0.37 + k * 0.05, R * 1.0, R * 1.8, dark, 0.0)
+    bx(0.74, 0.86, 0.3, 0.7, R * 2.0, R * 2.05, paint, 0.02)
+    gl = glass(); c0, c1 = R * 2.05, min(H - 0.2, R * 3.6)
+    for a, s0 in ((0.745, 0.3), (0.855, 0.3), (0.745, 0.68), (0.855, 0.68)): bx(a, a + 0.006, s0, s0 + 0.02, c0, c1, dark, 0.0)
+    bx(0.748, 0.858, 0.305, 0.695, c0, c1 - 0.05, gl, 0.0); bx(0.74, 0.865, 0.28, 0.72, c1, c1 + 0.25, paint, 0.05)
+    cyl(P(L0 + L * 0.9, S0 + S * 0.62, lo.z + R * 2.0), P(L0 + L * 0.9, S0 + S * 0.62, lo.z + c1 + 0.8), 0.22, dark, 10)
+    bx(0.74, 0.80, 0.2, 0.8, R * 0.9, R * 1.7, paint)            # hitch / kingpin housing
+    for s in (0.13, 0.87): wheel(0.84, s, R, S * 0.22)
+    for s in (0.04, 0.96): bx(0.80, 0.9, s - 0.03, s + 0.03, R * 1.9, R * 2.05, paint, 0.03)   # fenders
+    # gooseneck: arched beam from hitch to bowl draft arms
+    bx(0.66, 0.76, 0.42, 0.58, R * 1.7, R * 2.3, paint); bx(0.60, 0.68, 0.42, 0.58, R * 1.2, R * 2.0, paint)
+    for s in (0.06, 0.94): bx(0.38, 0.64, s - 0.025, s + 0.025, R * 1.1, R * 1.45, paint)   # draft arms
+    bx(0.60, 0.64, 0.06, 0.94, R * 1.1, R * 1.45, paint)
+    for s in (0.3, 0.7): cyl(P(L0 + L * 0.63, S0 + S * s, lo.z + R * 1.6), P(L0 + L * 0.57, S0 + S * s, lo.z + R * 2.6), 0.18, steel(), 10)
+    # bowl: side walls, floor, apron at front, ejector at back, cutting edge
+    z0, z1 = R * 0.35, min(H * 0.8, R * 3.2)
+    for s in (0.1, 0.9): bx(0.28, 0.6, s - 0.02, s + 0.02, z0 + 0.3, z1, paint)
+    bx(0.3, 0.58, 0.1, 0.9, z0, z0 + 0.3, dark); bx(0.27, 0.3, 0.1, 0.9, z0, z1, paint)
+    bx(0.56, 0.6, 0.12, 0.88, z0 - 0.15, z0 + (z1 - z0) * 0.95, paint)
+    bx(0.585, 0.615, 0.12, 0.88, z0 - 0.35, z0, edge, 0.02)
+    for s in (0.25, 0.75): cyl(P(L0 + L * 0.5, S0 + S * s, lo.z + z1 + 0.1), P(L0 + L * 0.62, S0 + S * s, lo.z + z1 + 0.4), 0.15, steel(), 8)
+    # rear engine module and wheels
+    bx(0.02, 0.27, 0.25, 0.75, R * 0.85, R * 2.1, paint); bx(0.0, 0.03, 0.3, 0.7, R * 0.95, R * 2.0, dark, 0.02)
+    for k in range(8): bx(0.0, 0.006, 0.31, 0.69, R * (1.0 + k * 0.12), R * (1.05 + k * 0.12), paint, 0.0)
+    cyl(P(L0 + L * 0.15, S0 + S * 0.6, lo.z + R * 2.1), P(L0 + L * 0.15, S0 + S * 0.6, lo.z + R * 2.9), 0.18, dark, 10)
+    for s in (0.13, 0.87): wheel(0.16, s, R, S * 0.22)
+    for s in (0.04, 0.96): bx(0.08, 0.24, s - 0.03, s + 0.03, R * 1.9, R * 2.05, paint, 0.03)
 
 def b_wagon_machine(lo, hi, name):
     """Farm and site machines: tractor, old tractor, bobcat, scraper, combine."""
@@ -817,6 +992,17 @@ def b_wreck(lo, hi, name):
     o = lathe(prof, V((0, 0, 0)), burnt, 32); o.rotation_euler.x = -math.pi / 2; o.location = (c.x, lo.y, lo.z + R)
     o.rotation_euler.y = rnd.uniform(-0.15, 0.15)
 
+def b_cellpanel(lo, hi, name):
+    """Cell transmitter: three white panel antennas round a short mast, with feeder cables."""
+    c = (lo + hi) / 2; H = hi.z - lo.z; R = min(hi.x - lo.x, hi.y - lo.y) * 0.4
+    cyl(V((c.x, c.y, lo.z)), V((c.x, c.y, hi.z)), 0.25, galv(), 10)
+    for k in range(3):
+        a = 2 * math.pi * k / 3; d = V((math.cos(a), math.sin(a), 0)); p = V((c.x, c.y, 0)) + d * R
+        cyl(V((c.x, c.y, lo.z + H * 0.5)), V((p.x, p.y, lo.z + H * 0.5)), 0.12, galv(), 6)
+        o = box(V((-0.5, -0.2, -H * 0.4)), V((0.5, 0.2, H * 0.4)), paintm((0.86, 0.86, 0.84), "panelant"), bevel=0.05)
+        o.location = (p.x, p.y, lo.z + H * 0.5); o.rotation_euler.z = a + math.pi / 2
+        catenary(V((p.x, p.y, lo.z + H * 0.12)), V((c.x, c.y, lo.z)), 0.3, 0.05, flat("cable", (0.05, 0.05, 0.05), 0.5, 0.6), 6)
+
 def b_slide_door(lo, hi, name):
     box(lo, hi, oldwood())
     W = max(hi.x - lo.x, hi.y - lo.y); ax = long_axis(lo, hi)
@@ -826,7 +1012,7 @@ def b_slide_door(lo, hi, name):
 
 def b_barn(lo, hi, name):
     """Barn pieces: plank walls with frame posts, roof, floor, doors."""
-    red = acg("Planks012", 1 / 6.0, ramp=((0.18, 0.05, 0.04), (0.5, 0.14, 0.1)), name="barnred")
+    red = acg("WoodSiding008", 1 / 8.0, ramp=((0.2, 0.05, 0.04), (0.52, 0.15, 0.1)), name="barnred")
     if "roof" in name:
         gable_roof(V((lo.x + 1, lo.y + 1, 0)), V((hi.x - 1, hi.y - 1, 0)), lo.z + 1, hi.z - 0.6, roofing(), over=1.0); return
     if "interior" in name:
@@ -875,14 +1061,14 @@ STRUCT = [
     (r"^pedbrdg_metal$", b_truss_bridge), (r"^pedbrdg_wood$", lambda lo, hi, n: b_truss_bridge(lo, hi, n, timber=True)),
     (r"^bridge_old01$|^trestle$|^trestleblock$", b_trestle), (r"^bridge_debris0\d$", b_debris), (r"^track(_short|end|radius)?$", b_track),
     (r"^trackcrossing$", b_crossing), (r"^rrsupport$|^support$", b_rail_support), (r"^rrt_elev(radius)?$|^rrtrack_supported$", b_elev_track),
-    (r"^skijump$", b_skijump), (r"^twr-|^ant_cel-xmit$", b_lattice_tower), (r"^telephone_pole01$|^lightpole$|^speakerpole$|^signal$|^antenna01$", b_mast),
+    (r"^skijump$", b_skijump), (r"^ant_cel-xmit$|^twr-cell_bracket$", b_cellpanel), (r"^twr-", b_lattice_tower), (r"^telephone_pole01$|^lightpole$|^speakerpole$|^signal$|^antenna01$", b_mast),
     (r"^skiliftpost$", b_skiliftpost), (r"^ht2?_wire|^lift_wire", b_wire), (r"^tm_head$", b_headframe), (r"^container01$", b_container),
     (r"^propanetank01$|^watertank01$", b_tank), (r"^finish(_big)?$|^waypoint_big$", b_finish), (r"^goalpost$", b_goalpost), (r"^oil_well$", b_pumpjack),
     (r"^windmill_pump$", b_windpump), (r"^outhouse01$|^toilet$|^doghouse01$|^pumpshack$|^duckblind$", b_hut), (r"^carport01$", b_carport),
-    (r"^awning0\d$", b_awning), (r"^picnic_table01$|^table_patio$", b_table), (r"^cargo_(boxes|sacks)$|^greenboxes01$|^cabinets_\d$|^toolbox$", b_crate_pile),
+    (r"^awning0\d$", b_awning), (r"^picnic_table01$|^table_patio$", b_table), (r"^toolbox$", b_toolchest), (r"^cargo_(boxes|sacks)$|^greenboxes01$|^cabinets_\d$", b_crate_pile),
     (r"^(soda|coffee)_machine01", b_machine), (r"^fridge01$", b_fridge), (r"^lawnchair01$", b_chair), (r"^palette01$", b_pallet), (r"^steps01$", b_steps),
     (r"^rdblock[ab]$", b_jersey), (r"^cattleguard$", b_cattleguard), (r"^gate_[lr]01$|^fence_chlinkgate$", b_gate), (r"^metalarch$", b_metalarch),
     (r"^truckpodium$", b_podium_truck), (r"^still01$", b_still), (r"^scarecrow$", b_scarecrow),
-    (r"^(tractor|tractor_old|bobcat|scraper|combine)$", b_wagon_machine), (r"^cargowreck_", b_wreck), (r"^bn_slide$", b_slide_door), (r"^bn_", b_barn),
+    (r"^scraper$", b_scraper), (r"^(tractor|tractor_old|bobcat|combine)$", b_wagon_machine), (r"^cargowreck_", b_wreck), (r"^bn_slide$", b_slide_door), (r"^bn_", b_barn),
     (r"^(flaggirl|30secman)$", b_people),
 ]

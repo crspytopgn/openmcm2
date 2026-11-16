@@ -23,6 +23,7 @@ wind01  = "sunflowers_puresky"
 [materials]
 # ambientCG ids (CC0), 2K JPG.
 ambientcg = [
+  "Asphalt012", "Bricks059", "Bricks076C", "Concrete031", "Metal032", "MetalPlates013", "PaintedPlaster017", "PavingStones092", "Planks012", "Planks023A", "Rock030", "Rock035", "RoofingTiles006", "Rust004", "WoodSiding008",
   "Ground051", "Ground048", "Ground067", "Ground036", "Ground037",
   "Ground080", "Ground054", "Ground085", "Grass004",
   "Concrete034", "Plastic010", "Wood049", "Fabric030", "MetalPlates006",
@@ -46,3 +47,12 @@ polyhaven = [
 "5bb654aed341477b8878f1e2ffd6fcd2" = ["Enduro bike", "Zaborchik", "bikes/fp_bike_enduro.glb (400F, 600F)"]
 "315a4d6dfc054b299f715270dbcf2222" = ["Dirtbike Model", "sonniesilva", "bikes/fp_bike_mx2.glb (125, 250, 500)"]
 "10cbeabee635483fae932f9e49f3cf7b" = ["Hight Quality Realistic Man Character", "hammer.gamedev", "riders/fp_rider.glb (base body)"]
+"d1b7c5cba07a4f278267fca69c821cb7" = ["Skid Steer Digger", "MitchellBr", "objects/bobcat.glb (S130 decals painted out)"]
+"e9e844f2f9364044a181ce8f38a83dc3" = ["Tractor", "sheldon.bean", "objects/tractor.glb (recoloured red)"]
+"d891c103cddd44b69d1357c832d9ad56" = ["Weathered Tractor", "ArtDmitriyK", "objects/tractor_old.glb"]
+"e76e04dced84428babcab4b712f4d169" = ["SK-5_NIVA", "Vebis_V_stolb_GT", "objects/combine.glb"]
+"68089dce5fa1461981d690f1cfd657fa" = ["Monobloc Plastic Garden Chair", "kuuttisiitonen", "objects/lawnchair01.glb"]
+"fd01521490ec4cabba4c89d113fdde23" = ["Electrical Substation [Drone Scan]", "MrUnityCreations", "objects/switchyard.glb"]
+"4feb15af7b554c16b88bf9cbe179558b" = ["Wind Turbine", "skettch", "objects/wingen_post.glb"]
+"88b3ca0e6bac44ce8cef9865288d2ee0" = ["Excavator digger 3d model", "Arts7789", "objects/shovel.glb"]
+"5bc9e49be13b4803aed3c25e87bb4486" = ["Pylon", "rhcreations", "objects/ht_tower.glb, ht_tower02.glb"]
