@@ -228,6 +228,9 @@ MM2_DATA="/path/to/Motocross Madness 2" cargo test
 * The Linux build carries [Liberation Sans](https://github.com/liberationfonts)
   for the menus' text on systems without Arial or a look-alike, under the
   SIL Open Font License 1.1 ([assets/fonts/LICENSE-OFL.txt](assets/fonts/LICENSE-OFL.txt)).
+* The logo, the launcher's titles and the site's headings use
+  [Archivo](https://github.com/Omnibus-Type/Archivo) Expanded Black Italic,
+  also under the SIL Open Font License 1.1.
 
 ## Legal
 

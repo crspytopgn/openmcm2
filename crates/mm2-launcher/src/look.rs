@@ -1,4 +1,5 @@
-//! The launcher's look: a dark theme in OpenMCM2's orange, and the few
+//! The launcher's look: a warm black theme in OpenMCM2's lime (the
+//! logo's number plate), and the few
 //! widgets it is built from (cards, segmented buttons, switches, the
 //! sidebar's pages). Icons are Google's Material Symbols
 //! (`egui_material_icons`), drawn inline with the text.
@@ -7,31 +8,34 @@ use eframe::egui::{self, Color32, CornerRadius, RichText, Sense, Stroke, Ui, Vec
 pub use egui_material_icons::icons as icon;
 use egui_material_icons::MaterialIcon;
 
-pub const ACCENT: Color32 = Color32::from_rgb(255, 138, 42);
-pub const ACCENT_HOVER: Color32 = Color32::from_rgb(255, 164, 82);
+pub const ACCENT: Color32 = Color32::from_rgb(163, 194, 74);
+pub const ACCENT_HOVER: Color32 = Color32::from_rgb(188, 214, 106);
 /// The window behind everything, the sidebar, a card, and what sits
-/// sunk into a card (a segmented row's tray): deep blues, lighter the
+/// sunk into a card (a segmented row's tray): warm blacks, lighter the
 /// nearer the front.
-pub const BG: Color32 = Color32::from_rgb(22, 27, 38);
-pub const SIDEBAR: Color32 = Color32::from_rgb(29, 36, 51);
-pub const CARD: Color32 = Color32::from_rgb(35, 43, 59);
-pub const SUNKEN: Color32 = Color32::from_rgb(26, 33, 48);
-pub const LINE: Color32 = Color32::from_rgb(54, 66, 90);
-pub const TEXT: Color32 = Color32::from_rgb(245, 247, 251);
-pub const WEAK: Color32 = Color32::from_rgb(186, 195, 213);
-pub const GOOD: Color32 = Color32::from_rgb(102, 217, 139);
-pub const BAD: Color32 = Color32::from_rgb(255, 112, 102);
+pub const BG: Color32 = Color32::from_rgb(18, 17, 16);
+pub const SIDEBAR: Color32 = Color32::from_rgb(24, 23, 20);
+pub const CARD: Color32 = Color32::from_rgb(30, 29, 26);
+pub const SUNKEN: Color32 = Color32::from_rgb(22, 21, 19);
+pub const LINE: Color32 = Color32::from_rgb(48, 46, 41);
+pub const TEXT: Color32 = Color32::from_rgb(236, 230, 216);
+pub const WEAK: Color32 = Color32::from_rgb(172, 166, 152);
+pub const GOOD: Color32 = Color32::from_rgb(150, 204, 110);
+pub const BAD: Color32 = Color32::from_rgb(232, 116, 92);
 /// A plain button's face, at rest and hovered.
-const BUTTON: Color32 = Color32::from_rgb(48, 59, 82);
-const BUTTON_HOVER: Color32 = Color32::from_rgb(62, 75, 104);
+/// Text on the accent (a picked button, the Play button): the
+/// background's warm black.
+pub const ON_ACCENT: Color32 = Color32::from_rgb(18, 17, 16);
+const BUTTON: Color32 = Color32::from_rgb(44, 42, 37);
+const BUTTON_HOVER: Color32 = Color32::from_rgb(58, 55, 49);
 /// The cards' icon badges, one each in turn.
 const TINTS: [Color32; 6] = [
     ACCENT,
-    Color32::from_rgb(79, 195, 247),
-    Color32::from_rgb(102, 217, 139),
-    Color32::from_rgb(255, 213, 79),
-    Color32::from_rgb(255, 111, 174),
-    Color32::from_rgb(167, 139, 250),
+    Color32::from_rgb(214, 178, 90),
+    Color32::from_rgb(120, 178, 176),
+    Color32::from_rgb(208, 128, 92),
+    Color32::from_rgb(200, 190, 160),
+    Color32::from_rgb(164, 150, 196),
 ];
 
 /// Sets the theme and the icons' font on `ctx`.
@@ -50,7 +54,7 @@ pub fn apply(ctx: &egui::Context) {
     v.weak_text_color = Some(WEAK);
     v.hyperlink_color = ACCENT_HOVER;
     v.selection.bg_fill = ACCENT;
-    v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+    v.selection.stroke = Stroke::new(1.0, ON_ACCENT);
     v.window_corner_radius = CornerRadius::same(12);
     v.window_stroke = Stroke::new(1.0, LINE);
     let round = CornerRadius::same(8);
@@ -63,12 +67,12 @@ pub fn apply(ctx: &egui::Context) {
     // Buttons' faces (weak_bg_fill), and the sliders' rails and knobs
     // (bg_fill).
     v.widgets.inactive.weak_bg_fill = BUTTON;
-    v.widgets.inactive.bg_fill = Color32::from_rgb(70, 84, 114);
+    v.widgets.inactive.bg_fill = Color32::from_rgb(70, 67, 60);
     v.widgets.inactive.bg_stroke = Stroke::NONE;
     v.widgets.hovered.weak_bg_fill = BUTTON_HOVER;
     v.widgets.hovered.bg_fill = ACCENT_HOVER;
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(96, 112, 146));
-    v.widgets.active.weak_bg_fill = Color32::from_rgb(74, 89, 122);
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(92, 88, 79));
+    v.widgets.active.weak_bg_fill = Color32::from_rgb(68, 65, 58);
     v.widgets.active.bg_fill = ACCENT;
     v.widgets.open.weak_bg_fill = BUTTON_HOVER;
     style.visuals = v;
@@ -93,6 +97,8 @@ pub fn apply(ctx: &egui::Context) {
 
 /// The name of the bold face's font family ([`bold`]).
 const BOLD: &str = "inter-bold";
+/// The titles' font family ([`title_family`]): the logo's lettering.
+const TITLE: &str = "archivo-title";
 
 /// Inter (the OFL-licensed font from `shadcn-egui-font-inter`), a
 /// variable font: at a regular weight for the text, and at a semi-bold
@@ -109,12 +115,19 @@ fn fonts(ctx: &egui::Context) {
         FontInsert::new(name, data, families)
     };
     ctx.add_font(face("inter", 420, vec![InsertFontFamily { family: egui::FontFamily::Proportional, priority: FontPriority::Highest }]));
+    // Archivo Expanded Black Italic (OFL, assets/fonts), the logo's
+    // lettering, for the pages' titles and the Play button.
+    ctx.add_font(FontInsert::new(
+        TITLE,
+        egui::FontData::from_static(include_bytes!("../../../assets/fonts/archivo-expanded-black-italic.ttf")),
+        vec![InsertFontFamily { family: egui::FontFamily::Name(TITLE.into()), priority: FontPriority::Highest }],
+    ));
     ctx.add_font(face(BOLD, 620, vec![InsertFontFamily { family: egui::FontFamily::Name(BOLD.into()), priority: FontPriority::Highest }]));
     // The icons behind Inter (whose own glyphs there are letters too);
     // those Inter has glyphs for in the icons' place are not used
     // (`launcher_icons_clear_inter`).
     let mut icons = egui_material_icons::font_insert();
-    icons.families = [egui::FontFamily::Proportional, egui::FontFamily::Name(BOLD.into())]
+    icons.families = [egui::FontFamily::Proportional, egui::FontFamily::Name(BOLD.into()), egui::FontFamily::Name(TITLE.into())]
         .into_iter()
         .map(|family| InsertFontFamily { family, priority: FontPriority::Lowest })
         .chain(std::iter::once(InsertFontFamily { family: egui::FontFamily::Name(egui_material_icons::FONT_FAMILY.into()), priority: FontPriority::Highest }))
@@ -125,6 +138,11 @@ fn fonts(ctx: &egui::Context) {
 /// The bold face's family, for `RichText::family`.
 pub fn bold_family() -> egui::FontFamily {
     egui::FontFamily::Name(BOLD.into())
+}
+
+/// The titles' family (the logo's lettering), for `RichText::family`.
+pub fn title_family() -> egui::FontFamily {
+    egui::FontFamily::Name(TITLE.into())
 }
 
 /// An icon then `text`, as one label.
@@ -160,7 +178,7 @@ pub fn card<R>(ui: &mut Ui, i: MaterialIcon, title: &str, body: impl FnOnce(&mut
 /// A page's title and what it is for.
 pub fn page_title(ui: &mut Ui, title: &str, about: &str) {
     ui.add_space(6.0);
-    ui.label(RichText::new(title).size(28.0).color(TEXT).family(bold_family()));
+    ui.label(RichText::new(title.to_uppercase()).size(26.0).color(TEXT).family(title_family()));
     ui.add(egui::Label::new(RichText::new(about).color(WEAK).size(15.0)).wrap());
     ui.add_space(10.0);
 }
@@ -221,7 +239,7 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, current: T, choices: &[Choice
                     Some(i) => with(i, &c.label),
                     None => c.label.clone(),
                 };
-                let colour = if on { Color32::WHITE } else if ui.is_enabled() { TEXT } else { WEAK };
+                let colour = if on { ON_ACCENT } else if ui.is_enabled() { TEXT } else { WEAK };
                 let b = egui::Button::new(RichText::new(text).color(colour))
                     .fill(if on { ACCENT } else { Color32::TRANSPARENT })
                     .stroke(Stroke::NONE)
@@ -251,9 +269,9 @@ pub fn switch(ui: &mut Ui, on: &mut bool) -> egui::Response {
     if ui.is_rect_visible(rect) {
         let t = ui.ctx().animate_bool(response.id, *on);
         let enabled = ui.is_enabled();
-        let off = if response.hovered() { Color32::from_rgb(92, 108, 140) } else { Color32::from_rgb(74, 88, 118) };
+        let off = if response.hovered() { Color32::from_rgb(90, 86, 78) } else { Color32::from_rgb(70, 67, 60) };
         let mut track = lerp(off, ACCENT, t);
-        let mut knob = Color32::WHITE;
+        let mut knob = TEXT;
         if !enabled {
             track = track.gamma_multiply(0.4);
             knob = knob.gamma_multiply(0.5);
@@ -304,7 +322,7 @@ pub fn switch_tile(ui: &mut Ui, on: &mut bool, name: &str, about: &str, width: f
 pub fn nav(ui: &mut Ui, on: bool, i: MaterialIcon, name: &str) -> bool {
     let text = RichText::new(with(i, name)).size(15.5).color(if on { Color32::WHITE } else { TEXT });
     let b = egui::Button::new(text)
-        .fill(if on { Color32::from_rgb(52, 64, 90) } else { Color32::TRANSPARENT })
+        .fill(if on { Color32::from_rgb(40, 38, 34) } else { Color32::TRANSPARENT })
         .stroke(Stroke::NONE)
         .corner_radius(8)
         .min_size(egui::vec2(ui.available_width(), 38.0));
@@ -319,8 +337,9 @@ pub fn nav(ui: &mut Ui, on: bool, i: MaterialIcon, name: &str) -> bool {
 
 /// A big accent button: the label, how high, whether it can be pressed.
 pub fn big_button(ui: &mut Ui, text: &str, height: f32, enabled: bool) -> egui::Response {
-    let b = egui::Button::new(RichText::new(text).size(20.0).family(bold_family()).color(Color32::WHITE))
-        .fill(if enabled { ACCENT } else { Color32::from_rgb(64, 76, 100) })
+    let colour = if enabled { ON_ACCENT } else { WEAK };
+    let b = egui::Button::new(RichText::new(text).size(20.0).family(title_family()).color(colour))
+        .fill(if enabled { ACCENT } else { Color32::from_rgb(52, 50, 45) })
         .stroke(Stroke::NONE)
         .corner_radius(10)
         .min_size(egui::vec2(ui.available_width(), height));
