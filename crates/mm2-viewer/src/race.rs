@@ -554,8 +554,11 @@ impl Bike {
     /// The thrown rider in a crash: where to draw them and their motion.
     pub fn wreck(&self) -> Option<(Mat4, &'static str)> {
         match self {
-            Bike::Player(b) => b.wreck.as_ref().map(|w| (w.place(), w.motion)),
-            Bike::Computer(b) => b.wreck.as_ref()?.wreck.as_ref().map(|w| (w.place(), w.motion)),
+            Bike::Player(b) => Some((b.drawn_wreck()?, b.wreck.as_ref()?.motion)),
+            Bike::Computer(b) => {
+                let bike = b.wreck.as_ref()?;
+                Some((bike.drawn_wreck()?, bike.wreck.as_ref()?.motion))
+            }
             Bike::Taped(_) => None,
         }
     }

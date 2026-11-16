@@ -734,14 +734,30 @@ impl Bike {
         if position.distance(self.position) > 20.0 {
             return now;
         }
-        // A step the length of the frame lands where the frame is drawn.
-        let t = if self.h < STEP { 1.0 } else { (self.pending / STEP).clamp(0.0, 1.0) };
+        let t = self.drawn_share();
         let from = Quat::from_mat3(&orientation);
         let to = Quat::from_mat3(&self.orientation);
         let r = Mat3::from_quat(from.slerp(to, t));
         let mut m = Mat4::from_mat3(r);
         m.w_axis = (position.lerp(self.position, t) - r * COM).extend(1.0);
         m
+    }
+
+    /// How far the screen is from the step before to the last one, 0 to 1.
+    fn drawn_share(&self) -> f32 {
+        // A step the length of the frame lands where the frame is drawn.
+        if self.h < STEP { 1.0 } else { (self.pending / STEP).clamp(0.0, 1.0) }
+    }
+
+    /// Where to draw the rider thrown off in a crash, between steps as
+    /// the bike is: on the bike while the bail plays.
+    pub fn drawn_wreck(&self) -> Option<Mat4> {
+        let w = self.wreck.as_ref()?;
+        Some(if w.stage == wreck::Stage::Bail {
+            self.drawn_place()
+        } else {
+            w.drawn_place(self.drawn_share())
+        })
     }
 
     /// Suspension compression, 0 to 1, front and rear (for the model's
@@ -2611,5 +2627,39 @@ mod tests {
         assert!(bike.wreck.is_none());
         assert!(bike.crash.is_none());
         assert!(bike.up().y > 0.9);
+    }
+
+    #[test]
+    fn the_thrown_rider_moves_every_frame_on_a_fast_screen() {
+        // Thrown at speed and drawn at 144 frames a second while the game
+        // steps 50 times a second: the rider is drawn between steps, so
+        // through the bail and the let-go it moves on each frame by about
+        // as much (drawn at the last step, every third frame stood still).
+        let mut bike = Bike::new(&Flat, Vec3::ZERO, Vec3::Z);
+        bike.velocity = Vec3::new(0.0, 0.0, 40.0);
+        bike.fixed_step = true;
+        bike.fall(Crash::Hit);
+        let frame = 1.0 / 144.0;
+        let mut was: Option<Vec3> = None;
+        let mut moves = Vec::new();
+        let mut after = 0;
+        for k in 0..200 {
+            bike.step(&Flat, Controls::default(), frame);
+            let at = bike.drawn_wreck().expect("no wreck").w_axis.truncate();
+            if let (Some(p), true) = (was, k > 10) {
+                moves.push(at.distance(p));
+            }
+            was = Some(at);
+            if bike.wreck.as_ref().unwrap().stage != wreck::Stage::Bail {
+                after += 1;
+                if after > 30 {
+                    break;
+                }
+            }
+        }
+        assert!(after > 30, "{after}");
+        let most = moves.iter().cloned().fold(0.0, f32::max);
+        let least = moves.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(least > most * 0.4, "{least} {most} {moves:?}");
     }
 }

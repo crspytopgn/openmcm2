@@ -9,6 +9,7 @@ use bytemuck::{Pod, Zeroable};
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Params {
     v: [f32; 4],
+    reach: [f32; 4],
 }
 
 pub struct Polish {
@@ -116,7 +117,9 @@ impl Polish {
             if m.fxaa { 1.0 } else { 0.0 },
             m.sharpen.min(100) as f32 / 100.0,
         ];
-        queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&Params { v }));
+        // One and a half pixels at 720 lines, more on taller windows.
+        let reach = [1.5 * (picture.height() as f32 / 720.0).max(1.0), 0.0, 0.0, 0.0];
+        queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&Params { v, reach }));
         let view = picture.create_view(&Default::default());
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("polish"),
