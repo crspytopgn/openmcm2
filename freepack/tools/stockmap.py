@@ -3,7 +3,7 @@
 free file that stands in for it. The engine's free loader reads this.
 
 [model]  stock model stem -> glTF (kind: made for it, "generic" crate stand-in)
-[eco]    stock eco species -> glTF card tree
+[eco]    stock eco species -> { file, height and radius in feet (stock size the card is built to), sway 0..1 (wind bend hint) }
 [sky]    stock .cub name   -> six PNG faces (face order as in sky.rs)
 Names are lower case; look them up case-insensitively."""
 import os, glob, tomllib
@@ -15,8 +15,19 @@ for line in open(os.path.join(B, "objects", "built.txt")):
     if k == "missing": missing.append(n); continue
     L.append(f'{n} = {{ file = "objects/{n}.glb", kind = "{k}" }}')
 L += ["", "[eco]"]
+SZ = {}
+for line in open(os.path.join(os.path.dirname(B), "stock_sizes.tsv")):
+    if line.startswith("#") or not line.strip(): continue
+    k, *v = line.split("\t"); SZ[k.lower()] = list(map(float, v[:6]))
+SWAY = {"grass": 0.6, "tumbleweed": 0.2, "tumblweed": 0.2, "drytumbleweed": 0.2, "saguaro": 0.0, "drysaguaro": 0.0, "palm": 0.35, "smpalm": 0.35, "palmetto": 0.4}
 for p in sorted(glob.glob(os.path.join(B, "eco", "*.glb"))):
-    n = os.path.basename(p)[:-4]; L.append(f'{n} = "eco/{n}.glb"')
+    n = os.path.basename(p)[:-4]; st = n.rstrip("0123456789")
+    v = SZ.get(n)
+    extra = ""
+    if v:
+        h = v[4] - max(v[1], 0) if v[4] > 0 else v[4] - v[1]; r = max(v[3] - v[0], v[5] - v[2]) / 2
+        extra = f", height = {h:.2f}, radius = {r:.2f}"
+    L.append(f'{n} = {{ file = "eco/{n}.glb"{extra}, sway = {SWAY.get(st, 0.25)} }}')
 L += ["", "[sky]"]
 src = tomllib.load(open(os.path.join(HERE, "sources.toml"), "rb"))
 for n in src["sky"]:
