@@ -332,6 +332,9 @@ pub struct Settings {
     pub fov: u32,
     /// Look for a newer OpenMCM2 when the launcher opens.
     pub check_updates: bool,
+    /// A small note on the game's main menu when a newer OpenMCM2 is out,
+    /// for players who start the game without the launcher.
+    pub update_notice: bool,
     /// Daniel's cleaner starts: the computer riders keep their order
     /// across the gate off the start (`--clean-starts`).
     pub clean_starts: bool,
@@ -597,6 +600,7 @@ impl Default for Settings {
             steady_camera: false,
             fov: GAME_FOV,
             check_updates: true,
+            update_notice: true,
             clean_starts: false,
             one_lap: false,
             kmh: false,
@@ -719,6 +723,7 @@ impl Settings {
                 "fov" => s.fov = v.parse::<u32>().unwrap_or(85).clamp(60, 120),
                 "vibration_strength" => s.vibration_strength = v.parse::<u32>().unwrap_or(50).min(100),
                 "check_updates" => s.check_updates = yes(v),
+                "update_notice" => s.update_notice = yes(v),
                 "clean_starts" => s.clean_starts = yes(v),
                 "one_lap" => s.one_lap = yes(v),
                 "kmh" => s.kmh = yes(v),
@@ -756,7 +761,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=4\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nauto_quality={}\nquality={}\nantialiasing={}\nresolution={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nscreen={}x{}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\nopengl={}\nforgiving_landings={}\n",
+            "version=4\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nauto_quality={}\nquality={}\nantialiasing={}\nresolution={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nscreen={}x{}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nupdate_notice={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\nopengl={}\nforgiving_landings={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -787,6 +792,7 @@ impl Settings {
             b(self.steady_camera),
             self.fov,
             b(self.check_updates),
+            b(self.update_notice),
             b(self.clean_starts),
             b(self.one_lap),
             b(self.kmh),
@@ -922,6 +928,7 @@ impl Settings {
 pub mod laps;
 pub mod playtime;
 pub mod races;
+pub mod release;
 
 #[cfg(test)]
 mod tests {
@@ -991,6 +998,7 @@ mod tests {
         s.vibration_strength = 80;
         s.fov = 100;
         s.check_updates = false;
+        s.update_notice = false;
         s.kmh = true;
         s.forgiving_landings = true;
         s.screenshot_key = true;
