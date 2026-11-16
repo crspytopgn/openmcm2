@@ -673,6 +673,7 @@ fn main() -> Result<(), BoxError> {
             if flag("--camera").is_none() {
                 camera =
                     Camera::looking_at(renderer::from_game(chase.0), renderer::from_game(chase.1));
+                camera.roll = r.camera_roll();
             }
             // A close look at the player's bike from in front.
             if args.iter().any(|a| a == "--front") {
@@ -1328,6 +1329,9 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
         let ghost = race.ghost == Some(i);
         renderer.set_object_ghost(r.object, ghost);
         renderer.set_object_ghost(r.object + 1, ghost);
+        // Seen from the player's own eyes, the player's rider is left out
+        // of the picture (his shadow stays), so no arm or helmet fills it.
+        renderer.set_object_unseen(r.object + 1, i == race.player && race.first_person());
         renderer.show_mud(i, [r.object, r.object + 1]);
         // Crossed up in the air, the cross-up motions turn the bike and
         // the rider themselves.
@@ -3104,6 +3108,7 @@ fn parse_camera(s: &str) -> Option<Camera> {
         yaw: yaw.to_radians(),
         pitch: pitch.to_radians(),
         fov: camera::FOV,
+        roll: 0.0,
     })
 }
 
@@ -5101,6 +5106,7 @@ impl App {
                 state.camera =
                     Camera::looking_at(renderer::from_game(eye), renderer::from_game(target));
                 state.camera.fov = r.fov();
+                state.camera.roll = r.camera_roll();
                 return;
             }
             self.fly(dt);
@@ -5198,6 +5204,7 @@ impl App {
                     state.camera =
                         Camera::looking_at(renderer::from_game(eye), renderer::from_game(target));
                     state.camera.fov = r.fov();
+                    state.camera.roll = r.camera_roll();
                     return;
                 }
             }

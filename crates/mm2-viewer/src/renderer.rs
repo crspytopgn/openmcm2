@@ -795,6 +795,14 @@ impl TerrainRenderer {
         }
     }
 
+    /// Leaves animated object `index` out of the camera's picture, its
+    /// shadow kept, or draws it again.
+    pub fn set_object_unseen(&mut self, index: usize, unseen: bool) {
+        if let Some(objects) = &mut self.objects {
+            objects.set_unseen(index, unseen);
+        }
+    }
+
     /// Draws animated object `index` see-through, or solid.
     pub fn set_object_ghost(&mut self, index: usize, ghost: bool) {
         if let Some(objects) = &mut self.objects {
@@ -1770,5 +1778,6 @@ pub fn start_camera(terrain: &Terrain) -> crate::camera::Camera {
         yaw: -std::f32::consts::FRAC_PI_2,
         pitch: -0.45,
         fov: crate::camera::FOV,
+        roll: 0.0,
     }
 }

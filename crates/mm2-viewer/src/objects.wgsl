@@ -158,6 +158,10 @@ fn game_vertex(position: vec3<f32>, normal: vec3<f32>, uv: vec2<f32>, color: vec
     out.color = color;
     out.world = world;
     out.ghost = m[0][3];
+    // 2: left out of the camera's picture (behind the near plane).
+    if (m[0][3] > 1.5) {
+        out.clip = vec4<f32>(0.0, 0.0, -1.0, 1.0);
+    }
     out.light = vertex_light(node >> 30u, out.normal);
     out.mode = node >> 30u;
     // The enhanced drawing's dressing hangs on a node too, but is still.
@@ -276,6 +280,9 @@ fn vs_motion(
     var out: MotionOut;
     // Drawn where the scene is (shifted as it is), measured unshifted.
     out.clip = globals.view_proj * vec4<f32>(world, 1.0);
+    if (node_matrix(n)[0][3] > 1.5) {
+        out.clip = vec4<f32>(0.0, 0.0, -1.0, 1.0);
+    }
     out.now = motion_views.now * vec4<f32>(world, 1.0);
     out.before = motion_views.before * vec4<f32>(was, 1.0);
     out.uv = uv;
