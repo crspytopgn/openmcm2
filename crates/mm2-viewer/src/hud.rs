@@ -35,6 +35,11 @@ const MARK_LONG: f32 = 42.5;
 const MARK_SHORT: f32 = 47.5;
 const NUMBER_OUT: f32 = 34.0;
 const NUMBER_PT: f32 = 15.0;
+/// The modern dial's numbers: smaller than the readout's, and each kept
+/// this far inside the long marks, so neighbours (km/h's three-figure
+/// ones too) don't run into each other or the marks.
+const DIAL_PT: f32 = 11.0;
+const NUMBER_GAP: f32 = 3.0;
 /// The picture's marks: light grey, as see-through as its face.
 const MARK_COLOUR: [f32; 4] = [0.8, 0.8, 0.8, 0.8];
 /// The dial's face: round about the needle's centre and cut flat below
@@ -457,10 +462,13 @@ impl Hud {
             ui.line(gfx, a, b, 1.25, MARK_COLOUR);
         }
         for mark in (0..=top).step_by(number_step) {
-            if let Some(t) = ui.text(gfx, &mark.to_string(), NUMBER_PT, true) {
+            if let Some(t) = ui.text(gfx, &mark.to_string(), DIAL_PT, true) {
                 let (w, h) = gfx.sprites.size(t);
                 let (w, h) = (w as f32, h as f32);
-                let [x, y] = at(mark as f32 * unit, NUMBER_OUT);
+                // The number's half size along its line from the centre.
+                let a = dial_angle(mark as f32 * unit);
+                let half = (a.sin().abs() * w + a.cos().abs() * h) / 2.0;
+                let [x, y] = at(mark as f32 * unit, (MARK_LONG - NUMBER_GAP - half).min(NUMBER_OUT));
                 gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [x - w / 2.0, y - h / 2.0, w, h], MARK_COLOUR);
             }
         }

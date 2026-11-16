@@ -129,6 +129,8 @@ pub struct Wreck {
     /// The body at the last pose, while the bail plays: when, where and
     /// turned how, for the speed and spin it lets go with.
     last: Option<(f32, Vec3, Mat3)>,
+    /// The body before the last step, to draw it between steps.
+    previous: Option<(Vec3, Mat3)>,
 }
 
 impl Wreck {
@@ -163,6 +165,7 @@ impl Wreck {
             faded: if bail { 0.0 } else { FADE },
             queued: None,
             last: None,
+            previous: None,
         }
     }
 
@@ -177,6 +180,24 @@ impl Wreck {
     /// the bike.
     pub fn place(&self) -> Mat4 {
         self.body() * self.pelvis.inverse()
+    }
+
+    /// Where to draw the rider `t` (0 to 1) of the way from the step
+    /// before to the last one (ours: the game draws once a step; drawn
+    /// at the last step's place, the thrown rider jumped on in 50 steps
+    /// a second while the bike and the screen ran smoothly).
+    pub fn drawn_place(&self, t: f32) -> Mat4 {
+        let Some((position, orientation)) = self.previous else {
+            return self.place();
+        };
+        if position.distance(self.position) > 20.0 {
+            return self.place();
+        }
+        let from = Quat::from_mat3(&orientation);
+        let to = Quat::from_mat3(&self.orientation);
+        let mut m = Mat4::from_quat(from.slerp(to, t));
+        m.w_axis = position.lerp(self.position, t).extend(1.0);
+        m * self.pelvis.inverse()
     }
 
     /// Where the motion playing puts the pelvis (`pelvis`, model space)
@@ -206,6 +227,7 @@ impl Wreck {
     /// One step of `h` seconds. `bike` is where the bike is now, for a
     /// bail. Returns whether the wreck is over.
     pub fn step(&mut self, ground: &dyn Ground, h: f32, bike: Mat4, bike_velocity: Vec3) -> bool {
+        self.previous = Some((self.position, self.orientation));
         self.time += h;
         if self.stage == Stage::Bail {
             let at = bike * self.pelvis;

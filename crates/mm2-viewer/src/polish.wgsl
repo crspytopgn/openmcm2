@@ -4,6 +4,8 @@
 struct Params {
     // 1 / width, 1 / height, edge smoothing on (1) or off, sharpening 0 to 1.
     v: vec4<f32>,
+    // x: how far out sharpening reads, pixels.
+    reach: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -81,14 +83,18 @@ fn fs_polish(in: Out) -> @location(0) vec4<f32> {
     if (amount > 0.0) {
         // Sharpening that holds back where the neighbours already differ
         // a lot, so edges don't ring and noise isn't raised.
-        let n = at(in.uv + vec2<f32>(0.0, -px.y));
-        let s = at(in.uv + vec2<f32>(0.0, px.y));
-        let w = at(in.uv + vec2<f32>(-px.x, 0.0));
-        let e = at(in.uv + vec2<f32>(px.x, 0.0));
+        // The game's textures are stretched over many pixels, so their
+        // detail is a few pixels wide: the neighbours are read that far
+        // out (more on a bigger window), between pixels.
+        let r = px * params.reach.x;
+        let n = at(in.uv + vec2<f32>(0.0, -r.y));
+        let s = at(in.uv + vec2<f32>(0.0, r.y));
+        let w = at(in.uv + vec2<f32>(-r.x, 0.0));
+        let e = at(in.uv + vec2<f32>(r.x, 0.0));
         let lo = min(c, min(min(n, s), min(w, e)));
         let hi = max(c, max(max(n, s), max(w, e)));
         let room = min(lo, vec3<f32>(1.0) - hi) / max(hi, vec3<f32>(1e-4));
-        let k = sqrt(clamp(room, vec3<f32>(0.0), vec3<f32>(1.0))) * mix(-0.08, -0.2, amount);
+        let k = sqrt(clamp(room, vec3<f32>(0.0), vec3<f32>(1.0))) * (-0.2 * amount);
         c = clamp((c + (n + s + w + e) * k) / (1.0 + 4.0 * k), vec3<f32>(0.0), vec3<f32>(1.0));
     }
     // Read as shown (sRGB-coded), written to the window's sRGB view,

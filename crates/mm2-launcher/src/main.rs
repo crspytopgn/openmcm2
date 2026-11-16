@@ -995,8 +995,8 @@ impl Launcher {
             tile(ui, &mut s.vsync, "VSync", "A picture each time the screen refreshes, with no tearing.");
             tile(ui, &mut s.show_fps, "Show frame rate", "The frames a second at the bottom left (F2 too).");
             slider(ui, "Frame cap", "The most pictures a second, to keep a laptop cool. 0 is no cap.", &mut s.more.fps_cap, 0..=240, 10.0, " fps");
-            tile(ui, &mut s.more.fxaa, "Smoother edges", "Softens jagged edges over the race picture, in either look.");
-            slider(ui, "Sharpening", "Brings out detail in the race picture, in either look. 0% is the original game's.", &mut s.more.sharpen, 0..=100, 5.0, "%");
+            tile(ui, &mut s.more.fxaa, "Smoother edges", "Smooths stair-stepped edges after the race is drawn, in either look: the outlines of banners, bushes, tree leaves and fences, which Anti-aliasing (MSAA) does not reach. The change is small, so look at a banner edge with it off and on.");
+            slider(ui, "Sharpening", "Makes the race picture crisper, in either look: the grain in the dirt and grass, banners and bikes stand out more. 0% is the original game's picture; 30 to 50% is a gentle lift, 100% is strong.", &mut s.more.sharpen, 0..=100, 5.0, "%");
         });
         look::card(ui, icon::ICON_TWO_WHEELER, "Tracks, bikes and riders", |ui| {
             tile(ui, &mut s.more.all_gear, "All gear in every event", "The bikes and outfits the Pro Circuit gives out, in single races too.");
