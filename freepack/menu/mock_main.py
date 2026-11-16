@@ -137,7 +137,7 @@ def logo_style(logo, style):
     if style == "print": return wear(logo, 0.04)
     return logo
 
-def main(photo, out):
+def compose_bg(photo):
     bg = Image.open(photo).convert("RGB")
     bg = ImageOps.fit(bg, (W, H), centering=(0.55, 0.45))
     # muted, warm, slightly faded print
@@ -173,6 +173,10 @@ def main(photo, out):
     tag = font("barlowcondensed/BarlowCondensed-Bold.ttf", 30)
     d.text((W - 640, 330), "RIDE IT LIKE YOU STOLE IT.", font=tag, fill=BONE)
     d.text((W - 640, 366), "No disc. No catch. Just dirt.", font=spec, fill=(220, 214, 200))
+    return canvas, spec
+
+def main(photo, out):
+    canvas, spec = compose_bg(photo); d = ImageDraw.Draw(canvas)
     # buttons at stock rects (x2), as stickers / tape labels
     btn = font("barlowcondensed/BarlowCondensed-Bold.ttf", 58)
     left = [("SINGLE", "flag", INK, BONE, "01 / RACE"), ("MULTI", "helmets", BONE, INK, "02 / ONLINE"),
