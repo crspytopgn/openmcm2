@@ -1,7 +1,7 @@
 # Free Pack credits
 
 Everything in the Free Pack is either made for OpenMCM2 (CC-BY 4.0, credit "OpenMCM2 contributors")
-or comes from the CC0 sources below. CC0 needs no credit, but we give it anyway. Thank you!
+or comes from the CC0 and CC-BY sources below. CC0 needs no credit, but we give it anyway. Thank you!
 
 ## Skies (Poly Haven, CC0)
 
@@ -28,6 +28,12 @@ or comes from the CC0 sources below. CC0 needs no credit, but we give it anyway.
 | --- | --- |
 | Ground051 | [ambientcg.com/view?id=Ground051](https://ambientcg.com/view?id=Ground051) |
 | Ground048 | [ambientcg.com/view?id=Ground048](https://ambientcg.com/view?id=Ground048) |
+| Ground082S | [ambientcg.com/view?id=Ground082S](https://ambientcg.com/view?id=Ground082S) |
+| Ground079S | [ambientcg.com/view?id=Ground079S](https://ambientcg.com/view?id=Ground079S) |
+| Ground078 | [ambientcg.com/view?id=Ground078](https://ambientcg.com/view?id=Ground078) |
+| Ground072 | [ambientcg.com/view?id=Ground072](https://ambientcg.com/view?id=Ground072) |
+| Gravel022 | [ambientcg.com/view?id=Gravel022](https://ambientcg.com/view?id=Gravel022) |
+| Rocks011 | [ambientcg.com/view?id=Rocks011](https://ambientcg.com/view?id=Rocks011) |
 | Ground067 | [ambientcg.com/view?id=Ground067](https://ambientcg.com/view?id=Ground067) |
 | Ground036 | [ambientcg.com/view?id=Ground036](https://ambientcg.com/view?id=Ground036) |
 | Ground037 | [ambientcg.com/view?id=Ground037](https://ambientcg.com/view?id=Ground037) |
@@ -50,3 +56,15 @@ or comes from the CC0 sources below. CC0 needs no credit, but we give it anyway.
 | [Tree Small 02](https://polyhaven.com/a/tree_small_02) | Rico Cilliers |
 | [Grass Medium 01](https://polyhaven.com/a/grass_medium_01) | Rob Tuytel, Rico Cilliers |
 | [Rock Moss Set 01](https://polyhaven.com/a/rock_moss_set_01) | Kless Gyzen |
+
+## Bikes and rider (Sketchfab, CC-BY 4.0)
+
+These models were refitted to the game's bike and rider frames, recoloured and given our own fictional liveries and kit.
+
+| Used as | Model | Author |
+| --- | --- | --- |
+| Enduro four-stroke (400F, 600F) | [Enduro bike](https://sketchfab.com/3d-models/5bb654aed341477b8878f1e2ffd6fcd2) | Zaborchik |
+| MX two-stroke (125, 250, 500) | [Dirtbike Model](https://sketchfab.com/3d-models/315a4d6dfc054b299f715270dbcf2222) | sonniesilva |
+| Rider base body | [Hight Quality Realistic Man Character](https://sketchfab.com/3d-models/10cbeabee635483fae932f9e49f3cf7b) | hammer.gamedev |
+
+Licence: [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/). Changes: cut into rigid parts, scaled and posed, materials and textures replaced.

@@ -34,6 +34,20 @@ L += ["", "[sky]"]
 src = tomllib.load(open(os.path.join(HERE, "sources.toml"), "rb"))
 for n in src["sky"]:
     s = n.lower(); L.append(f'"{s}.cub" = [' + ", ".join(f'"skies/sky-{s}-{i}.png"' for i in range(6)) + "]")
+L += ["", "[bikes]"]
+# which bike shape rides in which class: the MX two-stroke for 125/250/500, the enduro four-stroke for 400/600
+LINEUP = {"mx2": ((125, False), (250, False), (500, False)), "enduro": ((400, True), (600, True))}
+for m, classes in LINEUP.items():
+    if not os.path.exists(os.path.join(B, "bikes", f"fp_bike_{m}.glb")): continue
+    for cc, four in classes:
+        for lv in sorted(glob.glob(os.path.join(B, "bikes", "fp_livery_*.png"))):
+            n = os.path.basename(lv)[len("fp_livery_"):-4]
+            L.append(f'fp_bike_{m}{cc}_{n} = {{ model = "bikes/fp_bike_{m}.glb", livery = "bikes/fp_livery_{n}.png", cc = {cc}, four_stroke = {str(four).lower()}, name = "{n.title()} {cc}{"F" if four else ""}" }}')
+L += ["", "[riders]"]
+if os.path.exists(os.path.join(B, "riders", "fp_rider.glb")):
+    for o in sorted(glob.glob(os.path.join(B, "riders", "fp_rider_*.png"))):
+        n = os.path.basename(o)[9:-4]
+        L.append(f'fp_rider_{n} = {{ model = "riders/fp_rider.glb", outfit = "riders/fp_rider_{n}.png", name = "{n.title()}" }}')
 L += ["", "# Stock models with no stand-in yet (large buildings, vehicles, stadium shells):",
       "missing = [" + ", ".join(f'"{m}"' for m in missing) + "]"]
 open(os.path.join(B, "stockmap.toml"), "w").write("\n".join(L) + "\n")

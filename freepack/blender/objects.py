@@ -390,94 +390,502 @@ def _wheels(lo, hi, u, v, at, r_frac=0.18, inset=0.04):
             cyl(c - v * (w / 2 + 0.02), c + v * (w / 2 + 0.02), r * 0.55, galv(), 16)
     return r
 
+class Frame:
+    """Local frame for a vehicle: a along its length (0 rear, 1 front),
+    b across (0..1), z up as a fraction of its height. Real proportions
+    are kept from the stock length; the stock footprint only centres it."""
+    def __init__(self, lo, hi, u, v, wr, hr, long_is_length=True):
+        self.u, self.v = u, v
+        Lb, Wb, Hb = _span(lo, hi, u), _span(lo, hi, v), hi.z - lo.z
+        self.L = Lb; self.W = min(Wb, wr * Lb); self.H = min(max(Hb, hr * Lb), 1.3 * Hb) if hr else Hb
+        self.O = (lo + hi) / 2; self.O.z = lo.z
+    def p(self, a, b, z):
+        return self.O + self.u * ((a - 0.5) * self.L) + self.v * ((b - 0.5) * self.W) + Vector((0, 0, z * self.H))
+    def ext(self, pts, b0, b1, mat, bevel=0.0, uv=2.0):
+        """Extrude a side profile [(a, z), ...] across b0..b1."""
+        bm = bmesh.new()
+        r0 = [bm.verts.new(self.p(a, b0, z)) for a, z in pts]; r1 = [bm.verts.new(self.p(a, b1, z)) for a, z in pts]
+        n = len(pts); bm.faces.new(r0); bm.faces.new(r1[::-1])
+        for i in range(n): bm.faces.new((r0[i], r1[i], r1[(i + 1) % n], r0[(i + 1) % n]))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        if bevel > 0: bmesh.ops.bevel(bm, geom=list(bm.edges), offset=bevel, segments=2, affect="EDGES", profile=0.5, clamp_overlap=True)
+        _box_uv(bm, uv)
+        me = bpy.data.meshes.new("ext"); bm.to_mesh(me); bm.free()
+        o = bpy.data.objects.new("ext", me); bpy.context.scene.collection.objects.link(o); me.materials.append(mat); return o
+    def decal(self, a0, a1, z0, z1, side, mat, off=0.012):
+        """Picture on the b=0 (side 0) or b=1 (side 1) face, readable from outside."""
+        b = -off / self.W if side == 0 else 1 + off / self.W
+        bm = bmesh.new(); uv = bm.loops.layers.uv.verify()
+        q = [(a0, z0), (a1, z0), (a1, z1), (a0, z1)]
+        vs = [bm.verts.new(self.p(a, b, z)) for a, z in q]
+        f = bm.faces.new(vs if side == 0 else vs[::-1])
+        for l in f.loops:
+            a, z = next((qa, qz) for (qa, qz), v in zip(q, vs) if v == l.vert)
+            t = (a - a0) / (a1 - a0); l[uv].uv = (t if side == 0 else 1 - t, (z - z0) / (z1 - z0))
+        if side == 0: pass
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        me = bpy.data.meshes.new("decal"); bm.to_mesh(me); bm.free()
+        o = bpy.data.objects.new("decal", me); bpy.context.scene.collection.objects.link(o); me.materials.append(mat); return o
+    def bx(self, a0, a1, b0, b1, z0, z1, mat, bevel=0.0):
+        return self.ext([(a0, z0), (a1, z0), (a1, z1), (a0, z1)], b0, b1, mat, bevel)
+    def wheels(self, at, r, tw=None, dual=False):
+        w = tw or min(0.85, self.W * 0.11); rim = flat("rim", (0.42, 0.43, 0.44), 0.4, 0.8)
+        for a in at:
+            for side in (0, 1):
+                for k in ((0, 1) if dual else (0,)):
+                    off = (w / 2 + k * w * 1.05) / self.W; b = off if side == 0 else 1 - off
+                    c = self.p(a, b, 0) + Vector((0, 0, r)); c2 = c - self.v * (w / 2); c3 = c + self.v * (w / 2)
+                    cyl(c2, c3, r, tyre_mat(), 24)
+                    o = (-1 if side == 0 else 1) * 0.02
+                    cyl(c2 + self.v * o * (0 if side else 1) - self.v * 0.02, c3 + self.v * 0.02, r * 0.58, rim, 16)
+
+def lamp(): return flat("headlamp", (0.85, 0.85, 0.8), 0.15)
+def tail(): return flat("taillamp", (0.35, 0.03, 0.02), 0.3)
+def trim(): return flat("trim", (0.05, 0.05, 0.055), 0.6)
+def chrome(): return flat("chrome", (0.6, 0.6, 0.6), 0.25, 1.0)
+
+def _lights(F, zl, zt=None, inset=0.12):
+    zt = zt or zl
+    for b in ((inset, inset + 0.18), (1 - inset - 0.18, 1 - inset)):
+        F.bx(0.995, 1.004, b[0], b[1], zl, zl + 0.07, lamp()); F.bx(-0.004, 0.005, b[0], b[1], zt, zt + 0.07, tail())
+
+def car(F, paint, kind):
+    r = 0.22 if kind != "suv" else 0.24
+    F.wheels((0.18, 0.8), r * F.H)
+    if kind == "sports":
+        body = [(0.0, 0.18), (1.0, 0.18), (1.0, 0.38), (0.97, 0.47), (0.66, 0.55), (0.2, 0.6), (0.0, 0.55)]
+        glass_ = [(0.66, 0.54), (0.5, 0.92), (0.3, 0.93), (0.12, 0.6)]; roof = [(0.49, 0.9), (0.31, 0.9), (0.31, 0.97), (0.48, 0.97)]
+    elif kind == "suv":
+        body = [(0.0, 0.2), (1.0, 0.2), (1.0, 0.5), (0.97, 0.58), (0.76, 0.62), (0.02, 0.62), (0.0, 0.55)]
+        glass_ = [(0.76, 0.6), (0.68, 0.92), (0.04, 0.92), (0.03, 0.61)]; roof = [(0.68, 0.9), (0.03, 0.9), (0.03, 0.98), (0.67, 0.98)]
+    else:
+        body = [(0.0, 0.2), (1.0, 0.2), (1.0, 0.44), (0.98, 0.54), (0.72, 0.58), (0.28, 0.6), (0.02, 0.58), (0.0, 0.5)]
+        glass_ = [(0.71, 0.57), (0.58, 0.93), (0.32, 0.94), (0.22, 0.6)]; roof = [(0.57, 0.91), (0.33, 0.91), (0.33, 0.98), (0.56, 0.98)]
+    F.ext(body, 0.02, 0.98, paint, bevel=0.15)
+    F.ext(glass_, 0.07, 0.93, glass(), bevel=0.06)
+    F.ext(roof, 0.08, 0.92, paint, bevel=0.06)
+    a = (glass_[1][0] + glass_[2][0]) / 2 - 0.01; F.bx(a, a + 0.03, 0.065, 0.935, 0.58, 0.92, paint)   # B pillar
+    F.bx(-0.01, 0.06, 0.01, 0.99, 0.19, 0.3, trim(), 0.05); F.bx(0.94, 1.01, 0.01, 0.99, 0.19, 0.3, trim(), 0.05)  # bumpers
+    F.bx(0.996, 1.003, 0.35, 0.65, 0.33, 0.42, trim())   # grille
+    _lights(F, 0.38 if kind != "sports" else 0.32, 0.42)
+
+def jeep(F, paint):
+    F.wheels((0.17, 0.8), 0.27 * F.H)
+    F.ext([(0.0, 0.22), (1.0, 0.22), (1.0, 0.55), (0.62, 0.58), (0.0, 0.58)], 0.03, 0.97, paint, bevel=0.1)
+    F.bx(0.6, 0.63, 0.06, 0.94, 0.58, 0.85, trim()); F.bx(0.603, 0.627, 0.1, 0.9, 0.6, 0.82, glass())
+    for b in ((0.05, 0.09), (0.91, 0.95)): F.bx(0.2, 0.24, b[0], b[1], 0.58, 1.0, trim())
+    F.bx(0.2, 0.24, 0.05, 0.95, 0.96, 1.0, trim())
+    F.bx(0.25, 0.45, 0.12, 0.88, 0.45, 0.66, flat("seats", (0.08, 0.07, 0.06), 0.8))
+    F.bx(0.996, 1.004, 0.3, 0.7, 0.32, 0.52, trim()); _lights(F, 0.45, 0.4, 0.06)
+    cyl(F.p(-0.02, 0.5, 0.45) - F.u * 0.4, F.p(-0.02, 0.5, 0.45), 0.28 * F.H, tyre_mat(), 20)
+
+def pickup(F, paint):
+    F.wheels((0.17, 0.8), 0.24 * F.H)
+    F.ext([(0.42, 0.2), (1.0, 0.2), (1.0, 0.46), (0.98, 0.55), (0.72, 0.58), (0.42, 0.58)], 0.02, 0.98, paint, bevel=0.12)
+    F.ext([(0.71, 0.57), (0.61, 0.95), (0.44, 0.95), (0.44, 0.57)], 0.07, 0.93, glass(), bevel=0.05)
+    F.ext([(0.6, 0.93), (0.44, 0.93), (0.44, 1.0), (0.595, 1.0)], 0.07, 0.93, paint, bevel=0.05)
+    F.bx(0.0, 0.42, 0.02, 0.98, 0.2, 0.3, paint, 0.08)          # bed floor
+    for b in ((0.02, 0.07), (0.93, 0.98)): F.bx(0.0, 0.42, b[0], b[1], 0.2, 0.58, paint, 0.06)
+    F.bx(0.0, 0.03, 0.02, 0.98, 0.2, 0.56, paint, 0.04); F.bx(0.405, 0.42, 0.02, 0.98, 0.2, 0.62, paint)
+    F.bx(-0.01, 0.04, 0.01, 0.99, 0.18, 0.27, chrome(), 0.04); F.bx(0.95, 1.01, 0.01, 0.99, 0.18, 0.29, chrome(), 0.04)
+    F.bx(0.996, 1.003, 0.25, 0.75, 0.32, 0.46, trim()); _lights(F, 0.4, 0.42, 0.06)
+
+def cabover(F, paint, a0, z_top=1.0, tall_glass=0.62):
+    """Flat-fronted truck cab from a0 to the front."""
+    F.ext([(a0, 0.18), (1.0, 0.18), (1.0, z_top * 0.97), (0.99, z_top), (a0, z_top)], 0.03, 0.97, paint, bevel=0.12)
+    F.bx(0.998, 1.006, 0.08, 0.92, tall_glass, z_top * 0.9, glass())
+    for b in (0.025, 0.975): F.ext([(a0 + (1 - a0) * 0.45, tall_glass), (0.985, tall_glass), (0.985, z_top * 0.88), (a0 + (1 - a0) * 0.45, z_top * 0.88)], b - 0.004, b + 0.004, glass())
+    F.bx(0.998, 1.006, 0.3, 0.7, 0.24, 0.45, trim()); F.bx(0.99, 1.02, 0.01, 0.99, 0.12, 0.2, chrome(), 0.03)
+    for b in ((0.06, 0.18), (0.82, 0.94)): F.bx(0.999, 1.007, b[0], b[1], 0.3, 0.37, lamp())
+
+def boxtruck(F, paint, name):
+    F.wheels((0.16, 0.82), 0.16 * F.H, dual=False)
+    F.bx(0.0, 0.95, 0.12, 0.88, 0.12, 0.2, trim())                  # chassis
+    cabover(F, paint, 0.74, 0.72, 0.42)
+    body = flat("box_white", (0.66, 0.66, 0.64), 0.6)
+    F.bx(0.0, 0.72, 0.02, 0.98, 0.2, 1.0, body, 0.06)
+    for b, sg in ((0.015, -1), (0.985, 1)):
+        p0 = F.p(0.08, b, 0.42); p1 = F.p(0.64, b, 0.86)
+        _banner_quad(Vector((min(p0.x, p1.x), min(p0.y, p1.y), p0.z)), Vector((max(p0.x, p1.x), max(p0.y, p1.y), p1.z)), brand_mat(name), sg) if False else None
+    F.bx(-0.004, 0.004, 0.05, 0.95, 0.22, 0.98, flat("box_door", (0.55, 0.55, 0.53), 0.6))
+
+def firetruck(F, paint):
+    F.wheels((0.16, 0.26, 0.83), 0.17 * F.H)
+    F.bx(0.0, 0.97, 0.12, 0.88, 0.12, 0.2, trim())
+    cabover(F, paint, 0.72, 0.8, 0.48)
+    F.bx(0.0, 0.7, 0.03, 0.97, 0.2, 0.7, paint, 0.06)
+    for k in range(6):  # roller-door lockers
+        a = 0.04 + k * 0.105; F.bx(a, a + 0.09, 0.025, 0.975, 0.28, 0.64, flat("locker", (0.5, 0.5, 0.5), 0.35, 0.8))
+    for b in (0.3, 0.7): F.bx(0.02, 0.85, b - 0.015, b + 0.015, 0.84, 0.88, chrome())
+    for k in range(18): a = 0.04 + k * 0.045; F.bx(a, a + 0.008, 0.3, 0.7, 0.845, 0.875, chrome())
+    for b in (0.3, 0.7): F.bx(0.1, 0.13, b - 0.02, b + 0.02, 0.7, 0.85, chrome())
+    F.bx(0.85, 0.92, 0.25, 0.75, 0.8, 0.85, flat("lightbar_red", (0.5, 0.04, 0.03), 0.3))
+
+def tanktruck(F, paint, name):
+    F.wheels((0.12, 0.24, 0.84), 0.17 * F.H, dual=True)
+    F.bx(0.0, 0.97, 0.15, 0.85, 0.12, 0.22, trim())
+    cabover(F, paint, 0.76, 0.72, 0.42)
+    r = min(F.W * 0.46, F.H * 0.36); c0 = F.p(0.03, 0.5, 0.22) + Vector((0, 0, r)); c1 = F.p(0.73, 0.5, 0.22) + Vector((0, 0, r))
+    tm = flat("tank_steel", (0.62, 0.63, 0.64), 0.35, 0.9) if "tanker" in name else flat("tank_white", (0.68, 0.68, 0.66), 0.5)
+    cyl(c0, c1, r, tm, 32)
+    for a in (0.08, 0.38, 0.68):
+        c = F.p(a, 0.5, 0.22) + Vector((0, 0, r)); cyl(c - F.u * 0.15, c + F.u * 0.15, r * 1.02, trim(), 32)
+    F.bx(0.2, 0.6, 0.45, 0.55, 0.22 + 2 * r / F.H, 0.24 + 2 * r / F.H, steel())
+
+def semicab(F, paint):
+    F.wheels((0.12, 0.28, 0.82), 0.17 * F.H, dual=True)
+    F.bx(0.0, 0.97, 0.15, 0.85, 0.12, 0.22, trim())
+    F.ext([(0.55, 0.18), (0.98, 0.18), (1.0, 0.36), (0.97, 0.44), (0.82, 0.48), (0.8, 0.8), (0.55, 0.8)], 0.04, 0.96, paint, bevel=0.15)   # hood + cab
+    F.ext([(0.55, 0.8), (0.72, 0.8), (0.7, 0.97), (0.55, 0.97)], 0.06, 0.94, paint, bevel=0.1)   # sleeper roof
+    F.ext([(0.8, 0.5), (0.86, 0.5), (0.82, 0.78), (0.8, 0.78)], 0.06, 0.94, glass())
+    F.bx(0.0, 0.3, 0.3, 0.7, 0.22, 0.26, galv())                 # fifth wheel deck
+    for b in (0.02, 0.98):
+        c = F.p(0.78, b, 0.5); cyl(c, c + Vector((0, 0, 0.5 * F.H)), 0.1 * F.W * 0.5, chrome(), 10)  # stacks
+    F.bx(0.995, 1.004, 0.3, 0.7, 0.2, 0.42, chrome()); _lights(F, 0.3, 0.3, 0.04)
+
+def bus(F, paint, name):
+    school = "school" in name
+    F.wheels((0.2, 0.78) if school else (0.16, 0.26, 0.82), 0.15 * F.H)
+    F.ext([(0.0, 0.12), (1.0, 0.12), (1.0, 0.55), (0.985, 0.95), (0.96, 1.0), (0.02, 1.0), (0.0, 0.95)], 0.02, 0.98, paint, bevel=0.25)
+    F.ext([(0.03, 0.55), (0.9, 0.55), (0.9, 0.85), (0.03, 0.85)], 0.015, 0.985, glass())
+    for k in range(13 if school else 9):
+        a = 0.06 + k * (0.065 if school else 0.095); F.bx(a, a + 0.012, 0.012, 0.988, 0.55, 0.85, paint)
+    F.bx(0.996, 1.004, 0.06, 0.94, 0.55, 0.92, glass()); F.bx(0.92, 0.985, 0.012, 0.03, 0.15, 0.9, glass())
+    if school:
+        for b in (0.012, 0.988): F.bx(0.02, 0.98, b - 0.006, b + 0.006, 0.4, 0.43, trim())
+        F.bx(0.99, 1.08, 0.04, 0.96, 0.12, 0.45, paint, 0.1)     # nose
+    F.bx(-0.01, 0.02, 0.0, 1.0, 0.1, 0.2, trim()); F.bx(0.99, 1.01, 0.0, 1.0, 0.1, 0.2, trim()); _lights(F, 0.3, 0.3, 0.06)
+
+def haultruck(F, paint):
+    F.wheels((0.2, 0.75), 0.26 * F.H, tw=F.W * 0.16, dual=True)
+    F.bx(0.05, 0.95, 0.2, 0.8, 0.3, 0.48, steel())
+    F.ext([(0.0, 0.48), (0.72, 0.48), (0.86, 1.0), (0.0, 0.92)], 0.0, 1.0, paint, bevel=0.3)    # dump body with canopy
+    F.bx(0.74, 1.0, 0.04, 0.96, 0.48, 0.56, paint)               # deck
+    F.bx(0.78, 0.96, 0.05, 0.4, 0.56, 0.82, paint, 0.1); F.bx(0.95, 0.965, 0.07, 0.38, 0.62, 0.78, glass())
+    F.bx(0.94, 1.0, 0.3, 0.7, 0.3, 0.5, trim())
+    for b in (0.43, 0.57): F.bx(0.74, 0.98, b, b + 0.01, 0.56, 0.75, galv())
+
+def tug(F, paint):
+    F.wheels((0.2, 0.8), 0.2 * F.H)
+    F.bx(0.0, 1.0, 0.02, 0.98, 0.15, 0.45, paint, 0.12)
+    F.bx(0.05, 0.4, 0.08, 0.92, 0.45, 0.95, trim()); F.bx(0.06, 0.39, 0.06, 0.94, 0.5, 0.9, glass())
+    F.bx(0.06, 0.39, 0.08, 0.92, 0.93, 1.0, paint)
+
 def vehicle(lo, hi, name):
     u, v = _axes(lo, hi); paint = paint_for(name)
-    bus = re.search(r"bus|greyhound|semicab|firetruck|watertruck|tanker|dumptruck|feduptruck|companytruck|famtrk|flatbed|truckbed", name)
-    rw = _wheels(lo, hi, u, v, (0.16, 0.84) if not bus else (0.14, 0.72, 0.86))
-    zb = rw * 0.9 / (hi.z - lo.z)
-    if re.search(r"greyhound|schoolbus", name):
-        box(*_sub(lo, hi, u, v, 0, 1, 0.03, 0.97, zb, 0.97), paint, bevel=0.4)
-        box(*_sub(lo, hi, u, v, 0.05, 0.95, 0.02, 0.98, 0.55, 0.8), glass())
-    elif re.search(r"tanker|watertruck", name):
-        box(*_sub(lo, hi, u, v, 0.72, 1, 0.05, 0.95, zb, 0.9), paint, bevel=0.3); box(*_sub(lo, hi, u, v, 0.86, 0.99, 0.04, 0.96, 0.55, 0.8), glass())
-        c0 = lo + u * (_span(lo, hi, u) * 0.03) + v * (_span(lo, hi, v) / 2); c0.z = lo.z + (hi.z - lo.z) * 0.5
-        cyl(c0, c0 + u * (_span(lo, hi, u) * 0.66), min(_span(lo, hi, v), hi.z - lo.z) * 0.42, galv(), 24)
-    elif bus or re.search(r"truck|jeep|4runner|cop|companytruck", name):
-        # cab at the front, bed or box behind
-        box(*_sub(lo, hi, u, v, 0.62, 1, 0.04, 0.96, zb, 0.62), paint, bevel=0.3)
-        box(*_sub(lo, hi, u, v, 0.64, 0.86, 0.06, 0.94, 0.6, 0.98), paint, bevel=0.25)
-        box(*_sub(lo, hi, u, v, 0.66, 0.84, 0.05, 0.95, 0.66, 0.92), glass())
-        hb = 0.55 if re.search(r"flatbed|truckbed|jeep|4runner|cop", name) else 0.95
-        box(*_sub(lo, hi, u, v, 0.0, 0.6, 0.04, 0.96, zb, hb), paint if hb < 0.6 else flat("box_white", (0.6, 0.6, 0.58), 0.6), bevel=0.2)
-    else:
-        # car: low body, cabin in the middle
-        box(*_sub(lo, hi, u, v, 0, 1, 0.04, 0.96, zb, 0.55), paint, bevel=0.35)
-        box(*_sub(lo, hi, u, v, 0.28, 0.72, 0.08, 0.92, 0.5, 0.98), paint, bevel=0.3)
-        box(*_sub(lo, hi, u, v, 0.3, 0.7, 0.07, 0.93, 0.56, 0.92), glass())
-    if "cop" in name: box(*_sub(lo, hi, u, v, 0.45, 0.55, 0.3, 0.7, 0.98, 1.0), flat("lightbar", (0.2, 0.05, 0.05), 0.4))
+    if "cop" in name: paint = flat("paint_cop", (0.05, 0.05, 0.06), 0.4, 0.3)
+    R = [(r"greyhound|schoolbus", 0.24, 0.3, bus), (r"firetruck", 0.3, 0.3, firetruck), (r"tanker|watertruck", 0.32, 0.33, tanktruck),
+         (r"semicab", 0.4, 0.5, semicab), (r"feduptruck", 0.33, 0.4, boxtruck), (r"dumptruck", 0.8, 0.45, haultruck),
+         (r"airfield_tractor", 0.6, 0.55, tug), (r"companytruck|famtrkstr", 0.37, 0.32, pickup), (r"jeep", 0.45, 0.42, jeep),
+         (r"4runner", 0.4, 0.37, "suv"), (r"300zx|mx3", 0.42, 0.27, "sports"), (r"", 0.4, 0.3, "sedan")]
+    for pat, wr, hr, fn in R:
+        if re.search(pat, name): break
+    F = Frame(lo, hi, u, v, wr, hr)
+    if isinstance(fn, str): car(F, paint, fn)
+    elif fn in (boxtruck, tanktruck, bus): fn(F, paint, name)
+    else: fn(F, paint)
+    if "cop" in name:
+        F.bx(0.47, 0.53, 0.25, 0.75, 0.98, 1.03, flat("lightbar", (0.2, 0.05, 0.05), 0.4))
+        for b in (0.015, 0.985): F.bx(0.3, 0.7, b - 0.005, b + 0.005, 0.3, 0.55, flat("cop_white", (0.7, 0.7, 0.68), 0.4))
 
+TRIM = [(0.42, 0.16, 0.08), (0.12, 0.2, 0.32), (0.14, 0.24, 0.16), (0.3, 0.3, 0.32), (0.45, 0.32, 0.1), (0.25, 0.12, 0.18)]
 def trailer(lo, hi, name):
-    u, v = _axes(lo, hi); paint = paint_for(name)
-    rw = _wheels(lo, hi, u, v, (0.12, 0.24))
-    zb = rw * 1.8 / (hi.z - lo.z)
-    if re.search(r"flatbed|haywagon|pit_trailer", name) or (hi.z - lo.z) < 6:
-        box(*_sub(lo, hi, u, v, 0, 1, 0.02, 0.98, zb, zb + 0.08), wood())
-        if "haywagon" in name: bale_block(*_sub(lo, hi, u, v, 0.05, 0.95, 0.1, 0.9, zb + 0.08, 1.0))
-    else:
-        box(*_sub(lo, hi, u, v, 0, 1, 0.02, 0.98, zb, 1.0), siding() if (sum(map(ord, name)) % 2) else flat("trailer_white", (0.62, 0.62, 0.6), 0.6), uv_scale=6, bevel=0.2)
-        box(*_sub(lo, hi, u, v, 0.94, 1.0, 0.45, 0.55, 0.0, zb), steel())
+    u, v = _axes(lo, hi); h = sum(map(ord, name)); stripe = flat("stripe_%d" % (h % len(TRIM)), TRIM[h % len(TRIM)], 0.5)
+    if "haywagon" in name:
+        F = Frame(lo, hi, u, v, 0.5, None); F.wheels((0.15, 0.85), 0.11 * F.H)
+        F.bx(0.0, 1.0, 0.02, 0.98, 0.18, 0.24, wood()); F.bx(0.9, 1.15, 0.47, 0.53, 0.12, 0.16, wood())
+        for i in range(4):
+            for k in range(2):
+                for j in range(3 - k):
+                    a0 = 0.03 + i * 0.24; b0 = 0.06 + j * 0.3 + k * 0.15
+                    bale_block(*_sub_f(F, a0, a0 + 0.22, b0, b0 + 0.28, 0.24 + k * 0.38, 0.6 + k * 0.38))
+        return
+    if re.search(r"flatbed", name):
+        return railcar(lo, hi, name)
+    if re.search(r"semitrailer|nattrailer|pit_trailer", name):
+        F = Frame(lo, hi, u, v, 0.2 if "semi" in name else 0.42, None)
+        body = flat("hauler_white", (0.7, 0.7, 0.68), 0.45) if h % 2 else flat("hauler_dark", (0.1, 0.11, 0.12), 0.4, 0.3)
+        F.wheels((0.08, 0.16) if "semi" in name else (0.12, 0.2), 0.09 * F.H, dual=True)
+        F.bx(0.0, 1.0, 0.03, 0.97, 0.2, 1.0, body, 0.08)
+        F.bx(0.0, 1.0, 0.025, 0.975, 0.2, 0.26, stripe)
+        for side in (0, 1): F.decal(0.25, 0.75, 0.4, 0.9, side, brand_mat(name))
+        F.bx(-0.003, 0.003, 0.05, 0.95, 0.24, 0.97, flat("hauler_doors", (0.5, 0.5, 0.5), 0.5))
+        F.bx(0.78, 0.8, 0.2, 0.8, 0.0, 0.2, galv())     # landing legs
+        if "pit_trailer" in name or "nattrailer" in name:   # side awning out over the pit
+            F.ext([(0.1, 0.92), (0.9, 0.92), (0.9, 0.94), (0.1, 0.94)], -0.9, 0.0, canvas((0.75, 0.75, 0.72)))
+            for a in (0.1, 0.5, 0.9): F.bx(a, a + 0.006, -0.9, -0.89, 0.0, 0.92, galv())
+        return
+    # travel trailer: rounded front, windows, door, stripe, awning
+    F = Frame(lo, hi, u, v, 0.32, None); F.wheels((0.42,) if F.L < 30 else (0.38, 0.48), 0.1 * F.H)
+    shell = flat("rv_cream", (0.72, 0.7, 0.64), 0.45)
+    F.ext([(0.0, 0.15), (0.86, 0.15), (0.93, 0.25), (0.97, 0.55), (0.95, 0.85), (0.88, 0.97), (0.02, 0.97), (0.0, 0.9)], 0.02, 0.98, shell, bevel=0.2)
+    for b0, b1 in ((0.015, 0.985),):
+        F.ext([(0.0, 0.35), (0.92, 0.35), (0.945, 0.42), (0.0, 0.42)], b0, b1, stripe)
+    F.ext([(0.88, 0.55), (0.955, 0.6), (0.94, 0.8), (0.88, 0.82)], 0.15, 0.85, glass())
+    for side in (0, 1):
+        for a0 in ((0.1, 0.55) if side else (0.08, 0.32, 0.6)):
+            F.bx(a0, a0 + 0.14, -0.003 if side == 0 else 0.985, 0.015 if side == 0 else 1.003, 0.55, 0.8, glass())
+    F.bx(0.45, 0.53, -0.004, 0.02, 0.18, 0.85, flat("rv_door", (0.6, 0.58, 0.52), 0.5))
+    F.bx(0.95, 1.12, 0.47, 0.53, 0.12, 0.17, steel()); F.bx(1.0, 1.02, 0.48, 0.52, 0.0, 0.17, steel())
+    F.bx(0.95, 1.03, 0.3, 0.7, 0.2, 0.32, flat("propane", (0.7, 0.7, 0.68), 0.4))
+    if h % 3 == 0:
+        F.ext([(0.12, 0.9), (0.72, 0.9), (0.72, 0.92), (0.12, 0.92)], -0.45, 0.0, canvas(TRIM[(h + 2) % len(TRIM)]))
+        for a in (0.12, 0.72): F.bx(a, a + 0.008, -0.45, -0.44, 0.0, 0.9, galv())
+
+def _sub_f(F, a0, a1, b0, b1, z0, z1):
+    p0 = F.p(a0, b0, z0); p1 = F.p(a1, b1, z1)
+    return Vector((min(p0.x, p1.x), min(p0.y, p1.y), p0.z)), Vector((max(p0.x, p1.x), max(p0.y, p1.y), p1.z))
+
+def rail_trucks(F, at=(0.14, 0.86)):
+    r = 0.07 * F.H if F.H > 10 else 1.4; w = flat("rail_wheel", (0.12, 0.1, 0.09), 0.6, 0.6)
+    for a in at:
+        F.bx(a - 0.07, a + 0.07, 0.08, 0.92, r * 0.6 / F.H, r * 1.9 / F.H, trim())
+        for d in (-0.04, 0.04):
+            for b in (0.1, 0.9):
+                c = F.p(a + d, b, 0) + Vector((0, 0, r)); cyl(c - F.v * 0.25, c + F.v * 0.25, r, w, 16)
+    return r * 2.1 / F.H
 
 def railcar(lo, hi, name):
-    u, v = _axes(lo, hi); paint = paint_for(name + "rail")
-    L = _span(lo, hi, u); H = hi.z - lo.z
-    for a in (0.15, 0.85):
-        box(*_sub(lo, hi, u, v, a - 0.08, a + 0.08, 0.1, 0.9, 0.0, 0.18), steel())
-    if re.search(r"hopper|gondola|coalcar", name):
-        box(*_sub(lo, hi, u, v, 0.02, 0.98, 0.04, 0.96, 0.18, 0.95), paint, bevel=0.15)
-        box(*_sub(lo, hi, u, v, 0.04, 0.96, 0.08, 0.92, 0.8, 0.96), flat("coal", (0.03, 0.03, 0.03), 0.9) if "coal" in name else flat("hold", (0.05, 0.05, 0.05), 0.9))
-    elif "engine" in name:
-        box(*_sub(lo, hi, u, v, 0.02, 0.98, 0.06, 0.94, 0.18, 0.8), paint, bevel=0.2); box(*_sub(lo, hi, u, v, 0.78, 0.98, 0.04, 0.96, 0.18, 1.0), paint, bevel=0.2)
-        box(*_sub(lo, hi, u, v, 0.8, 0.96, 0.03, 0.97, 0.75, 0.92), glass())
-    else:
-        box(*_sub(lo, hi, u, v, 0.01, 0.99, 0.02, 0.98, 0.18, 0.97), paint if "caboose" in name else roofing(), bevel=0.15, uv_scale=6)
-        if "cattle" in name:
-            for k in range(8): box(*_sub(lo, hi, u, v, 0.05 + k * 0.115, 0.1 + k * 0.115, 0.0, 1.0, 0.4, 0.85), flat("slot", (0.03, 0.03, 0.03), 0.9))
-        if "caboose" in name: box(*_sub(lo, hi, u, v, 0.4, 0.6, 0.1, 0.9, 0.97, 1.0), paint)
+    u, v = _axes(lo, hi)
+    if name == "gondola":   # ski-lift cabin hanging on its grip arm
+        F = Frame(lo, hi, u, v, 1.0, None); body = flat("cabin_red", (0.45, 0.08, 0.06), 0.4)
+        F.ext([(0.05, 0.0), (0.95, 0.0), (1.0, 0.18), (0.98, 0.5), (0.9, 0.55), (0.1, 0.55), (0.02, 0.5), (0.0, 0.18)], 0.05, 0.95, body, bevel=0.2)
+        F.ext([(0.06, 0.25), (0.94, 0.25), (0.92, 0.48), (0.08, 0.48)], 0.04, 0.96, glass())
+        F.bx(0.47, 0.53, 0.47, 0.53, 0.55, 0.98, galv()); F.bx(0.3, 0.7, 0.45, 0.55, 0.95, 1.0, galv()); return
+    if name == "hopper":    # gravel hopper bin on legs (pit/quarry)
+        F = Frame(lo, hi, u, v, 1.0, None); m = flat("hopper_paint", (0.5, 0.4, 0.1), 0.6)
+        F.ext([(0.0, 0.55), (1.0, 0.55), (1.0, 1.0), (0.0, 1.0)], 0.0, 1.0, m, bevel=0.05)
+        F.ext([(0.3, 0.3), (0.7, 0.3), (1.0, 0.55), (0.0, 0.55)], 0.15, 0.85, m)
+        for a in (0.02, 0.92):
+            for b in (0.02, 0.92): F.bx(a, a + 0.06, b, b + 0.06, 0.0, 0.56, steel())
+        F.bx(0.04, 0.96, 0.06, 0.94, 0.96, 0.99, flat("gravel_top", (0.35, 0.33, 0.3), 0.95)); return
+    F = Frame(lo, hi, u, v, 0.23 if name != "engine" else 0.17, None)
+    hue = sum(map(ord, name)) % 3
+    rust = flat("rail_red", (0.26, 0.09, 0.05), 0.65, 0.2) if hue != 1 else flat("rail_blue", (0.1, 0.15, 0.2), 0.6, 0.2)
+    zd = rail_trucks(F)
+    F.bx(0.0, 1.0, 0.06, 0.94, zd, zd + 0.06, trim())   # underframe
+    for a in (-0.01, 1.0): F.bx(a, a + 0.01, 0.4, 0.6, zd + 0.01, zd + 0.06, galv())  # couplers
+    z0 = zd + 0.06
+    if name in ("boxcarclosed", "boxcaropen", "cattlecar"):
+        F.bx(0.005, 0.995, 0.02, 0.98, z0, 0.96, rust, 0.05)
+        F.bx(0.01, 0.99, 0.08, 0.92, 0.96, 1.0, rust, 0.08)
+        for k in range(1, 12):
+            a = k / 12; F.bx(a - 0.004, a + 0.004, 0.012, 0.988, z0, 0.96, rust)
+        if name == "cattlecar":
+            for k in range(6): F.bx(0.04, 0.96, -0.004, 1.004, z0 + 0.12 + k * 0.1, z0 + 0.16 + k * 0.1, flat("slot", (0.03, 0.03, 0.03), 0.9))
+        else:
+            dark = flat("boxcar_inside", (0.02, 0.02, 0.02), 0.9)
+            for side in (0, 1):
+                if name == "boxcaropen": F.bx(0.42, 0.58, -0.004 if side == 0 else 0.98, 0.02 if side == 0 else 1.004, z0 + 0.02, 0.88, dark)
+                F.bx(0.42 if name != "boxcaropen" else 0.6, 0.58 if name != "boxcaropen" else 0.76, -0.012 if side == 0 else 0.996, 0.004 if side == 0 else 1.012, z0 + 0.02, 0.9, rust)
+        F.bx(0.02, 0.98, 0.45, 0.55, 1.0, 1.02, galv())
+    elif name == "coalcar":
+        F.bx(0.005, 0.995, 0.02, 0.98, z0, 0.9, rust, 0.05)
+        for k in range(1, 10): F.bx(k / 10 - 0.006, k / 10 + 0.006, 0.01, 0.99, z0, 0.9, rust)
+        for k in range(4):
+            a = 0.08 + k * 0.23; F.ext([(a, 0.9), (a + 0.08, 0.98), (a + 0.16, 0.98), (a + 0.22, 0.9)], 0.05, 0.95, flat("coal", (0.03, 0.03, 0.03), 0.9))
+    elif name == "caboose":
+        red = flat("caboose_red", (0.38, 0.07, 0.05), 0.5)
+        F.bx(0.1, 0.9, 0.04, 0.96, z0, 0.78, red, 0.05); F.bx(0.08, 0.92, 0.02, 0.98, 0.78, 0.82, red, 0.05)
+        F.bx(0.38, 0.62, 0.1, 0.9, 0.82, 0.98, red, 0.04); F.bx(0.36, 0.64, 0.08, 0.92, 0.98, 1.0, red)
+        for b in (0.0, 0.96):
+            for a in (0.2, 0.32, 0.68, 0.8): F.bx(a, a + 0.06, b - 0.004, b + 0.044, 0.5, 0.68, glass())
+            F.bx(0.4, 0.6, b - 0.004, b + 0.044, 0.86, 0.95, glass())
+        for a0, a1 in ((0.0, 0.1), (0.9, 1.0)):
+            F.bx(a0, a1, 0.04, 0.96, z0, z0 + 0.02, steel())
+            for b in (0.04, 0.94): F.bx(a0, a1, b, b + 0.02, z0 + 0.25, z0 + 0.27, flat("rail_yellow", (0.6, 0.48, 0.08), 0.5))
+    elif name == "engine":
+        loco = flat("loco_paint", PAINT["navy"] if hue else (0.12, 0.2, 0.14), 0.45, 0.2); yel = flat("rail_yellow", (0.6, 0.48, 0.08), 0.5)
+        F.bx(0.0, 1.0, 0.0, 1.0, z0, z0 + 0.025, steel())
+        F.bx(0.04, 0.74, 0.18, 0.82, z0 + 0.025, 0.82, loco, 0.06)            # long hood
+        F.bx(0.74, 0.88, 0.04, 0.96, z0 + 0.025, 1.0, loco, 0.06)            # cab
+        F.ext([(0.88, z0 + 0.025), (0.99, z0 + 0.025), (0.99, 0.62), (0.88, 0.66)], 0.2, 0.8, loco, bevel=0.05)  # short nose
+        F.bx(0.875, 0.885, 0.1, 0.9, 0.74, 0.94, glass())
+        for b in (0.0, 0.96):
+            F.bx(0.77, 0.85, b - 0.004, b + 0.044, 0.72, 0.92, glass())
+            F.bx(0.04, 0.99, b + 0.02 if b else 0.0, b + 0.04 if b else 0.02, z0 + 0.19, z0 + 0.21, yel)
+        F.bx(0.3, 0.6, 0.15, 0.85, zd - 0.14, zd, trim())                    # fuel tank
+        for a in (0.1, 0.35, 0.6):
+            F.bx(a, a + 0.06, 0.4, 0.6, 0.82, 0.86, galv())
+        F.bx(0.04, 0.99, 0.0, 1.0, 0.42, 0.44, yel)
+        F.bx(0.99, 1.0, 0.3, 0.7, 0.55, 0.6, lamp())
+    else:   # rail flatcar with stakes and a load of lumber
+        F.bx(0.0, 1.0, 0.03, 0.97, z0, z0 + 0.06, wood())
+        for k in range(10):
+            for b in (0.03, 0.95): F.bx(0.05 + k * 0.1, 0.07 + k * 0.1, b, b + 0.02, z0 + 0.06, z0 + 0.3, steel())
+        F.bx(0.15, 0.85, 0.1, 0.9, z0 + 0.06, z0 + 0.4, acg("Wood049", 0.25, name="lumber"))
+
+def loft(F, secs, mat, seg=20):
+    """Smooth body through elliptical sections [(a, half_width_ft, half_height_ft, centre_z_frac)]."""
+    bm = bmesh.new(); rings = []
+    for a, rw, rh, zc in secs:
+        c = F.p(a, 0.5, zc); rings.append([bm.verts.new(c + F.v * (rw * math.cos(t)) + Vector((0, 0, rh * math.sin(t))))
+                                           for t in (2 * math.pi * k / seg for k in range(seg))])
+    for r0, r1 in zip(rings, rings[1:]):
+        for k in range(seg): bm.faces.new((r0[k], r0[(k + 1) % seg], r1[(k + 1) % seg], r1[k]))
+    bm.faces.new(rings[0][::-1]); bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces); _box_uv(bm, 4)
+    me = bpy.data.meshes.new("loft"); bm.to_mesh(me); bm.free()
+    for p_ in me.polygons: p_.use_smooth = True
+    o = bpy.data.objects.new("loft", me); bpy.context.scene.collection.objects.link(o); me.materials.append(mat); return o
+
+def airfoil(a0, a1, z, t):
+    """Side profile of a wing: chord a0 (trailing) to a1 (leading), thickness t (fraction of H)."""
+    c = a1 - a0
+    return [(a0, z), (a0 + c * 0.5, z - t * 0.15), (a1 - c * 0.08, z - t * 0.1), (a1, z + t * 0.3), (a1 - c * 0.1, z + t * 0.9), (a0 + c * 0.6, z + t), (a0 + c * 0.05, z + t * 0.3)]
+
+def prop(F, a, b, z, r, blades=3):
+    c = F.p(a, b, z); dark = flat("prop", (0.05, 0.05, 0.05), 0.5)
+    cyl(c - F.u * 0.3, c + F.u * 0.6, r * 0.12, flat("spinner", (0.5, 0.5, 0.52), 0.3, 0.8), 12, r2=r * 0.02)
+    for k in range(blades):
+        t = 2 * math.pi * k / blades + 0.4; d = (F.v * math.cos(t) + Vector((0, 0, math.sin(t))))
+        cyl(c, c + d * r, r * 0.06, dark, 6, r2=r * 0.035)
 
 def aircraft(lo, hi, name):
     heli = re.search(r"bell|heli", name)
-    u, v = _axes(lo, hi, long_is_length=bool(heli))  # planes: span is the long side
-    paint = paint_for(name); L, W, H = _span(lo, hi, u), _span(lo, hi, v), hi.z - lo.z
-    mid = lo + v * (W / 2); zc = lo.z + H * (0.45 if heli else 0.35)
+    u, v = _axes(lo, hi, long_is_length=bool(heli))
+    paint = paint_for(name); lt = flat("aircraft_white", (0.7, 0.7, 0.68), 0.45)
     if heli:
-        a = mid + u * (L * 0.15); b = mid + u * (L * 0.6); a.z = b.z = zc
-        cyl(a, b, H * 0.3, paint, 24); bpy.ops.mesh.primitive_uv_sphere_add(radius=H * 0.3, location=b); bpy.context.object.data.materials.append(glass())
-        t = mid + u * (L * 0.98); t.z = zc + H * 0.1; cyl(a, t, H * 0.08, paint, 12)
-        c = mid + u * (L * 0.45); c.z = hi.z - 0.3; cyl(c, c + Vector((0, 0, 0.15)), L * 0.48, flat("rotor", (0.05, 0.05, 0.05), 0.6), 48)
-        for s in (0.25, 0.75): box(*_sub(lo, hi, u, v, 0.2, 0.7, s - 0.02, s + 0.02, 0.0, 0.05), steel())
+        F = Frame(lo, hi, u, v, 0.3, None); L, H = F.L, F.H
+        body = paint if "bell" in name else lt
+        loft(F, [(0.36, 0.2, 0.2, 0.3), (0.38, 2.1, 2.4, 0.3), (0.5, 2.6, 3.0, 0.3), (0.62, 2.5, 2.9, 0.3), (0.7, 2.0, 2.3, 0.28), (0.74, 0.6, 0.9, 0.26)], body)
+        loft(F, [(0.6, 1.9, 2.0, 0.32), (0.66, 2.4, 2.5, 0.32), (0.72, 1.4, 1.9, 0.3), (0.745, 0.3, 0.5, 0.28)], glass())
+        loft(F, [(0.02, 0.25, 0.35, 0.36), (0.4, 0.6, 0.8, 0.34)], body)                        # tail boom
+        F.ext([(0.0, 0.35), (0.06, 0.38), (0.04, 0.62), (0.0, 0.6)], 0.49, 0.51, body)           # fin
+        F.ext([(0.07, 0.34), (0.12, 0.34), (0.12, 0.37), (0.07, 0.37)], 0.42, 0.58, body)         # stabiliser
+        for side in (0.38, 0.62):
+            F.bx(0.34, 0.74, side - 0.006, side + 0.006, 0.0, 0.025, galv())
+            for a in (0.42, 0.66): F.bx(a, a + 0.012, side - 0.004, side + 0.004, 0.0, 0.13, galv())
+        for a in (0.42, 0.66): F.bx(a, a + 0.012, 0.38, 0.62, 0.12, 0.14, galv())
+        hub = F.p(0.52, 0.5, 0.0) + Vector((0, 0, H * 0.62)); cyl(hub - Vector((0, 0, H * 0.06)), hub + Vector((0, 0, 0.6)), 0.35, galv(), 10)
+        R = min(L * 0.36, 17.0); dark = flat("rotor", (0.06, 0.06, 0.06), 0.6)
+        for t in (0.3, 0.3 + math.pi):
+            d = F.u * math.cos(t) + F.v * math.sin(t); n = Vector((0, 0, 1)).cross(d).normalized()
+            box_pts = [hub + n * 0.6 + Vector((0, 0, 0.5)), hub + d * R + n * 0.6 + Vector((0, 0, 0.5))]
+            cyl(hub + Vector((0, 0, 0.55)), hub + d * R + Vector((0, 0, 0.45)), 0.45, dark, 4)
+        tr = F.p(0.02, 0.53, 0.5); cyl(tr, tr + F.v * 0.2, 2.6, flat("tailrotor", (0.08, 0.08, 0.08), 0.6), 16)
         return
-    a = mid + u * (L * 0.02); b = mid + u * (L * 0.98); a.z = b.z = zc
-    r = min(H * 0.28, W * 0.06); cyl(a, b, r, paint, 24, r2=r * 0.35)
-    p0, p1 = _sub(lo, hi, u, v, 0.26, 0.42, 0.0, 1.0, (zc - lo.z - r * 0.3) / H, (zc - lo.z - r * 0.1) / H); box(p0, p1, paint)
-    if "biplane" in name: p0, p1 = _sub(lo, hi, u, v, 0.26, 0.42, 0.04, 0.96, 0.75, 0.8); box(p0, p1, paint)
-    p0, p1 = _sub(lo, hi, u, v, 0.9, 0.99, 0.32, 0.68, (zc - lo.z) / H, (zc - lo.z) / H + 0.03); box(p0, p1, paint)
-    p0, p1 = _sub(lo, hi, u, v, 0.9, 0.99, 0.49, 0.51, (zc - lo.z) / H, 0.98); box(p0, p1, paint)
-    p0, p1 = _sub(lo, hi, u, v, 0.08, 0.2, 0.44, 0.56, (zc - lo.z) / H + 0.02, (zc - lo.z + r * 1.1) / H); box(p0, p1, glass())
-    for s in (0.35, 0.65): _ = cyl(lo + u * (L * 0.3) + v * (W * s), lo + u * (L * 0.3) + v * (W * s) + v * 0.6, H * 0.12, tyre_mat(), 16)
+    F = Frame(lo, hi, u, v, 10.0, None); L, W, H = F.L, F.W, F.H
+    high = re.search(r"supercub|cargoplane", name); bi = "biplane" in name
+    twin = re.search(r"dc-3|beech18|aircraftq", name); four = "cargoplane" in name
+    r = L * (0.06 if twin else 0.075 if four else 0.085); zc = (0.42 if high else 0.36) if not four else 0.35
+    zr = zc * H
+    body = lt if re.search(r"dc-3|cargoplane|aircraftq", name) else paint
+    secs = [(0.0, r * 0.12, r * 0.25, zc + 0.08), (0.2, r * 0.45, r * 0.6, zc + 0.03), (0.5, r, r, zc), (0.75, r, r, zc), (0.9, r * 0.85, r * 0.85, zc - 0.01), (0.99, r * 0.35, r * 0.4, zc - 0.03)]
+    loft(F, secs, body)
+    F.ext([(0.86, zc + r * 0.35 / H), (0.92, zc + r * 0.35 / H), (0.885, zc + r * 0.85 / H), (0.86, zc + r * 0.85 / H)], 0.5 - r * 0.7 / W, 0.5 + r * 0.7 / W, glass())   # cockpit
+    t = min(r * 0.45, 0.1 * 0.18 * L) / H
+    wz = (zc + r * 0.75 / H) if high else (zc - r * 0.55 / H)
+    F.ext(airfoil(0.52, 0.7, wz, t), 0.0, 1.0, body, uv=6)
+    if bi: F.ext(airfoil(0.55, 0.72, zc + r * 2.2 / H, t), 0.02, 0.98, body, uv=6)
+    if bi:
+        for b in (0.2, 0.8, 0.35, 0.65): F.bx(0.6, 0.61, b - 0.004, b + 0.004, wz, zc + r * 2.2 / H, galv())
+    F.ext(airfoil(0.0, 0.1, zc + 0.03, t * 0.6), 0.5 - 0.16, 0.5 + 0.16, body)                                  # tailplane
+    F.ext([(0.0, zc + 0.05), (0.12, zc + 0.05), (0.04, 0.97), (0.0, 0.97)], 0.5 - 0.15 * r / W, 0.5 + 0.15 * r / W, body)   # fin
+    gear_r = max(1.0, H * 0.07)
+    if twin or four:
+        for b in ((0.3, 0.7) if twin else (0.2, 0.36, 0.64, 0.8)):
+            loft(F, [(0.5, r * 0.15, r * 0.15, wz), (0.58, r * 0.38, r * 0.42, wz), (0.72, r * 0.38, r * 0.42, wz), (0.78, r * 0.3, r * 0.3, wz)], body) if False else None
+            c = F.p(0.0, b, 0.0)
+            nac = [(0.48, r * 0.1, r * 0.1, wz), (0.55, r * 0.36, r * 0.4, wz), (0.72, r * 0.38, r * 0.42, wz), (0.76, r * 0.32, r * 0.34, wz)]
+            Fb = Frame.__new__(Frame); Fb.__dict__.update(F.__dict__); Fb.O = F.p(0.5, b, 0) ; Fb.O.z = F.O.z
+            loft(Fb, nac, body)
+            prop(Fb, 0.765, 0.5, wz, min(r * 1.4, (W * 0.16)))
+            if not four: _gear(Fb, 0.62, wz, gear_r)
+    else:
+        prop(F, 0.995, 0.5, zc - 0.03, r * 1.5)
+        for b in (0.5 - 1.6 * r / W, 0.5 + 1.6 * r / W):
+            Fb = Frame.__new__(Frame); Fb.__dict__.update(F.__dict__); Fb.O = F.p(0.5, b, 0); Fb.O.z = F.O.z
+            _gear(Fb, 0.8, zc - r * 0.8 / H, gear_r)
+    if four:
+        for b in (0.5 - 0.8 * r / W, 0.5 + 0.8 * r / W):
+            Fb = Frame.__new__(Frame); Fb.__dict__.update(F.__dict__); Fb.O = F.p(0.5, b, 0); Fb.O.z = F.O.z
+            _gear(Fb, 0.55, zc - r * 0.8 / H, gear_r); _gear(Fb, 0.65, zc - r * 0.8 / H, gear_r)
+    c = F.p(0.03, 0.5, 0) + Vector((0, 0, gear_r * 0.5)); cyl(c - F.v * 0.2, c + F.v * 0.2, gear_r * 0.5, tyre_mat(), 12)
+
+def _gear(F, a, ztop, r):
+    c = F.p(a, 0.5, 0) + Vector((0, 0, r)); top = F.p(a, 0.5, ztop)
+    cyl(c, top, r * 0.15, galv(), 8); cyl(c - F.v * (r * 0.35), c + F.v * (r * 0.35), r, tyre_mat(), 18)
+
+SIGN_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+def _sign_png(name):
+    """Plain road-sign faces in the common US highway style (our own drawing)."""
+    from PIL import Image, ImageDraw, ImageFont
+    path = os.path.join(BUILD, "tex", "sign_" + name + ".png")
+    if os.path.exists(path): return path
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    F = lambda s: ImageFont.truetype(SIGN_FONT, s)
+    def centred(d, y, txt, size, fill):
+        f = F(size); w = d.textlength(txt, font=f); d.text(((d.im.size[0] - w) / 2, y), txt, font=f, fill=fill)
+    yel, blk, wht, grn = (212, 170, 30), (18, 18, 18), (232, 232, 226), (24, 92, 52)
+    if re.search(r"narrowbrdg|intrsctn|roadends|worldends", name):
+        im = Image.new("RGB", (512, 512), (120, 120, 118)); d = ImageDraw.Draw(im)
+        d.polygon([(256, 6), (506, 256), (256, 506), (6, 256)], fill=blk); d.polygon([(256, 22), (490, 256), (256, 490), (22, 256)], fill=yel)
+        if "narrow" in name:
+            centred(d, 170, "NARROW", 62, blk); centred(d, 250, "BRIDGE", 62, blk)
+        elif "intrsctn" in name:
+            d.rectangle([236, 120, 276, 392], fill=blk); d.rectangle([120, 236, 392, 276], fill=blk)
+        elif "roadends" in name:
+            centred(d, 170, "ROAD", 70, blk); centred(d, 255, "ENDS", 70, blk)
+        else:
+            centred(d, 150, "END OF", 54, blk); centred(d, 215, "THE", 54, blk); centred(d, 280, "WORLD", 54, blk)
+    elif "speedlmt" in name:
+        im = Image.new("RGB", (400, 512), blk); d = ImageDraw.Draw(im); d.rectangle([10, 10, 389, 501], fill=wht)
+        centred(d, 40, "SPEED", 72, blk); centred(d, 120, "LIMIT", 72, blk); centred(d, 230, "45", 200, blk)
+    elif "hwy" in name:
+        im = Image.new("RGB", (400, 512), blk); d = ImageDraw.Draw(im); d.rectangle([8, 8, 391, 503], fill=wht)
+        d.polygon([(40, 60), (360, 60), (360, 300), (200, 470), (40, 300)], fill=blk)
+        d.polygon([(56, 76), (344, 76), (344, 292), (200, 446), (56, 292)], fill=wht); centred(d, 150, "70", 170, blk)
+    elif "milemrkr" in name:
+        im = Image.new("RGB", (128, 512), grn); d = ImageDraw.Draw(im); d.rectangle([6, 6, 121, 505], outline=wht, width=5)
+        centred(d, 60, "M", 60, wht); centred(d, 150, "I", 60, wht); centred(d, 240, "L", 60, wht); centred(d, 330, "E", 60, wht); centred(d, 420, "8", 70, wht)
+    else:
+        return None
+    im.save(path); return path
 
 def sign(lo, hi, name):
-    u, v = _axes(lo, hi); L = _span(lo, hi, u)
-    m = brand_mat(name) if re.search(r"trpk|ironmountain|info", name) else flat("sign_paint", (0.62, 0.5, 0.1), 0.5)
-    p0, p1 = _sub(lo, hi, u, v, 0.05, 0.95, 0.45, 0.55, 0.45, 1.0); box(p0, p1, m)
-    for a in (0.15, 0.85): box(*_sub(lo, hi, u, v, a - 0.02, a + 0.02, 0.4, 0.6, 0.0, 0.5), wood() if "info" in name else galv())
+    u, v = _axes(lo, hi); L = _span(lo, hi, u); Wd = _span(lo, hi, v)
+    png = _sign_png(name)
+    if png:   # road sign: galvanised U-post with the face on top
+        mid = lo + u * (L / 2) + v * (Wd / 2)
+        face_h = {"milemrkr": 2.4, "speedlmt": L * 1.25, "hwy": L * 1.25}.get(next((k for k in ("milemrkr", "speedlmt", "hwy") if k in name), ""), L)
+        z1 = hi.z; z0 = z1 - face_h
+        cyl(Vector((mid.x, mid.y, lo.z)) + v * 0.12, Vector((mid.x, mid.y, z1 - 0.2)) + v * 0.12, 0.09, galv(), 8)
+        m = image_mat(png, "signface_" + name, 0.5)
+        bm = bmesh.new(); uvl = bm.loops.layers.uv.verify()
+        p0 = lo + v * (Wd / 2); q = [(0, z0), (L, z0), (L, z1), (0, z1)]
+        if re.search(r"narrowbrdg|intrsctn|roadends|worldends", name):   # diamond: cut the face to shape (no alpha in the pack's JPEGs)
+            q = [(L / 2, z0), (L, z0 + face_h / 2), (L / 2, z1), (0, z0 + face_h / 2)]
+        vs = [bm.verts.new(p0 + u * a + Vector((0, 0, z - p0.z))) for a, z in q]
+        f = bm.faces.new(vs)
+        for l, (a, z) in zip(f.loops, q): l[uvl].uv = (a / L, (z - z0) / face_h)
+        me = bpy.data.meshes.new("face"); bm.to_mesh(me); bm.free()
+        o = bpy.data.objects.new("face", me); bpy.context.scene.collection.objects.link(o); me.materials.append(m)
+        sd = o.modifiers.new("s", "SOLIDIFY"); sd.thickness = 0.06; sd.offset = 1.0
+        return
+    # trailhead / park board: timber frame, roof, brand panel both sides
+    F = Frame(lo, hi, u, v, 1.0, None); w = wood(); z0 = max(0.0, -lo.z / F.H)
+    for a in (0.04, 0.9): F.bx(a, a + 0.06, 0.3, 0.7, 0.0, 0.92, w)
+    F.bx(0.08, 0.92, 0.42, 0.58, 0.35, 0.82, plywood())
+    for side in (0, 1):
+        Fb = Frame.__new__(Frame); Fb.__dict__.update(F.__dict__); Fb.W = F.W * 0.16
+        Fb.decal(0.1, 0.9, 0.38, 0.8, side, brand_mat(name))
+    if F.H > 8:
+        F.ext([(0.0, 0.88), (1.0, 0.88), (1.0, 0.9), (0.0, 0.9)], -0.1, 1.1, roofing())
 
 def splitrail(lo, hi, name):
-    u, v = _axes(lo, hi); L = _span(lo, hi, u); n = max(2, int(L / 9) + 1)
-    for k in range(n): a = k / (n - 1); box(*_sub(lo, hi, u, v, max(0, a - 0.02), min(1, a + 0.02), 0.3, 0.7, 0, 1.0), wood())
+    u, v = _axes(lo, hi); L = _span(lo, hi, u); Wd = _span(lo, hi, v); g = max(lo.z, 0.0) if lo.z > -0.5 else 0.0
+    top = hi.z; H = top - g; c = lo + v * (Wd / 2); w = wood()
+    posts = [0.03, 0.97] if L > 3 else [0.5]
+    for a in posts:
+        p = c + u * (L * a); cyl(Vector((p.x, p.y, lo.z)), Vector((p.x, p.y, top)), min(0.35, Wd * 0.3), w, 10)
+    if L <= 3: return
     broken = "broke" in name
-    for z in (0.45, 0.8):
-        a1 = 0.55 if broken and z > 0.5 else 1.0
-        box(*_sub(lo, hi, u, v, 0, a1, 0.4, 0.6, z - 0.06, z + 0.06), wood())
+    for k, z in enumerate((0.3, 0.58, 0.85)):
+        zz = g + H * z; a1 = 1.0
+        if broken and k == (sum(map(ord, name)) % 3): a1 = 0.55
+        p0 = c + u * 0.0 + Vector((0, 0, zz - c.z)); p1 = c + u * (L * a1) + Vector((0, 0, zz - c.z + (0.6 if a1 < 1 else 0)))
+        cyl(p0 + v * 0.25 * (-1) ** k, p1 + v * 0.25 * (-1) ** k, 0.22, w, 7)
 
 def picket(lo, hi, name):
     u, v = _axes(lo, hi); L = _span(lo, hi, u); n = max(3, int(L / 0.5))

@@ -11,6 +11,12 @@ for i, f in enumerate(files):
     before = set(bpy.data.objects); bpy.ops.import_scene.gltf(filepath=f)
     objs = [o for o in bpy.data.objects if o not in before]
     bpy.context.view_layer.update()
+    if os.environ.get("ALIGN"):
+        # turn long things side-on and three-quarter to the camera
+        import math as _m
+        for o in objs:
+            if o.parent is None: o.rotation_euler.z += _m.radians(float(os.environ.get("ALIGN")))
+        bpy.context.view_layer.update()
     lo, hi = Vector((1e9,) * 3), Vector((-1e9,) * 3)
     for o in objs:
         if o.type != "MESH": continue

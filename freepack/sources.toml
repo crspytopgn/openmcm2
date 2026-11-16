@@ -28,6 +28,7 @@ ambientcg = [
   "Concrete034", "Plastic010", "Wood049", "Fabric030", "MetalPlates006",
   "ThatchedRoof001A", "ThatchedRoof002A", "Rubber004", "Fence007A",
   "CorrugatedSteel007A", "Wood087", "PaintedMetal004",
+  "Ground082S", "Ground079S", "Ground078", "Ground072", "Gravel022", "Rocks011",
 ]
 
 [models]
@@ -38,3 +39,10 @@ polyhaven = [
   "searsia_burchellii", "shrub_01", "shrub_02", "shrub_04", "dead_tree_trunk_02",
   "dry_branches_medium_01", "quiver_tree_02", "wild_rooibos_bush",
 ]
+
+[sketchfab]
+# CC-BY 4.0 models, fetched with the Sketchfab download API (needs your own API token).
+# uid = [name, author, used as]
+"5bb654aed341477b8878f1e2ffd6fcd2" = ["Enduro bike", "Zaborchik", "bikes/fp_bike_enduro.glb (400F, 600F)"]
+"315a4d6dfc054b299f715270dbcf2222" = ["Dirtbike Model", "sonniesilva", "bikes/fp_bike_mx2.glb (125, 250, 500)"]
+"10cbeabee635483fae932f9e49f3cf7b" = ["Hight Quality Realistic Man Character", "hammer.gamedev", "riders/fp_rider.glb (base body)"]

@@ -82,15 +82,11 @@ waypnt = { file = "objects/waypnt.glb", kind = "waypoint" }
 3 = { file = "objects/3.glb", kind = "pole" }
 30secman = { file = "objects/30secman.glb", kind = "generic" }
 4 = { file = "objects/4.glb", kind = "pole" }
-4runner_brown = { file = "objects/4runner_brown.glb", kind = "generic" }
-4runner_green = { file = "objects/4runner_green.glb", kind = "generic" }
-4runner_white = { file = "objects/4runner_white.glb", kind = "generic" }
 5 = { file = "objects/5.glb", kind = "pole" }
 6 = { file = "objects/6.glb", kind = "pole" }
 7 = { file = "objects/7.glb", kind = "pole" }
 8 = { file = "objects/8.glb", kind = "pole" }
 9 = { file = "objects/9.glb", kind = "pole" }
-airfield_tractor = { file = "objects/airfield_tractor.glb", kind = "generic" }
 ant_cel = { file = "objects/ant_cel.glb", kind = "pole" }
 ant_cel-xmit = { file = "objects/ant_cel-xmit.glb", kind = "generic" }
 antenna01 = { file = "objects/antenna01.glb", kind = "generic" }
@@ -110,7 +106,6 @@ bn_slide = { file = "objects/bn_slide.glb", kind = "generic" }
 bn_wall-e = { file = "objects/bn_wall-e.glb", kind = "generic" }
 bn_wall-w = { file = "objects/bn_wall-w.glb", kind = "generic" }
 bobcat = { file = "objects/bobcat.glb", kind = "generic" }
-boxcaropen = { file = "objects/boxcaropen.glb", kind = "generic" }
 bridge_debris01 = { file = "objects/bridge_debris01.glb", kind = "generic" }
 bridge_debris03 = { file = "objects/bridge_debris03.glb", kind = "generic" }
 cabin = { file = "objects/cabin.glb", kind = "building" }
@@ -121,18 +116,14 @@ cargo_sacks = { file = "objects/cargo_sacks.glb", kind = "generic" }
 cargowreck_lwing = { file = "objects/cargowreck_lwing.glb", kind = "generic" }
 cargowreck_nose = { file = "objects/cargowreck_nose.glb", kind = "generic" }
 carport01 = { file = "objects/carport01.glb", kind = "generic" }
-cattlecar = { file = "objects/cattlecar.glb", kind = "generic" }
 cattleguard = { file = "objects/cattleguard.glb", kind = "generic" }
 cautionlightinside = { file = "objects/cautionlightinside.glb", kind = "pole" }
 chair_patio = { file = "objects/chair_patio.glb", kind = "pole" }
-chevellered = { file = "objects/chevellered.glb", kind = "generic" }
 citrus01 = { file = "eco/citrus01.glb", kind = "plant" }
 citrus02 = { file = "eco/citrus02.glb", kind = "plant" }
 citrus03 = { file = "eco/citrus03.glb", kind = "plant" }
 coffee_machine01-snow = { file = "objects/coffee_machine01-snow.glb", kind = "generic" }
-companytruck = { file = "objects/companytruck.glb", kind = "generic" }
 container01 = { file = "objects/container01.glb", kind = "generic" }
-cop_navy = { file = "objects/cop_navy.glb", kind = "generic" }
 crunchberry01 = { file = "eco/crunchberry01.glb", kind = "plant" }
 crunchberry02 = { file = "eco/crunchberry02.glb", kind = "plant" }
 crunchberry03 = { file = "eco/crunchberry03.glb", kind = "plant" }
@@ -152,16 +143,13 @@ drytumbleweed01 = { file = "objects/drytumbleweed01.glb", kind = "pole" }
 drytumbleweed02 = { file = "objects/drytumbleweed02.glb", kind = "pole" }
 drytumbleweed03 = { file = "objects/drytumbleweed03.glb", kind = "pole" }
 duckblind = { file = "objects/duckblind.glb", kind = "generic" }
-famtrkstr = { file = "objects/famtrkstr.glb", kind = "generic" }
 farmhouse = { file = "objects/farmhouse.glb", kind = "building" }
-feduptruck = { file = "objects/feduptruck.glb", kind = "generic" }
 fence_barbedwire = { file = "objects/fence_barbedwire.glb", kind = "pole" }
 fence_barbedwirepost = { file = "objects/fence_barbedwirepost.glb", kind = "pole" }
 fence_chlinkgate = { file = "objects/fence_chlinkgate.glb", kind = "generic" }
 fence_chlinkpole = { file = "objects/fence_chlinkpole.glb", kind = "pole" }
 finish = { file = "objects/finish.glb", kind = "generic" }
 finish_big = { file = "objects/finish_big.glb", kind = "generic" }
-firetruck = { file = "objects/firetruck.glb", kind = "generic" }
 five = { file = "objects/five.glb", kind = "pole" }
 flaggirl = { file = "objects/flaggirl.glb", kind = "generic" }
 flamingo01 = { file = "objects/flamingo01.glb", kind = "pole" }
@@ -174,16 +162,13 @@ gate_l01 = { file = "objects/gate_l01.glb", kind = "generic" }
 gate_r01 = { file = "objects/gate_r01.glb", kind = "generic" }
 girlbox = { file = "objects/girlbox.glb", kind = "generic" }
 goalpost = { file = "objects/goalpost.glb", kind = "generic" }
-gondola = { file = "objects/gondola.glb", kind = "generic" }
 grass01 = { file = "eco/grass01.glb", kind = "plant" }
 grass02 = { file = "eco/grass02.glb", kind = "plant" }
 grass03 = { file = "eco/grass03.glb", kind = "plant" }
 greenboxes01 = { file = "objects/greenboxes01.glb", kind = "generic" }
-greyhound = { file = "objects/greyhound.glb", kind = "generic" }
 hanger = { file = "objects/hanger.glb", kind = "building" }
 helipad = { file = "objects/helipad.glb", kind = "helipad" }
 hive_game01 = { file = "objects/hive_game01.glb", kind = "pole" }
-hopper = { file = "objects/hopper.glb", kind = "generic" }
 ht2_conna01 = { file = "objects/ht2_conna01.glb", kind = "pole" }
 ht2_conna02 = { file = "objects/ht2_conna02.glb", kind = "pole" }
 ht2_connb01 = { file = "objects/ht2_connb01.glb", kind = "pole" }
@@ -202,12 +187,7 @@ ht2_wireseg03 = { file = "objects/ht2_wireseg03.glb", kind = "generic" }
 ht2_wireseg04 = { file = "objects/ht2_wireseg04.glb", kind = "generic" }
 ht2_wireseg05 = { file = "objects/ht2_wireseg05.glb", kind = "generic" }
 hut = { file = "objects/hut.glb", kind = "building" }
-infosignnosnow = { file = "objects/infosignnosnow.glb", kind = "generic" }
-ironmountainsign = { file = "objects/ironmountainsign.glb", kind = "generic" }
 itind = { file = "objects/itind.glb", kind = "pole" }
-jeep = { file = "objects/jeep.glb", kind = "generic" }
-jeep_green = { file = "objects/jeep_green.glb", kind = "generic" }
-jeep_grey = { file = "objects/jeep_grey.glb", kind = "generic" }
 lawnchair01 = { file = "objects/lawnchair01.glb", kind = "generic" }
 lift_wire-long = { file = "objects/lift_wire-long.glb", kind = "generic" }
 lift_wire-short = { file = "objects/lift_wire-short.glb", kind = "generic" }
@@ -219,9 +199,6 @@ mesquite03 = { file = "eco/mesquite03.glb", kind = "plant" }
 metalarch = { file = "objects/metalarch.glb", kind = "generic" }
 miningbldg01 = { file = "objects/miningbldg01.glb", kind = "building" }
 miningshed01 = { file = "objects/miningshed01.glb", kind = "generic" }
-mx3 = { file = "objects/mx3.glb", kind = "generic" }
-mx3_brown = { file = "objects/mx3_brown.glb", kind = "generic" }
-nattrailer01 = { file = "objects/nattrailer01.glb", kind = "generic" }
 ocotillo01 = { file = "eco/ocotillo01.glb", kind = "plant" }
 office01 = { file = "objects/office01.glb", kind = "building" }
 oil_well = { file = "objects/oil_well.glb", kind = "generic" }
@@ -241,7 +218,6 @@ pine01 = { file = "eco/pine01.glb", kind = "plant" }
 pine02 = { file = "eco/pine02.glb", kind = "plant" }
 pine03 = { file = "eco/pine03.glb", kind = "plant" }
 pit_bridge = { file = "objects/pit_bridge.glb", kind = "generic" }
-pit_trailer = { file = "objects/pit_trailer.glb", kind = "generic" }
 pointer = { file = "objects/pointer.glb", kind = "pole" }
 propanetank01 = { file = "objects/propanetank01.glb", kind = "generic" }
 pumpshack = { file = "objects/pumpshack.glb", kind = "generic" }
@@ -262,16 +238,9 @@ saguaro02 = { file = "eco/saguaro02.glb", kind = "plant" }
 saguaro03 = { file = "eco/saguaro03.glb", kind = "plant" }
 scarecrow = { file = "objects/scarecrow.glb", kind = "generic" }
 scraper = { file = "objects/scraper.glb", kind = "generic" }
-semitrailer = { file = "objects/semitrailer.glb", kind = "generic" }
 shrub01 = { file = "eco/shrub01.glb", kind = "plant" }
 shrub02 = { file = "eco/shrub02.glb", kind = "plant" }
 shrub03 = { file = "eco/shrub03.glb", kind = "plant" }
-sign_hwy70_01 = { file = "objects/sign_hwy70_01.glb", kind = "pole" }
-sign_intrsctn01 = { file = "objects/sign_intrsctn01.glb", kind = "generic" }
-sign_milemrkr01 = { file = "objects/sign_milemrkr01.glb", kind = "pole" }
-sign_roadends = { file = "objects/sign_roadends.glb", kind = "generic" }
-sign_speedlmt01 = { file = "objects/sign_speedlmt01.glb", kind = "pole" }
-sign_worldends = { file = "objects/sign_worldends.glb", kind = "generic" }
 signal = { file = "objects/signal.glb", kind = "generic" }
 skiliftpost = { file = "objects/skiliftpost.glb", kind = "generic" }
 smpalm01 = { file = "eco/smpalm01.glb", kind = "plant" }
@@ -292,16 +261,10 @@ snowpine03 = { file = "eco/snowpine03.glb", kind = "plant" }
 soda_machine01 = { file = "objects/soda_machine01.glb", kind = "generic" }
 soda_machine01-snow = { file = "objects/soda_machine01-snow.glb", kind = "generic" }
 speakerpole = { file = "objects/speakerpole.glb", kind = "generic" }
-splitrailbrokeb = { file = "objects/splitrailbrokeb.glb", kind = "generic" }
-splitrailbrokec = { file = "objects/splitrailbrokec.glb", kind = "generic" }
-splitrailpost = { file = "objects/splitrailpost.glb", kind = "pole" }
 startgate = { file = "objects/startgate.glb", kind = "startgate" }
 station = { file = "objects/station.glb", kind = "building" }
 steps01 = { file = "objects/steps01.glb", kind = "generic" }
 still01 = { file = "objects/still01.glb", kind = "generic" }
-sts = { file = "objects/sts.glb", kind = "generic" }
-sts_red = { file = "objects/sts_red.glb", kind = "generic" }
-supercub = { file = "objects/supercub.glb", kind = "generic" }
 support = { file = "objects/support.glb", kind = "generic" }
 table_patio = { file = "objects/table_patio.glb", kind = "generic" }
 telephone_pole01 = { file = "objects/telephone_pole01.glb", kind = "generic" }
@@ -314,23 +277,6 @@ trackend = { file = "objects/trackend.glb", kind = "generic" }
 trackradius = { file = "objects/trackradius.glb", kind = "generic" }
 tractor = { file = "objects/tractor.glb", kind = "generic" }
 tractor_old = { file = "objects/tractor_old.glb", kind = "generic" }
-trailer02 = { file = "objects/trailer02.glb", kind = "generic" }
-trailer03 = { file = "objects/trailer03.glb", kind = "generic" }
-trailer04 = { file = "objects/trailer04.glb", kind = "generic" }
-trailer05 = { file = "objects/trailer05.glb", kind = "generic" }
-trailer06 = { file = "objects/trailer06.glb", kind = "generic" }
-trailer07 = { file = "objects/trailer07.glb", kind = "generic" }
-trailer08 = { file = "objects/trailer08.glb", kind = "generic" }
-trailer09 = { file = "objects/trailer09.glb", kind = "generic" }
-trailer10 = { file = "objects/trailer10.glb", kind = "generic" }
-trailer11 = { file = "objects/trailer11.glb", kind = "generic" }
-trailer12 = { file = "objects/trailer12.glb", kind = "generic" }
-trailer13 = { file = "objects/trailer13.glb", kind = "generic" }
-trailer14 = { file = "objects/trailer14.glb", kind = "generic" }
-trailer15 = { file = "objects/trailer15.glb", kind = "generic" }
-trailer16 = { file = "objects/trailer16.glb", kind = "generic" }
-trailer17 = { file = "objects/trailer17.glb", kind = "generic" }
-trailer18 = { file = "objects/trailer18.glb", kind = "generic" }
 trashcan01 = { file = "objects/trashcan01.glb", kind = "pole" }
 trashcan01_snow = { file = "objects/trashcan01_snow.glb", kind = "pole" }
 tree01 = { file = "eco/tree01.glb", kind = "plant" }
@@ -338,8 +284,6 @@ tree02 = { file = "eco/tree02.glb", kind = "plant" }
 tree03 = { file = "eco/tree03.glb", kind = "plant" }
 trestle = { file = "objects/trestle.glb", kind = "generic" }
 trestleblock = { file = "objects/trestleblock.glb", kind = "generic" }
-trpksign01 = { file = "objects/trpksign01.glb", kind = "generic" }
-truckbed01 = { file = "objects/truckbed01.glb", kind = "generic" }
 truckpodium = { file = "objects/truckpodium.glb", kind = "generic" }
 tumbleweed01 = { file = "objects/tumbleweed01.glb", kind = "pole" }
 tumbleweed02 = { file = "objects/tumbleweed02.glb", kind = "pole" }
@@ -359,7 +303,6 @@ twr-pole = { file = "objects/twr-pole.glb", kind = "pole" }
 viscue = { file = "objects/viscue.glb", kind = "pole" }
 watertank01 = { file = "objects/watertank01.glb", kind = "generic" }
 watertower = { file = "objects/watertower.glb", kind = "watertower" }
-watertruck = { file = "objects/watertruck.glb", kind = "generic" }
 waypoint_big = { file = "objects/waypoint_big.glb", kind = "generic" }
 wideleaf01 = { file = "eco/wideleaf01.glb", kind = "plant" }
 wideleaf02 = { file = "eco/wideleaf02.glb", kind = "plant" }
@@ -367,29 +310,6 @@ wideleaf03 = { file = "eco/wideleaf03.glb", kind = "plant" }
 windmill_pump = { file = "objects/windmill_pump.glb", kind = "generic" }
 x = { file = "objects/x.glb", kind = "pole" }
 youind = { file = "objects/youind.glb", kind = "pole" }
-300zx = { file = "objects/300zx.glb", kind = "vehicle" }
-4runner_blue = { file = "objects/4runner_blue.glb", kind = "vehicle" }
-chevelleblue = { file = "objects/chevelleblue.glb", kind = "vehicle" }
-cop = { file = "objects/cop.glb", kind = "vehicle" }
-schoolbus = { file = "objects/schoolbus.glb", kind = "vehicle" }
-semicab = { file = "objects/semicab.glb", kind = "vehicle" }
-tanker = { file = "objects/tanker.glb", kind = "vehicle" }
-dumptruck = { file = "objects/dumptruck.glb", kind = "vehicle" }
-trailer01 = { file = "objects/trailer01.glb", kind = "trailer" }
-flatbed = { file = "objects/flatbed.glb", kind = "trailer" }
-haywagon = { file = "objects/haywagon.glb", kind = "trailer" }
-boxcarclosed = { file = "objects/boxcarclosed.glb", kind = "railcar" }
-coalcar = { file = "objects/coalcar.glb", kind = "railcar" }
-engine = { file = "objects/engine.glb", kind = "railcar" }
-caboose = { file = "objects/caboose.glb", kind = "railcar" }
-biplane = { file = "objects/biplane.glb", kind = "aircraft" }
-dc-3 = { file = "objects/dc-3.glb", kind = "aircraft" }
-bellranger = { file = "objects/bellranger.glb", kind = "aircraft" }
-sign_narrowbrdg = { file = "objects/sign_narrowbrdg.glb", kind = "sign" }
-infosign = { file = "objects/infosign.glb", kind = "sign" }
-splitrail = { file = "objects/splitrail.glb", kind = "splitrail" }
-splitrailbroke = { file = "objects/splitrailbroke.glb", kind = "splitrail" }
-fence_picket = { file = "objects/fence_picket.glb", kind = "picket" }
 fp_haybale = { file = "objects/fp_haybale.glb", kind = "single_bale" }
 fp_tuffblock = { file = "objects/fp_tuffblock.glb", kind = "tuffblock" }
 fp_startgate_post = { file = "objects/fp_startgate_post.glb", kind = "startgate_post" }
@@ -398,6 +318,90 @@ fp_tirewall = { file = "objects/fp_tirewall.glb", kind = "tirewall" }
 fp_flagman_stand = { file = "objects/fp_flagman_stand.glb", kind = "flagman_stand" }
 fp_banner = { file = "objects/fp_banner.glb", kind = "billboard" }
 fp_arena = { file = "objects/fp_arena.glb", kind = "arena" }
+300zx = { file = "objects/300zx.glb", kind = "vehicle" }
+4runner_blue = { file = "objects/4runner_blue.glb", kind = "vehicle" }
+4runner_brown = { file = "objects/4runner_brown.glb", kind = "vehicle" }
+4runner_green = { file = "objects/4runner_green.glb", kind = "vehicle" }
+4runner_white = { file = "objects/4runner_white.glb", kind = "vehicle" }
+aircraftq = { file = "objects/aircraftq.glb", kind = "aircraft" }
+airfield_tractor = { file = "objects/airfield_tractor.glb", kind = "vehicle" }
+beech18 = { file = "objects/beech18.glb", kind = "aircraft" }
+bellranger = { file = "objects/bellranger.glb", kind = "aircraft" }
+biplane = { file = "objects/biplane.glb", kind = "aircraft" }
+boxcarclosed = { file = "objects/boxcarclosed.glb", kind = "railcar" }
+boxcaropen = { file = "objects/boxcaropen.glb", kind = "railcar" }
+caboose = { file = "objects/caboose.glb", kind = "railcar" }
+cargoplane01 = { file = "objects/cargoplane01.glb", kind = "aircraft" }
+cattlecar = { file = "objects/cattlecar.glb", kind = "railcar" }
+chevelleblue = { file = "objects/chevelleblue.glb", kind = "vehicle" }
+chevellered = { file = "objects/chevellered.glb", kind = "vehicle" }
+coalcar = { file = "objects/coalcar.glb", kind = "railcar" }
+companytruck = { file = "objects/companytruck.glb", kind = "vehicle" }
+cop = { file = "objects/cop.glb", kind = "vehicle" }
+cop_navy = { file = "objects/cop_navy.glb", kind = "vehicle" }
+dc-3 = { file = "objects/dc-3.glb", kind = "aircraft" }
+dumptruck = { file = "objects/dumptruck.glb", kind = "vehicle" }
+engine = { file = "objects/engine.glb", kind = "railcar" }
+famtrkstr = { file = "objects/famtrkstr.glb", kind = "vehicle" }
+feduptruck = { file = "objects/feduptruck.glb", kind = "vehicle" }
+fence_picket = { file = "objects/fence_picket.glb", kind = "picket" }
+firetruck = { file = "objects/firetruck.glb", kind = "vehicle" }
+flatbed = { file = "objects/flatbed.glb", kind = "trailer" }
+gondola = { file = "objects/gondola.glb", kind = "railcar" }
+greyhound = { file = "objects/greyhound.glb", kind = "vehicle" }
+haywagon = { file = "objects/haywagon.glb", kind = "trailer" }
+helinocam = { file = "objects/helinocam.glb", kind = "aircraft" }
+hopper = { file = "objects/hopper.glb", kind = "railcar" }
+infosign = { file = "objects/infosign.glb", kind = "sign" }
+infosignnosnow = { file = "objects/infosignnosnow.glb", kind = "sign" }
+ironmountainsign = { file = "objects/ironmountainsign.glb", kind = "sign" }
+jeep = { file = "objects/jeep.glb", kind = "vehicle" }
+jeep_green = { file = "objects/jeep_green.glb", kind = "vehicle" }
+jeep_grey = { file = "objects/jeep_grey.glb", kind = "vehicle" }
+mx3 = { file = "objects/mx3.glb", kind = "vehicle" }
+mx3_brown = { file = "objects/mx3_brown.glb", kind = "vehicle" }
+nattrailer01 = { file = "objects/nattrailer01.glb", kind = "trailer" }
+pit_trailer = { file = "objects/pit_trailer.glb", kind = "trailer" }
+schoolbus = { file = "objects/schoolbus.glb", kind = "vehicle" }
+semicab = { file = "objects/semicab.glb", kind = "vehicle" }
+semitrailer = { file = "objects/semitrailer.glb", kind = "trailer" }
+sign_hwy70_01 = { file = "objects/sign_hwy70_01.glb", kind = "sign" }
+sign_intrsctn01 = { file = "objects/sign_intrsctn01.glb", kind = "sign" }
+sign_milemrkr01 = { file = "objects/sign_milemrkr01.glb", kind = "sign" }
+sign_narrowbrdg = { file = "objects/sign_narrowbrdg.glb", kind = "sign" }
+sign_roadends = { file = "objects/sign_roadends.glb", kind = "sign" }
+sign_speedlmt01 = { file = "objects/sign_speedlmt01.glb", kind = "sign" }
+sign_worldends = { file = "objects/sign_worldends.glb", kind = "sign" }
+splitrail = { file = "objects/splitrail.glb", kind = "splitrail" }
+splitrailbroke = { file = "objects/splitrailbroke.glb", kind = "splitrail" }
+splitrailbrokeb = { file = "objects/splitrailbrokeb.glb", kind = "splitrail" }
+splitrailbrokec = { file = "objects/splitrailbrokec.glb", kind = "splitrail" }
+splitrailpost = { file = "objects/splitrailpost.glb", kind = "splitrail" }
+sts = { file = "objects/sts.glb", kind = "vehicle" }
+sts_red = { file = "objects/sts_red.glb", kind = "vehicle" }
+supercub = { file = "objects/supercub.glb", kind = "aircraft" }
+tanker = { file = "objects/tanker.glb", kind = "vehicle" }
+trailer01 = { file = "objects/trailer01.glb", kind = "trailer" }
+trailer02 = { file = "objects/trailer02.glb", kind = "trailer" }
+trailer03 = { file = "objects/trailer03.glb", kind = "trailer" }
+trailer04 = { file = "objects/trailer04.glb", kind = "trailer" }
+trailer05 = { file = "objects/trailer05.glb", kind = "trailer" }
+trailer06 = { file = "objects/trailer06.glb", kind = "trailer" }
+trailer07 = { file = "objects/trailer07.glb", kind = "trailer" }
+trailer08 = { file = "objects/trailer08.glb", kind = "trailer" }
+trailer09 = { file = "objects/trailer09.glb", kind = "trailer" }
+trailer10 = { file = "objects/trailer10.glb", kind = "trailer" }
+trailer11 = { file = "objects/trailer11.glb", kind = "trailer" }
+trailer12 = { file = "objects/trailer12.glb", kind = "trailer" }
+trailer13 = { file = "objects/trailer13.glb", kind = "trailer" }
+trailer14 = { file = "objects/trailer14.glb", kind = "trailer" }
+trailer15 = { file = "objects/trailer15.glb", kind = "trailer" }
+trailer16 = { file = "objects/trailer16.glb", kind = "trailer" }
+trailer17 = { file = "objects/trailer17.glb", kind = "trailer" }
+trailer18 = { file = "objects/trailer18.glb", kind = "trailer" }
+trpksign01 = { file = "objects/trpksign01.glb", kind = "sign" }
+truckbed01 = { file = "objects/truckbed01.glb", kind = "vehicle" }
+watertruck = { file = "objects/watertruck.glb", kind = "vehicle" }
 
 [eco]
 aspen01 = { file = "eco/aspen01.glb", height = 10.55, radius = 2.08, sway = 0.25 }
@@ -489,5 +493,45 @@ wideleaf03 = { file = "eco/wideleaf03.glb", height = 4.67, radius = 2.17, sway =
 "terra18.cub" = ["skies/sky-terra18-0.png", "skies/sky-terra18-1.png", "skies/sky-terra18-2.png", "skies/sky-terra18-3.png", "skies/sky-terra18-4.png", "skies/sky-terra18-5.png"]
 "wind01.cub" = ["skies/sky-wind01-0.png", "skies/sky-wind01-1.png", "skies/sky-wind01-2.png", "skies/sky-wind01-3.png", "skies/sky-wind01-4.png", "skies/sky-wind01-5.png"]
 
+[bikes]
+fp_bike_mx2125_blue = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_blue.png", cc = 125, four_stroke = false, name = "Blue 125" }
+fp_bike_mx2125_lime = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_lime.png", cc = 125, four_stroke = false, name = "Lime 125" }
+fp_bike_mx2125_orange = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_orange.png", cc = 125, four_stroke = false, name = "Orange 125" }
+fp_bike_mx2125_red = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_red.png", cc = 125, four_stroke = false, name = "Red 125" }
+fp_bike_mx2125_white = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_white.png", cc = 125, four_stroke = false, name = "White 125" }
+fp_bike_mx2125_yellow = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_yellow.png", cc = 125, four_stroke = false, name = "Yellow 125" }
+fp_bike_mx2250_blue = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_blue.png", cc = 250, four_stroke = false, name = "Blue 250" }
+fp_bike_mx2250_lime = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_lime.png", cc = 250, four_stroke = false, name = "Lime 250" }
+fp_bike_mx2250_orange = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_orange.png", cc = 250, four_stroke = false, name = "Orange 250" }
+fp_bike_mx2250_red = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_red.png", cc = 250, four_stroke = false, name = "Red 250" }
+fp_bike_mx2250_white = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_white.png", cc = 250, four_stroke = false, name = "White 250" }
+fp_bike_mx2250_yellow = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_yellow.png", cc = 250, four_stroke = false, name = "Yellow 250" }
+fp_bike_mx2500_blue = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_blue.png", cc = 500, four_stroke = false, name = "Blue 500" }
+fp_bike_mx2500_lime = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_lime.png", cc = 500, four_stroke = false, name = "Lime 500" }
+fp_bike_mx2500_orange = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_orange.png", cc = 500, four_stroke = false, name = "Orange 500" }
+fp_bike_mx2500_red = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_red.png", cc = 500, four_stroke = false, name = "Red 500" }
+fp_bike_mx2500_white = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_white.png", cc = 500, four_stroke = false, name = "White 500" }
+fp_bike_mx2500_yellow = { model = "bikes/fp_bike_mx2.glb", livery = "bikes/fp_livery_yellow.png", cc = 500, four_stroke = false, name = "Yellow 500" }
+fp_bike_enduro400_blue = { model = "bikes/fp_bike_enduro.glb", livery = "bikes/fp_livery_blue.png", cc = 400, four_stroke = true, name = "Blue 400F" }
+fp_bike_enduro400_lime = { model = "bikes/fp_bike_enduro.glb", livery = "bikes/fp_livery_lime.png", cc = 400, four_stroke = true, name = "Lime 400F" }
+fp_bike_enduro400_orange = { model = "bikes/fp_bike_enduro.glb", livery = "bikes/fp_livery_orange.png", cc = 400, four_stroke = true, name = "Orange 400F" }
+fp_bike_enduro400_red = { model = "bikes/fp_bike_enduro.glb", livery = "bikes/fp_livery_red.png", cc = 400, four_stroke = true, name = "Red 400F" }
+fp_bike_enduro400_white = { model = "bikes/fp_bike_enduro.glb", livery = "bikes/fp_livery_white.png", cc = 400, four_stroke = true, name = "White 400F" }
+fp_bike_enduro400_yellow = { model = "bikes/fp_bike_enduro.glb", livery = "bikes/fp_livery_yellow.png", cc = 400, four_stroke = true, name = "Yellow 400F" }
+fp_bike_enduro600_blue = { model = "bikes/fp_bike_enduro.glb", livery = "bikes/fp_livery_blue.png", cc = 600, four_stroke = true, name = "Blue 600F" }
+fp_bike_enduro600_lime = { model = "bikes/fp_bike_enduro.glb", livery = "bikes/fp_livery_lime.png", cc = 600, four_stroke = true, name = "Lime 600F" }
+fp_bike_enduro600_orange = { model = "bikes/fp_bike_enduro.glb", livery = "bikes/fp_livery_orange.png", cc = 600, four_stroke = true, name = "Orange 600F" }
+fp_bike_enduro600_red = { model = "bikes/fp_bike_enduro.glb", livery = "bikes/fp_livery_red.png", cc = 600, four_stroke = true, name = "Red 600F" }
+fp_bike_enduro600_white = { model = "bikes/fp_bike_enduro.glb", livery = "bikes/fp_livery_white.png", cc = 600, four_stroke = true, name = "White 600F" }
+fp_bike_enduro600_yellow = { model = "bikes/fp_bike_enduro.glb", livery = "bikes/fp_livery_yellow.png", cc = 600, four_stroke = true, name = "Yellow 600F" }
+
+[riders]
+fp_rider_blue = { model = "riders/fp_rider.glb", outfit = "riders/fp_rider_blue.png", name = "Blue" }
+fp_rider_lime = { model = "riders/fp_rider.glb", outfit = "riders/fp_rider_lime.png", name = "Lime" }
+fp_rider_orange = { model = "riders/fp_rider.glb", outfit = "riders/fp_rider_orange.png", name = "Orange" }
+fp_rider_red = { model = "riders/fp_rider.glb", outfit = "riders/fp_rider_red.png", name = "Red" }
+fp_rider_white = { model = "riders/fp_rider.glb", outfit = "riders/fp_rider_white.png", name = "White" }
+fp_rider_yellow = { model = "riders/fp_rider.glb", outfit = "riders/fp_rider_yellow.png", name = "Yellow" }
+
 # Stock models with no stand-in yet (large buildings, vehicles, stadium shells):
-missing = ["aircraftq", "b1b_02", "beech18", "blimp", "bn_interior", "bn_roof", "bn_wall-n", "bn_wall-s", "bridge01", "bridge_debris02", "bridge_debris04", "bridge_old01", "cargoplane01", "cargowreck_body", "cautionlight", "co_opbrick", "combine", "culvert01", "culvert02", "euro", "football", "helinocam", "ht_tower", "ht_tower02", "ht_wiresseg01", "ht_wiresseg02", "ht_wiresseg03", "ht_wiresseg04", "ht_wiresseg05", "irrcanseg01", "irrcanseg02", "irrcanseg03", "irrcanseg04", "irrcanseg05", "irrcanseg06", "irrcanseg07", "irrcanseg08", "irrcanseg09", "irrcanseg10", "irrcanseg11", "irrcanseg12", "irrcanseg13", "irrcanseg14", "irrcanseg15", "irrcanseg16", "irrcanseg17", "irrcanseg18", "irrcanseg19", "irrcanseg20", "irrcanseg21", "loadingramp", "lodge", "miningshack01", "missilesilo", "observatory", "observatorycone", "pedbrdg_metal", "pyramid", "rrt_elev", "rrt_elevradius", "ruins", "ruins2", "shovel", "silo", "skijump", "skilodge_patio", "sl-bridge", "switchyard", "tm_head", "trackcrossing", "ufo", "uigarage", "wingen_post", "cargoplane"]
+missing = ["b1b_02", "blimp", "bn_interior", "bn_roof", "bn_wall-n", "bn_wall-s", "bridge01", "bridge_debris02", "bridge_debris04", "bridge_old01", "cargowreck_body", "cautionlight", "co_opbrick", "combine", "culvert01", "culvert02", "euro", "football", "ht_tower", "ht_tower02", "ht_wiresseg01", "ht_wiresseg02", "ht_wiresseg03", "ht_wiresseg04", "ht_wiresseg05", "irrcanseg01", "irrcanseg02", "irrcanseg03", "irrcanseg04", "irrcanseg05", "irrcanseg06", "irrcanseg07", "irrcanseg08", "irrcanseg09", "irrcanseg10", "irrcanseg11", "irrcanseg12", "irrcanseg13", "irrcanseg14", "irrcanseg15", "irrcanseg16", "irrcanseg17", "irrcanseg18", "irrcanseg19", "irrcanseg20", "irrcanseg21", "loadingramp", "lodge", "miningshack01", "missilesilo", "observatory", "observatorycone", "pedbrdg_metal", "pyramid", "rrt_elev", "rrt_elevradius", "ruins", "ruins2", "shovel", "silo", "skijump", "skilodge_patio", "sl-bridge", "switchyard", "tm_head", "trackcrossing", "ufo", "uigarage", "wingen_post", "cargoplane"]
