@@ -10,7 +10,7 @@ def main_menu(out, lit="MenuSingle", single_open=True):
     c = img("MAINMENU", r"01_Main\BackGround_01.png")
     L = tomllib.load(open(os.path.join(B, "MAINMENU.toml"), "rb"))["controls"]
     stems = {"MenuSingle": "Single", "MenuMulti": "Multi", "MenuOptions": "MenuOptions", "MenuUserProfile": "Profile", "MenuHighScore": "HighScore",
-             "MenuReplay": "Replay", "Menuexit": "Exit", "MenuHelp": "MenuHelp", "MenuCredits": "Credits"}
+             "MenuReplay": "Replay", "Menuexit": "Exit", "MenuHelp": "MenuHelp", "MenuCredits": "Credits", "FreeDonate": "FreeDonate"}
     for k, s in stems.items(): put(c, img("MAINMENU", "01_Main\\%s%s.png" % (s, "Lit" if k == lit else "Up")), L[k]["rect"])
     if single_open:
         put(c, img("GLOBAL", r"01_Main\SinglePullDown0015.png"), tuple(L['MenuSingleAnimation']['rect']))

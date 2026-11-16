@@ -88,6 +88,10 @@ def icon(kind, sz, col):
     elif kind == "back":
         d.line([b, sz / 2, a + sz * 0.15, sz / 2], fill=c, width=w)
         d.polygon([(a - 2, sz / 2), (a + sz * 0.3, sz * 0.26), (a + sz * 0.3, sz * 0.74)], fill=c)
+    elif kind == "heart":
+        r = sz * 0.2; d.ellipse([sz * 0.5 - 2 * r, sz * 0.3 - r * 0.2, sz * 0.5, sz * 0.3 + r * 1.8], fill=c)
+        d.ellipse([sz * 0.5, sz * 0.3 - r * 0.2, sz * 0.5 + 2 * r, sz * 0.3 + r * 1.8], fill=c)
+        d.polygon([(sz * 0.5 - 2 * r + 1, sz * 0.3 + r * 1.05), (sz * 0.5 + 2 * r - 1, sz * 0.3 + r * 1.05), (sz * 0.5, b)], fill=c)
     elif kind == "star":
         import math
         pts = [(sz / 2 + (sz * 0.42 if i % 2 == 0 else sz * 0.18) * math.sin(i * math.pi / 5), sz / 2 - (sz * 0.42 if i % 2 == 0 else sz * 0.18) * math.cos(i * math.pi / 5)) for i in range(10)]

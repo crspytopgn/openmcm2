@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(HERE, "build", "ui")
 X = 2  # drawn at twice the stock size
 STATES = ("Up", "Lit", "Down", "Grey")
+RUST_SOFT = (150, 74, 46)
 BOLD = "barlowcondensed/BarlowCondensed-Bold.ttf"
 MED = "barlowcondensed/BarlowCondensed-Medium.ttf"
 written = []
@@ -227,6 +228,10 @@ def main_menu(photo):
         x, y, w, h = 452, 322 + j * 66, 160, 56
         rects[ctl] = [x, y, w, h]
         sticker_set(dat, None, "01_Main\\" + stem + "{s}.tga", w * X, h * X, text, b, f, ico, None, float(r.uniform(-3, 3)), seed=10 + j)
+    # Free Pack's own Donate button (a new control: the loader adds it from the layout file)
+    x, y, w, h = 452, 256, 160, 56
+    rects["FreeDonate"] = [x, y, w, h]
+    sticker_set(dat, None, "01_Main\\FreeDonate{s}.tga", w * X, h * X, "DONATE", RUST_SOFT, BONE, "heart", "KEEP IT FREE", float(r.uniform(-3, 3)), seed=12)
     # generic blank buttons (text drawn by the game)
     for k, (b, f) in enumerate(((INK, BONE), (BONE, INK)), 1):
         sticker_set(dat, None, "01_Main\\Button{s}0%d_18.tga" % k, 116 * X, 33 * X, "", b, f, seed=30 + k)
@@ -369,7 +374,10 @@ def write_layout(dat, rects):
     p = os.path.join(OUT, dat + ".toml")
     with open(p, "w") as f:
         f.write("# Free Pack layout for %s: control rects in 640x480 units\n" % dat)
-        for k, v in rects.items(): f.write('\n[controls.%s]\nrect = [%s]\n' % (k, ", ".join(map(str, v))))
+        for k, v in rects.items():
+            f.write('\n[controls.%s]\nrect = [%s]\n' % (k, ", ".join(map(str, v))))
+            if k == "FreeDonate":
+                f.write('new = true  # not in the stock dialog: a button the Free Pack adds\nkind = "button"\nimages = { up = "01_Main/FreeDonateUp.png", lit = "01_Main/FreeDonateLit.png", down = "01_Main/FreeDonateDown.png", grey = "01_Main/FreeDonateGrey.png" }\ntip = "Support OpenMCM2: opens the donate page"\naction = "open_url:https://github.com/sponsors/crspytopgn"\n')
     written.append(p)
 
 if __name__ == "__main__":
