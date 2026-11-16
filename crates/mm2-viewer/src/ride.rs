@@ -87,6 +87,20 @@ pub struct Chase {
     pub helmet: bool,
     /// The Helmet Cam's eye, its height softened apart from its place.
     head: Vec3,
+    /// The view's tilt, rad (0 in every view but the Helmet Cam); the
+    /// Helmet Cam's head: how far it leans with the bike; how far it looks into the turn, rad; the
+    /// last heading, to see how fast it turns; the landing dip, ft, and
+    /// how fast it moves; the nod from braking and opening the throttle;
+    /// the last speed; whether the bike was in the air and how fast it
+    /// was coming down.
+    roll: f32,
+    lean: f32,
+    turn_look: f32,
+    heading: Option<f32>,
+    dip: (f32, f32),
+    nod: f32,
+    last_speed: f32,
+    helmet_air: (bool, f32),
 }
 
 /// What the player holds for the camera this frame: the Thrill Cam and
@@ -165,6 +179,14 @@ impl Chase {
             frozen: None,
             helmet: false,
             head: position + Vec3::Y * Self::HEAD,
+            roll: 0.0,
+            lean: 0.0,
+            turn_look: 0.0,
+            heading: None,
+            dip: (0.0, 0.0),
+            nod: 0.0,
+            last_speed: 0.0,
+            helmet_air: (false, 0.0),
         }
     }
 
@@ -231,8 +253,18 @@ impl Chase {
         self.want_fov = (self.want_fov + by * mm2_physics::camera::FOV_STEP).clamp(10.0, 120.0);
     }
 
-    /// The field of view, degrees.
+    /// How far the view tilts about the way it looks, rad, in game
+    /// coordinates: only the Helmet Cam leans with the bike.
+    pub fn roll(&self) -> f32 {
+        self.roll
+    }
+
+    /// The field of view, degrees: the Helmet Cam sees a little wider,
+    /// as a helmet's opening does.
     pub fn fov(&self) -> f32 {
+        if self.helmet && self.frozen.is_none() {
+            return (self.fov + Self::HELMET_WIDER).min(120.0);
+        }
         self.fov
     }
 
@@ -249,6 +281,7 @@ impl Chase {
         if bike.airborne && !self.was_airborne {
             self.takeoff = (position, bike.velocity);
         }
+        self.roll = 0.0;
         self.was_airborne = bike.airborne;
         if !crashed {
             let flat = Vec3::new(forward.x, 0.0, forward.z).normalize_or(self.yaw);
@@ -394,19 +427,42 @@ impl Chase {
     /// How long the neck takes to follow the bike's bumps up and down, s.
     const NECK_RISE: f32 = 0.09;
     /// How much the look leans from where the bike points to where it is
-    /// going (into a slide or a corner).
-    const INTO_TURN: f32 = 0.3;
-    /// How far the look dips below level, so the bars sit low in view.
-    const LOOK_DOWN: f32 = 0.5;
+    /// going (into a slide).
+    const INTO_TURN: f32 = 0.2;
+    /// How far ahead the eyes look into a turn: this many seconds of the
+    /// turn, up to `TURN_LOOK_MOST` rad, eased over `TURN_LOOK_EASE` s.
+    const TURN_LOOK: f32 = 0.22;
+    const TURN_LOOK_MOST: f32 = 0.3;
+    const TURN_LOOK_EASE: f32 = 0.25;
+    /// How far the look dips below level: the bars low in view, the
+    /// track well ahead above them.
+    const LOOK_DOWN: f32 = 0.34;
+    /// How much wider the Helmet Cam sees than the view it came from, degrees.
+    const HELMET_WIDER: f32 = 12.0;
     /// How much of the bike's pitch the look takes.
     const PITCH_WITH_BIKE: f32 = 0.9;
+    /// How much of the bike's lean the head takes (riders keep their
+    /// head straighter than the bike), and how fast it follows, s.
+    const LEAN_WITH_BIKE: f32 = 0.45;
+    const LEAN_EASE: f32 = 0.12;
+    /// The landing dip: ft for each ft/s coming down (up to `DIP_MOST`),
+    /// and the neck's spring, 1/s, and damping.
+    const DIP_PER_FALL: f32 = 0.012;
+    const DIP_MOST: f32 = 0.5;
+    const DIP_SPRING: f32 = 14.0;
+    const DIP_DAMP: f32 = 0.55;
+    /// The nod: rad of look for each ft/s² of braking, up to `NOD_MOST`.
+    const NOD_PER_DECEL: f32 = 0.0025;
+    const NOD_MOST: f32 = 0.06;
+    const NOD_EASE: f32 = 0.2;
 
     /// The Helmet Cam: from the rider's helmet, the head held as a neck
     /// holds it (bumps softened, the horizon level), looking where the
     /// bike points and a little where it is going. Only the camera
     /// changes, never the riding.
     fn helmet_view(&mut self, bike: &Followed, terrain: &Terrain, dt: f32) -> (Vec3, Vec3) {
-        let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z).normalize_or(self.yaw);
+        let yaw = self.yaw;
+        let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z).normalize_or(yaw);
         let forward = flat(bike.forward);
         // `forward` is level; the bike's own nose, tipped with its up.
         let nose = (forward - bike.up * forward.dot(bike.up)).normalize_or(forward);
@@ -427,15 +483,68 @@ impl Chase {
         self.head.y = self.head.y.clamp(want.y - 0.6, want.y + 0.6);
         let floor = ground(terrain, self.head.x, self.head.z) + 0.5;
         self.head.y = self.head.y.max(floor);
+        let dt_safe = dt.max(1e-4);
+        // A landing: the neck gives a little and springs back.
+        let (was_air, falling) = self.helmet_air;
+        if bike.airborne {
+            self.helmet_air = (true, falling.max(-bike.velocity.y));
+        } else {
+            if was_air {
+                let hit = (falling * Self::DIP_PER_FALL).min(Self::DIP_MOST);
+                self.dip.1 -= hit * Self::DIP_SPRING;
+            }
+            self.helmet_air = (false, 0.0);
+        }
+        let (mut d, mut v) = self.dip;
+        let w = Self::DIP_SPRING;
+        v += (-w * w * d - 2.0 * Self::DIP_DAMP * w * v) * dt;
+        d = (d + v * dt).clamp(-Self::DIP_MOST, Self::DIP_MOST);
+        self.dip = (d, v);
+        // The eyes go ahead into the turn: how fast the heading turns.
+        let heading = forward.z.atan2(forward.x);
+        let rate = match self.heading {
+            Some(h) => {
+                let mut a = heading - h;
+                while a > std::f32::consts::PI {
+                    a -= std::f32::consts::TAU;
+                }
+                while a < -std::f32::consts::PI {
+                    a += std::f32::consts::TAU;
+                }
+                a / dt_safe
+            }
+            None => 0.0,
+        };
+        self.heading = Some(heading);
+        let want_turn = if bike.airborne { 0.0 } else { (rate * Self::TURN_LOOK).clamp(-Self::TURN_LOOK_MOST, Self::TURN_LOOK_MOST) };
+        self.turn_look += (want_turn - self.turn_look) * (1.0 - (-dt / Self::TURN_LOOK_EASE).exp());
+        // Braking tips the head forward, the throttle back, a little.
+        let accel = (bike.speed - self.last_speed) / dt_safe;
+        self.last_speed = bike.speed;
+        let want_nod = (-accel * Self::NOD_PER_DECEL).clamp(-Self::NOD_MOST, Self::NOD_MOST);
+        let want_nod = if accel.abs() > 400.0 { 0.0 } else { want_nod };
+        self.nod += (want_nod - self.nod) * (1.0 - (-dt / Self::NOD_EASE).exp());
+        // The head leans with the bike, less than it does.
+        let right = forward.cross(Vec3::Y);
+        let lean = bike.up.dot(right).clamp(-0.9, 0.9).asin();
+        self.roll_ease(lean * Self::LEAN_WITH_BIKE, dt);
         let going = if bike.speed > 5.0 { flat(bike.velocity) } else { forward };
         let look = forward.lerp(going, Self::INTO_TURN).normalize_or(forward);
+        let look = glam::Quat::from_rotation_y(-self.turn_look) * look;
         // The pitch follows most of the bike's, so the bars stay put in
         // view over crests and dips as the rider's head would keep them.
-        let pitch = nose.y.clamp(-0.9, 0.9) * Self::PITCH_WITH_BIKE - Self::LOOK_DOWN;
+        let pitch = nose.y.clamp(-0.9, 0.9) * Self::PITCH_WITH_BIKE - Self::LOOK_DOWN - self.nod;
         let dir = (look + Vec3::Y * pitch).normalize_or(look);
-        self.eye = self.head;
-        self.target = self.head + dir * 30.0;
+        self.eye = self.head + Vec3::Y * self.dip.0;
+        self.target = self.eye + dir * 30.0;
         (self.eye, self.target)
+    }
+
+    /// The head's lean eases toward `want`; `roll` is zeroed each frame
+    /// for the other views, so the Helmet Cam keeps its own in `lean`.
+    fn roll_ease(&mut self, want: f32, dt: f32) {
+        self.lean += (want - self.lean) * (1.0 - (-dt / Self::LEAN_EASE).exp());
+        self.roll = self.lean;
     }
 }
 
@@ -517,5 +626,40 @@ mod tests {
         assert_eq!(c.toggle_helmet(), View::Slot.name());
         assert!(!c.helmet);
         assert_eq!(c.view, View::Slot);
+    }
+
+    #[test]
+    fn helmet_landing_dips_and_springs_back() {
+        let terrain = Terrain {
+            size: 9,
+            heights: vec![0.0; 81],
+            normals: vec![[0, 127, 0]; 81],
+            surfaces: vec![0; 81],
+            scale: 30.0,
+            textures: Vec::new(),
+            tiles: Vec::new(),
+        };
+        let mut c = Chase::new(Vec3::new(100.0, 0.0, 100.0), Vec3::Z);
+        c.helmet = true;
+        let mut bike = Followed {
+            position: Vec3::new(100.0, 10.0, 100.0),
+            forward: Vec3::Z,
+            up: Vec3::Y,
+            velocity: Vec3::new(0.0, -30.0, 40.0),
+            speed: 50.0,
+            crashed: false,
+            airborne: true,
+            high: true,
+        };
+        c.follow(&bike, CamKeys::default(), &terrain, 1.0 / 60.0);
+        bike.airborne = false;
+        bike.velocity.y = 0.0;
+        let mut lowest: f32 = 0.0;
+        for _ in 0..120 {
+            c.follow(&bike, CamKeys::default(), &terrain, 1.0 / 60.0);
+            lowest = lowest.min(c.dip.0);
+        }
+        assert!(lowest < -0.1, "the head dips on landing: {lowest}");
+        assert!(c.dip.0.abs() < 0.02, "and springs back: {}", c.dip.0);
     }
 }

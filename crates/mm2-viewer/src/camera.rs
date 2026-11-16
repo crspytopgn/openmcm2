@@ -12,6 +12,9 @@ pub struct Camera {
     /// The field of view across a 4:3 screen, degrees (the game's own
     /// measure; wider windows keep the height, up to 21:9).
     pub fov: f32,
+    /// Radians the view tilts about the way it looks (the Helmet Cam
+    /// leaning with the bike); 0 keeps the horizon level.
+    pub roll: f32,
 }
 
 /// The game's usual field of view, degrees.
@@ -38,6 +41,7 @@ impl Camera {
             yaw: d.z.atan2(d.x),
             pitch: d.y.clamp(-1.0, 1.0).asin(),
             fov: FOV,
+            roll: 0.0,
         }
     }
 
@@ -59,7 +63,12 @@ impl Camera {
     }
 
     pub fn view(&self) -> Mat4 {
-        Mat4::look_to_rh(self.position, self.forward(), Vec3::Y)
+        let up = if self.roll == 0.0 {
+            Vec3::Y
+        } else {
+            glam::Quat::from_axis_angle(self.forward(), self.roll) * Vec3::Y
+        };
+        Mat4::look_to_rh(self.position, self.forward(), up)
     }
 
     pub fn look(&mut self, dx: f32, dy: f32) {

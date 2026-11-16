@@ -144,6 +144,9 @@ pub struct AnimatedModel {
     first_node: u32,
     /// Drawn see-through, as a ghost race's ghost is.
     ghost: bool,
+    /// Left out of the camera's picture but still casting its shadow (the
+    /// player's own rider, seen from the Helmet Cam).
+    unseen: bool,
     /// How dirty it is, 0 to 1, for the enhanced drawing.
     mud: f32,
     /// The rider's morphs, the first of its vertices in the mesh and those
@@ -247,7 +250,14 @@ impl AnimatedModel {
             let mut node = flip * *m * self.inverse_rest[i];
             // The transforms are affine, so the shader takes the unused
             // corners as the see-through mark and how dirty it is.
-            node.x_axis.w = if self.ghost { 1.0 } else { 0.0 };
+            // 2 leaves it out of the camera's picture.
+            node.x_axis.w = if self.unseen {
+                2.0
+            } else if self.ghost {
+                1.0
+            } else {
+                0.0
+            };
             node.y_axis.w = self.mud;
             nodes[self.first_node as usize + i] = node;
         }
@@ -632,6 +642,7 @@ impl ObjectMesh {
                 from: None,
                 first_node,
                 ghost: false,
+                unseen: false,
                 mud: 0.0,
                 morph,
                 spins: Vec::new(),
@@ -670,6 +681,7 @@ impl ObjectMesh {
                 from: None,
                 first_node,
                 ghost: false,
+                unseen: false,
                 mud: 0.0,
                 morph: None,
                 spins: Vec::new(),
@@ -1625,6 +1637,14 @@ impl ObjectRenderer {
     pub fn set_ghost(&mut self, index: usize, ghost: bool) {
         if let Some(a) = self.animated.get_mut(index) {
             a.ghost = ghost;
+        }
+    }
+
+    /// Leaves animated model `index` out of the camera's picture (its
+    /// shadow stays), or draws it again.
+    pub fn set_unseen(&mut self, index: usize, unseen: bool) {
+        if let Some(a) = self.animated.get_mut(index) {
+            a.unseen = unseen;
         }
     }
 
