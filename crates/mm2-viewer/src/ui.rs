@@ -1010,6 +1010,14 @@ impl Dlg {
         self.ctls.get(self.index(name)?)
     }
 
+    /// Gives a control another tooltip.
+    pub fn set_tip(&mut self, name: &str, text: &str) {
+        let Some(i) = self.index(name) else { return };
+        let props = &mut self.dialog.controls[i].props.0;
+        props.retain(|(k, _)| !k.eq_ignore_ascii_case("ToolTipText"));
+        props.push(("ToolTipText".into(), text.into()));
+    }
+
     pub fn show(&mut self, name: &str, visible: bool) {
         if let Some(c) = self.ctl(name) {
             c.visible = visible;

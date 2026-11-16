@@ -793,7 +793,7 @@ impl Session {
         let code = self.code();
         if !code.is_empty() && code != self.code {
             self.notes.push(format!(
-                "Race code: {code}. Players anywhere, in the game or the browser version, can type it in TCP/IP to join."
+                "Race code: {code}. Anyone can join with it, in the game or browser."
             ));
         }
         self.code = code;
