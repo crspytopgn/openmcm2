@@ -56,19 +56,37 @@ def import_clump(asset, variant):
     bpy.ops.import_scene.gltf(filepath=os.path.join(d, g))
     rnd = random.Random(variant)
     tufts = [o for o in bpy.context.scene.objects if o.type == "MESH" and o.parent is None]
+    # the atlas has no alpha: seed heads sit on black, so key alpha from brightness
+    for m in bpy.data.materials:
+        if not m.use_nodes: continue
+        nt = m.node_tree; P = nt.nodes.get("Principled BSDF"); t = [n for n in nt.nodes if n.type == "TEX_IMAGE" and n.image and "diff" in n.image.name]
+        if not P or not t: continue
+        bw = nt.nodes.new("ShaderNodeRGBToBW"); mr = nt.nodes.new("ShaderNodeMapRange")
+        mr.inputs["From Min"].default_value = 0.015; mr.inputs["From Max"].default_value = 0.06
+        nt.links.new(t[0].outputs["Color"], bw.inputs["Color"]); nt.links.new(bw.outputs["Val"], mr.inputs["Value"]); nt.links.new(mr.outputs["Result"], P.inputs["Alpha"])
     for o in tufts: o.location = (rnd.uniform(-0.12, 0.12), rnd.uniform(-0.12, 0.12), 0); o.rotation_euler.z = rnd.uniform(0, 6.3)
 
 def mat_rgb(name, rgb, rough=0.8):
     return flat(name, rgb, rough)
 
+def _cactus_mat():
+    m = bpy.data.materials.new("cactus"); m.use_nodes = True; nt = m.node_tree; P = nt.nodes["Principled BSDF"]
+    tc = nt.nodes.new("ShaderNodeTexCoord"); n = nt.nodes.new("ShaderNodeTexNoise"); n.inputs["Scale"].default_value = 40.0; n.inputs["Detail"].default_value = 8
+    ramp = nt.nodes.new("ShaderNodeValToRGB"); ramp.color_ramp.elements[0].color = (0.10, 0.14, 0.07, 1); ramp.color_ramp.elements[1].color = (0.24, 0.30, 0.17, 1)
+    nt.links.new(tc.outputs["Object"], n.inputs["Vector"]); nt.links.new(n.outputs["Fac"], ramp.inputs["Fac"]); nt.links.new(ramp.outputs["Color"], P.inputs["Base Color"])
+    b = nt.nodes.new("ShaderNodeBump"); b.inputs["Strength"].default_value = 0.3; nt.links.new(n.outputs["Fac"], b.inputs["Height"]); nt.links.new(b.outputs["Normal"], P.inputs["Normal"])
+    P.inputs["Roughness"].default_value = 0.75; return m
+
 def proc_saguaro(v):
-    rnd = random.Random(v); g = mat_rgb("cactus", (0.07, 0.12, 0.05))
+    rnd = random.Random(v); g = _cactus_mat()
     def ribbed(a, b, r):
-        o = cyl(a, b, r, g, 24, r2=r * 0.9)
+        o = cyl(a, b, r, g, 56, r2=r * 0.9)
         me = o.data; bm = bmesh.new(); bm.from_mesh(me)
+        cx, cy = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
         for vt in bm.verts:
-            ang = math.atan2(vt.co.y, vt.co.x); k = 1 + 0.08 * math.cos(ang * 12)
-            vt.co.x *= k; vt.co.y *= k
+            vt.co.x -= cx; vt.co.y -= cy
+            ang = math.atan2(vt.co.y - cy, vt.co.x - cx); k = 1 + 0.13 * abs(math.cos(ang * 7)) ** 0.5 - 0.06
+            vt.co.x = vt.co.x * k + cx; vt.co.y = vt.co.y * k + cy
         bm.to_mesh(me); bm.free()
         for p in me.polygons: p.use_smooth = True
     H = 1.0; ribbed((0, 0, 0), (0, 0, H), 0.09); bpy.ops.mesh.primitive_uv_sphere_add(radius=0.088, location=(0, 0, H)); bpy.context.object.data.materials.append(g)
@@ -94,11 +112,13 @@ def _frond_texture():
     W, H = 256, 1024; im = Image.new("RGBA", (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
     d.line([(W / 2, 0), (W / 2, H)], fill=(80, 70, 35, 255), width=6)
     rnd = random.Random(3)
-    for y in range(10, H, 14):
-        L = (W / 2 - 6) * math.sin(math.pi * y / H) ** 0.6
+    for y in range(16, H, 9):
+        L = (W / 2 - 6) * math.sin(math.pi * y / H) ** 0.5 * rnd.uniform(0.85, 1.0)
         for s in (-1, 1):
-            col = (int(rnd.uniform(45, 70)), int(rnd.uniform(70, 95)), int(rnd.uniform(30, 45)), 255)
-            d.polygon([(W / 2, y), (W / 2 + s * L, y + 40), (W / 2 + s * L * 0.95, y + 46), (W / 2, y + 8)], fill=col)
+            if rnd.random() < 0.12: continue
+            col = (int(rnd.uniform(55, 85)), int(rnd.uniform(75, 100)), int(rnd.uniform(35, 50)), 255)
+            if rnd.random() < 0.15: col = (110, 95, 55, 255)
+            d.polygon([(W / 2, y), (W / 2 + s * L, y + 70), (W / 2 + s * L * 0.97, y + 74), (W / 2, y + 4)], fill=col)
     os.makedirs(os.path.dirname(p), exist_ok=True); im.save(p); return p
 
 def _frond_mat():
@@ -132,12 +152,18 @@ def proc_palmetto(v):
     proc_palm(v, trunk=False)
 
 def proc_tumbleweed(v):
-    rnd = random.Random(v); g = mat_rgb("tumble", (0.42, 0.33, 0.2))
-    for i in range(140):
-        a = Vector((rnd.gauss(0, 1), rnd.gauss(0, 1), rnd.gauss(0, 1))).normalized() * rnd.uniform(0.1, 0.5)
-        b = a + Vector((rnd.gauss(0, 1), rnd.gauss(0, 1), rnd.gauss(0, 1))).normalized() * rnd.uniform(0.15, 0.35)
-        b = b.normalized() * min(b.length, 0.5)
-        cyl(a + Vector((0, 0, 0.5)), b + Vector((0, 0, 0.5)), 0.006, g, 4)
+    rnd = random.Random(v); g = mat_rgb("tumble", (0.48, 0.40, 0.27))
+    cu = bpy.data.curves.new("tw", "CURVE"); cu.dimensions = "3D"; cu.bevel_depth = 0.0035; cu.bevel_resolution = 1
+    for i in range(420):
+        c = Vector((rnd.gauss(0, 1), rnd.gauss(0, 1), rnd.gauss(0, 1))).normalized() * rnd.uniform(0.15, 0.45)
+        d = Vector((rnd.gauss(0, 1), rnd.gauss(0, 1), rnd.gauss(0, 1))).normalized()
+        sp = cu.splines.new("POLY"); k = 6; sp.points.add(k - 1); L = rnd.uniform(0.12, 0.3); bend = Vector((rnd.gauss(0, 1), rnd.gauss(0, 1), rnd.gauss(0, 1))) * 0.06
+        for j in range(k):
+            t = j / (k - 1) - 0.5; p = c + d * L * t + bend * (1 - 4 * t * t)
+            if p.length > 0.48: p = p.normalized() * 0.48
+            sp.points[j].co = (p.x, p.y, p.z * 0.85 + 0.42, 1)
+    o = bpy.data.objects.new("tw", cu); bpy.context.scene.collection.objects.link(o); cu.materials.append(g)
+    bpy.context.view_layer.objects.active = o; o.select_set(True); bpy.ops.object.convert(target="MESH")
 
 def treat(kind):
     """Bake a colour treatment into the source's base-colour images."""
@@ -150,6 +176,8 @@ def treat(kind):
         if kind == "dry": c = g[:, None] * np.array([1.15, 0.95, 0.7], np.float32)
         elif kind == "snow": c = c * 0.55 + np.array([0.85, 0.87, 0.9], np.float32) * 0.45
         elif kind == "bare": c = g[:, None] * np.array([1.05, 0.95, 0.85], np.float32)
+        elif kind == "seedheads":
+            dark = (g < 0.16)[:, None]; c = np.where(dark, np.array([0.42, 0.36, 0.22], np.float32) * (0.6 + 2.0 * g[:, None]), c)
         elif kind == "green": c = g[:, None] * np.array([0.6, 1.15, 0.45], np.float32)
         px[:, :3] = np.clip(c, 0, 1); im.pixels[:] = px.ravel()
 
@@ -158,7 +186,8 @@ def render_card(path, res_w, res_h):
     even sky light so the card carries gentle shading but no hard shadows."""
     sc = bpy.context.scene; lo, hi = bounds()
     cam = bpy.data.objects.new("cam", bpy.data.cameras.new("cam")); sc.collection.objects.link(cam); sc.camera = cam
-    cam.data.type = "ORTHO"; size = max((hi.x - lo.x) * res_h / res_w, hi.z - lo.z) * 1.02
+    cam.data.type = "ORTHO"; wx, hz = hi.x - lo.x, hi.z - lo.z
+    size = (max(wx, hz * res_w / res_h) if res_w >= res_h else max(hz, wx * res_h / res_w)) * 1.02
     cam.data.ortho_scale = size; cam.location = ((lo.x + hi.x) / 2, lo.y - 50, (lo.z + hi.z) / 2); cam.rotation_euler = (math.pi / 2, 0, 0)
     cam.data.clip_end = 500
     w = bpy.data.worlds.new("w"); sc.world = w; w.use_nodes = True

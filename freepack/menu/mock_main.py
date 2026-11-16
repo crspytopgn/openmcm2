@@ -13,7 +13,7 @@ def font(rel, size, var=None):
     return f
 S = 2; W, H = 640 * S, 480 * S
 rng = np.random.default_rng(3)
-BONE = (232, 226, 210); INK = (24, 22, 20); RUST = (176, 74, 38); OLIVE = (92, 98, 70); SKY = (120, 140, 150)
+LIME = (172, 236, 40); BONE = (232, 226, 210); INK = (24, 22, 20); RUST = (176, 74, 38); OLIVE = (92, 98, 70); SKY = (120, 140, 150)
 
 def grain(img, amt=10):
     a = np.asarray(img.convert("RGB"), np.float32)
@@ -145,7 +145,7 @@ def main(photo, out):
     btn = font("barlowcondensed/BarlowCondensed-Bold.ttf", 58)
     left = [("SINGLE", "flag", INK, BONE, "01 / RACE"), ("MULTI", "helmets", BONE, INK, "02 / ONLINE"),
             ("OPTIONS", "wrench", OLIVE, BONE, "03 / SET-UP"), ("RIDER", "helmet", INK, BONE, "04 / PROFILE"),
-            ("SCORES", "trophy", RUST, BONE, "05 / RECORDS"), ("REPLAY", "replay", BONE, INK, "06 / TAPES"),
+            ("SCORES", "trophy", LIME, INK, "05 / RECORDS"), ("REPLAY", "replay", BONE, INK, "06 / TAPES"),
             ("EXIT", "exit", INK, BONE, None)]
     for i, (t, ico, bgc, fg, sub) in enumerate(left):
         st = sticker(t, 330, 96, bgc + (255,), fg, btn, float(rng.uniform(-3.5, 3.5)), sub, ico)

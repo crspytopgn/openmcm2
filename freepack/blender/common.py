@@ -148,6 +148,7 @@ def export(path):
                               export_jpeg_quality=88, export_apply=True, export_yup=True)
 
 def bounds():
+    bpy.context.view_layer.update()
     lo = Vector((1e9,) * 3); hi = Vector((-1e9,) * 3)
     for o in bpy.context.scene.objects:
         if o.type != "MESH": continue
