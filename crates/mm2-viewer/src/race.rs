@@ -1803,6 +1803,12 @@ impl Race {
         self.chase.next_view()
     }
 
+    /// F1: the Helmet Cam extra on or off; its name, or `None` when the
+    /// extra is off.
+    pub fn toggle_helmet(&mut self) -> Option<&'static str> {
+        self.chase.toggle_helmet()
+    }
+
     /// Numpad 0: the camera freezes where it is, or goes back to its view.
     pub fn freeze_camera(&mut self) -> bool {
         self.chase.freeze()
