@@ -730,6 +730,7 @@ impl Hud {
         let forward = bike.forward();
         let right = Vec3::new(forward.z, 0.0, -forward.x);
         let scale = RADAR_RIM / (RADAR_FEET * self.zoom);
+        let lap_race = race.gates.is_empty() && !race.stunt_event && race.tag.is_none();
         for (i, r) in race.racers.iter().enumerate() {
             if i == race.player {
                 continue;
@@ -737,6 +738,12 @@ impl Hud {
             let rel = r.bike.position() - at;
             let (mut x, mut y) = (rel.dot(right) * scale, -rel.dot(forward) * scale);
             let d = (x * x + y * y).sqrt();
+            // Past the rim a rider waits on it in a darker green, except
+            // in Nationals and Supercross, where the radar leaves them out
+            // (0x521520 skips them when the event is 2 or 3).
+            if d > RADAR_RIM && lap_race {
+                continue;
+            }
             let colour = if d > RADAR_RIM {
                 (x, y) = (x / d * RADAR_RIM, y / d * RADAR_RIM);
                 [
@@ -775,12 +782,13 @@ impl Hud {
         if !race.gates.is_empty() {
             // Baja and Enduro (0x522170): the gate the player heads for in
             // yellow and the one after it in white, each post to post, when
-            // its first post is on the radar.
+            // the gate's middle is on the radar.
             let next = race.racers[race.player].timing.gate;
             for (k, colour) in [(0, RADAR_GATE), (1, [1.0; 4])] {
                 let g = &race.gates[(next + k) % race.gates.len()];
                 let (a, b) = (spot(g.centre - g.half_width), spot(g.centre + g.half_width));
-                if (a[0] * a[0] + a[1] * a[1]).sqrt() < RADAR_RIM {
+                let m = spot(g.centre);
+                if (m[0] * m[0] + m[1] * m[1]).sqrt() < RADAR_RIM {
                     line(ui, gfx, a, b, colour);
                 }
             }

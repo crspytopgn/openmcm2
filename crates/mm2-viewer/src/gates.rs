@@ -10,7 +10,7 @@ use mm2_physics::race::Line;
 /// The game takes at most 34 gates (it gives up on 35 or more).
 const MOST: usize = 34;
 /// The gates stand this far above the ground (0x5557e0).
-const RAISE: f32 = 2.0;
+pub const RAISE: f32 = 2.0;
 /// Half the arch's width and its height, from `Waypnt.slb` (both arches
 /// are the same size), cut down as the game cuts its gate box (0.98 of the
 /// width at 0x5557e4, 0.67 of the height at 0x5557e8).
