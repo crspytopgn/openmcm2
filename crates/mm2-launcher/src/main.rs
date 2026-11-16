@@ -658,7 +658,7 @@ impl Launcher {
     // ---- Play ----
 
     fn play_page(&mut self, ui: &mut egui::Ui, busy: bool) {
-        look::page_title(ui, "Ready to ride", "Motocross Madness 2, rebuilt to run natively.");
+        look::page_title(ui, "Ready to ride", "Motocross Madness 2, open source and running natively.");
         self.update_banner(ui, busy);
         self.game_card(ui, busy);
         self.summary_card(ui);
