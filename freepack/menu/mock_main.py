@@ -40,16 +40,64 @@ def tape(w, h, col=(214, 206, 180), alpha=215):
     a[..., :3] = np.clip(a[..., :3].astype(int) + rng.integers(-8, 8, a.shape[:2])[..., None], 0, 255)
     return Image.fromarray(a.astype(np.uint8))
 
-def sticker(text, w, h, bg, fg, f, rot, sub=None):
+
+def icon(kind, sz, col):
+    im = Image.new("RGBA", (sz, sz), (0, 0, 0, 0)); d = ImageDraw.Draw(im); w = max(3, sz // 11); c = col
+    m = sz * 0.12; a, b = m, sz - m
+    if kind == "flag":
+        d.line([a, a, a, b], fill=c, width=w)
+        q = (b - a) / 4
+        for i in range(4):
+            for j in range(3):
+                if (i + j) % 2 == 0: d.rectangle([a + w / 2 + i * q * 0.85, a + j * q * 0.8, a + w / 2 + (i + 1) * q * 0.85, a + (j + 1) * q * 0.8], fill=c)
+        d.rectangle([a + w / 2, a, a + w / 2 + 4 * q * 0.85, a + 3 * q * 0.8], outline=c, width=max(2, w // 2))
+    elif kind == "helmet" or kind == "helmets":
+        def hel(ox, oy, r):
+            d.chord([ox - r, oy - r, ox + r, oy + r], 180, 360, fill=c)
+            d.rectangle([ox - r, oy - 1, ox + r * 0.2, oy + r * 0.55], fill=c)
+            d.polygon([(ox + r * 0.3, oy - r * 0.15), (ox + r * 1.35, oy - r * 0.05), (ox + r * 0.3, oy + r * 0.2)], fill=c)
+        if kind == "helmet": hel(sz * 0.45, sz * 0.55, sz * 0.33)
+        else: hel(sz * 0.33, sz * 0.62, sz * 0.22); hel(sz * 0.62, sz * 0.42, sz * 0.22)
+    elif kind == "wrench":
+        d.line([a + sz * 0.15, b - sz * 0.15, b - sz * 0.22, a + sz * 0.22], fill=c, width=w + 3)
+        d.ellipse([b - sz * 0.38, a, b, a + sz * 0.38], outline=c, width=w)
+        d.ellipse([a, b - sz * 0.25, a + sz * 0.25, b], fill=c)
+    elif kind == "trophy":
+        d.pieslice([a + sz * 0.1, a - sz * 0.25, b - sz * 0.1, a + sz * 0.45], 0, 180, fill=c)
+        d.arc([a - sz * 0.02, a + sz * 0.02, a + sz * 0.3, a + sz * 0.3], 90, 270, fill=c, width=w // 2 + 1)
+        d.arc([b - sz * 0.3, a + sz * 0.02, b + sz * 0.02, a + sz * 0.3], 270, 90, fill=c, width=w // 2 + 1)
+        d.rectangle([sz * 0.45, a + sz * 0.45, sz * 0.55, b - sz * 0.15], fill=c)
+        d.rectangle([a + sz * 0.15, b - sz * 0.15, b - sz * 0.15, b], fill=c)
+    elif kind == "replay":
+        d.rounded_rectangle([a, a + sz * 0.12, b, b - sz * 0.12], radius=sz // 12, outline=c, width=w)
+        for cx in (0.34, 0.66): d.ellipse([sz * cx - sz * 0.1, sz * 0.4, sz * cx + sz * 0.1, sz * 0.6], outline=c, width=max(2, w // 2))
+    elif kind == "exit":
+        d.line([b - sz * 0.25, a, a, a, a, b, b - sz * 0.25, b], fill=c, width=w, joint="curve")
+        d.line([sz * 0.35, sz / 2, b, sz / 2], fill=c, width=w)
+        d.polygon([(b + 2, sz / 2), (b - sz * 0.2, sz * 0.3), (b - sz * 0.2, sz * 0.7)], fill=c)
+    elif kind == "help":
+        d.ellipse([a, a, b, b], outline=c, width=w)
+        f = font("archivoblack/ArchivoBlack-Regular.ttf", int(sz * 0.55)); bb = d.textbbox((0, 0), "?", font=f)
+        d.text(((sz - bb[2] - bb[0]) / 2, (sz - bb[3] - bb[1]) / 2), "?", font=f, fill=c)
+    elif kind == "star":
+        import math
+        pts = [(sz / 2 + (sz * 0.42 if i % 2 == 0 else sz * 0.18) * math.sin(i * math.pi / 5), sz / 2 - (sz * 0.42 if i % 2 == 0 else sz * 0.18) * math.cos(i * math.pi / 5)) for i in range(10)]
+        d.polygon(pts, fill=c)
+    return im
+
+def sticker(text, w, h, bg, fg, f, rot, sub=None, ico=None):
     pad = 10
     im = Image.new("RGBA", (w + pad * 2, h + pad * 2), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
     d.rectangle([pad, pad, pad + w, pad + h], fill=bg)
     bb = d.textbbox((0, 0), text, font=f); tw, th = bb[2] - bb[0], bb[3] - bb[1]
-    d.text((pad + (w - tw) / 2 - bb[0], pad + (h - th) / 2 - bb[1] - (5 if sub else 0)), text, font=f, fill=fg)
+    isz = int(h * 0.62) if ico else 0
+    if ico: im.alpha_composite(icon(ico, isz, fg), (pad + 12, pad + int((h - isz) / 2) - (6 if sub else 0)))
+    tx = pad + isz + 22 if ico else pad + (w - tw) / 2
+    d.text((tx - bb[0], pad + (h - th) / 2 - bb[1] - (7 if sub else 0)), text, font=f, fill=fg)
     if sub:
-        sf = font("barlowcondensed/BarlowCondensed-Medium.ttf", 13)
-        d.text((pad + 6, pad + h - 17), sub, font=sf, fill=fg)
-        d.line([pad + 6, pad + h - 20, pad + w - 6, pad + h - 20], fill=fg, width=1)
+        sf = font("barlowcondensed/BarlowCondensed-Medium.ttf", 16)
+        d.text((pad + 8, pad + h - 21), sub, font=sf, fill=fg)
+        d.line([pad + 8, pad + h - 24, pad + w - 8, pad + h - 24], fill=fg, width=1)
     # scuffs
     a = np.asarray(im).copy(); m = a[..., 3] > 0
     scuff = rng.random(a.shape[:2]) < 0.012
@@ -71,7 +119,7 @@ def main(photo, out):
     bg = Image.fromarray((np.clip(a, 0, 1) * 255).astype(np.uint8))
     canvas = bg.convert("RGBA")
     # left band: halftone xerox of the same photo on bone paper
-    band_w = 300
+    band_w = 430
     ht = halftone(bg.crop((0, 0, band_w, H)).filter(ImageFilter.GaussianBlur(1)), 7)
     paper = Image.new("RGBA", (band_w, H), BONE + (255,))
     ink = Image.new("RGBA", (band_w, H), (60, 56, 50, 255)); paper.paste(ink, (0, 0), ImageOps.invert(ht).point(lambda v: int(v * 0.35)))
@@ -97,17 +145,20 @@ def main(photo, out):
     d.text((W - 600, 360), "RIDE IT LIKE YOU STOLE IT.", font=tag, fill=BONE)
     d.text((W - 600, 396), "No disc. No catch. Just dirt.", font=spec, fill=(220, 214, 200))
     # buttons at stock rects (x2), as stickers / tape labels
-    btn = font("barlowcondensed/BarlowCondensed-Bold.ttf", 40)
-    items = [("SINGLE", 64, 96, 79, 44, INK, BONE, "01 / RACE"), ("MULTI", 44, 140, 84, 45, BONE, INK, "02 / ONLINE"),
-             ("OPTIONS", 35, 195, 86, 50, OLIVE, BONE, "03 / SET-UP"), ("RIDER", 36, 254, 80, 57, INK, BONE, "04 / PROFILE"),
-             ("SCORES", 40, 318, 82, 55, RUST, BONE, "05 / RECORDS"), ("REPLAY", 54, 374, 77, 46, BONE, INK, "06 / TAPES"),
-             ("EXIT", 73, 419, 70, 42, INK, BONE, None), ("HELP", 528, 339, 71, 47, BONE, INK, None), ("CREDITS", 522, 392, 69, 50, OLIVE, BONE, None)]
-    for i, (t, x, y, w, h, bgc, fg, sub) in enumerate(items):
-        st = sticker(t, w * S + 30, h * S - 10, bgc + (255,), fg, btn, float(rng.uniform(-4, 4)), sub)
-        canvas.alpha_composite(st, (x * S - 10, y * S - 6))
+    btn = font("barlowcondensed/BarlowCondensed-Bold.ttf", 58)
+    left = [("SINGLE", "flag", INK, BONE, "01 / RACE"), ("MULTI", "helmets", BONE, INK, "02 / ONLINE"),
+            ("OPTIONS", "wrench", OLIVE, BONE, "03 / SET-UP"), ("RIDER", "helmet", INK, BONE, "04 / PROFILE"),
+            ("SCORES", "trophy", RUST, BONE, "05 / RECORDS"), ("REPLAY", "replay", BONE, INK, "06 / TAPES"),
+            ("EXIT", "exit", INK, BONE, None)]
+    for i, (t, ico, bgc, fg, sub) in enumerate(left):
+        st = sticker(t, 330, 108, bgc + (255,), fg, btn, float(rng.uniform(-3.5, 3.5)), sub, ico)
+        canvas.alpha_composite(st, (40 + (i % 2) * 22, 70 + i * 124))
+    for j, (t, ico, bgc, fg) in enumerate([("HELP", "help", BONE, INK), ("CREDITS", "star", OLIVE, BONE)]):
+        st = sticker(t, 300, 100, bgc + (255,), fg, btn, float(rng.uniform(-3, 3)), None, ico)
+        canvas.alpha_composite(st, (W - 380, 640 + j * 132))
     # lit state: tape across SINGLE
     tp = tape(150, 34).rotate(-12, expand=True)
-    canvas.alpha_composite(tp, (64 * S + 120, 96 * S - 16))
+    canvas.alpha_composite(tp, (300, 52))
     # current profile line
     d.text((218 * S, 454 * S), "RIDER: KAI  ·  250 2T  ·  #47", font=spec, fill=BONE)
     img = grain(canvas, 7)
