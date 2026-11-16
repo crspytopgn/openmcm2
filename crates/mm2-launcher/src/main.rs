@@ -1291,7 +1291,7 @@ impl Launcher {
             });
         });
         look::card(ui, look::icon::ICON_FAVORITE, "Enjoying OpenMCM2?", |ui| {
-            ui.add(egui::Label::new("Want more updates? OpenMCM2 is free and always will be, but it's made with paid AI tools that cost money every month. A small donation helps keep the updates coming.").wrap());
+            ui.add(egui::Label::new("Want more updates? OpenMCM2 is free and always will be. If you enjoy it, a small donation helps keep the updates coming.").wrap());
             let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_FAVORITE, "Donate on GitHub")).color(egui::Color32::WHITE)).fill(look::ACCENT);
             if ui.add(b).on_hover_text(SPONSOR_URL).clicked() {
                 ui.ctx().open_url(egui::OpenUrl::new_tab(SPONSOR_URL));
