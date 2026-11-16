@@ -1,6 +1,6 @@
 # OpenMCM2 logo
 
-The number plate logo: chrome lettering on a black MX number plate with a
+The number plate logo: OPEN over MCM2 in chrome lettering on a black MX number plate with a
 lime edge, in the spirit of 2000s motocross graphics, worn like an old
 sticker. An original
 drawing (nothing from the Motocross Madness 2 box art or logo). Colours:
@@ -12,7 +12,7 @@ License), turned into outlines.
   (README, launcher, social preview, Steam art).
 - `openmcm2.svg`, `openmcm2-dark.svg`: the clean vector logo, the same file. The plate brings its own
   background, so it works on light and dark.
-- `wordmark.svg`: just the chrome lettering, for tight spaces like the
+- `wordmark.svg`: OPENMCM2 on one line in chrome, for tight spaces like the
   site's top bar.
 - `app-icon.svg`: the app icon (1024 grid), a dirt bike wheel with a chrome rim and 18 spokes;
   `app-icon-small.svg` has thicker spokes and fewer knobs, for 64 px and below.

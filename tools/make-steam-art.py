@@ -64,11 +64,11 @@ def main():
     # Portrait capsule (the library grid), 600x900.
     cap = shot("enduro-airfield.jpg", (480, 150, 640, 690), (600, 900))
     cap = shade(cap, 0.0, 0.85)
-    with_logo(cap, 520, 790).save(OUT / "capsule-600x900.png", optimize=True)
+    with_logo(cap, 420, 690).save(OUT / "capsule-600x900.png", optimize=True)
     # Wide capsule (recent games, the Deck's home row), 920x430.
     wide = shot("hero-dusk.jpg", (300, 225, 1000, 467), (920, 430))
     wide = shade(wide, 0.0, 0.8)
-    with_logo(wide, 560, 350).save(OUT / "wide-920x430.png", optimize=True)
+    with_logo(wide, 330, 215).save(OUT / "wide-920x430.png", optimize=True)
     # Hero (the banner on the game's page), 1920x620, no logo: Steam
     # puts the logo picture over it.
     hero = shot("nat-butte.jpg", (40, 235, 1400, 452), (1920, 620))
