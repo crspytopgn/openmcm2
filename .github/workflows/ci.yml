@@ -19,6 +19,18 @@ jobs:
       # Linux tests in the same AlmaLinux 8 container the release builds in.
       - if: runner.os == 'Linux'
         run: docker run --rm -v "$PWD":/w -w /w almalinux:8 sh tools/linux-build.sh cargo test --release --workspace
+      # A test AppImage of this commit, to try on a Steam Deck.
+      - if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD":/w -w /w almalinux:8 sh tools/linux-build.sh cargo build --release --locked -p mm2-viewer -p mm2-launcher -p mm2-tools
+          sudo chown -R "$(id -u):$(id -g)" target
+          sh tools/make-appimage.sh target/release openmcm2-test-linux-x86_64.AppImage
+      - if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmcm2-test-appimage
+          path: openmcm2-test-linux-x86_64.AppImage
+          retention-days: 14
       - if: runner.os != 'Linux'
         uses: Swatinem/rust-cache@v2
       - if: runner.os != 'Linux'

@@ -48,6 +48,13 @@ Windows, `~/.local/share/mm2/GAME` on Linux). Then pick the look, effects,
 full screen, window size and vsync, and press Play. The game itself is
 never downloaded: OpenMCM2 ships without any game data.
 
+**On Linux, a Steam Deck or a Steam Machine**, the `.AppImage` download is
+the whole thing in one file: make it executable and open it. To play it
+from Steam's Gaming Mode, with library pictures and controller tips, see
+[docs/steam-deck.md](docs/steam-deck.md). `mm2-launcher --play` (or the
+AppImage with `--play`) skips the launcher and starts the game with the
+saved settings.
+
 **More tracks.** The launcher's Get tracks section lists the player-made
 tracks on [MDX Racing](https://mdxracing.com) and, only for the ones you
 pick, downloads the zip from there and adds its track to the game
@@ -119,9 +126,17 @@ right and left triggers are gas and brake too. Options > Controls binds the
 pad's or stick's buttons to any action, and Accelerate also takes a flight
 stick's throttle lever. The Controls page names the pad in use and shows
 its own button names (Xbox A/B/LB/RT, PlayStation Cross/Circle/L1/R2), and
-the stick can be bound to steer or lean. The pad also works the menus: the
-stick or D-pad moves the pointer, A clicks and B goes back. With several plugged in, the
-one last touched rides.
+the stick can be bound to steer or lean. On a game pad every action has a
+button straight away: LB Reverse Cam, RB the clutch, the stick clicks
+Kahuna and Thrill Cam, the D-pad's left the taunt and its down backing up
+(the D-pad can be bound like any button). In a race, unless bound to
+something else, the D-pad's up changes the camera, its right switches to
+the Helmet Cam, View gets back on the bike and Menu leaves the race. The
+pad also works the menus: the D-pad jumps between the buttons, the stick
+moves the pointer, A clicks, B goes back and the shoulders switch tabs.
+The launcher works with a pad too. With several plugged in, the one last
+touched rides, and a stick or trigger that rests away from the middle is
+ignored until it comes back, so nothing steers or leans on its own.
 
 **Optional extras**, off unless asked for:
 

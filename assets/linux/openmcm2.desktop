@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=OpenMCM2
+GenericName=Motocross Madness 2
+Comment=Open-source engine for Motocross Madness 2, played from your own copy of the game
+Exec=mm2-launcher
+Icon=openmcm2
+Terminal=false
+Categories=Game;SportsGame;
+Keywords=motocross;mcm2;motocross madness;
+Actions=play;
+
+[Desktop Action play]
+Name=Play now (skip the launcher)
+Exec=mm2-launcher --play

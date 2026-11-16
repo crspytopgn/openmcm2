@@ -42,7 +42,7 @@ pub fn pad() -> Option<PadInfo> {
 
 /// A pad button's own label, by DirectInput's order for an Xbox pad
 /// (the south, east, west and north buttons, the shoulders, the two
-/// middle buttons, the stick clicks).
+/// middle buttons, the stick clicks), then the D-pad.
 fn pad_button(family: PadFamily, code: i32) -> Option<String> {
     let (brand, names): (&str, [&str; 10]) = match family {
         PadFamily::Xbox => ("Xbox", ["A", "B", "X", "Y", "LB", "RB", "View", "Menu", "LS", "RS"]),
@@ -52,7 +52,9 @@ fn pad_button(family: PadFamily, code: i32) -> Option<String> {
         ),
         PadFamily::Nintendo => ("Switch", ["B", "A", "Y", "X", "L", "R", "Minus", "Plus", "LS", "RS"]),
     };
-    let name = names.get(usize::try_from(code).ok()?)?;
+    let dpad = ["D-pad Up", "D-pad Down", "D-pad Left", "D-pad Right"];
+    let code = usize::try_from(code).ok()?;
+    let name = names.get(code).or_else(|| dpad.get(code.checked_sub(10)?))?;
     Some(format!("{brand} {name}"))
 }
 
@@ -382,7 +384,8 @@ mod tests {
         }));
         assert_eq!(input_name(2, 1, lang), "PS Circle");
         assert_eq!(input_name(2, -9, lang), "PS Right Stick X");
-        assert_eq!(input_name(2, 12, lang), "Joy Button 13");
+        assert_eq!(input_name(2, 12, lang), "PS D-pad Left");
+        assert_eq!(input_name(2, 14, lang), "Joy Button 15");
         set_pad(None);
     }
 }

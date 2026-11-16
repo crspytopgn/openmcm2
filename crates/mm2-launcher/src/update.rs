@@ -69,18 +69,35 @@ fn platform() -> Option<&'static str> {
     }
 }
 
-/// What gets replaced: the Mac app bundle, or the folder the launcher,
-/// viewer and tools sit in.
+/// The AppImage this launcher runs from, if it does: the file the
+/// AppImage runtime names in `APPIMAGE`.
+pub fn appimage() -> Option<PathBuf> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    let p = PathBuf::from(std::env::var_os("APPIMAGE")?);
+    p.is_file().then_some(p)
+}
+
+/// The end of the Linux AppImage's name, as the release workflow names it.
+const APPIMAGE_ENDING: &str = "-linux-x86_64.AppImage";
+
+/// What gets replaced: the Mac app bundle, the folder the launcher,
+/// viewer and tools sit in, or the one AppImage file holding them all.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Install {
     MacApp(PathBuf),
     Folder(PathBuf),
+    AppImage(PathBuf),
 }
 
 impl Install {
     /// The running launcher's own install, if it's laid out as a release
     /// puts it.
     pub fn here() -> Result<Install, String> {
+        if let Some(image) = appimage() {
+            return Ok(Install::AppImage(image));
+        }
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let exe = exe.canonicalize().unwrap_or(exe);
         Install::of(&exe)
@@ -105,7 +122,7 @@ impl Install {
     /// The folder the update is unpacked in and old files are kept in.
     fn staging(&self) -> PathBuf {
         match self {
-            Install::MacApp(app) => app.parent().unwrap_or(Path::new(".")).join(STAGING),
+            Install::MacApp(app) | Install::AppImage(app) => app.parent().unwrap_or(Path::new(".")).join(STAGING),
             Install::Folder(dir) => dir.join(STAGING),
         }
     }
@@ -115,6 +132,15 @@ impl Install {
         match self {
             Install::MacApp(app) => app.join("Contents/MacOS/mm2-launcher"),
             Install::Folder(dir) => dir.join(format!("mm2-launcher{}", std::env::consts::EXE_SUFFIX)),
+            Install::AppImage(image) => image.clone(),
+        }
+    }
+
+    /// The end of the release download's name for this install.
+    fn ending(&self) -> Option<&'static str> {
+        match self {
+            Install::AppImage(_) => Some(APPIMAGE_ENDING),
+            _ => platform(),
         }
     }
 
@@ -159,6 +185,10 @@ fn agent() -> ureq::Agent {
 /// Asks GitHub for the latest release, and returns it if it's newer than
 /// this build and has an archive for this platform.
 pub fn check() -> Result<Option<Release>, String> {
+    let ending = match Install::here() {
+        Ok(install) => install.ending(),
+        Err(_) => platform(),
+    };
     let current = current().ok_or("this build wasn't made by a release, so it can't update itself")?;
     let text = agent()
         .get(LATEST)
@@ -171,7 +201,7 @@ pub fn check() -> Result<Option<Release>, String> {
         .read_to_string()
         .map_err(|e| format!("couldn't read GitHub's answer: {e}"))?;
     let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("GitHub's answer didn't make sense: {e}"))?;
-    release_from(&json, current, platform().ok_or("there are no release builds for this computer")?)
+    release_from(&json, current, ending.ok_or("there are no release builds for this computer")?)
 }
 
 fn release_from(json: &serde_json::Value, current: &str, ending: &str) -> Result<Option<Release>, String> {
@@ -240,6 +270,10 @@ fn run(release: &Release, install: &Install, p: &Progress) -> Result<PathBuf, St
     let archive = staging.join(&release.asset);
     download(&release.url, release.size, &want, &archive, p)?;
     *p.stage.lock().unwrap() = "Installing…".into();
+    if let Install::AppImage(image) = install {
+        replace_appimage(&archive, image)?;
+        return Ok(install.launcher());
+    }
     let unpacked = staging.join("new");
     unpack(&archive, &unpacked)?;
     let top = single_folder(&unpacked)?;
@@ -370,11 +404,31 @@ fn single_folder(dir: &Path) -> Result<PathBuf, String> {
     }
 }
 
+/// Puts the downloaded AppImage `new` in place of `image`. The running
+/// one keeps working from its open file, and the new one starts next time.
+fn replace_appimage(new: &Path, image: &Path) -> Result<(), String> {
+    let mut magic = [0u8; 11];
+    fs::File::open(new)
+        .and_then(|mut f| f.read_exact(&mut magic))
+        .map_err(|e| format!("couldn't read the update: {e}"))?;
+    // An ELF program carrying the AppImage type 2 mark.
+    if &magic[..4] != b"\x7fELF" || &magic[8..11] != b"AI\x02" {
+        return Err("the update isn't an AppImage".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(new, fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+    }
+    fs::rename(new, image).map_err(|e| format!("couldn't put the new AppImage in place of {}: {e}", image.display()))
+}
+
 /// Puts the unpacked release `top` in place of `install`, keeping the old
 /// files in `old` until it has all worked, and putting them back if not.
 fn swap(install: &Install, top: &Path, old: &Path) -> Result<(), String> {
     fs::create_dir_all(old).map_err(|e| e.to_string())?;
     match install {
+        Install::AppImage(_) => Err("an AppImage is replaced whole, not unpacked".into()),
         Install::MacApp(app) => {
             let new = top.join("OpenMCM2.app");
             for f in ["Contents/MacOS/mm2-launcher", "Contents/MacOS/mm2-viewer", "Contents/Info.plist"] {
@@ -545,7 +599,7 @@ pub fn restart(install: &Install) -> io::Result<()> {
     use std::process::Command;
     match install {
         Install::MacApp(app) => Command::new("/usr/bin/open").arg("-n").arg(app).spawn().map(drop),
-        Install::Folder(_) => Command::new(install.launcher()).spawn().map(drop),
+        Install::Folder(_) | Install::AppImage(_) => Command::new(install.launcher()).spawn().map(drop),
     }
 }
 
@@ -578,6 +632,40 @@ mod tests {
         assert_eq!(w.sha256, None);
         assert_eq!(release_from(&json, "v0.1.6", "-linux-x86_64.tar.gz").unwrap(), None);
         assert!(release_from(&json, "v0.1.5", "-macos-arm64.zip").is_err());
+    }
+
+    #[test]
+    fn picks_the_appimage() {
+        let json = serde_json::json!({
+            "tag_name": "v0.6.0",
+            "assets": [
+                {"name":"openmcm2-v0.6.0-linux-x86_64.tar.gz","size":10,"browser_download_url":"https://github.com/a.tgz","digest":"sha256:AB"},
+                {"name":"openmcm2-v0.6.0-linux-x86_64.AppImage","size":20,"browser_download_url":"https://github.com/a.AppImage","digest":"sha256:CD"},
+            ]
+        });
+        let r = release_from(&json, "v0.5.4", APPIMAGE_ENDING).unwrap().unwrap();
+        assert_eq!(r.asset, "openmcm2-v0.6.0-linux-x86_64.AppImage");
+        assert_eq!(r.sha256.as_deref(), Some("cd"));
+        let r = release_from(&json, "v0.5.4", "-linux-x86_64.tar.gz").unwrap().unwrap();
+        assert_eq!(r.asset, "openmcm2-v0.6.0-linux-x86_64.tar.gz");
+    }
+
+    #[test]
+    fn replaces_an_appimage() {
+        let root = tmp("appimage");
+        let image = root.join("OpenMCM2.AppImage");
+        fs::write(&image, b"old").unwrap();
+        let bad = root.join("bad");
+        fs::write(&bad, b"not an appimage at all").unwrap();
+        assert!(replace_appimage(&bad, &image).is_err());
+        assert_eq!(fs::read(&image).unwrap(), b"old");
+        let new = root.join("new");
+        let mut bytes = b"\x7fELF\x02\x01\x01\x00AI\x02".to_vec();
+        bytes.extend_from_slice(&[0; 32]);
+        fs::write(&new, &bytes).unwrap();
+        replace_appimage(&new, &image).unwrap();
+        assert_eq!(fs::read(&image).unwrap(), bytes);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

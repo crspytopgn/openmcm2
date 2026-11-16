@@ -1268,6 +1268,24 @@ impl Dlg {
         )
     }
 
+    /// Where the pad's D-pad can jump the pointer to: the middle of each
+    /// control that takes a click, or of each line of an open list.
+    pub fn targets(&self) -> Vec<(f32, f32)> {
+        if let Some(l) = self.list {
+            let [lx, ly, lw] = l.lines;
+            let ctl = &self.ctls[l.control];
+            let n = ctl.items.len().saturating_sub(ctl.scroll).min(l.rows);
+            return (0..n).map(|i| (lx + lw / 2.0, ly + (i as f32 + 0.5) * LINE)).collect();
+        }
+        (0..self.ctls.len())
+            .filter(|&i| Self::clickable(&self.dialog.controls[i]) && self.ctls[i].enabled && self.showing(i))
+            .map(|i| {
+                let [x, y, w, h] = self.rect(i);
+                (x + w / 2.0, y + h / 2.0)
+            })
+            .collect()
+    }
+
     /// The control under the pointer, topmost first.
     fn hit(&self, x: f32, y: f32) -> Option<usize> {
         (0..self.ctls.len()).rev().find(|&i| {

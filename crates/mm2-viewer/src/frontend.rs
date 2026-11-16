@@ -757,6 +757,13 @@ impl Frontend {
         self.handle(audio, events, now)
     }
 
+    /// Where the pad's D-pad can jump the pointer to (see
+    /// [`Dlg::targets`]).
+    #[cfg_attr(not(feature = "gamepad"), allow(dead_code))]
+    pub fn targets(&mut self) -> Vec<(f32, f32)> {
+        self.dialogs().iter().flat_map(|d| d.targets()).collect()
+    }
+
     /// The pad's shoulder buttons: the next tab along (`step` 1) or the
     /// one before (−1), as clicked.
     #[cfg_attr(not(feature = "gamepad"), allow(dead_code))]

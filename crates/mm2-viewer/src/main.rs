@@ -3753,6 +3753,23 @@ struct App {
     shoot: bool,
 }
 
+/// The menu button the D-pad jumps to from `at`, in direction `dir`:
+/// the nearest ahead, a step off to the side counting double.
+#[cfg_attr(not(feature = "gamepad"), allow(dead_code))]
+fn pad_jump(at: (f32, f32), dir: (f32, f32), targets: &[(f32, f32)]) -> Option<(f32, f32)> {
+    targets
+        .iter()
+        .copied()
+        .filter_map(|t| {
+            let (dx, dy) = (t.0 - at.0, t.1 - at.1);
+            let ahead = dx * dir.0 + dy * dir.1;
+            let side = (dx * dir.1 - dy * dir.0).abs();
+            (ahead > 4.0).then_some((ahead + 2.0 * side, t))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, t)| t)
+}
+
 /// The device whose map the race uses when the profile's own is the
 /// keyboard: the joystick's kind, or the first joystick's map.
 #[cfg(feature = "gamepad")]
@@ -4191,6 +4208,10 @@ impl App {
                             Some(m) => *m,
                             None => joy(pad_device(&self.pads)).copied().unwrap_or_else(input::factory_pad),
                         };
+                        // A game pad gets buttons for the actions left on keys.
+                        if pad_device(&self.pads) == 3 {
+                            self.pad_map = input::with_pad_extras(self.pad_map);
+                        }
                         self.analog = p.controls.analog_axes;
                         if let race::Bike::Player(b) = &mut r.racers[r.player].bike {
                             b.gas_gyro = p.controls.gas_gyro;
@@ -4889,9 +4910,24 @@ impl App {
         let (stick, a, b) = pads.pointer();
         let (was_a, was_b) = std::mem::replace(&mut self.pad_click, (a, b));
         if !self.in_menus() {
-            // Back (DirectInput's button 6): the fork's quick get-up.
-            if presses.contains(&pad::Press::Button(6)) {
+            // Buttons the map leaves free: Back (DirectInput's button 6)
+            // the fork's quick get-up, Start (7) out of the race as
+            // Escape, the D-pad's up the next camera view and its right
+            // the Helmet Cam.
+            let free = |b: i32| presses.contains(&pad::Press::Button(b)) && !self.pad_map.iter().any(|&(k, c)| k == 2 && c == b);
+            let (back, start, view, helmet) = (free(6), free(7), free(pad::DPAD_UP), free(pad::DPAD_RIGHT));
+            if back {
                 self.get_back_on();
+            }
+            if start && self.front.is_some() && self.loading.is_none() {
+                self.end_race();
+                return;
+            }
+            if self.follow && (view || helmet) {
+                let name = self.race.as_mut().map(|r| if helmet { r.toggle_helmet() } else { r.next_view() });
+                if let (Some(name), Some((_, hud))) = (name, &mut self.hud) {
+                    hud.say(name);
+                }
             }
             return;
         }
@@ -4927,9 +4963,26 @@ impl App {
         // Past a fifth of the stick, up to 500 of the 640×480 screen a second.
         let speed = |v: f32| if v.abs() < 0.2 { 0.0 } else { v * 500.0 * dt };
         let (dx, dy) = (speed(stick[0]), speed(stick[1]));
+        let mut to = None;
         if dx != 0.0 || dy != 0.0 {
             let (x, y) = self.pointer;
-            let (x, y) = ((x + dx).clamp(0.0, 639.0), (y + dy).clamp(0.0, 479.0));
+            to = Some(((x + dx).clamp(0.0, 639.0), (y + dy).clamp(0.0, 479.0)));
+        }
+        // The D-pad jumps the pointer to the next button that way, which
+        // lights up as it would under the mouse.
+        for (b, dir) in [
+            (pad::DPAD_UP, (0.0, -1.0)),
+            (pad::DPAD_DOWN, (0.0, 1.0)),
+            (pad::DPAD_LEFT, (-1.0, 0.0)),
+            (pad::DPAD_RIGHT, (1.0, 0.0)),
+        ] {
+            if presses.contains(&pad::Press::Button(b)) {
+                if let Some(t) = pad_jump(self.pointer, dir, &f.targets()) {
+                    to = Some(t);
+                }
+            }
+        }
+        if let Some((x, y)) = to {
             self.pointer = (x, y);
             f.mouse_move(&self.audio, x, y);
             if let Some(s) = &self.state {

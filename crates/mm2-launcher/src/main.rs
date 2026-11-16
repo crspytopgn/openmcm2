@@ -10,6 +10,7 @@ mod boards;
 mod game;
 mod iso;
 mod look;
+mod pad;
 mod settings;
 mod shortcut;
 mod tracks;
@@ -37,6 +38,12 @@ fn main() -> eframe::Result {
     if args.first().is_some_and(|a| a == "--import") {
         std::process::exit(import_only(&args[1..]));
     }
+    // `--play [viewer options]`: the game straight away with the saved
+    // settings, skipping this window (for a Steam launch option or a
+    // desktop shortcut). It waits for the game, so Steam sees it running.
+    if args.first().is_some_and(|a| a == "--play") {
+        std::process::exit(play_only(&args[1..]));
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("OpenMCM2")
@@ -46,6 +53,20 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native("OpenMCM2", options, Box::new(|cc| Ok(Box::new(Launcher::new(cc)))))
+}
+
+fn play_only(args: &[String]) -> i32 {
+    let Some(viewer) = settings::viewer() else {
+        eprintln!("mm2-viewer isn't beside the launcher");
+        return 1;
+    };
+    match std::process::Command::new(&viewer).args(args).status() {
+        Ok(s) => s.code().unwrap_or(1),
+        Err(e) => {
+            eprintln!("couldn't start {}: {e}", viewer.display());
+            1
+        }
+    }
 }
 
 fn import_only(args: &[String]) -> i32 {
@@ -97,6 +118,8 @@ struct Launcher {
     /// Loaded at the first frame.
     logo: Option<egui::TextureHandle>,
     page: Page,
+    /// A game pad's presses, as keys.
+    pad: Option<pad::PadKeys>,
 }
 
 /// What a background job gives back, once it has.
@@ -306,6 +329,7 @@ impl Launcher {
             i.tidy();
         }
         let mut l = Launcher::with(Settings::load(), install);
+        l.pad = Some(pad::PadKeys::start(cc.egui_ctx.clone()));
         l.boards.send(&l.settings);
         if l.settings.check_updates && l.install.is_ok() {
             l.check_updates();
@@ -334,6 +358,7 @@ impl Launcher {
             boards: Boards::default(),
             logo: None,
             page: Page::Play,
+            pad: None,
         }
     }
 
@@ -510,6 +535,14 @@ impl eframe::App for Launcher {
     // Runs while minimized too, so the launcher sees the game end.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll(ctx);
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if let Some(pad) = &self.pad {
+            if self.running.is_none() {
+                pad.feed(ctx, raw);
+            }
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
