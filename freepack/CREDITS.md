@@ -116,6 +116,7 @@ These models were refitted to the game's bike and rider frames, recoloured and g
 | biplane | [Boeing Stearman PT.17](https://sketchfab.com/3d-models/3ccea297db744ba4aee10ef3f5289bf2) | helijah |
 | beech18 | [Beechcraft C18 S](https://sketchfab.com/3d-models/c494357dc66242209104077be180234a) | helijah |
 | dc-3 | [Dc3](https://sketchfab.com/3d-models/1668ac86c20b4c3eb2a04d22959a87e1) | manilov.ap |
+| cargoplane01 | [Lockheed C-130 Hercules](https://sketchfab.com/3d-models/5acfb2eb4f204f51ab418856c116b68e) | Tyler_Dave |
 | bellranger, helinocam | [SNCASE SE.3130 Alouette II](https://sketchfab.com/3d-models/ebfc77d41a0641d6a4f422f23e8a4a36) | helijah |
 | engine | [Diesel train engine](https://sketchfab.com/3d-models/1e1d6f173d1e48e593fa270fb1b5f5a8) | Leaf_dev |
 | coalcar | [Coal Hopper Railway Wagon](https://sketchfab.com/3d-models/287266d5edf749318cb9869fe583e0ae) | saadthedesigner314 |
