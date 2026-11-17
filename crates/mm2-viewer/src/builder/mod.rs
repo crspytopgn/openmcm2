@@ -211,6 +211,8 @@ enum Popup {
     /// Your tracks, and the tracks there are to copy (of one mode, from
     /// a row down).
     Open { files: Vec<PathBuf>, mode: Mode, scroll: usize },
+    /// The kind of race the track is for, to change it.
+    Kind,
 }
 
 pub struct Builder {
@@ -254,6 +256,8 @@ pub struct Builder {
     shift: bool,
     ctrl: bool,
     naming: bool,
+    /// Renaming has just begun: the first letter typed replaces the name.
+    name_fresh: bool,
     popup: Option<Popup>,
     toast: Option<(String, f32)>,
     now: f32,
@@ -317,6 +321,7 @@ impl Builder {
             shift: false,
             ctrl: false,
             naming: false,
+            name_fresh: false,
             popup: None,
             toast: None,
             now: 0.0,
@@ -735,13 +740,25 @@ impl Builder {
             match code {
                 K::Enter | K::NumpadEnter | K::Escape => {
                     self.naming = false;
+                    if self.course.name.trim().is_empty() {
+                        self.course.name = self.free_name(self.course.mode);
+                    }
                     self.changed();
                 }
                 K::Backspace => {
+                    if self.name_fresh {
+                        self.course.name.clear();
+                    }
                     self.course.name.pop();
+                    self.name_fresh = false;
                 }
                 _ => {
-                    for c in text.unwrap_or("").chars().filter(|c| !c.is_control()) {
+                    let typed: Vec<char> = text.unwrap_or("").chars().filter(|c| !c.is_control()).collect();
+                    if self.name_fresh && !typed.is_empty() {
+                        self.course.name.clear();
+                        self.name_fresh = false;
+                    }
+                    for c in typed {
                         if self.course.name.chars().count() < 28 {
                             self.course.name.push(c);
                         }
@@ -1424,24 +1441,55 @@ impl Builder {
         let w = self.width();
         // ---- top bar ----
         p.panel(input, [0.0, 0.0, w, 26.0]);
-        p.text([10.0, 7.0], "COURSE BUILDER", 13.0, true, [ACCENT[0], ACCENT[1], ACCENT[2], 1.0]);
-        let name_x = 10.0 + p.text_width("COURSE BUILDER", 13.0, true) + 14.0;
-        let name = if self.naming { format!("{}_", self.course.name) } else { self.course.name.clone() };
-        // Room up to the buttons on the right; a long name is cut short.
-        let room = w - 8.0 - 384.0 - name_x - 6.0;
-        let mut label = format!("{}  ·  {}", name, self.course.mode.name());
-        if p.text_width(&label, 12.0, false) + 12.0 > room {
-            label = name.clone();
-            while label.chars().count() > 3 && p.text_width(&format!("{label}..."), 12.0, false) + 12.0 > room {
-                label.pop();
-            }
-            if label != name {
+        // The title, where there is room for it beside the name.
+        let name_x = if w >= 740.0 {
+            p.text([10.0, 7.0], "COURSE BUILDER", 13.0, true, [ACCENT[0], ACCENT[1], ACCENT[2], 1.0]);
+            10.0 + p.text_width("COURSE BUILDER", 13.0, true) + 14.0
+        } else {
+            8.0
+        };
+        // The kind of race, a button of its own to change it.
+        let kind = format!("Race: {}", self.course.mode.name());
+        let kw = p.text_width(&kind, 12.0, false) + 14.0;
+        // Room up to the buttons on the right; a long name is cut short
+        // (while typing, its start, so what is typed shows).
+        let room = w - 8.0 - 384.0 - name_x - 6.0 - kw - 4.0;
+        let name = if self.naming && self.name_fresh {
+            format!("[{}]", self.course.name)
+        } else if self.naming {
+            format!("{}_", self.course.name)
+        } else {
+            self.course.name.clone()
+        };
+        let mut label = name.clone();
+        let fits = |p: &mut Painter, l: &str| p.text_width(l, 12.0, false) + 12.0 <= room;
+        if !fits(p, &label) {
+            if self.naming {
+                while label.chars().count() > 3 && !fits(p, &format!("...{label}")) {
+                    label.remove(0);
+                }
+                label = format!("...{label}");
+            } else {
+                while label.chars().count() > 3 && !fits(p, &format!("{label}...")) {
+                    label.pop();
+                }
                 label.push_str("...");
             }
         }
         let nw = p.text_width(&label, 12.0, false) + 12.0;
-        if p.button(input, "name", [name_x, 4.0, nw, 18.0], &label, "Click to rename the track. Its name shows in the track list.", self.naming) {
+        let tip = if self.naming { "Type the new name, then Enter. Click again when done." } else { "Click to rename the track, then type. Its name shows in the track list." };
+        if p.button(input, "name", [name_x, 4.0, nw, 18.0], &label, tip, self.naming) {
             self.naming = !self.naming;
+            self.name_fresh = self.naming;
+            if !self.naming {
+                if self.course.name.trim().is_empty() {
+                    self.course.name = self.free_name(self.course.mode);
+                }
+                self.changed();
+            }
+        }
+        if p.button(input, "kind", [name_x + nw + 4.0, 4.0, kw, 18.0], &kind, "The kind of race this track is for. Click to change it: Supercross, National, Baja or Enduro.", matches!(self.popup, Some(Popup::Kind))) {
+            self.popup = Some(Popup::Kind);
         }
         let mut x = w - 8.0;
         let mut right = |p: &mut Painter, input: &mut Input, id: &str, label: &str, tip: &str, width: f32, on: bool| {
@@ -1670,6 +1718,44 @@ impl Builder {
                 }
                 if keep {
                     self.popup = Some(Popup::Open { files, mode, scroll });
+                }
+            }
+            Some(Popup::Kind) => {
+                let (pw, ph) = (320.0, 168.0);
+                let (px, py) = ((w - pw) / 2.0, 110.0);
+                p.fill([0.0, 0.0, w, 480.0], [0.0, 0.0, 0.0, 0.35]);
+                p.panel(input, [px, py, pw, ph]);
+                p.text([px + 14.0, py + 12.0], "KIND OF RACE", 14.0, true, [ACCENT[0], ACCENT[1], ACCENT[2], 1.0]);
+                let copy = self.course.base.is_some();
+                let say = if copy { "A copy stays the kind of race its track is. Use New for another." } else { "Change this track to another kind. Your line, jumps and the rest move to fit." };
+                for (k, line) in panel::wrap(p, say, pw - 28.0, 11.0).iter().enumerate() {
+                    p.text([px + 14.0, py + 32.0 + k as f32 * 13.0], line, 11.0, false, [0.85, 0.85, 0.8, 1.0]);
+                }
+                let mut keep = true;
+                for (k, mode) in Mode::ALL.iter().enumerate() {
+                    let tip = match mode {
+                        Mode::Supercross => "A tight track on a stadium floor, lined with bales. The track is shrunk to fit the floor.",
+                        Mode::National => "An outdoor lap track cut into the hills.",
+                        Mode::Baja => "A long run across open desert from gate to gate.",
+                        Mode::Enduro => "Gates through hills and mountains.",
+                    };
+                    let r = [px + 14.0 + (k % 2) as f32 * 148.0, py + 66.0 + (k / 2) as f32 * 30.0, 144.0, 26.0];
+                    if p.button(input, &format!("kind{k}"), r, mode.name(), tip, self.course.mode == *mode) && !copy && self.course.mode != *mode {
+                        self.remember();
+                        self.course.change_mode(*mode);
+                        self.field = None;
+                        self.land = None;
+                        self.picked = None;
+                        self.changed();
+                        self.say(&format!("Now a {} track", mode.name()));
+                        keep = false;
+                    }
+                }
+                if p.button(input, "cancel", [px + pw - 84.0, py + ph - 30.0, 70.0, 20.0], "Close", "Keep the track as it is.", false) {
+                    keep = false;
+                }
+                if keep {
+                    self.popup = Some(Popup::Kind);
                 }
             }
             None => {}
@@ -1935,6 +2021,12 @@ impl Builder {
             Self::note(p, y, left, col, "Click the name in the top bar to rename the copy.");
             return;
         }
+        Self::heading(p, y, left, "KIND OF RACE");
+        let label = format!("{}  (change)", self.course.mode.name());
+        if p.button(input, "kind-land", [left, *y, col, 20.0], &label, "Make this a Supercross, National, Baja or Enduro track. Your line, jumps and the rest move to fit.", false) {
+            self.popup = Some(Popup::Kind);
+        }
+        *y += 26.0;
         let sx = self.course.mode == Mode::Supercross;
         if !sx {
             Self::heading(p, y, left, "LAND");
