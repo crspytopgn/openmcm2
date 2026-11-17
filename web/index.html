@@ -86,7 +86,7 @@
   #ldDetail { margin: 0; min-height: 1.5em; color: var(--dim); font-variant-numeric: tabular-nums; }
   #loader .track { position: relative; height: 12px; margin: .9rem 0 1.2rem; background: #24221d;
     border: 1px solid #36332b; transform: skewX(-14deg); overflow: hidden; }
-  #ldFill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); transition: width .2s; }
+  #ldFill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); }
   #loader .track.busy #ldFill { width: 100% !important; transition: none; opacity: .85;
     background: repeating-linear-gradient(-60deg, var(--accent) 0 12px, #7e9638 12px 24px); background-size: 28px 100%;
     animation: ldroll .7s linear infinite; }
@@ -267,6 +267,7 @@ const loader = {
     this.now = id;
     this.since = performance.now();
     this.row(id).className = "now";
+    $("ldFill").style.width = "0";
     $("ldTitle").textContent = STEPS[id]?.[0] ?? id;
     $("ldDetail").textContent = detail ?? STEPS[id]?.[1] ?? "";
     this.progress(null);
@@ -302,16 +303,16 @@ const loader = {
   },
   // Something went wrong: what happened, in plain words, what to try, and
   // the technical detail tucked away for a bug report.
-  fail(title, why, tech, actions = []) {
+  fail(title, why, tech, actions = [], tag = "Couldn't start") {
     this.show();
     if (this.now) this.row(this.now).className = "bad";
     this.now = null;
     $("loader").hidden = false;
     $("loader").classList.remove("gone");
     $("loader").classList.add("failed");
-    $("ldTag").textContent = "Couldn't start";
+    $("ldTag").textContent = tag;
     $("ldTitle").textContent = title;
-    $("ldDetail").textContent = "";
+    $("ldDetail").hidden = true;
     $("ldTrack").hidden = true;
     $("ldWhy").textContent = why;
     const box = $("ldActions");
@@ -393,10 +394,16 @@ let stopped = false;
 function gameStopped(err) {
   if (stopped) return;
   stopped = true;
-  const [title, why] = loader.shown && loader.now
-    ? explain(err)
-    : ["The game stopped", "The game hit a bug and had to stop. Your saves are kept. Reload to carry on; if it happens again, the details below help us fix it."];
-  loader.fail(title, why, String(err.stack || err));
+  if (loader.shown && loader.now) return loader.fail(...explain(err), String(err.stack || err));
+  // While playing: the start's steps are old news.
+  $("ldSteps").replaceChildren();
+  loader.fail(
+    "The game stopped",
+    "The game hit a bug and had to stop. Your saves are kept. Reload to carry on; if it happens again, the details below help us fix it.",
+    String(err.stack || err),
+    [],
+    "Stopped"
+  );
 }
 
 // Browsers keep sound off until the player clicks or presses a key, and
@@ -642,18 +649,27 @@ async function fetchEngine() {
   return whole;
 }
 
+// Whether this browser can run the game, checked before anything slow.
+let canRun = false;
+async function checkBrowser() {
+  if (canRun) return true;
+  loader.step("browser");
+  if (!navigator.gpu) return noWebGPU(), false;
+  const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" }).catch(() => null);
+  if (!adapter) {
+    const [title, why] = explain("adapter");
+    return loader.fail(title, why, "navigator.gpu.requestAdapter() gave no adapter"), false;
+  }
+  canRun = true;
+  return true;
+}
+
 let starting = false;
 async function start(list) {
   if (starting) return;
   starting = true;
   $("why").textContent = "";
-  loader.step("browser");
-  if (!navigator.gpu) return noWebGPU();
-  const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" }).catch(() => null);
-  if (!adapter) {
-    const [title, why] = explain("adapter");
-    return loader.fail(title, why, "navigator.gpu.requestAdapter() gave no adapter");
-  }
+  if (!(await checkBrowser())) return;
   const at = { step: "files" };
   try {
     loader.step("files");
@@ -728,6 +744,7 @@ async function useFile(file) {
       : "Pick the .mdf file that goes with the .mds.";
     return;
   }
+  if (!(await checkBrowser())) return;
   const list = await fromFile(file).catch((err) => {
     loader.hide();
     $("why").textContent = String(err.message || err);
@@ -752,6 +769,7 @@ async function useFolder(picked) {
     $("why").textContent = "That folder has no UI/MAINMENU.DAT in it. Pick the folder the game is installed in, or the CD.";
     return;
   }
+  if (!(await checkBrowser())) return;
   const list = picked
     .filter(([path]) => path.startsWith(root))
     .map(([path, f]) => ["/game/" + path.slice(root.length), f]);
