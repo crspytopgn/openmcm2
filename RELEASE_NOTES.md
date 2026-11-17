@@ -1,3 +1,33 @@
+# OpenMCM2 0.6.2
+
+The free graphics are now the whole game, with no MM2 files needed, and
+the menus have a new look you can pick even if you own the game.
+
+* **Full menus with the free graphics.** Without MM2 files you get every
+  menu, working as in the original: single races on the free tracks, the
+  garage with the free bikes and outfits, a Pro Circuit career on the
+  free tracks, high scores, replays, options and the credits. The
+  wording and button sounds are our own.
+* **New look or original menus.** The launcher's Play page and the
+  browser page now ask which menus you want, beside the graphics. The
+  new look has every screen and button of the original, redrawn. It
+  works with MM2 graphics too: in the browser only the menus' part of the
+  Free Pack downloads. Original menus stays the default when you have
+  the game, and needs its files.
+* **Track pictures.** Tracks you build, and the free tracks, now carry
+  their own preview picture, the same way the game's tracks do, so you
+  can tell them apart on the event screen. A track with no picture gets
+  one drawn from its ground.
+* **Smoother and quicker:** the sky and the ground draw less work for
+  the same picture, the sky-light bake is several times faster, and Auto
+  graphics sets the costliest effects aside for a while if frames keep
+  coming late, then gives them back.
+* **Free Pack ground:** the fine ground detail no longer shows as big
+  squares.
+* **Browser:** Play no longer opens the Course Builder after you've used
+  its button once, and time played with the free graphics is counted
+  too, including the last minutes before you close the tab.
+
 # OpenMCM2 0.6.1
 
 The Free Pack gets much smaller, sounds much better and now plays a
