@@ -24,6 +24,7 @@ usage:
   mm2-tools freetrack <out.env> [seed]      make a new free test track from scratch
   mm2-tools freetracks <GAME-dir> [ground-dir] [only]  make the free pack's tracks (only: a file or event folder)
   mm2-tools preview <track.env> <out.png>  draw a track's preview picture from its ground
+  mm2-tools free-previews <ground-dir> <out-dir>  the free tracks' pictures (.tga), for the pack's previews/
   mm2-tools course <in.course|mode|track.env> <out.env>  bake a Course Builder track (mode: sx, national, baja, enduro; an .env: a copy of it)";
 
 fn main() -> ExitCode {
@@ -47,6 +48,7 @@ fn main() -> ExitCode {
         ["dialog", file, out] => dialog(file, Some(out)),
         ["course", from, out] => course(from, Path::new(out)),
         ["preview", env, out] => preview(env, out),
+        ["free-previews", ground, out] => free_previews(Path::new(ground), Path::new(out)),
         ["free-menus", ui, text, out] => free_menus(Path::new(ui), Path::new(text), Path::new(out)),
         _ => {
             eprintln!("{USAGE}");
@@ -385,6 +387,27 @@ fn preview(env: &str, out: &str) -> BoxResult {
     enc.set_depth(png::BitDepth::Eight);
     enc.write_header()?.write_image_data(&rgb)?;
     println!("wrote {out}");
+    Ok(())
+}
+
+/// Every free track's event-page pictures (the `.tga`s its `.ENV`
+/// carries), for the Free Pack's `previews/`: the menus show them before a
+/// track is first built.
+fn free_previews(ground: &Path, out: &Path) -> BoxResult {
+    std::fs::create_dir_all(out)?;
+    let read = |name: &str| std::fs::read(ground.join(name)).ok();
+    for def in freetracks::SET {
+        for (name, bytes) in freetracks::make(def, &read).map_err(|e| format!("{}: {e}", def.file))? {
+            if !name.to_ascii_uppercase().ends_with(".ENV") {
+                continue;
+            }
+            let ar = rs2::Archive::parse(&bytes)?;
+            for e in ar.entries().iter().filter(|e| e.name.to_ascii_lowercase().ends_with(".tga")) {
+                std::fs::write(out.join(&e.name), ar.data(e))?;
+                println!("{}", e.name);
+            }
+        }
+    }
     Ok(())
 }
 
