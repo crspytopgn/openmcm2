@@ -12,8 +12,37 @@ natively on macOS (Metal), Windows (DX12/Vulkan) and Linux (Vulkan).
 **This repository contains no game files.** Like OpenMW, the engine reads the
 tracks, models, textures, sounds and menus from a copy of the game that you
 own. Point it at the folder of your install (or the CD's `GAME` folder).
+**No copy? Play with the free graphics** (see below).
 
-Project page: https://crspytopgn.github.io/openmcm2/
+Project page: https://crspytopgn.github.io/openmcm2/ · Play in your browser: https://crspytopgn.github.io/openmcm2/play/
+
+## New in 0.6: build your own tracks
+
+![The Course Builder: draw a line, add jumps, paint the ground and ride it](assets/readme/course-builder.gif)
+
+The **Course Builder** is on the main menu. Draw the line, drop in jumps,
+whoops and rhythm sections, paint sand and mud, add bales, tents and
+trailers, then press **Ride it** and you're racing your own track. *Surprise
+me* makes a whole track in one click, and you can start from a copy of any
+track you already have. It's free, works with either set of graphics, and
+runs in the browser too. (A switch in Options turns the menu entry off.)
+
+## No copy of MM2? Play with the free graphics
+
+| | |
+|---|---|
+| ![The free supercross stadium at night](assets/readme/free-sx-night.jpg) | ![A full gate leaving the start on a free national track](assets/readme/free-national.jpg) |
+
+The **Free Pack** is a whole set of new art made for OpenMCM2: bikes and
+riders, a supercross stadium with lights for night races, 28 new tracks
+across every event, skies, trees, trucks and planes. It's all our own work or
+openly licensed (see [freepack/CREDITS.md](freepack/CREDITS.md)), so anyone
+can download it and ride. The launcher and the browser page both ask
+**MM2 graphics or free graphics?** when you play, and fetch the pack for you,
+downloading only what changed when it updates.
+
+Early days: without MM2 files the free graphics open in the Course Builder
+for now, where you build a track and ride it. Full races and menus with the free art are on the way.
 
 [![OpenMCM2 showcase video](https://img.youtube.com/vi/rP0TEnWLzNo/maxresdefault.jpg)](https://youtu.be/rP0TEnWLzNo)
 
