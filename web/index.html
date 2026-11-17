@@ -300,6 +300,8 @@ const STEPS = {
   start: ["Starting the game", "Reading the menus, sounds and your settings."],
   gpu: ["Connecting to your graphics card", "Asking the browser for the graphics card."],
   graphics: ["Setting up the graphics", "Building the shaders the game draws with."],
+  packcheck: ["Checking the Free Pack", "Asking for the newest list of the pack's files."],
+  pack: ["Downloading the Free Pack", ""],
 };
 const MB = (n) => (n / 1048576).toFixed(n < 10 * 1048576 ? 1 : 0);
 const loader = {
@@ -312,6 +314,7 @@ const loader = {
     $("loader").hidden = false;
     $("loader").classList.remove("gone", "failed");
     $("ldError").hidden = true;
+    $("ldDetail").hidden = $("ldTrack").hidden = false;
     $("ldSteps").replaceChildren();
     $("ldTag").textContent = "Loading";
   },
@@ -1064,39 +1067,65 @@ async function sha256(buffer) {
 }
 // Brings the pack in this browser up to date (when online), and gives its
 // files as [path, blob] under /freepack, or null if there's none.
+// The pack's files this browser uses. Its 28 tracks (TERAFORM, 1.4 GB)
+// stay out for now: nothing in the browser opens them yet (without MM2
+// the free graphics open the Course Builder), so they'd only take space.
+const wanted = (m) => m.files.filter((f) => !/^TERAFORM\//i.test(f.path));
 async function syncPack(fetchNew) {
   let manifest = await fs.packGet("manifest").catch(() => null);
   if (fetchNew) {
     try {
-      status("Checking the Free Pack…");
+      loader.step("packcheck");
       const r = await fetch(PACK_URL + "freepack.json", { cache: "no-cache" });
       if (!r.ok) throw new Error(`the Free Pack download answered ${r.status}`);
       const latest = await r.json();
       if (latest.format !== 1) throw new Error("this Free Pack needs a newer OpenMCM2: reload the page");
       const have = await fs.packStored();
-      const missing = [...new Map(latest.files.filter((f) => !have.has(f.sha256)).map((f) => [f.sha256, f])).values()];
-      const bar = $("bar");
-      bar.hidden = false;
-      bar.max = Math.max(1, missing.reduce((n, f) => n + f.size, 0));
-      bar.value = 0;
+      const missing = [...new Map(wanted(latest).filter((f) => !have.has(f.sha256)).map((f) => [f.sha256, f])).values()];
+      const total = missing.reduce((n, f) => n + f.size, 0);
+      let fetched = 0;
+      const all = wanted(latest).reduce((n, f) => n + f.size, 0);
+      loader.step(
+        "pack",
+        missing.length
+          ? `${MB(total)} MB to download${total < all ? ` (of ${MB(all)} MB: the rest is already here)` : ""}. It stays in this browser, so next time only changes come down.`
+          : "Already up to date."
+      );
+      const note = total < all ? ` · the other ${MB(all - total)} MB is already here` : "";
+      const show = () =>
+        loader.progress(fetched / total, `${MB(fetched)} of ${MB(total)} MB · ${Math.floor((fetched / total) * 100)}%${note}`);
+      if (missing.length) show();
       let next = 0;
       const worker = async () => {
         while (next < missing.length) {
           const f = missing[next++];
           const got = await fetch(PACK_URL + "files/" + f.sha256);
           if (!got.ok) throw new Error(`${f.path}: the download answered ${got.status}`);
-          const data = await got.arrayBuffer();
-          if ((await sha256(data)) !== f.sha256) throw new Error(`${f.path} didn't match its checksum, so it wasn't used`);
+          // Counted as it arrives, so big files move the bar too.
+          const parts = [];
+          let size = 0;
+          const reader = got.body.getReader();
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            parts.push(value);
+            size += value.length;
+            fetched += value.length;
+            show();
+          }
+          const data = await new Blob(parts).arrayBuffer();
+          if ((await sha256(data)) !== f.sha256) {
+            fetched -= size;
+            throw new Error(`${f.path} didn't match its checksum, so it wasn't used`);
+          }
           await fs.packPut(f.sha256, new Blob([data]));
-          bar.value += f.size;
-          status(`Downloading the Free Pack ${latest.version}… ${bar.value >> 20} of ${bar.max >> 20} MB`);
         }
       };
       navigator.storage?.persist?.();
       await Promise.all(Array.from({ length: 6 }, worker));
       await fs.packPut("manifest", latest);
       // Files no version needs any more.
-      const used = new Set(latest.files.map((f) => f.sha256));
+      const used = new Set(wanted(latest).map((f) => f.sha256));
       await fs.packDelete([...have].filter((k) => k !== "manifest" && !used.has(k)));
       manifest = latest;
     } catch (err) {
@@ -1107,7 +1136,7 @@ async function syncPack(fetchNew) {
   }
   if (!manifest) return null;
   const list = [];
-  for (const f of manifest.files) {
+  for (const f of wanted(manifest)) {
     const blob = await fs.packGet(f.sha256);
     if (!blob) return null;
     list.push(["/freepack/" + f.path, blob]);
@@ -1116,15 +1145,25 @@ async function syncPack(fetchNew) {
 }
 async function downloadAndPlay() {
   $("why").textContent = "";
-  $("freepick").hidden = $("freekept").hidden = true;
+  // No point downloading the pack for a browser that can't run the game.
+  if (!(await checkBrowser())) return;
   try {
     const list = await syncPack(true);
+    if (!list) throw new Error("the downloaded pack is missing some files");
+    $("freepick").hidden = $("freekept").hidden = true;
     go(list, true);
   } catch (err) {
-    $("bar").hidden = true;
-    status("");
-    $("why").textContent = "The Free Pack couldn't be downloaded: " + String(err.message || err);
-    $("freepick").hidden = false;
+    console.warn(err);
+    const offline = !navigator.onLine;
+    loader.fail(
+      "Couldn't download the Free Pack",
+      offline
+        ? "This browser is offline. Connect to the internet and try again."
+        : "The download stopped part way. Check your internet connection and try again: the files that already came down are kept, so it carries on where it stopped.\n\nIf it keeps failing, the browser may be out of storage space for the pack (about 2 GB).",
+      String(err.stack || err),
+      [["Try the download again", () => { loader.hide(); downloadAndPlay(); }]],
+      "Download failed"
+    );
   }
 }
 $("getpack").addEventListener("click", downloadAndPlay);
