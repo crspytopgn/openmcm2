@@ -223,6 +223,145 @@ pub fn plants(course: &Course, field: &Field) -> Vec<Plant> {
     out
 }
 
+/// How the scenery grows on a land: grass along the edges, bush clumps,
+/// groves of trees, and a light scatter of trees (and on a desert, bushes)
+/// over the rest. Densities 0 to 1; groves and clumps a hundred feet of
+/// line.
+struct Growth {
+    edge_grass: f32,
+    clumps: f32,
+    groves: f32,
+    grove_density: f32,
+    scatter_trees: f32,
+    scatter_bushes: f32,
+    /// Woods out on the land.
+    woods: usize,
+}
+
+fn growth(course: &Course) -> Growth {
+    match course.land.kind {
+        LandKind::Desert => Growth { edge_grass: 0.25, clumps: 0.6, groves: 0.3, grove_density: 0.45, scatter_trees: 0.02, scatter_bushes: 0.02, woods: 0 },
+        LandKind::Mountains => Growth { edge_grass: 0.45, clumps: 0.5, groves: 0.75, grove_density: 0.85, scatter_trees: 0.03, scatter_bushes: 0.0, woods: 8 },
+        LandKind::Valley => Growth { edge_grass: 0.6, clumps: 0.7, groves: 0.6, grove_density: 0.8, scatter_trees: 0.02, scatter_bushes: 0.0, woods: 6 },
+        LandKind::Rolling | LandKind::Flat => Growth { edge_grass: 0.55, clumps: 0.65, groves: 0.5, grove_density: 0.75, scatter_trees: 0.015, scatter_bushes: 0.0, woods: 5 },
+    }
+}
+
+/// "Dress the scenery": plant strokes that grow the land round the line
+/// as a real course looks, tall grass along the edges, bushes in clumps
+/// just off the track, groves of trees further out and a few trees over
+/// the rest. Every stroke is marked [`Planting::auto`]. Nothing for a
+/// stadium. Kept light (about 15,000 plants on a National track) so the
+/// track loads fast in the browser too.
+pub fn scenery(course: &Course) -> Vec<crate::Planting> {
+    use crate::Planting;
+    if course.mode == Mode::Supercross {
+        return Vec::new();
+    }
+    let path = course.path();
+    if path.is_empty() || path.length < 100.0 {
+        return Vec::new();
+    }
+    let g = growth(course);
+    let side = course.mode.side();
+    // Different for each track, the same every time for one.
+    let mut seed = course.land.seed as u64 ^ 0x9e37_79b9;
+    for p in &course.line.points {
+        seed = seed.wrapping_mul(31).wrapping_add((p.x as i64 * 7 + p.z as i64 * 13) as u64);
+    }
+    let mut dice = Dice(seed);
+    let stroke = |flora, radius, density, dabs| Planting { flora, radius, density, clear: false, everywhere: false, dabs, auto: true };
+    let mut out = Vec::new();
+    // Over the rest of the land.
+    if g.scatter_trees > 0.0 {
+        out.push(Planting { everywhere: true, ..stroke(Flora::Trees, 0.0, g.scatter_trees, Vec::new()) });
+    }
+    if g.scatter_bushes > 0.0 {
+        out.push(Planting { everywhere: true, ..stroke(Flora::Bushes, 0.0, g.scatter_bushes, Vec::new()) });
+    }
+    let inside = |p: [f32; 2]| p[0] > 20.0 && p[1] > 20.0 && p[0] < side - 20.0 && p[1] < side - 20.0;
+    let at = |i: usize, off: f32| {
+        let (p, n) = (path.pts[i], path.side(i));
+        [p[0] + n[0] * off, p[1] + n[1] * off]
+    };
+    // Tall grass along both edges, broken here and there.
+    let mut grass = Vec::new();
+    let mut s = 0.0;
+    while s < path.length {
+        let i = path.index_at(s);
+        let hw = path.width[i] / 2.0;
+        for sign in [1.0f32, -1.0] {
+            if dice.next() < 0.8 {
+                let p = at(i, sign * (hw + 16.0 + dice.next() * 22.0));
+                if inside(p) {
+                    grass.push(p);
+                }
+            }
+        }
+        s += 34.0;
+    }
+    out.push(stroke(Flora::Grass, 24.0, g.edge_grass, grass));
+    // Bush clumps just off the track.
+    let mut bushes = Vec::new();
+    let mut s = 20.0;
+    while s < path.length {
+        if dice.next() < g.clumps {
+            let i = path.index_at(s);
+            let hw = path.width[i] / 2.0;
+            let sign = if dice.next() < 0.5 { 1.0 } else { -1.0 };
+            let p = at(i, sign * (hw + 26.0 + dice.next() * 50.0));
+            if inside(p) {
+                bushes.push(stroke(Flora::Bushes, 14.0 + dice.next() * 14.0, 0.7 + dice.next() * 0.3, vec![p]));
+            }
+        }
+        s += 70.0 + dice.next() * 40.0;
+    }
+    out.extend(bushes);
+    // Groves of trees with bushes round them, further out.
+    let mut s = 60.0;
+    while s < path.length {
+        if dice.next() < g.groves {
+            let i = path.index_at(s);
+            let hw = path.width[i] / 2.0;
+            let sign = if dice.next() < 0.5 { 1.0 } else { -1.0 };
+            let r = 40.0 + dice.next() * 50.0;
+            let p = at(i, sign * (hw + 40.0 + r * 0.5 + dice.next() * 170.0));
+            if inside(p) {
+                out.push(stroke(Flora::Trees, r, g.grove_density * (0.75 + dice.next() * 0.25), vec![p]));
+                out.push(stroke(Flora::Bushes, r * 1.25, 0.45, vec![p]));
+            }
+        }
+        s += 110.0 + dice.next() * 70.0;
+    }
+    // A few woods out on the land, away from the track, for a backdrop.
+    let grid = crate::path::Grid::new(&path, 400.0);
+    let mut woods = 0;
+    for _ in 0..80 {
+        if woods >= g.woods {
+            break;
+        }
+        let p = [side * (0.06 + dice.next() * 0.88), side * (0.06 + dice.next() * 0.88)];
+        let r = 120.0 + dice.next() * 160.0;
+        if grid.nearest(p).is_some_and(|(_, d)| d < r + 120.0) {
+            continue;
+        }
+        out.push(stroke(Flora::Trees, r, g.grove_density, vec![p]));
+        out.push(stroke(Flora::Bushes, r * 1.15, 0.35, vec![p]));
+        woods += 1;
+    }
+    out
+}
+
+/// Grows the scenery again round the line as it is now: the old
+/// "Dress the scenery" strokes give way to new ones, laid under the
+/// player's own so their painting and clearing still show.
+pub fn redress(course: &mut Course) {
+    course.plants.retain(|p| !p.auto);
+    let mut fresh = scenery(course);
+    fresh.append(&mut course.plants);
+    course.plants = fresh;
+}
+
 fn field_index(field: &Field, x: f32, z: f32) -> usize {
     let i = |v: f32| ((v / field.step).round().max(0.0) as usize).min(field.n - 1);
     i(z) * field.n + i(x)
@@ -535,7 +674,7 @@ mod tests {
     #[test]
     fn plants_grow_off_the_track_and_read_back() {
         let mut c = Course::new(Mode::National);
-        c.plants.push(Planting { flora: Flora::Mixed, radius: 300.0, density: 0.8, clear: false, everywhere: true, dabs: Vec::new() });
+        c.plants.push(Planting { flora: Flora::Mixed, radius: 300.0, density: 0.8, clear: false, everywhere: true, dabs: Vec::new(), auto: false });
         let land = crate::bake::land(&c, 4);
         let field = crate::bake::bake(&c, 4, &land);
         let plants = plants(&c, &field);
@@ -551,6 +690,45 @@ mod tests {
         let eco2 = mm2_formats::esb::parse(&again).unwrap();
         assert_eq!(eco2.objects.len(), plants.len() + 10);
         assert_eq!(eco2.species.len(), sp.len() + 2);
+    }
+
+    #[test]
+    fn dressed_tracks_stay_light() {
+        for mode in [Mode::National, Mode::Enduro, Mode::Baja, Mode::Supercross] {
+            let mut c = Course::new(mode);
+            redress(&mut c);
+            let land = crate::bake::land(&c, 2);
+            let field = crate::bake::bake(&c, 2, &land);
+            let plants = plants(&c, &field);
+            let sp = species(&c);
+            let trees = plants.iter().filter(|p| sp[p.species as usize].flora == Flora::Trees).count();
+            let bushes = plants.iter().filter(|p| sp[p.species as usize].flora == Flora::Bushes).count();
+            println!("{mode:?}: {} plants ({trees} trees, {bushes} bushes), esb {} KB", plants.len(), esb(c.mode.side(), &sp, &plants, None).len() / 1024);
+            if mode == Mode::Supercross {
+                assert!(plants.is_empty());
+                continue;
+            }
+            assert!(trees > 300 && bushes > 300, "{mode:?} bare");
+            assert!(plants.len() < 30_000, "{mode:?}: {} plants", plants.len());
+        }
+    }
+
+    #[test]
+    fn dressing_again_follows_the_line_and_keeps_own_plants() {
+        let mut c = Course::new(Mode::National);
+        let own = Planting { flora: Flora::Trees, radius: 50.0, density: 1.0, clear: true, everywhere: false, dabs: vec![[100.0, 100.0]], auto: false };
+        c.plants.push(own.clone());
+        redress(&mut c);
+        let first = c.plants.clone();
+        for p in &mut c.line.points {
+            p.x += 200.0;
+        }
+        redress(&mut c);
+        assert_ne!(c.plants, first);
+        assert_eq!(c.plants.last(), Some(&own));
+        assert_eq!(c.plants.iter().filter(|p| !p.auto).count(), 1);
+        assert!(c.change_mode(Mode::Supercross));
+        assert!(c.plants.iter().all(|p| !p.auto));
     }
 
     #[test]
