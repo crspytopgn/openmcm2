@@ -32,6 +32,9 @@ on:
         description: "Remake sound/ from the CC0 recordings (tools/freepack/make_sounds.py)"
         type: boolean
         default: false
+      sound_from:
+        description: "Or: a branch whose sound/ is laid over the pack's (each engine class it has replaced whole), e.g. freepack-audio"
+        default: ""
       dry_run:
         description: "Only pack it and list what would change, upload nothing"
         type: boolean
@@ -43,6 +46,7 @@ on:
       branch: { type: string, default: "" }
       leave_out: { type: string, default: "" }
       sounds: { type: boolean, default: false }
+      sound_from: { type: string, default: "" }
       dry_run: { type: boolean, default: false }
 
 permissions:
@@ -85,6 +89,17 @@ jobs:
             sudo apt-get install -y -q python3-numpy
             rm -rf "$PACK/sound"
             python3 tools/freepack/make_sounds.py "$PACK" "$RUNNER_TEMP/sounds"
+          fi
+          # Recorded sounds kept on a branch of their own (the Freesound set).
+          if [ -n "${{ inputs.sound_from }}" ]; then
+            git fetch --depth=1 origin "${{ inputs.sound_from }}"
+            mkdir "$RUNNER_TEMP/snd"
+            git archive FETCH_HEAD sound | tar -x -C "$RUNNER_TEMP/snd"
+            for c in "$RUNNER_TEMP"/snd/sound/engine/*/; do
+              rm -rf "$PACK/sound/engine/$(basename "$c")"
+            done
+            mkdir -p "$PACK/sound"
+            cp -R "$RUNNER_TEMP/snd/sound/." "$PACK/sound/"
           fi
           # The menus' own sounds, made in code, when the source lacks them.
           if [ ! -d "$PACK/sound/ui" ]; then
