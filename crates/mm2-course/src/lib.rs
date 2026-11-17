@@ -22,6 +22,7 @@ pub mod kit;
 pub mod land;
 pub mod nature;
 pub mod path;
+pub mod preview;
 
 pub use bake::Field;
 

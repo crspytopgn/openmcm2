@@ -727,6 +727,10 @@ impl Launcher {
             self.freepack_card(ui, busy);
         } else {
             self.game_card(ui, busy);
+            // The new menus come with the Free Pack.
+            if self.settings.new_menus {
+                self.freepack_card(ui, busy);
+            }
         }
         self.summary_card(ui);
         self.playtime_card(ui);
@@ -748,6 +752,7 @@ impl Launcher {
         let free = self.settings.free_graphics;
         let (has_game, has_pack) = (self.settings.game.is_some(), self.settings.freepack.is_some());
         let mut pick = None;
+        let mut pick_menus = None;
         look::card(ui, icon::ICON_PALETTE, "How do you want to play?", |ui| {
             let gap = 12.0;
             let w = ((ui.available_width() - gap) / 2.0).max(220.0);
@@ -773,8 +778,8 @@ impl Launcher {
                     free,
                     icon::ICON_FOREST,
                     "Free graphics",
-                    "New art and sound made for OpenMCM2, free for anyone. No MM2 files needed. Early days: for now it opens the Course Builder, where you make a track and ride it.",
-                    "Plays with the Free Pack instead of the original's files: new bikes, riders, ground, trees, stadium and engine sounds, all openly licensed. Races and menus with the free art are still being made, so for now Play opens the Course Builder.",
+                    "New art and sound made for OpenMCM2, free for anyone. No MM2 files needed: the full menus, free tracks, bikes and riders, and the Course Builder.",
+                    "Plays with the Free Pack instead of the original's files: new bikes, riders, ground, trees, stadium, tracks and engine sounds, all openly licensed. Every menu works as in the original; only what's in them changes.",
                     w,
                     |ui| match has_pack {
                         true => look::status(ui, true, "Free Pack ready"),
@@ -782,6 +787,50 @@ impl Launcher {
                     },
                 ) {
                     pick = Some(true);
+                }
+            });
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(6.0);
+            // The menus' look, with either graphics. The original's need
+            // the game's files; the new look needs the Free Pack.
+            ui.label(egui::RichText::new("Menus").color(look::TEXT).family(look::bold_family()));
+            ui.add_space(4.0);
+            let new = self.settings.new_menus || !has_game;
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                if look::pick_tile(
+                    ui,
+                    new,
+                    icon::ICON_AUTO_AWESOME,
+                    "New look",
+                    "Menus redrawn for OpenMCM2: same buttons and screens as the original, in a fresh workshop style.",
+                    "Every menu and button from the original, laid out the same and working the same, drawn in a new style. Works with either graphics. Comes with the Free Pack.",
+                    w,
+                    |ui| match has_pack {
+                        true => look::status(ui, true, "Free Pack ready"),
+                        false => look::status(ui, false, "Comes with the Free Pack"),
+                    },
+                ) {
+                    pick_menus = Some(true);
+                }
+                let r = ui.add_enabled_ui(has_game, |ui| {
+                    look::pick_tile(
+                        ui,
+                        !new,
+                        icon::ICON_HISTORY,
+                        "Original menus",
+                        "The menus exactly as Motocross Madness 2 had them, chain and all.",
+                        "The original game's own menus, art and sounds. Needs your Motocross Madness 2 files, as they come from your copy of the game.",
+                        w,
+                        |ui| match has_game {
+                            true => look::status(ui, true, "Game data ready"),
+                            false => look::status(ui, false, "Needs your MM2 files"),
+                        },
+                    )
+                });
+                if r.inner && has_game {
+                    pick_menus = Some(false);
                 }
             });
             ui.add_space(10.0);
@@ -806,6 +855,9 @@ impl Launcher {
         });
         if let Some(free) = pick {
             self.settings.free_graphics = free;
+        }
+        if let Some(new) = pick_menus {
+            self.settings.new_menus = new;
         }
     }
 

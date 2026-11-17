@@ -2430,6 +2430,8 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
     let races = if multi { made.courses.iter().map(|c| c.3.clone()).collect() } else { Vec::new() };
     let scene = write_scene(&Scene { def, land, start: made.start, models: std::mem::take(&mut made.models), races, podium: made.podium });
     files.push((format!("{stem}.scn"), scene.into_bytes()));
+    // Pictures for the event page, as the game's own tracks carry.
+    crate::preview::add(stem, &mut files);
     let refs: Vec<(&str, &[u8])> = files.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect();
     let mut out = vec![(format!("{stem}.ENV"), rs2::build(&refs))];
     if matches!(def.kind, Kind::Supercross | Kind::Tag) {

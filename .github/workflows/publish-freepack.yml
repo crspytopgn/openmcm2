@@ -86,6 +86,11 @@ jobs:
             rm -rf "$PACK/sound"
             python3 tools/freepack/make_sounds.py "$PACK" "$RUNNER_TEMP/sounds"
           fi
+          # The menus' own sounds, made in code, when the source lacks them.
+          if [ ! -d "$PACK/sound/ui" ]; then
+            sudo apt-get install -y -q python3-numpy
+            python3 tools/freepack/make_ui_sounds.py "$PACK"
+          fi
           python3 tools/freepack/pack.py "$PACK" out "${{ inputs.version }}"
 
       - name: Set up rclone for R2

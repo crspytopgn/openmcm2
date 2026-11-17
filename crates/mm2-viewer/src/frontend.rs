@@ -2032,11 +2032,25 @@ pub fn list_tracks(folder: &Path, event: EventKind) -> Vec<TrackEntry> {
 pub fn preview_image(t: &TrackEntry) -> Option<tga::Image> {
     let bytes = crate::read_archive(&t.path).ok()?;
     let ar = rs2::Archive::parse(&bytes).ok()?;
-    let entry = ar
+    if let Some(entry) = ar.entries().iter().find(|e| e.name.eq_ignore_ascii_case(&t.preview)) {
+        return tga::parse(ar.data(entry)).ok();
+    }
+    // A track with no picture of its own (made before the builder drew
+    // them, or brought in without one): one drawn from its ground.
+    let files: Vec<(String, Vec<u8>)> = ar
         .entries()
         .iter()
-        .find(|e| e.name.eq_ignore_ascii_case(&t.preview))?;
-    tga::parse(ar.data(entry)).ok()
+        .filter(|e| {
+            let n = e.name.to_ascii_lowercase();
+            n.ends_with(".trn") || n.ends_with(".tdf")
+        })
+        .map(|e| (e.name.clone(), ar.data(e).to_vec()))
+        .collect();
+    let stem = t.preview.rsplit_once('.').map_or(t.preview.as_str(), |(s, _)| s);
+    let size = mm2_course::preview::LARGE;
+    let rgb = mm2_course::preview::picture(stem, &files, size)?;
+    let rgba = rgb.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+    Some(tga::Image { width: size.0 as u32, height: size.1 as u32, rgba })
 }
 
 /// The Random Gate box's count, race number and their arrows, greyed while

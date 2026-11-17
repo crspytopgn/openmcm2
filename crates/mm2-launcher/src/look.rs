@@ -372,7 +372,7 @@ pub fn pick_tile(ui: &mut Ui, picked: bool, i: MaterialIcon, title: &str, about:
                 body(ui);
             });
         });
-    let r = ui.interact(tile.response.rect, ui.id().with(title), Sense::click()).on_hover_text(hover);
+    let r = ui.interact(tile.response.rect, ui.id().with(title), Sense::click()).on_hover_text(hover).on_disabled_hover_text(hover);
     r.clicked()
 }
 

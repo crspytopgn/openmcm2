@@ -286,6 +286,10 @@ pub struct Settings {
     pub free_graphics: bool,
     /// The free pack's folder.
     pub freepack: Option<PathBuf>,
+    /// `menus=new`: the menus in the new look (the Free Pack's art and
+    /// layout, `--new-menus`), with either graphics; `menus=original` (the
+    /// default) keeps the original game's, which need its files.
+    pub new_menus: bool,
     pub hires: Option<PathBuf>,
     pub use_hires: bool,
     pub enhanced: bool,
@@ -596,6 +600,7 @@ impl Default for Settings {
         Settings {
             game: None,
             free_graphics: false,
+            new_menus: false,
             freepack: None,
             hires: None,
             use_hires: true,
@@ -715,6 +720,7 @@ impl Settings {
             match k.trim() {
                 "game" if !v.is_empty() => s.game = Some(v.into()),
                 "graphics" => s.free_graphics = v == "free",
+                "menus" => s.new_menus = v == "new",
                 "freepack" if !v.is_empty() => s.freepack = Some(v.into()),
                 "hires" if !v.is_empty() => s.hires = Some(v.into()),
                 "use_hires" => s.use_hires = yes(v),
@@ -833,9 +839,10 @@ impl Settings {
             b(self.forgiving_landings),
         );
         t += &format!(
-            "graphics={}\nfreepack={}\n",
+            "graphics={}\nfreepack={}\nmenus={}\n",
             if self.free_graphics { "free" } else { "original" },
-            p(&self.freepack)
+            p(&self.freepack),
+            if self.new_menus { "new" } else { "original" }
         );
         t += &self.more.text();
         for (u, on) in UPGRADES.iter().zip(&self.upgrades) {
@@ -848,12 +855,27 @@ impl Settings {
     pub fn args(&self) -> Vec<String> {
         let mut a = Vec::new();
         match (&self.freepack, &self.game) {
-            // The free pack's art and sound, without the original's files.
-            (Some(f), _) if self.free_graphics => {
+            // The free pack's art and sound; the original's menus need the
+            // game's files too, the new ones need only the pack.
+            (Some(f), game) if self.free_graphics => {
                 a.push("--freepack".into());
                 a.push(f.display().to_string());
+                match game {
+                    Some(g) if !self.new_menus => {
+                        a.push(g.display().to_string());
+                        a.push("--original-menus".into());
+                    }
+                    _ => a.push("--new-menus".into()),
+                }
             }
-            (_, Some(g)) => a.push(g.display().to_string()),
+            (pack, Some(g)) => {
+                a.push(g.display().to_string());
+                match pack {
+                    Some(f) if self.new_menus => a.push(format!("--new-menus={}", f.display())),
+                    Some(_) => a.push("--original-menus".into()),
+                    None => {}
+                }
+            }
             _ => {}
         }
         if let (true, Some(h)) = (self.use_hires && !self.free_graphics, &self.hires) {
@@ -1133,6 +1155,18 @@ mod tests {
         s.freepack = Some("/packs/free".into());
         assert_eq!(Settings::parse(&s.text()), s);
         assert_eq!(s.args()[..2], ["--freepack".to_string(), "/packs/free".to_string()]);
+        assert!(s.args().contains(&"--new-menus".to_string()));
+        {
+            // The original's menus over the free graphics, then the new
+            // menus over the original's.
+            let mut t = s.clone();
+            t.game = Some("/games/mm2".into());
+            assert_eq!(t.args()[2..4], ["/games/mm2".to_string(), "--original-menus".to_string()]);
+            t.free_graphics = false;
+            t.new_menus = true;
+            assert_eq!(Settings::parse(&t.text()).new_menus, true);
+            assert_eq!(t.args()[..2], ["/games/mm2".to_string(), "--new-menus=/packs/free".to_string()]);
+        }
         let mut args = vec!["mm2-viewer".to_string()];
         args.extend(s.args());
         assert_eq!(More::from_args(&args), s.more);
