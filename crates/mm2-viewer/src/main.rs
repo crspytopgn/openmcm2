@@ -51,7 +51,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod free_text;
-mod free_motions;
 mod addons;
 mod ibl;
 mod pace;
@@ -1909,6 +1908,11 @@ fn load_track(
                     tricks = rs2::Archive::parse(&bytes)
                         .map(|ar| trick_motions(&ar, bike))
                         .unwrap_or_default();
+                    // Without the game's motions (the Free Pack alone), the
+                    // pack's riders do tricks of their own.
+                    if tricks.iter().all(Option::is_none) {
+                        tricks = freepack::own_tricks();
+                    }
                     // The player's collision points, from the bike's `.col`.
                     if let Ok(ar) = rs2::Archive::parse(&bytes) {
                         let stem = bike.rsplit_once('.').map_or(bike, |(s, _)| s);

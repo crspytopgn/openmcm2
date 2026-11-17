@@ -358,23 +358,88 @@ pub fn animated(name: &str) -> Option<(&'static str, String)> {
 /// The free rider's or bike's own riding motions, for when the original's
 /// aren't there (the free graphics on their own): the same names and
 /// phases as the game's (lean, turn, wheelie, cross-ups, looking back,
-/// backing up), so the riding mix drives them as it does the game's. Made
+/// backing up, the crash's bails, falls and landings, and the tricks), so
+/// the riding mix, the wreck and the stunts drive them as they do the
+/// game's. Made
 /// for the pack by IK onto the free bikes' seat, pegs and bars
 /// (`tools/freepack/free_motions.py`), not taken from the game.
 pub fn own_motions(rider: bool) -> Vec<(String, mm2_formats::anim::Motion, f32, bool)> {
-    let table = if rider { crate::free_motions::RIDER } else { crate::free_motions::BIKE };
-    table
+    own_table().iter().filter(|m| m.rider == rider).map(|m| (m.name.clone(), m.motion.clone(), m.fps, m.looping)).collect()
+}
+
+/// One of the pack's own motions.
+struct OwnMotion {
+    name: String,
+    fps: f32,
+    looping: bool,
+    rider: bool,
+    motion: mm2_formats::anim::Motion,
+}
+
+/// The pack's own motions, read once from `free_motions.bin` (made by
+/// `tools/freepack/free_motions.py`; see there for the layout).
+fn own_table() -> &'static [OwnMotion] {
+    static TABLE: std::sync::OnceLock<Vec<OwnMotion>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| read_own(include_bytes!("free_motions.bin")).unwrap_or_default())
+}
+
+fn read_own(data: &[u8]) -> Option<Vec<OwnMotion>> {
+    if data.get(..4)? != b"FPMO" {
+        return None;
+    }
+    let mut at = 4usize;
+    let mut take = |n: usize| -> Option<&[u8]> {
+        let b = data.get(at..at + n)?;
+        at += n;
+        Some(b)
+    };
+    let count = u16::from_le_bytes(take(2)?.try_into().ok()?);
+    let mut out = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        let len = take(1)?[0] as usize;
+        let name = String::from_utf8(take(len)?.to_vec()).ok()?;
+        let fps = f32::from_le_bytes(take(4)?.try_into().ok()?);
+        let (looping, rider) = (take(1)?[0] != 0, take(1)?[0] != 0);
+        let frames = u16::from_le_bytes(take(2)?.try_into().ok()?) as usize;
+        let keys = take(1)?[0] as usize;
+        let mut motion = mm2_formats::anim::Motion { frames: Vec::with_capacity(frames) };
+        for _ in 0..frames {
+            let mut list = Vec::with_capacity(keys);
+            for _ in 0..keys {
+                let b = take(19)?;
+                let q = |i: usize| i16::from_le_bytes([b[1 + 2 * i], b[2 + 2 * i]]) as f32;
+                let axis = |i: usize| [q(i) / 30000.0, q(i + 1) / 30000.0, q(i + 2) / 30000.0];
+                list.push(mm2_formats::anim::Key {
+                    frame: b[0] as usize,
+                    look: axis(0),
+                    up: axis(3),
+                    position: [q(6) / 1000.0, q(7) / 1000.0, q(8) / 1000.0],
+                });
+            }
+            motion.frames.push(list);
+        }
+        out.push(OwnMotion { name, fps, looping, rider, motion });
+    }
+    Some(out)
+}
+
+/// The tricks for the pack's own riders, as the race reads them: each
+/// trick's own motion with its frames a second and length (no bike
+/// motion: the bike holds still under the rider).
+pub fn own_tricks() -> Vec<Option<crate::race::TrickMotion>> {
+    let names = mm2_physics::stunt::TRICKS
         .iter()
-        .map(|(name, frames)| {
-            let frames = frames
-                .iter()
-                .map(|keys| {
-                    keys.iter()
-                        .map(|&(frame, look, up, position)| mm2_formats::anim::Key { frame: frame as usize, look, up, position })
-                        .collect()
-                })
-                .collect();
-            (name.to_string(), mm2_formats::anim::Motion { frames }, 1.0, true)
+        .map(|t| t.to_string())
+        .chain(mm2_physics::stunt::TRICKS.iter().map(|t| format!("{t}Alt")));
+    names
+        .map(|name| {
+            let m = own_table().iter().find(|m| m.rider && m.name.eq_ignore_ascii_case(&name))?;
+            Some(crate::race::TrickMotion {
+                rider: m.name.clone(),
+                bike: String::new(),
+                fps: m.fps,
+                frames: m.motion.frames.len() as i32,
+            })
         })
         .collect()
 }
@@ -791,6 +856,21 @@ pub fn ui_rect(stem: &str, name: &str) -> Option<[i32; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn own_motions_cover_riding_crashes_and_tricks() {
+        let rider = own_motions(true);
+        for name in ["LeanR02", "Turn2D", "CrosOv2", "Endo", "Kahuna", "Fall01", "HeadHit", "SuperMan", "BarKneelAlt"] {
+            assert!(rider.iter().any(|m| m.0 == name), "{name}");
+        }
+        assert!(rider.iter().filter(|m| m.0 != "BackUpBottom").all(|m| m.1.frames.iter().all(|f| f.len() == 16)));
+        assert!(own_motions(false).iter().any(|m| m.0 == "BTurn2D"));
+        let tricks = own_tricks();
+        assert_eq!(tricks.len(), 32);
+        assert_eq!(tricks.iter().flatten().count(), 22);
+        let kneel = tricks[0].as_ref().unwrap();
+        assert_eq!((kneel.fps, kneel.frames), (18.0, 30));
+    }
 
     #[test]
     fn reads_the_stockmap() {
