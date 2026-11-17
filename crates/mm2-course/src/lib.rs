@@ -16,9 +16,11 @@ pub mod auto;
 pub mod bake;
 pub mod copy;
 pub mod env;
+pub mod flight;
 pub mod free;
 pub mod kit;
 pub mod land;
+pub mod nature;
 pub mod path;
 
 pub use bake::Field;
@@ -45,6 +47,12 @@ pub struct Course {
     /// Surface paint, applied in order over the land's and the track's own.
     pub paint: Vec<Paint>,
     pub objects: Vec<Object>,
+    /// Plant brush strokes: trees, bushes and grass, in order.
+    pub plants: Vec<Planting>,
+    /// Rivers and streams.
+    pub rivers: Vec<River>,
+    /// Planes, helicopters and the blimp, each flying its own loop.
+    pub flights: Vec<Flight>,
     pub look: Look,
     /// Things the bake adds along the track by itself.
     pub dress: Dress,
@@ -366,6 +374,113 @@ fn one() -> f32 {
     1.0
 }
 
+/// What a plant brush plants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Flora {
+    Trees,
+    Bushes,
+    Grass,
+    /// Trees with bushes and grass under them.
+    Mixed,
+}
+
+impl Flora {
+    pub const ALL: [Flora; 4] = [Flora::Mixed, Flora::Trees, Flora::Bushes, Flora::Grass];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Flora::Trees => "Trees",
+            Flora::Bushes => "Bushes",
+            Flora::Grass => "Grass",
+            Flora::Mixed => "Wild",
+        }
+    }
+}
+
+/// One drag of the plant brush. Density 0 to 1; `clear` takes plants
+/// away instead. With `everywhere`, it covers the whole land.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Planting {
+    pub flora: Flora,
+    pub radius: f32,
+    pub density: f32,
+    #[serde(default)]
+    pub clear: bool,
+    #[serde(default)]
+    pub everywhere: bool,
+    pub dabs: Vec<[f32; 2]>,
+}
+
+/// A river: its middle line, how wide and deep it is, ft. It runs
+/// downhill from its first point.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct River {
+    pub points: Vec<[f32; 2]>,
+    pub width: f32,
+    pub depth: f32,
+}
+
+/// What flies a flight path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Craft {
+    Biplane,
+    CargoPlane,
+    Helicopter,
+    Blimp,
+}
+
+impl Craft {
+    pub const ALL: [Craft; 4] = [Craft::Biplane, Craft::Helicopter, Craft::CargoPlane, Craft::Blimp];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Craft::Biplane => "Biplane",
+            Craft::CargoPlane => "Cargo plane",
+            Craft::Helicopter => "Helicopter",
+            Craft::Blimp => "Blimp",
+        }
+    }
+
+    /// Its model, as `MODELS.RES` names it.
+    pub fn model(self) -> &'static str {
+        match self {
+            Craft::Biplane => "Biplane.slt",
+            Craft::CargoPlane => "CargoPlane.slt",
+            Craft::Helicopter => "HeliNoCam.slt",
+            Craft::Blimp => "Blimp.slt",
+        }
+    }
+
+    /// A good speed to fly at, ft/s.
+    pub fn speed(self) -> f32 {
+        match self {
+            Craft::Biplane => 110.0,
+            Craft::CargoPlane => 160.0,
+            Craft::Helicopter => 70.0,
+            Craft::Blimp => 25.0,
+        }
+    }
+
+    /// A good height over the ground, ft.
+    pub fn height(self) -> f32 {
+        match self {
+            Craft::Biplane => 160.0,
+            Craft::CargoPlane => 320.0,
+            Craft::Helicopter => 110.0,
+            Craft::Blimp => 260.0,
+        }
+    }
+}
+
+/// A craft flying round a loop through its points: x, height over the
+/// ground, z (ft). Speed in ft/s.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Flight {
+    pub craft: Craft,
+    pub points: Vec<[f32; 3]>,
+    pub speed: f32,
+}
+
 /// The sky and light.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -543,6 +658,9 @@ impl Course {
             strokes: Vec::new(),
             paint: Vec::new(),
             objects: Vec::new(),
+            plants: Vec::new(),
+            rivers: Vec::new(),
+            flights: Vec::new(),
             look: Look {
                 sky: if mode == Mode::Baja {
                     "Terra12.cub".into()
@@ -627,6 +745,12 @@ impl Course {
         }
         for o in &mut self.objects {
             [o.x, o.z] = at(o.x, o.z);
+        }
+        for d in self.plants.iter_mut().flat_map(|p| p.dabs.iter_mut()).chain(self.rivers.iter_mut().flat_map(|r| r.points.iter_mut())) {
+            *d = at(d[0], d[1]);
+        }
+        for p in self.flights.iter_mut().flat_map(|f| f.points.iter_mut()) {
+            [p[0], p[2]] = at(p[0], p[2]);
         }
         if mode.laps() {
             self.line.closed = true;

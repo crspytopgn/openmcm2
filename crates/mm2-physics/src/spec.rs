@@ -51,7 +51,24 @@ pub fn category(cc: u32) -> usize {
         .unwrap_or(1)
 }
 
+/// Each category's spec with its first preset, as the game's `presets.pb`
+/// gives them: weight, rpm limits and the power curve. For when that file
+/// isn't there (the Free Pack alone), so a 125 or a 500 still rides as one.
+const STOCK: [(f32, f32, f32, [f32; 11]); 5] = [
+    (210.0, 7000.0, 12000.0, [14.0, 18.0, 20.0, 22.0, 25.0, 28.0, 30.0, 32.0, 28.0, 27.0, 20.0]),
+    (230.0, 5000.0, 10000.0, [24.0, 28.0, 33.0, 38.0, 39.0, 41.0, 43.0, 45.0, 41.0, 35.0, 22.0]),
+    (270.0, 5000.0, 10000.0, [18.0, 24.0, 28.0, 33.0, 36.0, 41.0, 40.0, 36.0, 32.0, 30.0, 27.0]),
+    (240.0, 4000.0, 9000.0, [24.0, 32.0, 41.0, 56.0, 53.0, 50.0, 48.0, 42.0, 34.0, 29.0, 25.0]),
+    (280.0, 4000.0, 9000.0, [24.0, 30.0, 34.0, 39.0, 42.0, 47.0, 46.0, 41.0, 38.0, 35.0, 31.0]),
+];
+
 impl Spec {
+    /// The stock spec of `category` (0 to 4) with its first preset.
+    pub fn stock(category: usize) -> Spec {
+        let (weight, rpm_low, rpm_high, power) = STOCK[category.min(4)];
+        Spec { weight, rpm_low, rpm_high, power }
+    }
+
     /// The spec of `category` (0 to 4) from the text of `presets.pb`, with
     /// the curve of `preset` (0 to 2), or the category's own with `None`.
     pub fn from_presets(text: &str, category: usize, preset: Option<usize>) -> Option<Spec> {
@@ -106,6 +123,11 @@ impl Spec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stock_250_is_the_default() {
+        assert_eq!(Spec::stock(1), Spec::default());
+    }
 
     #[test]
     fn categories_from_engine_size() {

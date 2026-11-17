@@ -191,7 +191,14 @@ pub fn write_with(course: &Course, pictures: &Pictures) -> Baked {
         }
     }
     let terrain = terrain(course, &field, &ready);
-    let scene = scene(course, &field, &path, &stem);
+    let mut scene = scene(course, &field, &path, &stem);
+    let (living, flights) = living(course, &field, &stem, None, 1);
+    if !flights.is_empty() {
+        scene += &format!("\r\n[Animations]\r\nNumberOfAnimations={}\r\n\r\n", flights.len());
+        for f in &flights {
+            scene += f;
+        }
+    }
     let tdf = tdf(course, &field, &path);
     let mut files: Vec<(String, Vec<u8>)> = vec![
         (format!("{stem}.scn"), scene.into_bytes()),
@@ -208,6 +215,7 @@ pub fn write_with(course: &Course, pictures: &Pictures) -> Baked {
         files.push((format!("{stem}01.tdf"), tdf));
         files.push((format!("{stem}01.wpt"), wpt(&gates).into_bytes()));
     }
+    files.extend(living);
     // The builder's own file rides along, so a shared track can be opened
     // and changed again.
     files.push((format!("{stem}.course"), course.to_json().into_bytes()));
@@ -762,6 +770,25 @@ fn scene(course: &Course, field: &Field, path: &Path, stem: &str) -> String {
     s
 }
 
+/// What makes the land live: the plants' eco-system (laid over `esb`, a
+/// copied track's own), the rivers' water and the flights' files, and
+/// the flights' `[AnimationN]` sections numbered from `first`.
+pub fn living(course: &Course, field: &Field, stem: &str, esb: Option<(&str, &[u8])>, first: usize) -> (Vec<(String, Vec<u8>)>, Vec<String>) {
+    let mut files = Vec::new();
+    let plants = crate::nature::plants(course, field);
+    if !plants.is_empty() {
+        let species = crate::nature::species(course);
+        let name = esb.map_or(format!("{stem}.esb"), |(n, _)| n.to_string());
+        files.push((name, crate::nature::esb(course.mode.side(), &species, &plants, esb.map(|(_, b)| b))));
+    }
+    if !field.rivers.is_empty() {
+        files.push((format!("{stem}.wtr"), crate::nature::water_file(&field.rivers).into_bytes()));
+    }
+    let (fly, sections) = crate::flight::files(course, stem, &|x, z| field.height(x, z), first);
+    files.extend(fly);
+    (files, sections)
+}
+
 /// One placed model's `[ModelN]` section.
 pub fn model_section(n: usize, m: &Placed) -> String {
     format!(
@@ -798,6 +825,25 @@ mod tests {
             assert!(t.textures.len() <= 256, "{mode:?}: {} pictures", t.textures.len());
             eprintln!("{mode:?}: {} terrain pictures", t.textures.len());
         }
+    }
+
+    #[test]
+    fn plants_rivers_and_flights_go_into_the_track() {
+        let mut c = Course::new(Mode::Enduro);
+        let side = c.mode.side();
+        c.plants.push(crate::Planting { flora: crate::Flora::Mixed, radius: 200.0, density: 0.7, clear: false, everywhere: false, dabs: vec![[side * 0.3, side * 0.3], [side * 0.35, side * 0.3]] });
+        c.rivers.push(crate::River { points: vec![[side * 0.1, side * 0.5], [side * 0.9, side * 0.55]], width: 28.0, depth: 2.0 });
+        c.flights.push(crate::Flight { craft: crate::Craft::Biplane, points: vec![[side * 0.5, 160.0, side * 0.5]], speed: 110.0 });
+        let baked = write(&c);
+        let ar = rs2::Archive::parse(&baked.env).unwrap();
+        let has = |ext: &str| ar.entries().iter().find(|e| e.name.to_ascii_lowercase().ends_with(ext)).map(|e| ar.data(e));
+        let eco = mm2_formats::esb::parse(has(".esb").unwrap()).unwrap();
+        assert!(!eco.objects.is_empty());
+        assert_eq!(crate::nature::read_water(&String::from_utf8_lossy(has(".wtr").unwrap())).len(), 1);
+        assert!(has(".mcf").is_some() && has(".mot").is_some());
+        let s = scn::Scene::parse(has(".scn").unwrap()).unwrap();
+        assert_eq!(s.animations.len(), 1);
+        assert!(s.animations[0].model.ends_with("_fly1.mcf"));
     }
 
     #[test]

@@ -613,6 +613,8 @@ pub struct RaceSounds {
     tagged: Option<f32>,
     /// The scene's ambient sounds.
     emitters: Vec<Emitter>,
+    /// Till another splash may sound, s.
+    splash_wait: f32,
     /// Only the engines sound: no landings, crashes, chimes or crowd (for
     /// recording the engine note on its own, as the game's engine buffer
     /// is captured to compare with).
@@ -673,6 +675,9 @@ impl RaceSounds {
                 }
             }
         }
+        // The rivers' own sounds (OpenMCM2's, none of the game's).
+        effects.insert(RIVER.into(), Arc::new(river_sound()));
+        effects.insert(SPLASH.into(), Arc::new(splash_sound()));
         let engines = classes
             .iter()
             .map(|&class| Engine {
@@ -703,6 +708,7 @@ impl RaceSounds {
             popup: None,
             tagged: None,
             emitters: Vec::new(),
+            splash_wait: 0.0,
             engines_only: false,
         };
         // The crowd loops from the start, flat (0x4e81a0).
@@ -1209,6 +1215,20 @@ impl RaceSounds {
         }
     }
 
+    /// A bike splashing through a river at `at`, `strength` 0 to 1.
+    pub fn splash(&mut self, audio: &Audio, l: &Listener, at: Vec3, strength: f32, dt: f32) {
+        self.splash_wait -= dt;
+        if self.splash_wait > 0.0 {
+            return;
+        }
+        self.splash_wait = 0.28 - 0.12 * strength.clamp(0.0, 1.0);
+        if let Some(v) = self.play_at(audio, SPLASH, at, (30.0, 260.0), l) {
+            let (volume, pan, pitch) = l.hear(at, Vec3::ZERO, (30.0, 260.0));
+            let k = 0.45 + 0.55 * strength.clamp(0.0, 1.0);
+            audio.place(v, volume * k * self.options.gain, pan, pitch * (0.9 + 0.2 * (self.random(100) as f32 / 100.0)));
+        }
+    }
+
     /// The podium: the engines stop and the crowd cheers (0x45e490's
     /// `CrowdLoop.wav`).
     pub fn podium(&mut self, audio: &Audio) {
@@ -1405,4 +1425,84 @@ mod revs_tests {
         let w = blend(&l.on, 5657.0);
         assert!((w[0] - w[1]).abs() < 0.01 && (w[0] * w[0] + w[1] * w[1] - 1.0).abs() < 0.01);
     }
+}
+
+/// The flowing water a river's banks sound with, and a bike's splash:
+/// made here, so they need no files.
+pub const RIVER: &str = "openmcm2-river.wav";
+pub const SPLASH: &str = "openmcm2-splash.wav";
+
+/// A small steady noise source.
+struct Noise(u32);
+
+impl Noise {
+    fn next(&mut self) -> f32 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 17;
+        self.0 ^= self.0 << 5;
+        self.0 as f32 / u32::MAX as f32 * 2.0 - 1.0
+    }
+}
+
+/// Six seconds of running water, looping: rumbling low noise with the
+/// chuckle of small bubbles over it, its ends faded into each other.
+fn river_sound() -> Sound {
+    let rate = 22050u32;
+    let n = rate as usize * 6;
+    let mut noise = Noise(0x1234_5678);
+    let (mut low, mut mid, mut band) = (0.0f32, 0.0f32, 0.0f32);
+    let mut raw = Vec::with_capacity(n);
+    let mut bubbles: Vec<(usize, f32, f32)> = Vec::new();
+    for i in 0..n {
+        let w = noise.next();
+        low += (w - low) * 0.02;
+        mid += (w - mid) * 0.25;
+        band += (mid - band) * 0.12;
+        let t = i as f32 / rate as f32;
+        // The flow swells and settles.
+        let swell = 0.75 + 0.25 * (t * 0.9).sin() * (t * 0.37 + 1.0).sin();
+        let mut v = low * 2.6 * swell + (mid - band) * 0.55 * swell;
+        // Now and then a bubble: a quick falling tone.
+        if noise.next() > 0.9985 {
+            bubbles.push((i, 500.0 + (noise.next() + 1.0) * 700.0, 0.08 + (noise.next() + 1.0) * 0.05));
+        }
+        bubbles.retain(|&(at, f, a)| {
+            let age = (i - at) as f32 / rate as f32;
+            if age > 0.06 {
+                return false;
+            }
+            v += (std::f32::consts::TAU * f * (1.0 + age * 6.0) * age).sin() * a * (1.0 - age / 0.06);
+            true
+        });
+        raw.push(v);
+    }
+    // Loop: the last second faded into the first.
+    let fade = rate as usize;
+    let mut samples: Vec<f32> = raw[..n - fade].to_vec();
+    for k in 0..fade {
+        let t = k as f32 / fade as f32;
+        samples[k] = raw[k] * t + raw[n - fade + k] * (1.0 - t);
+    }
+    let peak = samples.iter().fold(0.0f32, |m, v| m.max(v.abs())).max(1e-3);
+    Sound { rate, channels: 1, samples: samples.into_iter().map(|v| v / peak * 0.6).collect() }
+}
+
+/// A splash: a burst of hiss falling away, with a low slap at its start.
+fn splash_sound() -> Sound {
+    let rate = 22050u32;
+    let n = (rate as f32 * 0.7) as usize;
+    let mut noise = Noise(0x9e37_79b9);
+    let (mut a, mut b) = (0.0f32, 0.0f32);
+    let samples = (0..n)
+        .map(|i| {
+            let t = i as f32 / rate as f32;
+            let w = noise.next();
+            a += (w - a) * 0.45;
+            b += (a - b) * 0.08;
+            let hiss = (a - b) * (-t * 7.0).exp() * (1.0 - (-t * 120.0).exp());
+            let slap = (std::f32::consts::TAU * 90.0 * t).sin() * (-t * 30.0).exp() * 0.5;
+            (hiss * 1.4 + slap) * 0.8
+        })
+        .collect();
+    Sound { rate, channels: 1, samples }
 }

@@ -22,6 +22,10 @@ pub struct Field {
     /// How far each sample is from the line, in half track widths (1 at
     /// the edge), or a large number away from it.
     pub track: Vec<f32>,
+    /// The water's height over each sample in a river, else NaN.
+    pub water: Vec<f32>,
+    /// Each river's water.
+    pub rivers: Vec<crate::nature::Water>,
 }
 
 impl Field {
@@ -267,6 +271,8 @@ pub fn bake(course: &Course, every: usize, land: &[f32]) -> Field {
     for s in &course.strokes {
         apply_stroke(s, n, step, &mut heights);
     }
+    let mut water = vec![f32::NAN; n * n];
+    let rivers = crate::nature::carve(course, n, step, &mut heights, &mut surfaces, &mut water);
     for p in &course.paint {
         let r = p.radius.max(step);
         for d in &p.dabs {
@@ -282,6 +288,8 @@ pub fn bake(course: &Course, every: usize, land: &[f32]) -> Field {
         heights,
         surfaces,
         track,
+        water,
+        rivers,
     }
 }
 

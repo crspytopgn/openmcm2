@@ -22,7 +22,18 @@ const NEEDLE: f32 = 45.0;
 /// the panel, radar and dial drawn at the window's resolution, the other
 /// pictures enlarged smoothly and the lines smooth-edged.
 pub fn sharp() -> bool {
-    crate::tweaks::get().modern_hud
+    crate::tweaks::get().modern_hud || NO_PICTURES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Set when the game's HUD pictures (`RES/GLOBAL.RES`) aren't there, as
+/// when playing with the Free Pack alone: the modernised HUD then draws
+/// the dial, radar and panel itself, so none of them go missing.
+static NO_PICTURES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Notes whether the game in `game` has the HUD's pictures.
+pub fn find_pictures(game: &std::path::Path) {
+    let missing = !crate::fs::is_file(game.join("RES").join("GLOBAL.RES"));
+    NO_PICTURES.store(missing, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The modernised HUD's dial, drawn at the window's resolution in place
