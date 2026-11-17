@@ -25,6 +25,9 @@ on:
       branch:
         description: "Or: a branch holding the zip split into pack.zip.part-* files"
         default: ""
+      leave_out:
+        description: "Folders of the source to leave out of the pack, space separated (e.g. TERAFORM)"
+        default: ""
       dry_run:
         description: "Only pack it and list what would change, upload nothing"
         type: boolean
@@ -34,6 +37,7 @@ on:
       version: { type: string, required: true }
       source: { type: string, default: pack.zip }
       branch: { type: string, default: "" }
+      leave_out: { type: string, default: "" }
       dry_run: { type: boolean, default: false }
 
 permissions:
@@ -67,7 +71,12 @@ jobs:
           echo "PACK=$PWD/$root" >> "$GITHUB_ENV"
 
       - name: Pack it
-        run: python3 tools/freepack/pack.py "$PACK" out "${{ inputs.version }}"
+        run: |
+          for d in ${{ inputs.leave_out }}; do
+            case "$d" in */*|..*|"") echo "leave_out takes top folder names only: $d"; exit 1;; esac
+            rm -rf "$PACK/$d"
+          done
+          python3 tools/freepack/pack.py "$PACK" out "${{ inputs.version }}"
 
       - name: Set up rclone for R2
         run: |
