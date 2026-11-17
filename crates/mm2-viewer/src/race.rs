@@ -2154,7 +2154,10 @@ impl Race {
                         }
                         r.on_course = course.follow(probe, look, &mut r.place).is_some();
                         r.off_course = if r.on_course { 0.0 } else { r.off_course + step };
-                        if !r.on_course {
+                        // Time down in a crash doesn't count against the
+                        // lap: it only ever costs time. Riding off the
+                        // course (a cut) still does.
+                        if !r.on_course && !crashed {
                             r.lap_off_now += step;
                         }
                     }
