@@ -456,6 +456,67 @@ impl State {
         d
     }
 
+    /// The length of [`State::write_small`]'s packet.
+    pub const SMALL_LEN: usize = 59;
+
+    /// The state packed small for the network (59 bytes, not 88): where
+    /// to 1/64 ft, angles to 1/10000 of a turn, speeds to 1/100 ft/s and
+    /// spin to 1/1000 rad/s, which nobody can see the difference of.
+    pub fn write_small(&self) -> Vec<u8> {
+        let mut d = Vec::with_capacity(Self::SMALL_LEN);
+        for x in self.position {
+            let v = ((x * 64.0).round() as i32).clamp(-(1 << 23), (1 << 23) - 1);
+            d.extend_from_slice(&v.to_le_bytes()[..3]);
+        }
+        let i16s = |d: &mut Vec<u8>, v: [f32; 3], scale: f32| {
+            for x in v {
+                d.extend_from_slice(&((x * scale).round().clamp(-32768.0, 32767.0) as i16).to_le_bytes());
+            }
+        };
+        i16s(&mut d, self.angles.map(wrap), 32767.0 / std::f32::consts::PI);
+        i16s(&mut d, self.velocity, 100.0);
+        i16s(&mut d, self.spin, 1000.0);
+        d.extend_from_slice(&self.pose);
+        d.extend_from_slice(&self.flags);
+        d.push(self.place);
+        d.push(self.index);
+        for w in [self.step, self.word_790, self.word_7a0] {
+            d.extend_from_slice(&w.to_le_bytes());
+        }
+        for t in [self.lap_time, self.best_lap, self.total] {
+            d.extend_from_slice(&t.to_le_bytes());
+        }
+        d.extend_from_slice(&self.clock.to_le_bytes());
+        d
+    }
+
+    /// A state from [`State::write_small`]'s packet.
+    pub fn small(d: &[u8]) -> Option<State> {
+        if d.len() < Self::SMALL_LEN {
+            return None;
+        }
+        let i24 = |o: usize| (i32::from_le_bytes([0, d[o], d[o + 1], d[o + 2]]) >> 8) as f32 / 64.0;
+        let i16v = |o: usize, scale: f32| std::array::from_fn(|i| i16::from_le_bytes([d[o + i * 2], d[o + i * 2 + 1]]) as f32 / scale);
+        let w = |o: usize| u16::from_le_bytes([d[o], d[o + 1]]);
+        Some(State {
+            position: [i24(0), i24(3), i24(6)],
+            angles: i16v(9, 32767.0 / std::f32::consts::PI),
+            velocity: i16v(15, 100.0),
+            spin: i16v(21, 1000.0),
+            pose: d[27..31].try_into().unwrap(),
+            flags: d[31..35].try_into().unwrap(),
+            place: d[35],
+            index: d[36],
+            step: w(37),
+            word_790: w(39),
+            word_7a0: w(41),
+            lap_time: f32_at(d, 43),
+            best_lap: f32_at(d, 47),
+            total: f32_at(d, 51),
+            clock: u32_at(d, 55),
+        })
+    }
+
     /// Between this and `b`, `f` of the way (angles the short way round).
     pub fn lerp(&self, b: &State, f: f32) -> State {
         let l = |x: [f32; 3], y: [f32; 3]| std::array::from_fn(|i| x[i] + (y[i] - x[i]) * f);
@@ -804,5 +865,42 @@ mod tests {
         }
         assert!(Delta::between(&state(0.0, 0.0, 0), &state(1.0, 0.0, 1100)).is_none());
         assert!(Delta::between(&state(0.0, 0.0, 0), &state(40.0, 0.0, 10)).is_none());
+    }
+}
+
+#[cfg(test)]
+mod small_tests {
+    use super::State;
+
+    #[test]
+    fn small_packets_come_back_close() {
+        let s = State {
+            place: 3,
+            step: 50,
+            word_790: 7,
+            word_7a0: 9,
+            position: [1765.31, 95.42, -2000.97],
+            angles: [0.1, -0.4, 3.0],
+            lap_time: 12.5,
+            best_lap: 61.25,
+            total: 300.0,
+            spin: [0.5, -1.25, 2.0],
+            velocity: [40.12, -3.5, 88.0],
+            pose: [1, 2, 3, 4],
+            clock: 123_456,
+            flags: [5, 6, 7, 8],
+            index: 2,
+        };
+        let d = s.write_small();
+        assert_eq!(d.len(), State::SMALL_LEN);
+        let t = State::small(&d).unwrap();
+        for i in 0..3 {
+            assert!((t.position[i] - s.position[i]).abs() <= 1.0 / 128.0);
+            assert!((t.angles[i] - s.angles[i]).abs() < 1e-3);
+            assert!((t.velocity[i] - s.velocity[i]).abs() <= 0.005);
+            assert!((t.spin[i] - s.spin[i]).abs() <= 0.0005);
+        }
+        assert_eq!((t.pose, t.flags, t.place, t.index, t.step, t.clock), (s.pose, s.flags, s.place, s.index, s.step, s.clock));
+        assert_eq!((t.lap_time, t.best_lap, t.total), (s.lap_time, s.best_lap, s.total));
     }
 }

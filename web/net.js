@@ -147,7 +147,43 @@ async function client() {
   return peer;
 }
 
+// An always-open free roam room on the leaderboard server: a WebSocket
+// that speaks the game's own messages, one per WebSocket message.
+function joinRoom(url) {
+  show("Connecting to free roam…");
+  const n = nextLink++;
+  const ws = new WebSocket(url);
+  ws.binaryType = "arraybuffer";
+  const conn = {
+    get open() {
+      return ws.readyState === WebSocket.OPEN;
+    },
+    send: (d) => ws.send(d),
+    close: () => ws.close(),
+  };
+  const link = { conn, queue: [] };
+  links.set(n, link);
+  let open = false;
+  ws.onopen = () => {
+    open = true;
+    show("Connected to free roam.", null, 4);
+    for (const d of link.queue) ws.send(d);
+    link.queue = [];
+  };
+  ws.onmessage = (e) => events.push(["data", n, bytes(e.data)]);
+  const gone = () => {
+    if (!links.has(n)) return;
+    links.delete(n);
+    events.push(["gone", n]);
+    if (!open) show("Couldn't reach free roam just now. Check your internet connection and try again.", null, 15, true);
+  };
+  ws.onclose = gone;
+  ws.onerror = gone;
+  return n;
+}
+
 function join(code) {
+  if (/^wss?:\/\//.test(code)) return joinRoom(code);
   // Numbered now, connected once the matchmaking server answers; what is
   // sent before then waits.
   const name = code.toUpperCase();
