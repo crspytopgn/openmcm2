@@ -88,6 +88,10 @@ pub const PUSHED: f32 = 0.5;
 /// The steering axis's dead centre (0x449e20 makes the axis with 0.04).
 pub const STEER_DEAD: f32 = 0.04;
 
+/// The lean axis's dead centre. The game's has none (0x449e20); this
+/// keeps a stick that drifts a little from leaning the rider.
+pub const LEAN_DEAD: f32 = 0.12;
+
 /// The analog throttle: nothing below 0.2 (0x52e3e0), and the gas counts
 /// as open past 0.33 (0x493270).
 pub const THROTTLE_FLOOR: f32 = 0.2;

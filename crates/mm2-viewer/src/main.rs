@@ -4837,7 +4837,7 @@ impl App {
     /// The joystick in use, as the profile maps it (0x449e20 binds the
     /// map, 0x52e3e0 reads it): an action on a button is held with it;
     /// the steering axis has a 0.04 dead centre and is cubed, fine near
-    /// the middle and full lock at the edge; the lean axis has no dead
+    /// the middle and full lock at the edge; the lean axis has a small dead
     /// centre. Accelerate on the Z axis (a flight stick's throttle
     /// lever) opens the gas past a third of its travel, the way the
     /// game's analog throttle does (0.2 floor, 0.33 to count). Analog
@@ -4904,7 +4904,12 @@ impl App {
             self.pad_smooth = (if s.abs() < 1e-3 && steer == 0.0 { 0.0 } else { s }, Some(now));
             steer = self.pad_smooth.0;
         }
-        let lean = pull(input::LEAN_FORWARD, -1.0, 0.0) - pull(input::LEAN_BACK, 1.0, 0.0);
+        // The lean axis: the game gives it no dead centre, so a stick
+        // that drifts a little off the middle (worn sticks, a Steam
+        // Deck's) would lean the rider all the time. Here it has a small
+        // one, rescaled so the edge is still full lean.
+        let lean = pull(input::LEAN_FORWARD, -1.0, pad::LEAN_DEAD) - pull(input::LEAN_BACK, 1.0, pad::LEAN_DEAD);
+        let lean = lean.signum() * ((lean.abs() - pad::LEAN_DEAD) / (1.0 - pad::LEAN_DEAD)).max(0.0);
         // For a player's log: the first time the pad leans the rider,
         // and on which pad.
         if lean.abs() > 0.2 && !self.pad_lean_logged {
