@@ -637,7 +637,7 @@ def _sub_f(F, a0, a1, b0, b1, z0, z1):
     return Vector((min(p0.x, p1.x), min(p0.y, p1.y), p0.z)), Vector((max(p0.x, p1.x), max(p0.y, p1.y), p1.z))
 
 def rail_trucks(F, at=(0.14, 0.86)):
-    r = 0.07 * F.H if F.H > 10 else 1.4; w = flat("rail_wheel", (0.12, 0.1, 0.09), 0.6, 0.6)
+    r = 0.07 * F.H if F.H > 10 else 1.4; w = acg("Rust004", 0.3, ramp=((0.04, 0.03, 0.025), (0.16, 0.1, 0.07)), rough=0.6, name="rail_wheel")
     for a in at:
         F.bx(a - 0.07, a + 0.07, 0.08, 0.92, r * 0.6 / F.H, r * 1.9 / F.H, trim())
         for d in (-0.04, 0.04):
@@ -648,20 +648,20 @@ def rail_trucks(F, at=(0.14, 0.86)):
 def railcar(lo, hi, name):
     u, v = _axes(lo, hi)
     if name == "gondola":   # ski-lift cabin hanging on its grip arm
-        F = Frame(lo, hi, u, v, 1.0, None); body = flat("cabin_red", (0.45, 0.08, 0.06), 0.4)
+        F = Frame(lo, hi, u, v, 1.0, None); body = acg("PaintedMetal004", 0.25, ramp=((0.36, 0.06, 0.045), (0.46, 0.09, 0.065)), rough=0.45, name="cabin_red")
         F.ext([(0.05, 0.0), (0.95, 0.0), (1.0, 0.18), (0.98, 0.5), (0.9, 0.55), (0.1, 0.55), (0.02, 0.5), (0.0, 0.18)], 0.05, 0.95, body, bevel=0.2)
         F.ext([(0.06, 0.25), (0.94, 0.25), (0.92, 0.48), (0.08, 0.48)], 0.04, 0.96, glass())
         F.bx(0.47, 0.53, 0.47, 0.53, 0.55, 0.98, galv()); F.bx(0.3, 0.7, 0.45, 0.55, 0.95, 1.0, galv()); return
     if name == "hopper":    # gravel hopper bin on legs (pit/quarry)
-        F = Frame(lo, hi, u, v, 1.0, None); m = flat("hopper_paint", (0.5, 0.4, 0.1), 0.6)
+        F = Frame(lo, hi, u, v, 1.0, None); m = acg("Rust004", 0.12, ramp=((0.22, 0.17, 0.05), (0.55, 0.45, 0.14)), rough=0.7, name="hopper_paint")
         F.ext([(0.0, 0.55), (1.0, 0.55), (1.0, 1.0), (0.0, 1.0)], 0.0, 1.0, m, bevel=0.05)
         F.ext([(0.3, 0.3), (0.7, 0.3), (1.0, 0.55), (0.0, 0.55)], 0.15, 0.85, m)
         for a in (0.02, 0.92):
             for b in (0.02, 0.92): F.bx(a, a + 0.06, b, b + 0.06, 0.0, 0.56, steel())
-        F.bx(0.04, 0.96, 0.06, 0.94, 0.96, 0.99, flat("gravel_top", (0.35, 0.33, 0.3), 0.95)); return
+        F.bx(0.04, 0.96, 0.06, 0.94, 0.96, 0.99, acg("Gravel022", 0.2, name="gravel_top")); return
     F = Frame(lo, hi, u, v, 0.23 if name != "engine" else 0.17, None)
     hue = sum(map(ord, name)) % 3
-    rust = flat("rail_red", (0.26, 0.09, 0.05), 0.65, 0.2) if hue != 1 else flat("rail_blue", (0.1, 0.15, 0.2), 0.6, 0.2)
+    rust = acg("Rust004", 0.08, ramp=((0.09, 0.03, 0.018), (0.34, 0.12, 0.06)), rough=0.7, name="rail_red") if hue != 1 else acg("PaintedMetal004", 0.12, ramp=((0.05, 0.07, 0.09), (0.16, 0.21, 0.26)), rough=0.6, name="rail_blue")
     zd = rail_trucks(F)
     F.bx(0.0, 1.0, 0.06, 0.94, zd, zd + 0.06, trim())   # underframe
     for a in (-0.01, 1.0): F.bx(a, a + 0.01, 0.4, 0.6, zd + 0.01, zd + 0.06, galv())  # couplers
