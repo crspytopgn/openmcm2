@@ -331,6 +331,15 @@ pub fn outfits() -> &'static [Outfit] {
 }
 
 /// The rider model (`fp_rider.mcf`) an outfit of the pack goes on.
+/// The podium's stand-in for the game's `Winner.mcf` when the rider on
+/// the grid is one of the pack's (`fp_rider.mcf` stands as
+/// `winfp_rider.mcf`): the same rider, playing the podium's motions (the
+/// game's when it is there, else the pack's own).
+pub fn winner_model(rider: &str) -> Option<String> {
+    let (template, shape) = animated(rider)?;
+    (template == "Rider.mcf").then(|| format!("win{shape}.mcf"))
+}
+
 pub fn outfit_model(outfit: &str) -> Option<String> {
     let outfit = outfit.trim().to_ascii_lowercase();
     rides().outfits.iter().find(|o| o.outfit == outfit).map(|o| format!("{}.mcf", o.shape))
@@ -341,16 +350,20 @@ pub fn outfit_model(outfit: &str) -> Option<String> {
 /// the original's `.mcf` whose motions it plays, and the shape to load.
 pub fn animated(name: &str) -> Option<(&'static str, String)> {
     let stem = stem_of(name);
-    let (ui, shape) = match stem.strip_prefix("ui") {
-        Some(rest) if rides().shapes.contains_key(rest) => (true, rest.to_string()),
-        _ => (false, stem),
+    // `ui…` for the menus' turning one, `win…` for a rider on the podium.
+    let (kind, shape) = match (stem.strip_prefix("ui"), stem.strip_prefix("win")) {
+        (Some(rest), _) if rides().shapes.contains_key(rest) => (1, rest.to_string()),
+        (_, Some(rest)) if rides().shapes.contains_key(rest) => (2, rest.to_string()),
+        _ => (0, stem),
     };
     let &(_, rider) = rides().shapes.get(&shape)?;
-    let template = match (ui, rider) {
-        (false, false) => "Bike.mcf",
-        (false, true) => "Rider.mcf",
-        (true, false) => "UIHonda.mcf",
-        (true, true) => "UIRider.mcf",
+    let template = match (kind, rider) {
+        (0, false) => "Bike.mcf",
+        (0, true) => "Rider.mcf",
+        (1, false) => "UIHonda.mcf",
+        (1, true) => "UIRider.mcf",
+        (_, true) => crate::podium::WINNER,
+        (_, false) => return None,
     };
     Some((template, shape))
 }
@@ -448,7 +461,7 @@ pub fn own_tricks() -> Vec<Option<crate::race::TrickMotion>> {
 /// riders (`Some(true)`) or bikes (`Some(false)`), as the game drives them.
 pub fn ridden(name: &str) -> Option<bool> {
     match animated(name)?.0 {
-        "Rider.mcf" => Some(true),
+        "Rider.mcf" | crate::podium::WINNER => Some(true),
         "Bike.mcf" => Some(false),
         _ => None,
     }
@@ -860,7 +873,7 @@ mod tests {
     #[test]
     fn own_motions_cover_riding_crashes_and_tricks() {
         let rider = own_motions(true);
-        for name in ["LeanR02", "Turn2D", "CrosOv2", "Endo", "Kahuna", "Fall01", "HeadHit", "SuperMan", "BarKneelAlt"] {
+        for name in ["LeanR02", "Turn2D", "CrosOv2", "Endo", "Kahuna", "Fall01", "HeadHit", "SuperMan", "BarKneelAlt", "Podium3_02", "Podium4_01", "Podium5_03"] {
             assert!(rider.iter().any(|m| m.0 == name), "{name}");
         }
         assert!(rider.iter().filter(|m| m.0 != "BackUpBottom").all(|m| m.1.frames.iter().all(|f| f.len() == 16)));

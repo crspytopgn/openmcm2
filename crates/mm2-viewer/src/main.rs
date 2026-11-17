@@ -2011,8 +2011,11 @@ fn load_track(
                 .iter()
                 .map(|&bike| {
                     let outfit = skins[bike + 1].clone();
+                    // A rider of the pack's stands up there as itself.
+                    let model = freepack::winner_model(&animations[bike + 1].model)
+                        .unwrap_or_else(|| podium::WINNER.into());
                     animations.push(scn::Animation {
-                        model: podium::WINNER.into(),
+                        model,
                         offset: [0.0; 3],
                         look: [0.0, 0.0, 1.0],
                         up: [0.0, 1.0, 0.0],

@@ -314,6 +314,56 @@ for name, (fps, frames, hold, base, more) in ALTS.items():
     rider[name] = trick(dict(TRICKS[base][3], **more), frames, max(hold, 4)); TIMING[name] = (float(fps), False)
 TRICK_NAMES = list(TRICKS) + list(ALTS)
 
+# The podium (podium.rs): 7 s like the game's (106 frames at 15 a second;
+# here 53 at 7.5, the engine blends between them), stood up. The stage's
+# motions carry each step's place (Podium3 for three riders, Podium5 the
+# other choice), the truck's steps are placed by the engine (Podium4).
+# The winner punches both fists up, second waves, third claps.
+PODIUM_FRAMES = 53
+STEP = {1: (0.0, 3.8, 0.1), 2: (4.0, 2.8, 0.1), 3: (-4.05, 3.3, 0.05)}
+def stood(at, t, act, kind):
+    """One podium frame `t` (0..1) for place `act` standing at `at`."""
+    w = 2 * math.pi * t
+    sway = 0.25 * math.sin(w * 2 + kind)
+    pelvis = (at[0] + sway, at[1] + 3.18, at[2])
+    side = math.copysign(1.0, sway)
+    legs = ((0, 5 + 3 * side, 4), (0, 5 - 3 * side, 4))
+    if act == 1:
+        # Fists up and pumping, a bounce on each.
+        pump = 0.5 + 0.5 * math.sin(w * (5 if kind != 5 else 7))
+        up = ease(min(1.0, t * 8))
+        sw = -40 - 125 * up + 20 * pump * up
+        out = 25 * (1 - up) - (15 + 10 * pump) * up  # out turns inward once the arm is up
+        arms = ((sw, out, 20 + 50 * pump * up), (sw, out, 20 + 50 * pump * up))
+        bounce = 0.12 * pump * up
+        pelvis = (pelvis[0], pelvis[1] + bounce - 0.05, pelvis[2])
+        legs = ((0, 4, 8 - 6 * pump), (0, 4, 8 - 6 * pump))
+        head = (-20 * up, 8 * math.sin(w * 2))
+        spine = (-8 * up, 3 * math.sin(w * 2), 0)
+    elif act == 2:
+        # The right hand up waving, the left on the hip.
+        up = ease(min(1.0, t * 6))
+        wave = math.sin(w * 6)
+        arms = ((-10, 35, 70), (-30 - 125 * up, 25 * (1 - up) - (20 + 18 * wave) * up, 25 + 25 * up))
+        head = (-8, 15 * math.sin(w))
+        spine = (0, -3 * up, 10 * math.sin(w))
+    else:
+        # Clapping for the winner, then a wave.
+        clap = abs(math.sin(w * (8 if kind != 5 else 10)))
+        late = ease(max(0.0, min(1.0, (t - 0.6) * 5)))
+        a = (-40, -45 - 12 * clap, 95)
+        arms = (tuple(np.array(a) * (1 - late) + np.array((-15, 10, 15)) * late),
+                tuple(np.array(a) * (1 - late) + np.array((-160, -25 - 15 * math.sin(w * 6), 25)) * late))
+        head = (-5, -20 * (1 if at[0] < 0 else -1) * (1 - late) + 10 * math.sin(w))
+        spine = (5 * (1 - late), 0, 12 * (1 if at[0] < 0 else -1) * (1 - late))
+    return keys(fk(pelvis=pelvis, spine=spine, head=head, legs=legs, arms=arms))
+for kind in (3, 4, 5):
+    for n in (1, 2, 3):
+        at = (0.0, 0.0, 0.0) if kind == 4 else STEP[n]
+        name = f"Podium{kind}_0{n}"
+        rider[name] = [stood(at, f / (PODIUM_FRAMES - 1), n, kind) for f in range(PODIUM_FRAMES)]
+        TIMING[name] = (7.5, False)
+
 def pack(tables):
     """The motions as the engine reads them (freepack::own_motions):
     "FPMO", then per motion its name, frames a second, looping, rider or

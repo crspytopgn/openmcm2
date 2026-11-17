@@ -1839,7 +1839,8 @@ fn national(def: &Def) -> Made {
             models.push(model("fp_flagman_stand", &land, p[0] + left[0] * (half + 10.0), p[1] + left[1] * (half + 10.0), [-left[0], -left[1]]));
         }
     }
-    scatter_props(&land, pits, 85.0, &mut rng, &["tent01", "tent02", "nattrailer01", "nattrailer01", "toilet", "fp_banner"], 22, &mut models);
+    // The podium stands in the middle of the pits: the tents keep clear of it.
+    scatter_props(&land, pits, 85.0, PODIUM_CLEAR, &mut rng, &["tent01", "tent02", "nattrailer01", "nattrailer01", "toilet", "fp_banner"], 22, &mut models);
     let start = start_at(&course, &land, line);
     // The finish arch stands up the straight, clear of the wide start.
     let finish = (line + (sl * 0.7 - 20.0).clamp(0.0, 115.0)) % course.length;
@@ -1884,15 +1885,20 @@ fn flatten(land: &mut Land, at: [f32; 2], radius: f32, blend: f32, material: u8)
     }
 }
 
-fn scatter_props(land: &Land, at: [f32; 2], radius: f32, rng: &mut Rng, names: &[&str], count: usize, models: &mut Vec<Model>) {
+/// Props strewn round `at` out to `radius`, none nearer than `clear` (ft).
+fn scatter_props(land: &Land, at: [f32; 2], radius: f32, clear: f32, rng: &mut Rng, names: &[&str], count: usize, models: &mut Vec<Model>) {
     for _ in 0..count {
         let a = rng.range(0.0, TAU);
-        let r = rng.range(0.15, 0.9) * radius;
+        let r = clear + rng.range(0.15, 0.9) * (radius - clear);
         let (x, z) = (at[0] + a.cos() * r, at[1] + a.sin() * r);
         let look = rng.range(0.0, TAU);
         models.push(Model { name: rng.pick(names).to_string(), at: [x, land.at(x, z), z], look: [look.cos(), look.sin()], scale: 1.0 });
     }
 }
+
+/// How far the pits' tents and trailers keep from the podium in their
+/// middle (its stage is 26 ft wide, a tent's roof about 20).
+const PODIUM_CLEAR: f32 = 36.0;
 
 /// How much bigger than the art's own the free stadium is drawn.
 const ARENA_SCALE: f32 = 1.25;
@@ -2199,7 +2205,7 @@ fn open_country(def: &Def) -> Made {
         [p[0] - d[1] * 90.0, p[1] + d[0] * 90.0]
     };
     flatten(&mut land, camp, 60.0, 30.0, LOOSE as u8);
-    scatter_props(&land, camp, 55.0, &mut rng, &["tent01", "nattrailer01", "toilet"], 6, &mut models);
+    scatter_props(&land, camp, 55.0, 0.0, &mut rng, &["tent01", "nattrailer01", "toilet"], 6, &mut models);
     Made { land, courses, lap_lines: None, start, models, keep: vec![(camp, 80.0)], podium: None, infield: None }
 }
 
@@ -2276,7 +2282,7 @@ fn quarry(def: &Def) -> Made {
         }
     }
     let start = start_at(&course, &land, 0.0);
-    scatter_props(&land, [cx, cz], 60.0, &mut rng, &["nattrailer01", "gianttire01", "triplebale02"], 8, &mut models);
+    scatter_props(&land, [cx, cz], 60.0, 0.0, &mut rng, &["nattrailer01", "gianttire01", "triplebale02"], 8, &mut models);
     Made { land, courses: vec![(course, 22.0, Vec::new(), String::new())], lap_lines: None, start, models, keep: vec![([cx, cz], radius * 0.6)], podium: None, infield: None }
 }
 
@@ -2435,8 +2441,14 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
     if matches!(def.kind, Kind::Supercross | Kind::Tag) {
         out.push((format!("{stem}.lights"), arena_lights(land, def.kind).into_bytes()));
     }
+    out.push((format!("{stem}.made"), MADE.as_bytes().to_vec()));
     Ok(out)
 }
+
+/// Which making of the recipes a built track is from (its `.made` file):
+/// a track built by an older one is built again. Change it whenever a
+/// change here moves anything on an existing track.
+pub const MADE: &str = "2";
 
 /// The free track whose file is `stem` (`FPNAT01`), any case.
 pub fn find(stem: &str) -> Option<&'static Def> {
