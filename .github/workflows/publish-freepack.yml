@@ -1,7 +1,6 @@
 # Publishes the Free Pack: the launcher's download (the "freepack" GitHub
 # pre-release) and the browser's (the openmcm2-freepack R2 bucket).
 #
-#
 # The finished pack folder (stockmap.toml at its root, shared textures
 # split out) comes in as a zip on a DRAFT release tagged "freepack-source"
 # (drafts aren't public), uploaded from the Mac with:
