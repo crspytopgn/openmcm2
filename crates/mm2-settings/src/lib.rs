@@ -247,7 +247,7 @@ pub fn parse_difficulty(text: &str) -> Option<[[u32; 3]; 4]> {
     (n.len() == 12 && n.iter().all(|v| (1..=MOST_STEP).contains(v))).then_some(t)
 }
 
-pub const UPGRADES: [(&str, &str, bool); 23] = [
+pub const UPGRADES: [(&str, &str, bool); 25] = [
     ("lighting", "Per-pixel lighting", true),
     ("shadows", "Sun shadows", true),
     ("distance", "Far draw distance and haze", true),
@@ -269,6 +269,8 @@ pub const UPGRADES: [(&str, &str, bool); 23] = [
     ("ssr", "Reflections in puddles", true),
     ("skylight", "Sky light", true),
     ("pbr", "Realistic materials and reflections", true),
+    ("filmic", "Film-like colour (free graphics)", true),
+    ("air", "Sunlit haze", true),
     ("nightlights", "Stadium lights at night", true),
     // Only on a GPU that can trace rays; elsewhere the shadow maps stay.
     ("raytracing", "Ray tracing: shadows and reflections", false),

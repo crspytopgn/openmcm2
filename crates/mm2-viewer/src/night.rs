@@ -243,7 +243,7 @@ impl StadiumLights {
             // foot is still told apart that far off.
             let proj = Mat4::perspective_rh(angle * 2.0, 1.0, (dist - cover * 1.2).max(10.0), dist + cover * 1.2);
             views[g] = proj * view;
-            texels[g] = 2.0 * dist * angle.tan() / crate::enhance::SHADOW_SIDE as f32;
+            texels[g] = 2.0 * dist * angle.tan() / crate::enhance::shadow_side() as f32;
         }
         let lowest = lamps.iter().map(|l| l.at.y).fold(f32::MAX, f32::min);
         eprintln!("night lights: {} lamps in {} groups, floor at {:.0} ft", lamps.len(), GROUPS, floor.y);

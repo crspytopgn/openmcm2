@@ -1146,7 +1146,8 @@ impl TerrainRenderer {
             self.blocks.iter().filter(|b| seen.sees(b.0, b.1)).map(|b| b.2.clone()),
             &mut self.runs,
         );
-        let (cascades, texels) = crate::enhance::cascades(camera.view(), camera.fovy(aspect), aspect, lights.to_sun);
+        let side = self.enhanced.as_ref().map_or(crate::enhance::SHADOW_SIDE, |e| e.shared.side);
+        let (cascades, texels) = crate::enhance::cascades(camera.view(), camera.fovy(aspect), aspect, lights.to_sun, side);
         // The dust clouds as the sun sees them, round those near the eye.
         let dust_view = self
             .enhanced
@@ -1276,9 +1277,13 @@ impl TerrainRenderer {
                 stadium_texels: night_lamps.as_ref().map_or([1.0; 4], |n| [n.texels[0], n.texels[1], n.texels[2], flag(n.listed)]),
                 stadium_lamps: night_lamps.as_ref().map_or([[0.0; 4]; crate::night::MOST_LAMPS], |n| n.uniform().0),
                 stadium_ways: night_lamps.as_ref().map_or([[0.0; 4]; crate::night::MOST_LAMPS], |n| n.uniform().1),
-                ibl: match (&self.env_baked, on.pbr) {
-                    (Some(_), true) => [1.0, (crate::ibl::LEVELS - 1) as f32, GAME_SKY_LIGHT, 0.0],
-                    _ => [0.0; 4],
+                ibl: {
+                    // w: the sunlit air in the haze, under an open sky.
+                    let air = flag(on.air && self.sky.is_some());
+                    match (&self.env_baked, on.pbr) {
+                        (Some(_), true) => [1.0, (crate::ibl::LEVELS - 1) as f32, GAME_SKY_LIGHT, air],
+                        _ => [0.0, 0.0, 0.0, air],
+                    }
                 },
                 sh: self.env_baked.as_ref().map_or([[0.0; 4]; 9], |b| b.2),
             };

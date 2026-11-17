@@ -10,6 +10,12 @@ use wgpu::util::DeviceExt as _;
 pub const SHADOW_DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Texels a side of each cascade.
 pub const SHADOW_SIDE: u32 = 2048;
+
+/// Texels a side of each cascade with the upgrades as set: twice
+/// [`SHADOW_SIDE`] on Ultra (crate::graphics::Enhanced::shadow_side).
+pub fn shadow_side() -> u32 {
+    crate::graphics::enhanced().map_or(SHADOW_SIDE, |e| e.shadow_side.clamp(512, 8192))
+}
 pub const CASCADES: usize = 3;
 /// How far each cascade reaches from the camera, ft; past the last the
 /// shadows fade out.
@@ -212,6 +218,8 @@ pub struct Shared {
     pub material_average: [[f32; 4]; crate::materials::COUNT],
     /// The ruts' map, to draw the tyres into: its view and texels a side.
     pub ruts: (wgpu::TextureView, u32),
+    /// Texels a side of each cascade's layer.
+    pub side: u32,
 }
 
 /// The most headlights that glow on the bikes.
@@ -456,11 +464,12 @@ impl Shared {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let side = shadow_side();
         let map = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("sun shadows"),
             size: wgpu::Extent3d {
-                width: SHADOW_SIDE,
-                height: SHADOW_SIDE,
+                width: side,
+                height: side,
                 depth_or_array_layers: CASCADES as u32,
             },
             mip_level_count: 1,
@@ -576,6 +585,7 @@ impl Shared {
         };
         let group = parts.group(device, &layout, rt);
         Shared {
+            side,
             dust,
             parts,
             layout,
@@ -589,10 +599,10 @@ impl Shared {
 }
 
 /// The cascades for a camera at `view` with `fovy` and `aspect`, lit from
-/// `to_sun`: each a box along the light round a slice of what the camera
+/// `to_sun`, in maps `side` texels a side: each a box along the light round a slice of what the camera
 /// sees, moved only in whole texels so the shadows' edges hold still as
 /// the camera moves. Returns each one's matrix and its texel, ft.
-pub fn cascades(view: Mat4, fovy: f32, aspect: f32, to_sun: Vec3) -> ([Mat4; CASCADES], [f32; CASCADES]) {
+pub fn cascades(view: Mat4, fovy: f32, aspect: f32, to_sun: Vec3, side: u32) -> ([Mat4; CASCADES], [f32; CASCADES]) {
     let inverse = view.inverse();
     let (ty, tx) = ((fovy / 2.0).tan(), (fovy / 2.0).tan() * aspect);
     let up = if to_sun.y.abs() > 0.99 { Vec3::Z } else { Vec3::Y };
@@ -613,7 +623,7 @@ pub fn cascades(view: Mat4, fovy: f32, aspect: f32, to_sun: Vec3) -> ([Mat4; CAS
         let centre = corners.iter().copied().sum::<Vec3>() / corners.len() as f32;
         let radius = corners.iter().map(|c| c.distance(centre)).fold(0.0, f32::max);
         let radius = (radius * 16.0).ceil() / 16.0;
-        let texel = 2.0 * radius / SHADOW_SIDE as f32;
+        let texel = 2.0 * radius / side as f32;
         // Snap the centre to the texel grid as the light sees it.
         let mut c = light.transform_point3(centre);
         c.x = (c.x / texel).round() * texel;
