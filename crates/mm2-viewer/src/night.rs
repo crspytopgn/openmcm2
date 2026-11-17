@@ -182,6 +182,8 @@ pub struct StadiumLights {
     /// The lowest lamp's height, ft: what is painted near-white above it
     /// is a lamp, and glows.
     pub lowest: f32,
+    /// The track's own list (its `.lights` file), not found or guessed.
+    pub listed: bool,
 }
 
 impl StadiumLights {
@@ -251,7 +253,7 @@ impl StadiumLights {
                 eprintln!("  lamp at {:?} way {:?} power {:.3} edge {:.2} group {g}", l.at, l.way, l.power, l.edge);
             }
         }
-        Some(StadiumLights { lamps, group, views, texels, lowest })
+        Some(StadiumLights { lamps, group, views, texels, lowest, listed: false })
     }
 
     /// The lamps for enhanced.wgsl: xyz where, w power; xyz the way, w the

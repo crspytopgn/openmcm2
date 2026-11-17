@@ -680,7 +680,7 @@ impl TerrainRenderer {
             return;
         }
         self.night_found = found_lamps(&self.night_banks, &floor);
-        self.night_listed = listed.and_then(|l| crate::night::StadiumLights::new(l, &floor));
+        self.night_listed = listed.and_then(|l| crate::night::StadiumLights::new(l, &floor)).map(|n| crate::night::StadiumLights { listed: true, ..n });
     }
 
     /// Lays the detail texture over the terrain (0x50b140, 0x50b990): each
@@ -1190,7 +1190,8 @@ impl TerrainRenderer {
                     [n.lamps.len() as f32, night, n.lowest, if sun_shadows { crate::night::GROUPS as f32 } else { 0.0 }]
                 }),
                 stadium_views: night_lamps.as_ref().map_or([Mat4::IDENTITY; crate::night::GROUPS], |n| n.views).map(|m| m.to_cols_array_2d()),
-                stadium_texels: night_lamps.as_ref().map_or([1.0; 4], |n| [n.texels[0], n.texels[1], n.texels[2], 0.0]),
+                // w: the lamps are a track's own list, their heads to glow.
+                stadium_texels: night_lamps.as_ref().map_or([1.0; 4], |n| [n.texels[0], n.texels[1], n.texels[2], flag(n.listed)]),
                 stadium_lamps: night_lamps.as_ref().map_or([[0.0; 4]; crate::night::MOST_LAMPS], |n| n.uniform().0),
                 stadium_ways: night_lamps.as_ref().map_or([[0.0; 4]; crate::night::MOST_LAMPS], |n| n.uniform().1),
             };

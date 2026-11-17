@@ -432,6 +432,8 @@ fn noise3(p: vec3<f32>) -> f32 {
 // What the stands and the roof keep of their painted light at night,
 // under a stadium's own lamps, before the lamps' own on them.
 const NIGHT_PAINTED: vec3<f32> = vec3<f32>(0.2, 0.2, 0.22);
+// How far round a listed lamp's place its head glows, ft.
+const LAMP_HEAD: f32 = 7.0;
 
 @fragment
 fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
@@ -595,6 +597,17 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         let lo = min(texel.r, min(texel.g, texel.b));
         let lamp = smoothstep(0.72, 0.85, hi) * smoothstep(0.35, 0.5, lo);
         colour += texel.rgb * lamp * 2.5 * enh.stadium.y;
+        // A lamp the track lists (its `.lights` file) glows where its head
+        // is, on the faces turned the way it shines, whatever its paint.
+        if (enh.stadium_texels.w > 0.5) {
+            for (var i = 0u; i < u32(enh.stadium.x); i++) {
+                let at = enh.stadium_lamps[i].xyz;
+                let way = enh.stadium_ways[i].xyz;
+                let near = 1.0 - smoothstep(LAMP_HEAD * 0.5, LAMP_HEAD, length(in.world - at));
+                let facing = smoothstep(0.0, 0.4, dot(n, way));
+                colour += vec3<f32>(1.0, 0.97, 0.9) * near * facing * 3.0 * enh.stadium.y;
+            }
+        }
     }
     if (caked > 0.0 && enh.world.y > 0.3 && in.mode < UNLIT) {
         // Wet mud shines.
