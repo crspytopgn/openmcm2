@@ -124,3 +124,39 @@ These models were refitted to the game's bike and rider frames, recoloured and g
 | caboose | [train_caboose](https://sketchfab.com/3d-models/6ae06e8e67964cdea60009b86c3ee747) | tonmoydeyrick |
 
 Licence: [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/). Changes: bikes and rider cut into rigid parts, scaled and posed, materials and textures replaced; props thinned, scaled to fit, maker decals painted out and paint recoloured.
+
+## Sounds (Freesound, CC0 and CC BY)
+
+Engines, crashes, landings and the crowd are real recordings from
+[Freesound](https://freesound.org), trimmed, looped and matched for the game.
+The full list of which file each went into is in the pack's `sound/CREDITS.md`.
+
+| Recording | By | Licence |
+|---|---|---|
+| [motorbike crm 250cc kick start rev engine.wav](https://freesound.org/people/martian/sounds/148855/) | martian | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| [HONDA_85CR.wav](https://freesound.org/people/Olympia_94/sounds/704792/) | Olympia_94 | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [motorbike crm 250 cc onboard ride pullaway.wav](https://freesound.org/people/martian/sounds/148868/) | martian | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [Single Cylinder Motorcycle](https://freesound.org/people/richwise/sounds/361407/) | richwise | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [motorcycle dirt bike motocross idle stationary revs various on stand nice left nearby right close.wav](https://freesound.org/people/kyles/sounds/450016/) | kyles | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [motorcycle dirt bike motocross onboard idle start accelerate fast.wav](https://freesound.org/people/kyles/sounds/450020/) | kyles | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [motorcycle_nsuMax_1954_engine.wav](https://freesound.org/people/photomonster/sounds/218352/) | photomonster | [CC BY 3.0](http://creativecommons.org/licenses/by/3.0/) |
+| [Moottoripyörä, vanha, lämmittely, kaasutus / An old motorbike, warm-up, revving, Norton, a four-stroke racer](https://freesound.org/people/YleArkisto/sounds/255128/) | YleArkisto | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| [big log on dirt throwing.wav](https://freesound.org/people/KrystianPawlowski/sounds/584891/) | KrystianPawlowski | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [HEAVY BAG DROP DIRT.wav](https://freesound.org/people/burbujafilms/sounds/392008/) | burbujafilms | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [240713_2785-2_FR_Car_and_motorcycle_crash](https://freesound.org/people/kevp888/sounds/746501/) | kevp888 | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| [rock_hit_impact_dirt_01062026](https://freesound.org/people/Artninja/sounds/841240/) | Artninja | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| [Rock_impact_debris_sounds_small_01022026](https://freesound.org/people/Artninja/sounds/840799/) | Artninja | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| [Jumping onto rock.wav](https://freesound.org/people/Edelhanie/sounds/594603/) | Edelhanie | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| [G24-02-Body Fall on Dirt.wav](https://freesound.org/people/craigsmith/sounds/438301/) | craigsmith | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [S03-19 Body falls on dirt; grunts.wav](https://freesound.org/people/craigsmith/sounds/675923/) | craigsmith | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [Body fall in grass CLOSE.mp3](https://freesound.org/people/J.Zazvurek/sounds/73583/) | J.Zazvurek | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| [Dive into Dirt.wav](https://freesound.org/people/CalGre/sounds/467122/) | CalGre | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [Human jumping down to gravel w/ impact](https://freesound.org/people/DeqstersLab/sounds/819656/) | DeqstersLab | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [Urheilukilpailut, yleisurheilu, kannustava yleisö / Large, supportive crowd, sports competition, athletics, audience cheering and clapping rhytmically in the stadium, some horns](https://freesound.org/people/YleArkisto/sounds/316719/) | YleArkisto | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| [Crowd Cheer](https://freesound.org/people/FoolBoyMedia/sounds/397434/) | FoolBoyMedia | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [400 people applauding a theatre show](https://freesound.org/people/Sadiquecat/sounds/795933/) | Sadiquecat | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [concert crowd cheering](https://freesound.org/people/fxcv/sounds/645337/) | fxcv | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [bicycle braking on dirt road or gravel recorded with Sony PCM D100](https://freesound.org/people/Garuda1982/sounds/524276/) | Garuda1982 | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+| [Abrupt stopping on gravel road 2.wav](https://freesound.org/people/Vendarro/sounds/584323/) | Vendarro | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
+
+The menu chimes and the crowd's ooh and boo are made in code.
