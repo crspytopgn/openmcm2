@@ -15,13 +15,15 @@ the original game.
   want it on the menu? Turn it off in the launcher's Extras.
 * **Free graphics (the Free Pack):** a whole new set of art made for
   OpenMCM2: bikes and riders, a supercross stadium, 28 new tracks across
-  every event, skies, trees, vehicles and aircraft, with real engine sounds
-  for each class. It's all our own work or openly licensed, so it's free
+  every event, skies, trees, vehicles and aircraft. It's all our own work or openly licensed, so it's free
   for anyone. The launcher and the browser page now ask **MM2 graphics or
   free graphics?** and download the pack for you. Updates fetch only the
   parts that changed. Early days: without MM2 files, the free graphics
   open in the Course Builder for now. Full races and menus with the free
-  art are on the way.
+  art are on the way. The pack's own engine recordings (a different sound
+  for each class) arrive in a pack update soon: until then the free
+  graphics use the original game's sounds if you have it, and are silent
+  without it.
 * **Night races under stadium lights:** pick Night as the time of day and
   supercross stadiums are lit by their own lamp banks, with soft shadows
   from each bank (Enhanced switch "Stadium lights at night").
