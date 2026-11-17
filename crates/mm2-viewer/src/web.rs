@@ -39,6 +39,16 @@ extern "C" {
     fn js_track_loading(on: bool);
     #[wasm_bindgen(js_name = building)]
     fn js_building(on: bool);
+    /// The steps of effects this computer needs set aside (dynres), to
+    /// start with next time; a page without it is left alone.
+    #[wasm_bindgen(js_name = autoShed, catch)]
+    fn js_auto_shed(steps: u32) -> Result<(), JsValue>;
+}
+
+/// Tells the page how many steps of effects to set aside from the start
+/// next time (`shed=` with `quality=auto`).
+pub fn auto_shed(steps: u8) {
+    let _ = js_auto_shed(steps as u32);
 }
 
 /// Asks the browser for the GPU, and wakes the window once it answers.

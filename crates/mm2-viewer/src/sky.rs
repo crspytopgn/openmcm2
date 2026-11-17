@@ -139,7 +139,9 @@ impl SkyRenderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
                 depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::Always),
+                // Drawn after the solid scene (Renderer::render), at depth 1,
+                // only where nothing was: the same picture, shaded less.
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -189,7 +191,9 @@ impl SkyRenderer {
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
                     depth_write_enabled: Some(false),
-                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    // Drawn after the solid scene (Renderer::render), at depth 1,
+                // only where nothing was: the same picture, shaded less.
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),
@@ -220,7 +224,9 @@ impl SkyRenderer {
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
                     depth_write_enabled: Some(false),
-                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    // Drawn after the solid scene (Renderer::render), at depth 1,
+                // only where nothing was: the same picture, shaded less.
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),

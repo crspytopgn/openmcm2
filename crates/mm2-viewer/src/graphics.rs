@@ -121,6 +121,10 @@ pub struct Enhanced {
     /// Draws the scene smaller while frames come late, and back up once
     /// they keep time (crate::dynres): on with `quality=auto`.
     pub dynamic: bool,
+    /// The effects already set aside for this computer when the game
+    /// starts (`shed=N`, 0 to [`MOST_SHED`]): what a browser learned last
+    /// time it played, so it starts where it ends up anyway.
+    pub shed: u8,
 }
 
 /// The weather, for looks only.
@@ -178,6 +182,7 @@ impl Default for Enhanced {
             pixels: Some(QHD),
             scale: None,
             dynamic: false,
+            shed: 0,
         }
     }
 }
@@ -342,6 +347,13 @@ impl Enhanced {
                             _ => return Err(format!("resolution must be like 1920x1080, 1080p or native, not {r}")),
                         }
                     }
+                };
+                continue;
+            }
+            if let Some(n) = name.strip_prefix("shed=") {
+                e.shed = match n.parse::<u8>() {
+                    Ok(n) if n <= MOST_SHED => n,
+                    _ => return Err(format!("shed must be 0 to {MOST_SHED}, not {n}")),
                 };
                 continue;
             }
@@ -621,7 +633,58 @@ pub fn enhanced() -> Option<Enhanced> {
         e.time = time;
         e.weather = weather;
     }
+    if e.dynamic {
+        e = e.shed_to(SHED.load(Ordering::Relaxed).max(e.shed));
+    }
     Some(e)
+}
+
+/// The most steps of effects [`Enhanced::shed_to`] sets aside.
+pub const MOST_SHED: u8 = 3;
+
+/// Steps of effects set aside while racing, when even the smallest scene
+/// dynamic resolution draws comes late (crate::dynres): none at first.
+static SHED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// The steps of effects set aside now (at least the starting `shed=`).
+pub fn shed() -> u8 {
+    let start = ENHANCED.read().unwrap().map_or(0, |e| e.shed);
+    SHED.load(Ordering::Relaxed).max(start)
+}
+
+/// Sets aside `n` steps of effects, from the next frame on.
+pub fn set_shed(n: u8) {
+    SHED.store(n.min(MOST_SHED), Ordering::Relaxed);
+}
+
+impl Enhanced {
+    /// Without the costliest effects, `n` steps of them, dearest for the
+    /// least seen first: 1 the soft shadow edges, smooth hills, horizon
+    /// occlusion, reflections and light shafts (about Medium); 2 also the
+    /// grass, occlusion and contact shadows (about Low); 3 also the sun's
+    /// shadows and the dust clouds. Only turned off, never on, so nothing
+    /// is needed that was not made when the race loaded; and the
+    /// anti-aliasing and the scene's size are left to dynamic resolution.
+    pub fn shed_to(mut self, n: u8) -> Enhanced {
+        if n >= 1 {
+            self.soft_shadows = false;
+            self.smooth = false;
+            self.gtao = false;
+            self.ssr = false;
+            self.shafts = false;
+            self.cinematic = false;
+        }
+        if n >= 2 {
+            self.grass = false;
+            self.ao = false;
+            self.contact = false;
+        }
+        if n >= 3 {
+            self.shadows = false;
+            self.dust = false;
+        }
+        self
+    }
 }
 
 /// The upgrades as they show now: none while F3 has switched to the
