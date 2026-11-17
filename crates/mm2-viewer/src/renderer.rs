@@ -339,7 +339,12 @@ impl TerrainRenderer {
             }
         }
         let images = textures;
-        let textures = upload_textures(device, queue, images);
+        // The same picture once, and four to a layer past what the GPU
+        // takes (a browser may take only 256).
+        // (MM2_MAX_LAYERS=256 tries a browser's limit on a desktop.)
+        let most = std::env::var("MM2_MAX_LAYERS").ok().and_then(|n| n.parse().ok()).unwrap_or(u32::MAX);
+        let fitted = fit_layers(images, &mut tile_map, device.limits().max_texture_array_layers.min(most));
+        let textures = upload_textures(device, queue, &fitted);
         let tile_map = device.create_texture_with_data(
             queue,
             &wgpu::TextureDescriptor {
@@ -985,7 +990,18 @@ impl TerrainRenderer {
         let aspect = width as f32 / height.max(1) as f32;
         // The size the enhanced scene is drawn at, before it is stretched
         // over the screen.
-        let scene = showing.map_or((width, height), |e| e.scene_size((width, height)));
+        let scene = showing.map_or((width, height), |e| {
+            let size = e.scene_size((width, height));
+            if !e.dynamic {
+                return size;
+            }
+            // Dynamic resolution: smaller while frames come late, bigger
+            // (up to the screen's own) while they keep time.
+            // (Not past the preset's in a browser: Enhanced::for_browser.)
+            let room = if cfg!(target_arch = "wasm32") { 1.0 } else { width as f32 / size.0.max(1) as f32 };
+            crate::dynres::set_room(room);
+            crate::dynres::scaled(size, (width, height))
+        });
         let (start, end) = self.fog_range;
         // The enhanced haze: half as thick as the game's fog at its end,
         // and the view reaching on till it has all but hidden the land.
@@ -1789,6 +1805,111 @@ fn upload_textures(
     texture
 }
 
+/// A tile map value for a tile in a layer of four ([`fit_layers`]): the
+/// top bit set, the quarter in the next two, the layer in the rest.
+pub const PACKED: u16 = 0x8000;
+
+/// The terrain textures to upload for the tiles in `tile_map`, which is
+/// changed to match: each picture once (some tracks repeat the same one
+/// under many names), and when there are still more than the GPU takes
+/// in one array, four to a layer twice the size, each in a quarter
+/// ([`PACKED`]; the shaders' `tile_layer`). A layer of four blurs into its
+/// neighbours a little in the farthest mips, so it is only for those.
+pub fn fit_layers(images: &[Image], tile_map: &mut [u16], most: u32) -> Vec<Image> {
+    use std::collections::HashMap;
+    let mut seen: HashMap<(u32, &[u8]), u16> = HashMap::new();
+    let mut unique: Vec<Image> = Vec::new();
+    let mut remap = vec![0xffffu16; images.len()];
+    for (i, img) in images.iter().enumerate() {
+        let Some(top) = img.levels.first() else { continue };
+        remap[i] = *seen.entry((img.size, &top[..])).or_insert_with(|| {
+            unique.push(img.clone());
+            (unique.len() - 1) as u16
+        });
+    }
+    for t in tile_map.iter_mut() {
+        if let Some(&n) = remap.get(*t as usize) {
+            *t = n;
+        }
+    }
+    let size = unique.iter().map(|t| t.size).max().unwrap_or(1);
+    if array_layers(unique.len().max(1) as u32, size, size) <= most {
+        return unique;
+    }
+    eprintln!("{} terrain textures, more than the {most} this GPU takes in one array: four to a layer", unique.len());
+    let fits = (most.saturating_sub(1).min(0x1fff) * 4) as usize;
+    if unique.len() > fits {
+        eprintln!("{} terrain textures still left out", unique.len() - fits);
+    }
+    // Every tile at the full size with its mips, as a box filter makes them.
+    let full = |img: &Image| -> Vec<Vec<u8>> {
+        if img.size == size {
+            return img.levels.clone();
+        }
+        let k = (size / img.size.max(1)) as usize;
+        let (from, side) = (&img.levels[0], img.size as usize);
+        let mut top = vec![0u8; (size * size * 4) as usize];
+        for y in 0..size as usize {
+            for x in 0..size as usize {
+                let at = ((y / k) * side + x / k) * 4;
+                top[(y * size as usize + x) * 4..][..4].copy_from_slice(&from[at..at + 4]);
+            }
+        }
+        let mut levels = vec![top];
+        while (size >> (levels.len() - 1)) > 1 {
+            let side = (size >> (levels.len() - 1)) as usize;
+            levels.push(box_half(levels.last().unwrap(), side));
+        }
+        levels
+    };
+    let mut packed = Vec::new();
+    for four in unique[..unique.len().min(fits)].chunks(4) {
+        let quarters: Vec<Vec<Vec<u8>>> = four.iter().map(full).collect();
+        let big = size * 2;
+        let mut levels = Vec::new();
+        for level in 0..quarters[0].len() {
+            let side = (size >> level).max(1) as usize;
+            let row = side * 2;
+            let mut out = vec![0u8; row * row * 4];
+            for (q, tile) in quarters.iter().enumerate() {
+                let (qx, qy) = ((q & 1) * side, (q >> 1) * side);
+                for y in 0..side {
+                    let to = ((qy + y) * row + qx) * 4;
+                    out[to..to + side * 4].copy_from_slice(&tile[level][y * side * 4..(y + 1) * side * 4]);
+                }
+            }
+            levels.push(out);
+        }
+        // The one more mip a layer twice the size has.
+        let last = levels.last().unwrap().clone();
+        levels.push(box_half(&last, 2));
+        packed.push(Image { size: big, levels });
+    }
+    for t in tile_map.iter_mut() {
+        if *t == 0xffff {
+            continue;
+        }
+        let n = *t as usize;
+        *t = if n < fits { PACKED | (((n % 4) as u16) << 13) | (n / 4) as u16 } else { 0xffff };
+    }
+    packed
+}
+
+/// An RGBA8 image `side` square halved by a box filter.
+fn box_half(level: &[u8], side: usize) -> Vec<u8> {
+    let half = (side / 2).max(1);
+    let mut out = vec![0u8; half * half * 4];
+    for y in 0..half {
+        for x in 0..half {
+            for c in 0..4 {
+                let at = |dx: usize, dy: usize| level[(((2 * y + dy).min(side - 1)) * side + (2 * x + dx).min(side - 1)) * 4 + c] as u32;
+                out[(y * half + x) * 4 + c] = ((at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1) + 2) / 4) as u8;
+            }
+        }
+    }
+    out
+}
+
 /// The layer count to give a 2D array texture of `layers` images,
 /// `width` by `height`. wgpu's OpenGL backend takes any square array
 /// whose layer count is a multiple of six for a cube map (or cube map
@@ -1848,5 +1969,47 @@ pub fn start_camera(terrain: &Terrain) -> crate::camera::Camera {
         pitch: -0.45,
         fov: crate::camera::FOV,
         roll: 0.0,
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    fn image(size: u32, shade: u8) -> Image {
+        let mut levels = Vec::new();
+        let mut side = size;
+        loop {
+            levels.push(vec![shade; (side * side * 4) as usize]);
+            if side == 1 {
+                break;
+            }
+            side /= 2;
+        }
+        Image { size, levels }
+    }
+
+    #[test]
+    fn the_same_picture_is_uploaded_once() {
+        let images: Vec<Image> = (0..6).map(|i| image(8, (i % 2) as u8)).collect();
+        let mut map = vec![0, 1, 2, 3, 4, 5, 0xffff];
+        let out = fit_layers(&images, &mut map, 256);
+        assert_eq!(out.len(), 2);
+        assert_eq!(map, [0, 1, 0, 1, 0, 1, 0xffff]);
+    }
+
+    #[test]
+    fn too_many_go_four_to_a_layer() {
+        let images: Vec<Image> = (0..10).map(|i| image(8, i as u8)).collect();
+        let mut map: Vec<u16> = (0..10).collect();
+        let out = fit_layers(&images, &mut map, 4);
+        assert_eq!(out.len(), 3);
+        assert!(out.iter().all(|i| i.size == 16 && i.levels.len() == 5));
+        // Tile 5 is the second quarter of the second layer.
+        assert_eq!(map[5], PACKED | (1 << 13) | 1);
+        // Its texels sit in the top right quarter of that layer.
+        let top = &out[1].levels[0];
+        assert_eq!(top[(0 * 16 + 8) * 4], 5);
+        assert_eq!(top[(8 * 16 + 0) * 4], 6);
     }
 }

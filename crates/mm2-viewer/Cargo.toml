@@ -16,6 +16,8 @@ mm2-indeo = { version = "0.5.5", path = "../mm2-indeo" }
 mm2-physics = { version = "0.5.5", path = "../mm2-physics" }
 mm2-settings = { version = "0.5.5", path = "../mm2-settings" }
 png = "0.18.1"
+# The built-in photo materials (assets/ground), lossless WebP.
+image-webp = "0.2"
 pollster = "1.0.1"
 wgpu = "30.0.1"
 winit = "0.30"
