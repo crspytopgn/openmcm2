@@ -20,7 +20,8 @@ it much better sound.
   the original game nothing goes missing in a race: HUD labels, rider
   names and messages, the speedo, radar and score panel, dirt roost and
   ground detail are all there, and each bike class rides with its own
-  engine instead of every bike riding as a 250.
+  engine instead of every bike riding as a 250. The free bikes and the
+  pack's bales and walls are solid, so you no longer ride through them.
 * **Living courses:** the Course Builder can now plant trees and
   bushes, run rivers and streams through your track (ride through them
   for a splash), and send aircraft flying overhead.
