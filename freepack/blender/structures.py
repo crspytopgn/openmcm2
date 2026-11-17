@@ -1273,12 +1273,32 @@ def b_truckbed(lo, hi, name):
     for x in (lo.x + 0.6, hi.x - 0.6): cyl(V((x - 0.5, c.y + 1, z0 + r)), V((x + 0.5, c.y + 1, z0 + r)), r, tyre_mat(), 20)
     cyl(V((c.x, lo.y, z0 + r * 1.1)), V((c.x, lo.y + 3, z0 + r * 1.2)), 0.15, steel(), 8)
 
+def marker_mat(name, rgb):
+    """A race marker's paint: a little glow so it reads in shade, kept well
+    under white so the bloom leaves it alone (the engine also holds the
+    markers' glow down, freepack::MARKERS)."""
+    m = flat(name, rgb, 0.35); b = m.node_tree.nodes["Principled BSDF"]
+    b.inputs["Emission Color"].default_value = (*rgb, 1); b.inputs["Emission Strength"].default_value = 0.3; return m
+
+def gem(lo, hi, m, sides=8, girdle=0.7, table=0.55):
+    """A cut gem pointing down: tip at the bottom, an even girdle ring
+    `girdle` of the way up, a flat table at the top; flat shaded."""
+    c = (lo + hi) / 2; r = min(hi.x - lo.x, hi.y - lo.y) / 2; z0, z1 = lo.z, hi.z; zg = z0 + (z1 - z0) * girdle
+    ring = lambda rr, z, off=0.0: [V((c.x + rr * math.cos(2 * math.pi * (k + off) / sides), c.y + rr * math.sin(2 * math.pi * (k + off) / sides), z)) for k in range(sides)]
+    vs = [V((c.x, c.y, z0))] + ring(r, zg) + ring(r * table, z1, 0.5)
+    g = lambda k: 1 + k % sides; t = lambda k: 1 + sides + k % sides
+    fs = [[0, g(k + 1), g(k)] for k in range(sides)]
+    fs += [[g(k), g(k + 1), t(k)] for k in range(sides)] + [[t(k - 1), g(k), t(k)] for k in range(sides)]
+    fs += [[t(k) for k in range(sides)]]
+    return mesh("gem", vs, fs, m)
+
 def b_marker(lo, hi, name):
-    """Race HUD markers (countdown numbers, 'you'/'it' arrows): solid glowing shapes."""
+    """Race HUD markers (countdown numbers, the 'you' and 'it' signs, the
+    runway pointer): clean solid shapes in matt paint with a soft glow."""
     txt = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "x": "X", "decimalpoint": "."}.get(name)
-    m = emit(f"marker_{name}", (1.0, 0.82, 0.12) if name not in ("itind",) else (0.95, 0.2, 0.15))
     c = (lo + hi) / 2; W, D, H = hi - lo; H = max(H, 0.05)
     if txt:
+        m = marker_mat(f"marker_{name}", (1.0, 0.82, 0.12))
         cu = bpy.data.curves.new(name, "FONT"); cu.body = txt; cu.extrude = 0.08; cu.align_x = "CENTER"; cu.align_y = "CENTER"
         cu.font = bpy.data.fonts.load("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
         o = bpy.data.objects.new(name, cu); bpy.context.scene.collection.objects.link(o); o.rotation_euler.x = math.pi / 2
@@ -1286,14 +1306,26 @@ def b_marker(lo, hi, name):
         bpy.ops.object.transform_apply(rotation=True); k = H / max(o.dimensions.z, 1e-3); o.scale = (k, k, k); bpy.ops.object.transform_apply(scale=True)
         vs = [v.co for v in o.data.vertices]; a = V(map(min, *vs)); b = V(map(max, *vs)); o.data.transform(Matrix.Translation(c - (a + b) / 2))
         o.data.materials.clear(); o.data.materials.append(m); return
-    # arrows pointing down (indicators) or along their long side (pointer)
-    if name == "pointer":
-        prism([(lo.y, c.z - H * 0.15), (lo.y + D * 0.65, c.z - H * 0.15), (lo.y + D * 0.65, lo.z), (hi.y, c.z), (lo.y + D * 0.65, hi.z), (lo.y + D * 0.65, c.z + H * 0.15), (lo.y, c.z + H * 0.15)], c.x - 0.1, c.x + 0.1, m, axis="y" if False else "x")
+    if name == "youind":
+        # The player's own sign: a red cut gem, point down, as the game's
+        # red diamond over the bike.
+        gem(lo, hi, marker_mat("marker_youind", (0.72, 0.06, 0.05)))
         return
-    w = max(W, D) / 2
-    for ang in (0, math.pi / 2):
-        o = prism([(-w * 0.35, lo.z + H * 0.45), (-w * 0.35, hi.z), (w * 0.35, hi.z), (w * 0.35, lo.z + H * 0.45), (w, lo.z + H * 0.45), (0, lo.z), (-w, lo.z + H * 0.45)], -0.04, 0.04, m, axis="y")
-        o.location = (c.x, c.y, 0); o.rotation_euler.z = ang
+    if name == "itind":
+        # Moto-Tag's IT sign: a flat chevron pointing down, bevelled.
+        m = marker_mat("marker_itind", (0.95, 0.55, 0.06)); w = W / 2; t = max(D, 0.12) / 2
+        o = prism([(-w, hi.z), (0, lo.z + H * 0.42), (w, hi.z), (w, hi.z - H * 0.3), (0, lo.z), (-w, hi.z - H * 0.3)], c.y - t, c.y + t, m, axis="y")
+        o.location.x = c.x; bev = o.modifiers.new("bevel", "BEVEL"); bev.width = t * 0.45; bev.segments = 2
+        return
+    m = marker_mat(f"marker_{name}", (1.0, 0.82, 0.12))
+    if name == "pointer":
+        # The runway pointer back to the course: one solid arrow along its
+        # long side, bevelled.
+        t = min(W, 0.2) / 2
+        o = prism([(lo.y, c.z - H * 0.15), (lo.y + D * 0.65, c.z - H * 0.15), (lo.y + D * 0.65, lo.z), (hi.y, c.z), (lo.y + D * 0.65, hi.z), (lo.y + D * 0.65, c.z + H * 0.15), (lo.y, c.z + H * 0.15)], c.x - t, c.x + t, m, axis="x")
+        bev = o.modifiers.new("bevel", "BEVEL"); bev.width = t * 0.4; bev.segments = 2
+        return
+    gem(lo, hi, m)
 
 STRUCT = [
     (r"^farmhouse$", b_farmhouse), (r"^garage0\d$", b_garage), (r"^gasstation$", b_gasstation), (r"^hanger$", b_hangar),
