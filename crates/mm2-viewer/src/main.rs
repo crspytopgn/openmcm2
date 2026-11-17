@@ -85,6 +85,7 @@ mod countdown;
 mod cues;
 mod reverb;
 mod freepack;
+mod free_tracks;
 mod menu_link;
 mod frontend;
 #[cfg(target_arch = "wasm32")]
@@ -1718,6 +1719,8 @@ fn load_track(
 ) -> Result<Track, BoxError> {
     let ride = rides.get(me).cloned().flatten();
     load_step();
+    // A Free Pack track is built from its recipe the first time.
+    free_tracks::ensure(path)?;
     let track_bytes = read_archive(path)?;
     let archive = rs2::Archive::parse(&track_bytes)?;
     let find = |ext: &str| {

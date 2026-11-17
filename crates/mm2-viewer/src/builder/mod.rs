@@ -36,8 +36,22 @@ pub fn take_open() -> bool {
 /// The tracks in the game folder's TERAFORM, by file, when there are no
 /// menus to list them.
 pub fn tracks_in_folder() -> Vec<GameTrack> {
-    let Some(game) = GAME.get().cloned().flatten() else { return Vec::new() };
+    let game = GAME.get().cloned().flatten();
     let mut out = Vec::new();
+    // The Free Pack's tracks, built from their recipes when first copied.
+    let teraform = crate::free_tracks::home(game.as_deref());
+    for mode in Mode::ALL {
+        for (path, def) in crate::free_tracks::listed(&teraform, mode.folder()) {
+            let courses = crate::free_tracks::courses(def);
+            if courses.is_empty() {
+                out.push(GameTrack { mode, name: def.name.to_string(), path: path.clone(), course: 0 });
+            }
+            for (course, name) in courses.into_iter().enumerate() {
+                out.push(GameTrack { mode, name, path: path.clone(), course });
+            }
+        }
+    }
+    let Some(game) = game else { return out };
     for mode in Mode::ALL {
         let dir = game.join("TERAFORM").join(mode.folder());
         let Ok(list) = std::fs::read_dir(&dir) else { continue };
@@ -49,6 +63,9 @@ pub fn tracks_in_folder() -> Vec<GameTrack> {
         files.sort();
         for path in files {
             let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            if crate::free_tracks::listed(&teraform, mode.folder()).iter().any(|(p, _)| *p == path) {
+                continue;
+            }
             out.push(GameTrack { mode, name, path, course: 0 });
         }
     }
@@ -1971,6 +1988,7 @@ fn load_file(path: &Path) -> Option<Course> {
     };
     // A copy reads its track again.
     if let Some(base) = c.base.clone() {
+        let _ = crate::free_tracks::ensure(Path::new(&base.file));
         let bytes = crate::fs::read(&base.file).map_err(|e| eprintln!("{}: {e}", base.file)).ok()?;
         mm2_course::copy::attach(&mut c, &bytes).map_err(|e| eprintln!("{}: {e}", base.file)).ok()?;
     }
@@ -1979,6 +1997,7 @@ fn load_file(path: &Path) -> Option<Course> {
 
 /// A copy of the track at `path` (its `course`th course) to change.
 fn copy_of(path: &Path, mode: Mode, course: usize, name: &str) -> Result<Course, String> {
+    crate::free_tracks::ensure(path)?;
     let bytes = crate::fs::read(path).map_err(|e| e.to_string())?;
     mm2_course::copy::import(&bytes, &path.to_string_lossy(), Some(mode), course, &format!("{name} copy"))
 }

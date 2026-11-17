@@ -30,7 +30,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    fn folder(self) -> &'static str {
+    pub fn folder(self) -> &'static str {
         match self {
             Kind::National => "NATIONAL",
             Kind::Supercross => "SX",
@@ -2203,7 +2203,7 @@ fn open_country(def: &Def) -> Made {
     Made { land, courses, lap_lines: None, start, models, keep: vec![(camp, 80.0)], podium: None, infield: None }
 }
 
-fn race_names(def: &Def) -> Vec<String> {
+pub fn race_names(def: &Def) -> Vec<String> {
     let parts: [&str; 3] = match def.kind {
         Kind::Baja => ["Short Run", "Long Haul", "Outer Loop"],
         _ => ["Trail One", "Trail Two", "The Big Loop"],
