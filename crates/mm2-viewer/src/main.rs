@@ -88,6 +88,7 @@ mod countdown;
 mod cues;
 mod reverb;
 mod freepack;
+mod freshen;
 mod free_tracks;
 mod menu_link;
 mod frontend;
