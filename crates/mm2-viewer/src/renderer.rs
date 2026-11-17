@@ -165,6 +165,12 @@ pub struct TerrainRenderer {
     desert: bool,
     /// A stadium track (Supercross).
     stadium: bool,
+    /// The scene's own sky box, shrunk, for the sky's light all round
+    /// (crate::ibl); none for a stadium.
+    env_painted: Option<crate::ibl::Source>,
+    /// What the sky's light was last baked from and for, its harmonics,
+    /// and its roughest level.
+    env_baked: Option<(bool, crate::ibl::Light, [[f32; 4]; 9])>,
     /// In a replay, the distance (ft) to the rider the camera follows: the
     /// enhanced drawing then blurs what is out of focus and what the
     /// camera swings past.
@@ -667,6 +673,8 @@ impl TerrainRenderer {
             shadowless: (Vec::new(), true),
             desert: false,
             stadium: false,
+            env_painted: None,
+            env_baked: None,
             cinematic: None,
             last_view_proj: None,
             taa_frame: 0,
@@ -736,6 +744,8 @@ impl TerrainRenderer {
         images: &crate::hires::SkyImages,
         _format: wgpu::TextureFormat,
     ) {
+        self.env_painted = Some(crate::ibl::shrink(images.side, &images.faces, 64));
+        self.env_baked = None;
         self.sky = Some(crate::sky::SkyRenderer::new(
             device,
             queue,
@@ -1156,6 +1166,34 @@ impl TerrainRenderer {
                 }
             }
         }
+        // The sky's light all round, baked again when the light changes.
+        if let (Some(e), Some(on), Some(d)) = (self.enhanced.as_mut(), showing, day.as_ref()) {
+            if on.pbr {
+                let painted = !real_sky && self.sky.is_some() && self.env_painted.is_some();
+                let light = crate::ibl::Light {
+                    to_sun: lights.to_sun,
+                    sun: Vec3::from(lights.sun),
+                    ambient: Vec3::from(lights.ambient),
+                    zenith: d.zenith,
+                    horizon: d.horizon,
+                    fog: Vec3::from(self.fog),
+                    cover: d.cover,
+                    night: d.night,
+                };
+                let fresh = self.env_baked.as_ref().is_some_and(|(p, l, _)| *p == painted && l.near(&light));
+                if !fresh {
+                    let source = match (&self.env_painted, painted, self.sky.is_some()) {
+                        (Some(s), true, _) => s.clone(),
+                        (_, _, true) => crate::ibl::Source::Real,
+                        _ => crate::ibl::Source::Indoors,
+                    };
+                    let baked = crate::ibl::bake(&source, &light, crate::ibl::SIDE);
+                    let view = crate::ibl::upload(device, queue, &baked);
+                    e.shared.set_env(device, view, e.rt.as_ref());
+                    self.env_baked = Some((painted, light, baked.sh));
+                }
+            }
+        }
         if let (Some(e), Some(on)) = (&self.enhanced, showing) {
             let flag = |b: bool| b as u32 as f32;
             let (h_start, density, _) = haze.unwrap_or((0.0, 0.0, far));
@@ -1230,6 +1268,11 @@ impl TerrainRenderer {
                 stadium_texels: night_lamps.as_ref().map_or([1.0; 4], |n| [n.texels[0], n.texels[1], n.texels[2], flag(n.listed)]),
                 stadium_lamps: night_lamps.as_ref().map_or([[0.0; 4]; crate::night::MOST_LAMPS], |n| n.uniform().0),
                 stadium_ways: night_lamps.as_ref().map_or([[0.0; 4]; crate::night::MOST_LAMPS], |n| n.uniform().1),
+                ibl: match (&self.env_baked, on.pbr) {
+                    (Some(_), true) => [1.0, (crate::ibl::LEVELS - 1) as f32, GAME_SKY_LIGHT, 0.0],
+                    _ => [0.0; 4],
+                },
+                sh: self.env_baked.as_ref().map_or([[0.0; 4]; 9], |b| b.2),
             };
             queue.write_buffer(&e.shared.buffer, 0, bytemuck::bytes_of(&enh));
         }
@@ -1990,6 +2033,11 @@ const NIGHT_SKY: wgpu::Color = wgpu::Color { r: 0.006, g: 0.008, b: 0.016, a: 1.
 
 /// How strongly the ray-traced light shafts show (crate::rt).
 const SHAFT_STRENGTH: f32 = 0.6;
+
+/// How much of the sky's light all round (crate::ibl) the game's own
+/// models take in place of their old even ambient, 0 to 1: gently, so
+/// they keep their look.
+const GAME_SKY_LIGHT: f32 = 0.5;
 
 pub fn from_game(v: Vec3) -> Vec3 {
     Vec3::new(v.x, v.y, -v.z)

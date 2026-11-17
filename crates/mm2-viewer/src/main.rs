@@ -51,6 +51,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod addons;
+mod ibl;
 mod pace;
 mod dynres;
 mod bars;

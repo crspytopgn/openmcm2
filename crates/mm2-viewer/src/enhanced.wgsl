@@ -70,4 +70,10 @@ struct Enh {
     // 10 times its shadow group.
     stadium_lamps: array<vec4<f32>, 24>,
     stadium_ways: array<vec4<f32>, 24>,
+    // The sky's light all round (ibl.rs): x whether the physically based
+    // materials take it, y the cube's roughest level, z how much of it the
+    // game's own models take.
+    ibl: vec4<f32>,
+    // Its irradiance as harmonics, for the polynomials in irradiance().
+    sh: array<vec4<f32>, 9>,
 };

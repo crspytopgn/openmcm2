@@ -83,6 +83,9 @@ pub struct Enhanced {
     /// The sky's light baked over the land once a race: dimmer in dips,
     /// under banks and between hills.
     pub skylight: bool,
+    /// Physically based materials (the free pack's) and the sky's light
+    /// all round (crate::ibl) on every model.
+    pub pbr: bool,
     /// The sun's shadows traced as rays through the scene, in place of
     /// the shadow maps, and reflections in wet ground and glossy paint,
     /// where the GPU can (crate::rt); off unless asked.
@@ -152,6 +155,7 @@ impl Default for Enhanced {
             contact: true,
             ssr: true,
             skylight: true,
+            pbr: true,
             raytracing: false,
             taa: false,
             mud_start: 0.0,
@@ -364,12 +368,13 @@ impl Enhanced {
                 "contact" | "contact-shadows" => e.contact = on,
                 "ssr" | "reflections" => e.ssr = on,
                 "skylight" | "sky-light" => e.skylight = on,
+                "pbr" => e.pbr = on,
                 "raytracing" | "rt" => e.raytracing = on,
                 "taa" | "temporal" => e.taa = on,
                 "dynamic" | "dynamic-resolution" => e.dynamic = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-dynamic, raytracing, taa, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra, resolution=1080p or 85%, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-dynamic, raytracing, taa, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra, resolution=1080p or 85%, weather=rain or time=dusk"
                     ))
                 }
             }

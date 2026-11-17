@@ -5,13 +5,15 @@
 //! positions, normals and one set of texture coordinates, placed by the
 //! node tree, and each material's base colour (a factor, and a PNG or JPEG
 //! texture stored in the file, or in a file beside it that several models
-//! share). Everything is baked into one frame.
+//! share) with the rest of its metallic-roughness look (normal, metal and
+//! roughness, occlusion and emissive pictures and factors). Everything is
+//! baked into one frame.
 //!
 //! glTF is right-handed with +Y up; the game's axes are (x, y, -z), so z is
 //! mirrored and the windings turned to match. Units stay as authored (the
 //! free pack works in feet, like the game).
 
-use crate::slb::{Frame, Lod, Material, Model, Surface};
+use crate::slb::{Frame, Lod, Material, Model, Pbr, Surface};
 use crate::{Error, Result};
 use serde_json::Value;
 
@@ -110,18 +112,38 @@ fn read(data: &[u8], prefix: &str, names: Option<&[&str]>) -> Result<(Model, Vec
         }
         named.push(name);
     }
-    // Each glTF material: its texture's name and its colour (BGRA).
-    let materials: Vec<(String, [u8; 4])> = arr(&gltf["materials"])
+    // A texture reference's picture name, if it has one.
+    let picture = |info: &Value| {
+        info["index"]
+            .as_u64()
+            .and_then(|t| gltf["textures"][t as usize]["source"].as_u64())
+            .and_then(|i| named.get(i as usize).cloned().flatten())
+    };
+    let number = |v: &Value, default: f32| v.as_f64().map_or(default, |v| v as f32);
+    // Each glTF material: its texture's name, its colour (BGRA) and the
+    // rest of its physically based look.
+    let materials: Vec<(String, [u8; 4], Pbr)> = arr(&gltf["materials"])
         .iter()
         .map(|m| {
             let pbr = &m["pbrMetallicRoughness"];
-            let image = pbr["baseColorTexture"]["index"]
-                .as_u64()
-                .and_then(|t| gltf["textures"][t as usize]["source"].as_u64())
-                .and_then(|i| named.get(i as usize).cloned().flatten());
+            let image = picture(&pbr["baseColorTexture"]);
             let f: Vec<f32> = arr(&pbr["baseColorFactor"]).iter().filter_map(|v| v.as_f64()).map(|v| v as f32).collect();
             let c = |k: usize| (srgb(f.get(k).copied().unwrap_or(1.0)) * 255.0).round().clamp(0.0, 255.0) as u8;
-            (image.unwrap_or_default(), [c(2), c(1), c(0), 255])
+            let e: Vec<f32> = arr(&m["emissiveFactor"]).iter().filter_map(|v| v.as_f64()).map(|v| v as f32).collect();
+            let strength = number(&m["extensions"]["KHR_materials_emissive_strength"]["emissiveStrength"], 1.0);
+            let look = Pbr {
+                normal: picture(&m["normalTexture"]).unwrap_or_default(),
+                metal_rough: picture(&pbr["metallicRoughnessTexture"]).unwrap_or_default(),
+                occlusion: picture(&m["occlusionTexture"]).unwrap_or_default(),
+                emissive: picture(&m["emissiveTexture"]).unwrap_or_default(),
+                metallic: number(&pbr["metallicFactor"], 1.0).clamp(0.0, 1.0),
+                roughness: number(&pbr["roughnessFactor"], 1.0).clamp(0.0, 1.0),
+                normal_scale: number(&m["normalTexture"]["scale"], 1.0),
+                occlusion_strength: number(&m["occlusionTexture"]["strength"], 1.0).clamp(0.0, 1.0),
+                emissive_factor: [0, 1, 2].map(|k| e.get(k).copied().unwrap_or(0.0) * strength),
+                specular: number(&m["extensions"]["KHR_materials_specular"]["specularFactor"], 1.0).clamp(0.0, 1.0),
+            };
+            (image.unwrap_or_default(), [c(2), c(1), c(0), 255], look)
         })
         .collect();
 
@@ -135,11 +157,11 @@ fn read(data: &[u8], prefix: &str, names: Option<&[&str]>) -> Result<(Model, Vec
     };
     let mut model = Model {
         frames,
-        materials: materials.iter().map(|(t, _)| Material { texture: t.clone() }).collect(),
+        materials: materials.iter().map(|(t, _, look)| Material { texture: t.clone(), pbr: Some(look.clone()) }).collect(),
         lods: vec![Lod { surfaces: Vec::new() }],
     };
     if model.materials.is_empty() {
-        model.materials.push(Material { texture: String::new() });
+        model.materials.push(Material { texture: String::new(), pbr: None });
     }
     let scene = gltf["scene"].as_u64().unwrap_or(0) as usize;
     let roots: Vec<usize> = match gltf["scenes"][scene]["nodes"].as_array() {
@@ -359,7 +381,7 @@ impl Doc<'_> {
 
     /// One triangle primitive, placed by `world` and turned into game
     /// axes. Faces are u32 here; [`split`] makes them fit.
-    fn primitive(&self, prim: &Value, world: &[f32; 16], materials: &[(String, [u8; 4])]) -> Result<Option<Big>> {
+    fn primitive(&self, prim: &Value, world: &[f32; 16], materials: &[(String, [u8; 4], Pbr)]) -> Result<Option<Big>> {
         if prim["mode"].as_u64().unwrap_or(4) != 4 {
             return Ok(None);
         }
@@ -528,6 +550,12 @@ mod tests {
 
     /// A one-triangle glb, moved up 2 and back 3 by its node.
     fn triangle() -> Vec<u8> {
+        with_material(r#"{"pbrMetallicRoughness":{"baseColorFactor":[1,0,0,1]}}"#, "")
+    }
+
+    /// The triangle with `material` as its one material and `images` (a
+    /// JSON list's insides) beside it.
+    fn with_material(material: &str, extra: &str) -> Vec<u8> {
         let mut bin = Vec::new();
         for v in [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0] {
             bin.extend_from_slice(&v.to_le_bytes());
@@ -538,11 +566,12 @@ mod tests {
         let json = r#"{"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],
             "nodes":[{"name":"Wheel","mesh":0,"translation":[0,2,-3]}],
             "meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1,"material":0}]}],
-            "materials":[{"pbrMetallicRoughness":{"baseColorFactor":[1,0,0,1]}}],
+            "materials":[MATERIAL],EXTRA
             "buffers":[{"byteLength":44}],
             "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":6}],
             "accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},
                          {"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}]}"#;
+        let json = json.replace("MATERIAL", material).replace("EXTRA", extra);
         let mut json = json.as_bytes().to_vec();
         while json.len() % 4 != 0 {
             json.push(b' ');
@@ -584,5 +613,29 @@ mod tests {
         // The vertices stay in model space, as the game's models have them.
         assert_eq!(s.positions[0], [0.0, 2.0, 3.0]);
         assert_eq!(material_names(&triangle()).unwrap(), vec![String::new()]);
+    }
+
+    #[test]
+    fn reads_the_physically_based_look() {
+        let glb = with_material(
+            r#"{"pbrMetallicRoughness":{"baseColorTexture":{"index":0},"metallicRoughnessTexture":{"index":1},"roughnessFactor":0.5},
+                "normalTexture":{"index":2,"scale":0.8},"occlusionTexture":{"index":1},"emissiveFactor":[1,0.5,0],
+                "extensions":{"KHR_materials_specular":{"specularFactor":0.5}}}"#,
+            r#""images":[{"uri":"textures/paint.png"},{"uri":"textures/orm.png"},{"uri":"textures/normal.png"}],
+               "textures":[{"source":0},{"source":1},{"source":2}],"#,
+        );
+        let (model, images) = parse(&glb, "fp:t:").unwrap();
+        assert_eq!(images.len(), 3);
+        let m = &model.materials[0];
+        assert_eq!(m.texture, "fp:file:paint.png");
+        let pbr = m.pbr.as_ref().unwrap();
+        assert_eq!(pbr.normal, "fp:file:normal.png");
+        assert_eq!(pbr.metal_rough, "fp:file:orm.png");
+        assert_eq!(pbr.occlusion, "fp:file:orm.png");
+        assert_eq!(pbr.emissive, "");
+        // glTF's defaults where a factor isn't given.
+        assert_eq!((pbr.metallic, pbr.roughness), (1.0, 0.5));
+        assert_eq!((pbr.normal_scale, pbr.occlusion_strength, pbr.specular), (0.8, 1.0, 0.5));
+        assert_eq!(pbr.emissive_factor, [1.0, 0.5, 0.0]);
     }
 }

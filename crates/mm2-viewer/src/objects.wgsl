@@ -324,6 +324,26 @@ fn fs_motion(in: MotionOut) -> @location(0) vec4<f32> {
 // How brightly a back-lit banner glows at night, by its own colours.
 const BACKLIT: f32 = 0.9;
 
+// A physically based material's other pictures (objects.rs; flat or white
+// where it has none), and its factors as glTF gives them: x metal, y
+// roughness, z the normal map's strength, w the occlusion's; emit rgb
+// its glow, w its specular; maps x 1 for such a material, y it has a
+// normal map, z a metal and roughness map, w an occlusion map.
+struct Look {
+    pbr: vec4<f32>,
+    emit: vec4<f32>,
+    maps: vec4<f32>,
+};
+@group(1) @binding(3) var pbr_normal: texture_2d<f32>;
+@group(1) @binding(4) var pbr_metal_rough: texture_2d<f32>;
+@group(1) @binding(5) var pbr_occlusion: texture_2d<f32>;
+@group(1) @binding(6) var pbr_emissive: texture_2d<f32>;
+@group(1) @binding(7) var<uniform> look: Look;
+
+fn to_linear(c: vec3<f32>) -> vec3<f32> {
+    return select(pow((c + 0.055) / 1.055, vec3<f32>(2.4)), c / 12.92, c <= vec3<f32>(0.04045));
+}
+
 #include "enhanced_fns.wgsl"
 
 // The wind's way and its gusts, as the grass sways (grass.wgsl).
@@ -478,7 +498,42 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         bend = (s.normal - normalize(in.rest_normal)) * near * 1.6;
         strength *= 1.0 - 0.8 * near;
     }
-    let bumped = normalize(bump(n, in.world, luminance(texel.rgb), strength) + bend * sign(dot(n, normalize(in.normal))));
+    var bumped = normalize(bump(n, in.world, luminance(texel.rgb), strength) + bend * sign(dot(n, normalize(in.normal))));
+    // The free pack's physically based materials, read here before any
+    // discard (their normal's frame looks at the pixels around).
+    let physical = look.maps.x > 0.5 && enh.ibl.x > 0.5;
+    var mat: Pbr;
+    mat.n = n;
+    mat.ao = 1.0;
+    var emitted = vec3<f32>(0.0);
+    if (physical) {
+        let mr = textureSample(pbr_metal_rough, tex_sampler, in.uv);
+        // The vertices' colour is the material's base colour, stored as
+        // sRGB like its picture.
+        mat.base = textureSample(tex, tex_sampler, in.uv).rgb * to_linear(in.color.rgb);
+        mat.metal = clamp(look.pbr.x * mr.b, 0.0, 1.0);
+        mat.roughness = clamp(look.pbr.y * mr.g, 0.0, 1.0);
+        mat.specular = look.emit.w;
+        let occlusion = textureSample(pbr_occlusion, tex_sampler, in.uv).r;
+        mat.ao = mix(1.0, occlusion, look.pbr.w * look.maps.w);
+        emitted = textureSample(pbr_emissive, tex_sampler, in.uv).rgb * look.emit.rgb;
+        // How much the normal map's bumps spread within the texel read:
+        // its mips average them into a shorter normal (Toksvig 2005).
+        var spread = 0.0;
+        if (look.maps.y > 0.5) {
+            let t = textureSample(pbr_normal, tex_sampler, in.uv).xyz * 2.0 - 1.0;
+            let r = clamp(length(t), 0.05, 1.0);
+            spread = (1.0 - r) / r;
+            mat.n = mapped_normal(n, in.world, in.uv, normalize(t * vec3<f32>(look.pbr.z, look.pbr.z, 1.0)));
+        }
+        // Where the normal turns fast across a pixel (a far bumpy model,
+        // a sharp edge) or its bumps are finer than a pixel, its highlight
+        // would sparkle and shimmer: rougher there.
+        let dn = max(dot(dpdx(mat.n), dpdx(mat.n)), dot(dpdy(mat.n), dpdy(mat.n)));
+        let a2 = mat.roughness * mat.roughness * mat.roughness * mat.roughness + min(dn * 0.5 + spread * 2.0, 0.3);
+        mat.roughness = sqrt(sqrt(a2));
+        bumped = mat.n;
+    }
     if (edge <= 0.0 || (texel.a < 0.5 && enh.flags.x < 0.5) || tree_hidden(in.world, in.clip.xy)) {
         discard;
     }
@@ -489,6 +544,8 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     var light = in.light;
     // What stands still by the track: not a tree, not a rider or bike.
     let roadside = in.moving < 0.5 && surface.z < 0.5;
+    // What a physically based material reflects, apart from its colour.
+    var shine = vec3<f32>(0.0);
     if (enh.flags.x > 0.5 && in.mode < UNLIT) {
         var l = globals.to_sun.xyz;
         if (in.mode == PLANT) {
@@ -496,6 +553,12 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         }
         var lit = billboard_sun(sun_visible(in.world, n, dist, 0.0));
         var facing = max(dot(bumped, l), 0.0);
+        // The free pack's leaves let light through and round them: a crossed plant's
+        // planes edge-on to the sun aren't dark, so a tree doesn't split
+        // into a lit half and a dark one.
+        if (in.mode == PLANT && physical) {
+            facing = clamp(dot(bumped, l) * 0.5 + 0.5, 0.0, 1.0);
+        }
         // What stands still by the track (fences, signs, poles, tents; not
         // the trees, nor the riders) softly: its shadows half as deep, the
         // light wrapping round it, so a rail or post a pixel across
@@ -506,7 +569,7 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         facing = mix(facing, dot(bumped, l) * 0.5 + 0.5, soft);
         // Ambient a little brighter from the sky above than the ground below.
         let sky = mix(0.95, 1.15, bumped.y * 0.5 + 0.5);
-        let game = globals.ambient.rgb * sky * sky_seen(in.world) + globals.sun.rgb * facing * lit;
+        let game = globals.ambient.rgb * sky_tint(bumped, sky) * sky_seen(in.world) + globals.sun.rgb * facing * lit;
         // A soft highlight where the sun glints off it.
         let v = normalize(globals.camera.xyz - in.world);
         let h = normalize(l + v);
@@ -517,6 +580,15 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
             // seen from the shade side of the tree, toward the sun.
             let through = pow(max(dot(-v, globals.to_sun.xyz), 0.0), 3.0);
             light += globals.sun.rgb * vec3<f32>(0.9, 1.0, 0.6) * through * 0.5 * lit;
+        }
+        if (physical && in.mode != PLANT) {
+            // The game's light taken to linear: a white matte surface
+            // square on to the sun comes out as the game's would.
+            let ambient = pow(max(globals.ambient.rgb, vec3<f32>(0.0)), vec3<f32>(2.2));
+            let sun_lin = max(pow(max(globals.ambient.rgb + globals.sun.rgb, vec3<f32>(0.0)), vec3<f32>(2.2)) - ambient, vec3<f32>(0.0));
+            let shaded = shade_pbr(mat, v, globals.to_sun.xyz, sun_lin, lit, sky_seen(in.world));
+            light = shaded.diffuse;
+            shine = shaded.reflected;
         }
     } else if (in.mode < UNLIT) {
         // The game's own light, only shadowed.
@@ -535,6 +607,9 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     // boots and the underside, in splats that spread as it gets dirtier;
     // dark and glossy when wet, pale and dusty when dry.
     var albedo = texel.rgb * grain;
+    if (physical) {
+        albedo = mat.base * (1.0 - mat.metal);
+    }
     var caked = 0.0;
     if (enh.sky.y > 0.5 && in.mud > 0.0 && in.moving > 0.5) {
         let low = 1.0 - smoothstep(0.3, 3.2, in.rest.y);
@@ -557,7 +632,7 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     if (glowing) {
         light *= 1.0 - enh.night.x;
     }
-    var colour = albedo * light;
+    var colour = albedo * light + shine * (1.0 - caked) + emitted;
     if (in.mode < UNLIT && in.mode != PLANT) {
         // A stadium's floodlights: soft light from the four corners, and
         // their glints off paint and plastic.
@@ -622,7 +697,7 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         let h = normalize(globals.to_sun.xyz + v);
         colour += globals.sun.rgb * pow(max(dot(bumped, h), 0.0), 40.0) * 0.25 * caked * enh.world.y * sun_visible(in.world, n, dist, 0.0);
     }
-    if (polished && in.mode < UNLIT) {
+    if (polished && in.mode < UNLIT && !physical) {
         // Shiny plastic and paint: the brighter, purer colours gloss over,
         // with the sky caught in them at a glancing angle and a hard
         // highlight from the sun.

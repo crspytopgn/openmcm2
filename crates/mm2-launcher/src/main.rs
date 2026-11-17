@@ -1891,6 +1891,7 @@ fn effect_about(name: &str) -> &'static str {
         "contact" => "A thin, soft shadow right where tyres, boots and props touch the ground, finer than the sun's shadows can draw.",
         "ssr" => "In the rain, puddles and wet ground mirror the bikes, riders and trees on screen. Off when ray tracing draws the reflections.",
         "skylight" => "The sky's light worked out over the land when a track loads: a little dimmer in dips, under banks and between hills.",
+        "pbr" => "Materials lit as real ones are, as modern games do: metal and paint, rough and smooth surfaces, fine bumps and dents from their maps, and the sky and sun reflected in them. The free art uses it fully; the original's models only take the sky's light round about, gently, keeping their look.",
         "nightlights" => "Only when the time of day is set to Night: a stadium is lit by its own lamp banks high under the roof. The floor, bikes and riders are lit from above, each bank casting a soft shadow, and the lamps glow. Off, a stadium at night keeps its daytime light.",
         "ground" => "The ground re-made from photo materials.",
         "grass" => "Grass growing on the grassy ground near you.",
