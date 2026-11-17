@@ -1,0 +1,83 @@
+# Every third-party file the Free Pack is built from. Only CC0 sources.
+# `tools/fetch.py` downloads these into cache/, and CREDITS.md is made
+# from this list. Nothing from Motocross Madness 2 is used.
+
+[sky]
+# Stock sky name -> Poly Haven HDRI (CC0). Picked to match each stock
+# sky's mood (clear, hazy, overcast, dusk), not its picture.
+Burn03  = "kloofendal_misty_morning_puresky"
+Terra01 = "farm_field_puresky"
+Terra03 = "citrus_orchard_road_puresky"
+Terra04 = "overcast_soil_puresky"
+Terra05 = "kloofendal_overcast_puresky"
+Terra06 = "kloofendal_28d_misty_puresky"
+Terra09 = "qwantani_mid_morning_puresky"
+Terra11 = "belfast_sunset_puresky"
+Terra12 = "kloofendal_43d_clear_puresky"
+Terra15 = "mud_road_puresky"
+Terra16 = "industrial_sunset_02_puresky"
+Terra17 = "qwantani_dusk_2_puresky"
+Terra18 = "kloofendal_48d_partly_cloudy_puresky"
+wind01  = "sunflowers_puresky"
+
+[materials]
+# ambientCG ids (CC0), 2K JPG.
+ambientcg = [
+  "Asphalt012", "Bricks059", "Bricks076C", "Concrete031", "Metal032", "MetalPlates013", "PaintedPlaster017", "PavingStones092", "Planks012", "Planks023A", "Rock030", "Rock035", "RoofingTiles006", "Rust004", "WoodSiding008",
+  "Ground051", "Ground048", "Ground067", "Ground036", "Ground037",
+  "Ground080", "Ground054", "Ground085", "Grass004",
+  "Concrete034", "Plastic010", "Wood049", "Fabric030", "MetalPlates006",
+  "ThatchedRoof001A", "ThatchedRoof002A", "Rubber004", "Fence007A",
+  "CorrugatedSteel007A", "Wood087", "PaintedMetal004",
+  "Ground082S", "Ground079S", "Ground078", "Ground072", "Gravel022", "Rocks011", "Ground103", "Ground049A",
+]
+
+[models]
+# Poly Haven models (CC0), 1K glTF.
+polyhaven = [
+  "fir_tree_01", "island_tree_02", "tree_small_02", "grass_medium_01",
+  "rock_moss_set_01", "pine_sapling_small", "jacaranda_tree", "searsia_lucida",
+  "searsia_burchellii", "shrub_01", "shrub_02", "shrub_04", "dead_tree_trunk_02",
+  "dry_branches_medium_01", "quiver_tree_02", "wild_rooibos_bush",
+]
+
+[sketchfab]
+# CC-BY 4.0 models, fetched with the Sketchfab download API (needs your own API token).
+# uid = [name, author, used as]
+"5bb654aed341477b8878f1e2ffd6fcd2" = ["Enduro bike", "Zaborchik", "bikes/fp_bike_enduro.glb (400F, 600F)"]
+"315a4d6dfc054b299f715270dbcf2222" = ["Dirtbike Model", "sonniesilva", "bikes/fp_bike_mx2.glb (125, 250, 500)"]
+"10cbeabee635483fae932f9e49f3cf7b" = ["Hight Quality Realistic Man Character", "hammer.gamedev", "riders/fp_rider.glb (base body), tex/fp_crowd2_* (rendered crowd)"]
+"d1b7c5cba07a4f278267fca69c821cb7" = ["Skid Steer Digger", "MitchellBr", "objects/bobcat.glb (S130 decals painted out)"]
+"e9e844f2f9364044a181ce8f38a83dc3" = ["Tractor", "sheldon.bean", "objects/tractor.glb (recoloured red)"]
+"d891c103cddd44b69d1357c832d9ad56" = ["Weathered Tractor", "ArtDmitriyK", "objects/tractor_old.glb"]
+"e76e04dced84428babcab4b712f4d169" = ["SK-5_NIVA", "Vebis_V_stolb_GT", "objects/combine.glb"]
+"68089dce5fa1461981d690f1cfd657fa" = ["Monobloc Plastic Garden Chair", "kuuttisiitonen", "objects/lawnchair01.glb"]
+"fd01521490ec4cabba4c89d113fdde23" = ["Electrical Substation [Drone Scan]", "MrUnityCreations", "objects/switchyard.glb"]
+"4feb15af7b554c16b88bf9cbe179558b" = ["Wind Turbine", "skettch", "objects/wingen_post.glb"]
+"88b3ca0e6bac44ce8cef9865288d2ee0" = ["Excavator digger 3d model", "Arts7789", "objects/shovel.glb"]
+"5bc9e49be13b4803aed3c25e87bb4486" = ["Pylon", "rhcreations", "objects/ht_tower.glb, ht_tower02.glb"]
+"5c17c582ef9549798f694b660feea42a" = ["Kiri '86 - Low poly model", "DanielZhabotinsky", "objects/300zx"]
+"22015d1863d6455aa31cfd738b972c50" = ["Bokaroo '67 - Low poly model", "DanielZhabotinsky", "objects/4runner_blue, 4runner_brown, 4runner_green, 4runner_white"]
+"e2678da920cc4be68dbc193727919ffb" = ["Fairheaven LT '80 - Low poly model", "DanielZhabotinsky", "objects/chevellered, chevelleblue"]
+"b71558486d024ecc8dc4abbb1263f022" = ["Chapman '73 Cop cruiser - Low poly model", "DanielZhabotinsky", "objects/cop"]
+"945fd09f513f4d1ab19b6388a7ea7323" = ["Negotiator '80 Cop Cruiser - Low poly model", "DanielZhabotinsky", "objects/cop_navy"]
+"6c48c94be8974dc7a5932f697c0ba68f" = ["Conquer '89 Pickup - Low poly model", "DanielZhabotinsky", "objects/companytruck"]
+"663a0953c038434a918cb85725c88ffa" = ["LCT 3000 '95 - Low poly model", "DanielZhabotinsky", "objects/feduptruck"]
+"09d718c9cf72401b8534d265a06a803f" = ["Shvan '92 - Low poly model", "DanielZhabotinsky", "objects/famtrkstr"]
+"2866efdfa943484391ef8313768e074d" = ["Urban '10 - Low poly model", "DanielZhabotinsky", "objects/mx3, mx3_brown"]
+"aa0becb6e854422596cac6b21bf79787" = ["Fairheaven SW '84 - Low poly model", "DanielZhabotinsky", "objects/sts, sts_red"]
+"67beae18c3d24be68f9c8f0ec382d8e3" = ["Lightbody Lifted '85 - Low poly model", "DanielZhabotinsky", "objects/jeep, jeep_green, jeep_grey"]
+"8ff2a13f30914932a70c7950cfa58465" = ["Generic civil service vehicles pack", "comrade1280", "objects/firetruck, schoolbus, greyhound"]
+"3e8c5275aeab487fa37d227ce0bd1a9a" = ["Semi Truck Baked", "3DE_Study", "objects/semicab"]
+"48c77f54fa4d4b8c97749532a9d0fb52" = ["No-Brand Dump Truck", "nguyenhoanglam20100609", "objects/dumptruck"]
+"0bfeafdb2eb94612ad89ea2e794cf249" = ["Tanker Truck", "ezbreneman", "objects/tanker, watertruck"]
+"413e3f81b0db4e0ebba0f27490732770" = ["Piper Pa 18", "helijah", "objects/supercub"]
+"3ccea297db744ba4aee10ef3f5289bf2" = ["Boeing Stearman PT.17", "helijah", "objects/biplane (roundels painted out)"]
+"c494357dc66242209104077be180234a" = ["Beechcraft C18 S", "helijah", "objects/beech18"]
+"1668ac86c20b4c3eb2a04d22959a87e1" = ["Dc3", "manilov.ap", "objects/dc-3 (airline name and registration painted out)"]
+"ebfc77d41a0641d6a4f422f23e8a4a36" = ["SNCASE SE.3130 Alouette II", "helijah", "objects/bellranger, helinocam (roundels painted out)"]
+"5acfb2eb4f204f51ab418856c116b68e" = ["Lockheed C-130 Hercules", "Tyler_Dave", "objects/cargoplane01 (serial and squadron badge painted out)"]
+"1e1d6f173d1e48e593fa270fb1b5f5a8" = ["Diesel train engine", "Leaf_dev", "objects/engine"]
+"287266d5edf749318cb9869fe583e0ae" = ["Coal Hopper Railway Wagon", "saadthedesigner314", "objects/coalcar"]
+"6cede42e50cc4042addfbedac1311551" = ["Railway Boxcar Freight Wagon", "saadthedesigner314", "objects/boxcarclosed"]
+"6ae06e8e67964cdea60009b86c3ee747" = ["train_caboose", "tonmoydeyrick", "objects/caboose.glb"]
