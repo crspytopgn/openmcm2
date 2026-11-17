@@ -873,6 +873,15 @@ impl Bike {
         self.tyres.map(|t| t.down)
     }
 
+    /// How the model's suspension frames are drawn (0x4ff100 slides the
+    /// fork's `Shocks` frame along its stroke, 0x4ff950 swings the
+    /// `SwingArm` frame about its pivot): the fork's slide in the bars'
+    /// space, ft, and the swingarm's turn about its x axis, radians.
+    pub fn suspension_frames(&self) -> (Vec3, f32) {
+        let [front, rear] = self.squeezes();
+        ((HANDLEBARS - FRONT_AXLE).normalize() * front, rear / swingarm_length())
+    }
+
     /// Both shocks' compressions, front and rear, ft.
     pub fn squeezes(&self) -> [f32; 2] {
         self.tyres.map(|t| t.squeeze)

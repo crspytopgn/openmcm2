@@ -1,5 +1,6 @@
 //! Dumps an .mcf's model frames and named motions as JSON:
-//! `motion_dump <GAME dir> Rider.mcf Turn2D LeanR02 ...`.
+//! `motion_dump <GAME dir> Rider.mcf Turn2D LeanR02 ...` (an .mcf in
+//! `RES/BIKE.RES`; its model from there or `RES/OBJECTS.RES`).
 use mm2_formats::{anim, faoe, rs2, slb, Container};
 use std::path::Path;
 fn archive(dir: &Path, name: &str) -> Vec<u8> {
@@ -36,6 +37,13 @@ fn main() {
             print!("]");
         }
         print!("]");
+    }
+    print!("}},\"info\":{{");
+    let mut first = true;
+    for want in &args[3..] {
+        let Some(info) = mcf.motions.iter().find(|m| m.name.eq_ignore_ascii_case(want)) else { continue };
+        print!("{}{:?}:{{\"fps\":{},\"looping\":{},\"frames\":{}}}", if first { "" } else { "," }, want, info.fps, info.looping, info.frame_count);
+        first = false;
     }
     println!("}}}}");
 }

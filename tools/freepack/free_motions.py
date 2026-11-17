@@ -154,15 +154,18 @@ TIMING = {}
 # inside foot goes 0.9 ft out, 0.2 up and 2.3 forward of the peg at full
 # steer (Turn3D, sat back: 0.7, 0.5, 1.7), the hips 0.75 forward and, from the half-standing row, sat down). More
 # phases than the other motions, so the late leg doesn't cut corners.
+# The bars' full turn about the steering axis, degrees: slow (LeanR) and
+# at speed (Turn), as far round as the game's bike turns them.
+LEAN_BARS, TURN_BARS = 46, 19
 LEG_OUT = [(0.85, 0.2, 2.1), (0.85, 0.2, 2.1), (0.65, 0.45, 1.55)]
 SLIDE = [(0.12, -0.5, 0.35), (0.15, -0.05, 0.5), (0.12, 0.0, 0.3)]
 for r in range(3):
-    rider[f"LeanR0{r+1}"] = [keys(pose(ROWS[r], steer_of(p), bars=24, roll=8, head_yaw=-14 * steer_of(p), foot_out=0.85)) for p in phases()]
+    rider[f"LeanR0{r+1}"] = [keys(pose(ROWS[r], steer_of(p), bars=LEAN_BARS, roll=8, head_yaw=-14 * steer_of(p), foot_out=0.85)) for p in phases()]
     for kind, base in (("D", ROWS[r]), ("U", dict(ROWS[r], **STAND))):
-        rider[f"Turn{r+1}{kind}"] = [keys(pose(base, steer_of(p), bars=9, roll=10, head_yaw=-10 * steer_of(p),
+        rider[f"Turn{r+1}{kind}"] = [keys(pose(base, steer_of(p), bars=TURN_BARS, roll=10, head_yaw=-10 * steer_of(p),
                                                leg_out=LEG_OUT[r], slide=SLIDE[r])) for p in phases(17)]
-bike["BLeanR02"] = [bike_keys(bars=24 * steer_of(p)) for p in phases()]
-bike["BTurn2D"] = [bike_keys(bars=9 * steer_of(p)) for p in phases()]
+bike["BLeanR02"] = [bike_keys(bars=LEAN_BARS * steer_of(p)) for p in phases()]
+bike["BTurn2D"] = [bike_keys(bars=TURN_BARS * steer_of(p)) for p in phases()]
 bike["BTurn2U"] = bike["BTurn2D"]
 # Wheelie: sat back, arms long.
 rider["Wheelie"] = [keys(pose(ROWS[2], pelvis=(0, 3.55, -1.5), pelvis_pitch=-4, upper_pitch=4, head_pitch=6,
@@ -402,5 +405,9 @@ def pack(tables):
     return bytes(out)
 
 if __name__ == '__main__':
+    if '--match' in sys.argv:
+        # Matched to the original's motions (match_motions.py).
+        import match_motions
+        match_motions.match(rider, bike, TIMING, sys.argv[sys.argv.index('--match') + 1])
     open(sys.argv[1], 'wb').write(pack((rider, bike)))
     print("rider", len(rider), "bike", len(bike), "bytes", os.path.getsize(sys.argv[1]))

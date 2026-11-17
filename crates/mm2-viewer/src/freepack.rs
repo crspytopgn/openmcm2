@@ -437,8 +437,8 @@ fn read_own(data: &[u8]) -> Option<Vec<OwnMotion>> {
 }
 
 /// The tricks for the pack's own riders, as the race reads them: each
-/// trick's own motion with its frames a second and length (no bike
-/// motion: the bike holds still under the rider).
+/// trick's own rider motion with its frames a second and length, and the
+/// bike's (`b<trick>`, as the game names them) where the pack has one.
 pub fn own_tricks() -> Vec<Option<crate::race::TrickMotion>> {
     let names = mm2_physics::stunt::TRICKS
         .iter()
@@ -447,9 +447,14 @@ pub fn own_tricks() -> Vec<Option<crate::race::TrickMotion>> {
     names
         .map(|name| {
             let m = own_table().iter().find(|m| m.rider && m.name.eq_ignore_ascii_case(&name))?;
+            let bike = format!("b{name}");
+            let bike = own_table()
+                .iter()
+                .find(|b| !b.rider && b.name.eq_ignore_ascii_case(&bike))
+                .map_or(String::new(), |b| b.name.clone());
             Some(crate::race::TrickMotion {
                 rider: m.name.clone(),
-                bike: String::new(),
+                bike,
                 fps: m.fps,
                 frames: m.motion.frames.len() as i32,
             })
@@ -461,8 +466,8 @@ pub fn own_tricks() -> Vec<Option<crate::race::TrickMotion>> {
 /// riders (`Some(true)`) or bikes (`Some(false)`), as the game drives them.
 pub fn ridden(name: &str) -> Option<bool> {
     match animated(name)?.0 {
-        "Rider.mcf" | crate::podium::WINNER => Some(true),
-        "Bike.mcf" => Some(false),
+        "Rider.mcf" | "UIRider.mcf" | crate::podium::WINNER => Some(true),
+        "Bike.mcf" | "UIHonda.mcf" => Some(false),
         _ => None,
     }
 }
@@ -912,7 +917,7 @@ mod tests {
     #[test]
     fn own_motions_cover_riding_crashes_and_tricks() {
         let rider = own_motions(true);
-        for name in ["LeanR02", "Turn2D", "CrosOv2", "Endo", "Kahuna", "Fall01", "HeadHit", "SuperMan", "BarKneelAlt", "Podium3_02", "Podium4_01", "Podium5_03"] {
+        for name in ["LeanR02", "Turn2D", "CrosOv2", "Endo", "Kahuna", "Fall01", "HeadHit", "SuperMan", "BarKneelAlt", "Victory", "WaitR", "StretchR", "Podium3_02", "Podium4_01", "Podium5_03"] {
             assert!(rider.iter().any(|m| m.0 == name), "{name}");
         }
         assert!(rider.iter().filter(|m| m.0 != "BackUpBottom").all(|m| m.1.frames.iter().all(|f| f.len() == 16)));
@@ -922,6 +927,7 @@ mod tests {
         assert_eq!(tricks.iter().flatten().count(), 22);
         let kneel = tricks[0].as_ref().unwrap();
         assert_eq!((kneel.fps, kneel.frames), (18.0, 30));
+        assert_eq!(kneel.bike, "bBarKneel");
     }
 
     #[test]

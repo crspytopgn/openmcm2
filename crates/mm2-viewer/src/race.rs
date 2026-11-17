@@ -565,6 +565,17 @@ impl Bike {
         }
     }
 
+    /// The suspension frames' slide and swing (`mm2_physics::Bike::
+    /// suspension_frames`) for a bike the shock physics runs; a computer
+    /// rider's two-wheel model and a tape keep them at rest.
+    pub fn suspension_frames(&self) -> (Vec3, f32) {
+        match self {
+            Bike::Player(b) => b.suspension_frames(),
+            Bike::Computer(b) => b.wreck.as_ref().map_or((Vec3::ZERO, 0.0), |w| w.suspension_frames()),
+            Bike::Taped(_) => (Vec3::ZERO, 0.0),
+        }
+    }
+
     /// Where the thrown rider's motion puts the pelvis (model space) and
     /// the body parts' corners (the pelvis's space) now.
     pub fn set_wreck_pose(&mut self, pelvis: Mat4, points: Vec<glam::Vec3>) {
