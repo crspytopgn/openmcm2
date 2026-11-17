@@ -18,6 +18,9 @@ struct Vertex {
 
 pub struct WaterRenderer {
     pipeline: wgpu::RenderPipeline,
+    /// With the enhanced drawing's shared parts as group 1: the sky's own
+    /// light in the ripples, and its haze (water_enhanced.wgsl).
+    enhanced: Option<wgpu::RenderPipeline>,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     count: u32,
@@ -30,7 +33,16 @@ pub struct WaterRenderer {
 const OVER: f32 = 1.14;
 
 impl WaterRenderer {
-    pub fn new(device: &wgpu::Device, rivers: &[Water], globals: &wgpu::Buffer, format: wgpu::TextureFormat, samples: u32, depth: wgpu::TextureFormat) -> Option<WaterRenderer> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        device: &wgpu::Device,
+        rivers: &[Water],
+        globals: &wgpu::Buffer,
+        format: wgpu::TextureFormat,
+        samples: u32,
+        depth: wgpu::TextureFormat,
+        shared: Option<&wgpu::BindGroupLayout>,
+    ) -> Option<WaterRenderer> {
         use wgpu::util::DeviceExt;
         let mut vertices = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
@@ -84,12 +96,13 @@ impl WaterRenderer {
             layout: &layout,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() }, wgpu::BindGroupEntry { binding: 1, resource: uniform.as_entire_binding() }],
         });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("water"), bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let make = |shader: &wgpu::ShaderModule, layouts: &[Option<&wgpu::BindGroupLayout>]| {
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("water"), bind_group_layouts: layouts, immediate_size: 0 });
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("water"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
                 buffers: &[Some(wgpu::VertexBufferLayout {
@@ -99,7 +112,7 @@ impl WaterRenderer {
                 })],
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: shader,
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
@@ -115,9 +128,15 @@ impl WaterRenderer {
             multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
             multiview_mask: None,
             cache: None,
+        })
+        };
+        let pipeline = make(&shader, &[Some(&layout)]);
+        let enhanced = shared.map(|shared| {
+            make(&crate::enhance::shader(device, "water enhanced", &enhanced_source()), &[Some(&layout), Some(shared)])
         });
         Some(WaterRenderer {
             pipeline,
+            enhanced,
             vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("water"), contents: bytemuck::cast_slice(&vertices), usage: wgpu::BufferUsages::VERTEX }),
             indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("water"), contents: bytemuck::cast_slice(&indices), usage: wgpu::BufferUsages::INDEX }),
             count: indices.len() as u32,
@@ -131,13 +150,29 @@ impl WaterRenderer {
         queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&[time, day, 0.0, 0.0]));
     }
 
-    pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
-        pass.set_pipeline(&self.pipeline);
+    /// Draws the rivers; with the enhanced drawing's shared group, as it
+    /// lights them.
+    pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>, shared: Option<&wgpu::BindGroup>) {
+        match (&self.enhanced, shared) {
+            (Some(pipeline), Some(group)) => {
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(1, group, &[]);
+            }
+            _ => pass.set_pipeline(&self.pipeline),
+        }
         pass.set_bind_group(0, &self.group, &[]);
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.count, 0, 0..1);
     }
+}
+
+/// The enhanced drawing's water shader before its shared declarations
+/// go in: the plain one with its sky and fog renamed, and the enhanced
+/// ones after it.
+pub fn enhanced_source() -> String {
+    include_str!("water.wgsl").replacen("fn mirrored(", "fn plain_mirrored(", 1).replacen("fn fogged(", "fn plain_fogged(", 1)
+        + include_str!("water_enhanced.wgsl")
 }
 
 /// The water's height under `(x, z)` (game coordinates, ft), if it is in

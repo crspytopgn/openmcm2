@@ -962,7 +962,8 @@ impl TerrainRenderer {
 
     /// The track's rivers, drawn over the scene in both drawings.
     pub fn set_water(&mut self, device: &wgpu::Device, rivers: &[mm2_course::nature::Water]) {
-        self.water = crate::water::WaterRenderer::new(device, rivers, &self.globals, self.scene_format, self.samples, DEPTH_FORMAT);
+        let shared = self.enhanced.as_ref().map(|e| &e.shared.layout);
+        self.water = crate::water::WaterRenderer::new(device, rivers, &self.globals, self.scene_format, self.samples, DEPTH_FORMAT, shared);
     }
 
     /// Draws bike `bike`'s models (its bike and its rider) as dirty as it
@@ -1587,7 +1588,7 @@ impl TerrainRenderer {
             mark_pass!(self.gpu_timer, &mut pass, "scene: objects");
             if let Some(water) = &self.water {
                 water.set_time(queue, time, day.as_ref().map_or(1.0, |d| 1.0 - d.night));
-                water.draw(&mut pass);
+                water.draw(&mut pass, shared.map(|s| s.0));
             }
             if let Some((dust, own, group)) = self
                 .enhanced
