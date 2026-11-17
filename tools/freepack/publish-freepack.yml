@@ -1,0 +1,107 @@
+# Publishes the Free Pack: the launcher's download (the "freepack" GitHub
+# pre-release) and the browser's (the openmcm2-freepack R2 bucket).
+#
+# Goes in crspytopgn/openmcm2 as .github/workflows/publish-freepack.yml, with
+# tools/freepack/pack.py beside the rest of the repo's tools.
+#
+# The finished pack folder (stockmap.toml at its root, shared textures
+# split out) comes in as a zip on a DRAFT release tagged "freepack-source"
+# (drafts aren't public), uploaded from the Mac with:
+#   gh release create freepack-source --draft --repo crspytopgn/openmcm2 --title "Free Pack source" --notes "not public"   # once
+#   gh release upload freepack-source pack.zip --clobber --repo crspytopgn/openmcm2
+#
+# Secrets: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ACCOUNT_ID.
+name: Publish the Free Pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The pack's version, e.g. 2026.11.20"
+        required: true
+      source:
+        description: "The pack zip's name on the freepack-source draft release"
+        default: pack.zip
+      dry_run:
+        description: "Only pack it and list what would change, upload nothing"
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      version: { type: string, required: true }
+      source: { type: string, default: pack.zip }
+      dry_run: { type: boolean, default: false }
+
+permissions:
+  contents: write
+
+concurrency: publish-freepack
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BUCKET: openmcm2-freepack
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get the pack
+        run: |
+          gh release download freepack-source --repo "$REPO" --pattern "${{ inputs.source }}" --output pack.zip
+          mkdir src && cd src && unzip -q ../pack.zip
+          # The folder holding stockmap.toml.
+          root=$(dirname "$(find . -name stockmap.toml | awk '{ print length, $0 }' | sort -n | head -1 | cut -d' ' -f2-)")
+          echo "PACK=$PWD/$root" >> "$GITHUB_ENV"
+
+      - name: Pack it
+        run: python3 tools/freepack/pack.py "$PACK" out "${{ inputs.version }}"
+
+      - name: Set up rclone for R2
+        run: |
+          sudo apt-get install -y -q rclone
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret_access_key = ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          endpoint = https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          acl = private
+          no_check_bucket = true
+          EOF
+
+      - name: What changes
+        run: |
+          echo "R2 files new in this version:"
+          rclone copy out/r2/files "r2:$BUCKET/files" --dry-run 2>&1 | grep -c "Skipped copy" || true
+          echo "Release parts:"
+          ls -la out/github
+
+      - name: Upload to R2 (files first, the list last)
+        if: ${{ !inputs.dry_run }}
+        run: |
+          rclone copy out/r2/files "r2:$BUCKET/files" --transfers 16 \
+            --header-upload "Cache-Control: public, max-age=31536000, immutable"
+          rclone copyto out/r2/freepack.json "r2:$BUCKET/freepack.json" \
+            --header-upload "Cache-Control: no-cache" --header-upload "Content-Type: application/json"
+
+      - name: Upload to the GitHub release (parts first, the list last)
+        if: ${{ !inputs.dry_run }}
+        run: |
+          if ! gh release view freepack --repo "$REPO" >/dev/null 2>&1; then
+            # A pre-release, so the launcher's own update check never takes it for a new OpenMCM2.
+            gh release create freepack --repo "$REPO" --prerelease --title "Free Pack" \
+              --notes "New art and sound to play OpenMCM2 without the original game's files. The launcher downloads this for you (Play page, Free graphics)."
+          fi
+          have=$(gh release view freepack --repo "$REPO" --json assets --jq '.assets[].name')
+          for f in out/github/*.zip; do
+            echo "$have" | grep -qx "$(basename "$f")" || gh release upload freepack "$f" --repo "$REPO"
+          done
+          gh release upload freepack out/github/freepack.json --clobber --repo "$REPO"
+          # Parts the new list no longer names.
+          for old in $(echo "$have" | grep '^freepack-.*\.zip$'); do
+            [ -e "out/github/$old" ] || gh release delete-asset freepack "$old" --repo "$REPO" --yes
+          done

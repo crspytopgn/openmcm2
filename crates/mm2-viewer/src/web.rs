@@ -37,6 +37,8 @@ extern "C" {
     fn js_painted() -> js_sys::Promise;
     #[wasm_bindgen(js_name = trackLoading)]
     fn js_track_loading(on: bool);
+    #[wasm_bindgen(js_name = building)]
+    fn js_building(on: bool);
 }
 
 /// Asks the browser for the GPU, and wakes the window once it answers.
@@ -73,6 +75,15 @@ pub fn fail(why: &str) {
 /// Tells the page a track is loading (the page can't draw while it does).
 pub fn track_loading(on: bool) {
     js_track_loading(on);
+}
+
+/// Tells the page when the Course Builder is open, so its buttons over
+/// the game's corners keep out of the builder's way.
+pub fn building(on: bool) {
+    thread_local!(static BUILDING: Cell<bool> = const { Cell::new(false) });
+    if BUILDING.with(|b| b.replace(on)) != on {
+        js_building(on);
+    }
 }
 
 /// Tells the page when a race starts and ends, so it shows its touch

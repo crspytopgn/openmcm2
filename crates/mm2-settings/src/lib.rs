@@ -277,6 +277,12 @@ pub const UPGRADES: [(&str, &str, bool); 22] = [
 pub struct Settings {
     /// The game folder the port reads.
     pub game: Option<PathBuf>,
+    /// `graphics=free`: play with the free pack's art and sound
+    /// (`--freepack DIR`) instead of the original game's; the original's
+    /// unless picked.
+    pub free_graphics: bool,
+    /// The free pack's folder.
+    pub freepack: Option<PathBuf>,
     pub hires: Option<PathBuf>,
     pub use_hires: bool,
     pub enhanced: bool,
@@ -407,6 +413,9 @@ pub struct More {
     /// The playtime tracker sends anonymous totals (no name) to the
     /// leaderboard server; on unless turned off (`--no-share-playtime`).
     pub share_playtime: bool,
+    /// The Course Builder's link on the main menu's chain; on unless
+    /// turned off (`--no-builder-menu`).
+    pub builder_menu: bool,
 }
 
 /// The game's own pad dead zone, %.
@@ -435,6 +444,7 @@ impl Default for More {
             lobby_downloads: true,
             list_races: true,
             share_playtime: true,
+            builder_menu: true,
         }
     }
 }
@@ -470,6 +480,7 @@ impl More {
             "share_playtime" => self.share_playtime = yes,
             "lobby_downloads" => self.lobby_downloads = yes,
             "list_races" => self.list_races = yes,
+            "builder_menu" => self.builder_menu = yes,
             _ => return false,
         }
         true
@@ -478,7 +489,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -495,6 +506,7 @@ impl More {
             b(self.lobby_downloads),
             b(self.list_races),
             b(self.share_playtime),
+            b(self.builder_menu),
         )
     }
 
@@ -512,6 +524,7 @@ impl More {
             (!self.share_playtime, "--no-share-playtime"),
             (!self.lobby_downloads, "--no-lobby-downloads"),
             (!self.list_races, "--no-list-races"),
+            (!self.builder_menu, "--no-builder-menu"),
         ] {
             if on {
                 a.push(flag.to_string());
@@ -551,6 +564,7 @@ impl More {
             list_races: !has("--no-list-races"),
             leaderboards: !has("--no-leaderboards"),
             share_playtime: !has("--no-share-playtime"),
+            builder_menu: !has("--no-builder-menu"),
             ..d.clone()
         };
         for (flag, key) in [
@@ -578,6 +592,8 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             game: None,
+            free_graphics: false,
+            freepack: None,
             hires: None,
             use_hires: true,
             enhanced: false,
@@ -666,6 +682,7 @@ impl Settings {
             share_playtime: m.share_playtime,
             lobby_downloads: m.lobby_downloads,
             list_races: m.list_races,
+            builder_menu: m.builder_menu,
             ..More::default()
         };
     }
@@ -694,6 +711,8 @@ impl Settings {
             let v = v.trim();
             match k.trim() {
                 "game" if !v.is_empty() => s.game = Some(v.into()),
+                "graphics" => s.free_graphics = v == "free",
+                "freepack" if !v.is_empty() => s.freepack = Some(v.into()),
                 "hires" if !v.is_empty() => s.hires = Some(v.into()),
                 "use_hires" => s.use_hires = yes(v),
                 "enhanced" => s.enhanced = yes(v),
@@ -810,6 +829,11 @@ impl Settings {
             b(self.opengl),
             b(self.forgiving_landings),
         );
+        t += &format!(
+            "graphics={}\nfreepack={}\n",
+            if self.free_graphics { "free" } else { "original" },
+            p(&self.freepack)
+        );
         t += &self.more.text();
         for (u, on) in UPGRADES.iter().zip(&self.upgrades) {
             t += &format!("upgrade.{}={}\n", u.0, b(*on));
@@ -820,10 +844,16 @@ impl Settings {
     /// `mm2-viewer`'s arguments for these settings.
     pub fn args(&self) -> Vec<String> {
         let mut a = Vec::new();
-        if let Some(g) = &self.game {
-            a.push(g.display().to_string());
+        match (&self.freepack, &self.game) {
+            // The free pack's art and sound, without the original's files.
+            (Some(f), _) if self.free_graphics => {
+                a.push("--freepack".into());
+                a.push(f.display().to_string());
+            }
+            (_, Some(g)) => a.push(g.display().to_string()),
+            _ => {}
         }
-        if let (true, Some(h)) = (self.use_hires, &self.hires) {
+        if let (true, Some(h)) = (self.use_hires && !self.free_graphics, &self.hires) {
             a.push("--hires".into());
             a.push(h.display().to_string());
         }
@@ -1094,8 +1124,12 @@ mod tests {
             lobby_downloads: false,
             list_races: false,
             share_playtime: false,
+            builder_menu: false,
         };
+        s.free_graphics = true;
+        s.freepack = Some("/packs/free".into());
         assert_eq!(Settings::parse(&s.text()), s);
+        assert_eq!(s.args()[..2], ["--freepack".to_string(), "/packs/free".to_string()]);
         let mut args = vec!["mm2-viewer".to_string()];
         args.extend(s.args());
         assert_eq!(More::from_args(&args), s.more);

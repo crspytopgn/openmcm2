@@ -53,9 +53,13 @@ const LISTS: [(List, &str); 8] = [
     (List::Rev, "Rev"),
 ];
 
-/// The ini sections, by class: below 250 cc, two-strokes from 250 cc, and
-/// the four-strokes (bike +0x738, +0x737).
-const CLASSES: [&str; 3] = ["125", "250", "400"];
+/// The engine classes: the original's three ini sections (below 250 cc,
+/// two-strokes from 250 cc, the four-strokes; bike +0x738, +0x737), then
+/// the free pack's big two-strokes and big four-strokes, which the
+/// original plays with its `[250]` and `[400]` samples.
+const CLASSES: [&str; 5] = ["125", "250", "400", "500", "600"];
+/// The original's section for each class.
+const ORIGINAL: [usize; 5] = [0, 1, 2, 1, 2];
 
 /// ft/s to mph, as the game converts (0x55ca00).
 const MPH: f32 = 0.68182;
@@ -82,12 +86,12 @@ const BONUS_POINTS: f32 = 10000.0;
 
 /// The engine class of a bike of `cc` (0x4e7160).
 pub fn class(cc: u32, four_stroke: bool) -> usize {
-    if cc < 250 {
-        0
-    } else if four_stroke {
-        2
-    } else {
-        1
+    match (cc, four_stroke) {
+        (cc, _) if cc < 250 => 0,
+        (cc, true) if cc >= 500 => 4,
+        (_, true) => 2,
+        (cc, false) if cc >= 450 => 3,
+        _ => 1,
     }
 }
 
@@ -169,6 +173,128 @@ struct Bank {
     lists: Vec<Vec<Arc<Sound>>>,
     /// The tops of the low, mid and high torque bands, mph.
     bands: [i32; 3],
+    /// The free pack's steady loops, played by revs instead of the
+    /// original's whole samples (see [`Revs`]).
+    loops: Option<Loops>,
+}
+
+/// A free pack class's engine as three steady loops, each recorded at a
+/// known engine speed, pitched to the revs of the moment: on the gas, off
+/// it, and at idle (`engine.ini` in the class's folder).
+struct Loops {
+    on: Arc<Sound>,
+    off: Arc<Sound>,
+    idle: Arc<Sound>,
+    /// The revs each loop was recorded at.
+    on_rpm: f32,
+    off_rpm: f32,
+    idle_rpm: f32,
+    /// The engine's idle and its top, rpm.
+    low: f32,
+    high: f32,
+    /// Top speed in each gear, mph.
+    gears: Vec<f32>,
+}
+
+impl Loops {
+    fn load(dir: &Path) -> Option<Loops> {
+        let ini = scn::Ini::parse(&crate::fs::read_to_string(dir.join("engine.ini")).ok()?);
+        let get = |key: &str| ini.sections.iter().find_map(|s| s.get(key)).map(|v| v.trim().to_string());
+        let num = |key: &str| get(key).and_then(|v| v.parse::<f32>().ok());
+        let wav = |key: &str| {
+            let name = get(key)?;
+            let bytes = crate::fs::read(dir.join(&name)).map_err(|e| eprintln!("{}: {e}", dir.join(&name).display())).ok()?;
+            mm2_formats::wav::parse(&bytes).ok().map(Arc::new)
+        };
+        let gears: Vec<f32> = get("GearTopSpeeds")
+            .map(|v| v.split(',').filter_map(|g| g.trim().parse().ok()).collect())
+            .unwrap_or_else(|| GEARS.to_vec());
+        Some(Loops {
+            on: wav("OnLoop")?,
+            off: wav("OffLoop")?,
+            idle: wav("IdleLoop")?,
+            on_rpm: num("OnLoopRpm")?,
+            off_rpm: num("OffLoopRpm")?,
+            idle_rpm: num("IdleLoopRpm")?,
+            low: num("IdleRpm").unwrap_or(1600.0),
+            high: num("MaxRpm").unwrap_or(10000.0),
+            gears: if gears.is_empty() { vec![75.0] } else { gears },
+        })
+    }
+}
+
+/// Top speed in each gear, mph, unless the class's `engine.ini` gives its
+/// own: long gears, so each pull to the shift lasts a second or more (the
+/// bikes reach 50 mph in about three seconds).
+const GEARS: [f32; 4] = [32.0, 50.0, 68.0, 88.0];
+
+/// One bike's revs for the free pack's loops: a five-speed box worked out
+/// from the bike's speed, the clutch slipping at a standstill, and free
+/// revving in the air and at the gate.
+#[derive(Default)]
+struct Revs {
+    rpm: f32,
+    gear: usize,
+    /// The road speed the revs follow, mph, smoothed: the bike's own
+    /// jumps about over every bump.
+    mph: f32,
+    /// How much of the on-gas loop is heard, 0 to 1.
+    load: f32,
+    voices: Option<[Voice; 3]>,
+}
+
+impl Revs {
+    fn step(&mut self, loops: &Loops, mph: f32, gas: f32, grounded: bool, dt: f32) {
+        let (low, high) = (loops.low, loops.high);
+        if self.rpm == 0.0 {
+            self.rpm = low;
+        }
+        self.mph += (mph - self.mph) * (1.0 - (-4.0 * dt).exp());
+        let mph = self.mph;
+        let target = if grounded {
+            // The gear that keeps the revs under the shift point; down a
+            // gear only once they fall well below it.
+            let top = |g: usize| loops.gears[g.min(loops.gears.len() - 1)];
+            while self.gear + 1 < loops.gears.len() && mph > top(self.gear) * 0.97 {
+                self.gear += 1;
+            }
+            while self.gear > 0 && mph < top(self.gear - 1) * 0.6 {
+                self.gear -= 1;
+            }
+            let wheel = high * mph / top(self.gear);
+            // Pulling away the clutch slips: the revs hold up with the gas
+            // until the wheel catches them.
+            let slip = low + (high * 0.7 - low) * gas;
+            wheel.max(if self.gear == 0 { slip } else { low })
+        } else {
+            low + (high * 0.95 - low) * gas
+        };
+        let target = target.clamp(low, high);
+        // Revs climb steadily; on the gas they fall only at a shift (or
+        // the clutch going in at the start), which is quick; off it they
+        // die away more slowly.
+        let rate = if target > self.rpm {
+            6.0
+        } else if gas > 0.1 {
+            16.0
+        } else {
+            5.0
+        };
+        self.rpm += (target - self.rpm) * (1.0 - (-rate * dt).exp());
+        let load = if gas > 0.1 { 1.0 } else { 0.0 };
+        self.load += (load - self.load) * (1.0 - (-14.0 * dt).exp());
+    }
+
+    /// Each loop's volume and pitch: on, off, idle.
+    fn mix(&self, loops: &Loops) -> [(f32, f32); 3] {
+        let near_idle = ((loops.low * 1.7 - self.rpm) / (loops.low * 0.7)).clamp(0.0, 1.0);
+        let off = 1.0 - self.load;
+        [
+            (self.load, self.rpm / loops.on_rpm),
+            (off * (1.0 - near_idle) * 0.7, self.rpm / loops.off_rpm),
+            (off * near_idle * 0.8, self.rpm / loops.idle_rpm),
+        ]
+    }
 }
 
 impl Bank {
@@ -222,6 +348,62 @@ impl Bank {
                 band("MidTorqueMaxSpeed", 55),
                 band("HighTorqueMaxSpeed", 100),
             ],
+            loops: None,
+        })
+    }
+
+    /// A class from the free pack's folder: each list's WAVs, named after
+    /// the list (`LowTorque01.wav`), in name order.
+    fn load_dir(dir: &Path, divisor: usize) -> Option<Bank> {
+        let mut names: Vec<(String, std::path::PathBuf)> = crate::fs::read_dir(dir)
+            .ok()?
+            .filter_map(|e| e.ok())
+            .map(|e| (e.file_name().to_string_lossy().to_ascii_lowercase(), e.path()))
+            .filter(|(n, _)| n.ends_with(".wav"))
+            .collect();
+        names.sort();
+        let lists: Vec<Vec<Arc<Sound>>> = LISTS
+            .iter()
+            .map(|(_, list)| {
+                let prefix = list.to_ascii_lowercase();
+                let files: Vec<_> = names
+                    .iter()
+                    .filter(|(n, _)| {
+                        n.strip_prefix(&prefix)
+                            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit() || c == '.'))
+                    })
+                    .collect();
+                let keep = if files.len() > 1 { (files.len() / divisor.max(1)).max(1) } else { files.len() };
+                files
+                    .into_iter()
+                    .take(keep)
+                    .filter_map(|(_, p)| crate::fs::read(p).ok())
+                    .filter_map(|b| mm2_formats::wav::parse(&b).map_err(|e| eprintln!("{}: {e}", dir.display())).ok())
+                    .map(Arc::new)
+                    .collect()
+            })
+            .collect();
+        let loops = Loops::load(dir);
+        if lists.iter().all(|l| l.is_empty()) && loops.is_none() {
+            return None;
+        }
+        let ini = crate::fs::read_to_string(dir.join("bands.ini")).unwrap_or_default();
+        let ini = scn::Ini::parse(&ini);
+        let band = |key: &str, default: i32| {
+            ini.sections
+                .iter()
+                .find_map(|s| s.get(key))
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(default)
+        };
+        Some(Bank {
+            lists,
+            bands: [
+                band("LowTorqueMaxSpeed", 20),
+                band("MidTorqueMaxSpeed", 55),
+                band("HighTorqueMaxSpeed", 100),
+            ],
+            loops,
         })
     }
 
@@ -301,6 +483,8 @@ struct Engine {
     /// so is the first: the game keeps the index and tests it for 0).
     wreck: usize,
     fall: usize,
+    /// The free pack's loops, when its class has them.
+    revs: Revs,
 }
 
 /// A one-shot 3D sound still playing, where it was started.
@@ -346,7 +530,7 @@ const EMITTER_REACH: f32 = 1.2;
 
 pub struct RaceSounds {
     /// By class; only the classes in the race are loaded.
-    banks: [Option<Bank>; 3],
+    banks: [Option<Bank>; 5],
     effects: HashMap<String, Arc<Sound>>,
     engines: Vec<Engine>,
     /// The class of any racer not given one: the player's.
@@ -406,27 +590,39 @@ impl RaceSounds {
         // classes keep half their samples (a quarter with three, when the
         // player's keeps half), the game's way of saving memory (0x4e7160
         // with its fifth argument 6).
-        let present: Vec<usize> = (0..3).filter(|c| classes.contains(c)).collect();
+        let present: Vec<usize> = (0..CLASSES.len()).filter(|c| classes.contains(c)).collect();
         let mine = classes.get(player).copied().unwrap_or(1);
         let divisor = |c: usize| match (options.sixteen_bit, present.len()) {
             (true, 2) if c != mine => 2,
-            (true, 3) if c != mine => 4,
-            (true, 3) => 2,
+            (true, 3..) if c != mine => 4,
+            (true, 3..) => 2,
             _ => 1,
         };
-        let mut banks: [Option<Bank>; 3] = Default::default();
+        // The free pack's own recordings for each class when it is in use,
+        // else the original's samples for the class's section.
+        let mut banks: [Option<Bank>; 5] = Default::default();
         for &c in &present {
-            banks[c] = Bank::load(res, options.sixteen_bit, CLASSES[c], divisor(c));
+            banks[c] = crate::freepack::engine_dir(CLASSES[c])
+                .and_then(|dir| Bank::load_dir(&dir, divisor(c)))
+                .or_else(|| Bank::load(res, options.sixteen_bit, CLASSES[ORIGINAL[c]], divisor(c)));
             if banks[c].is_none() {
-                eprintln!("no [{}] engine sounds in RES/ENGINE.RES", CLASSES[c]);
+                eprintln!("no [{}] engine sounds", CLASSES[c]);
             }
         }
         let mut effects = HashMap::new();
+        if let Some(dir) = crate::freepack::fx_dir() {
+            for e in crate::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let name = e.file_name().to_string_lossy().to_ascii_lowercase();
+                if let Some(s) = crate::fs::read(e.path()).ok().and_then(|b| mm2_formats::wav::parse(&b).ok()) {
+                    effects.insert(name, Arc::new(s));
+                }
+            }
+        }
         if let Ok(bytes) = crate::read_archive(&res.join("AUDIO.RES")) {
             if let Ok(ar) = rs2::Archive::parse(&bytes) {
                 for e in ar.entries() {
                     if let Ok(s) = mm2_formats::wav::parse(ar.data(e)) {
-                        effects.insert(e.name.to_ascii_lowercase(), Arc::new(s));
+                        effects.entry(e.name.to_ascii_lowercase()).or_insert(Arc::new(s));
                     }
                 }
             }
@@ -737,6 +933,34 @@ impl RaceSounds {
             }
             e.crashed = bike.crashed();
 
+            if let Some(loops) = self.banks[e.class].as_ref().and_then(|b| b.loops.as_ref()) {
+                let gas = if bike.crashed() { 0.0 } else { r.controls.throttle.clamp(0.0, 1.0) };
+                // Off the ground only once it's been off a while, as the
+                // original's sounds judge it: every bump lifts the bike a
+                // moment, and the revs mustn't flare each time.
+                let grounded = e.air < AIR && racing;
+                let flat = bike.velocity();
+                let road = Vec3::new(flat.x, 0.0, flat.z).length() * MPH;
+                e.revs.step(loops, road, gas, grounded, dt);
+                if !heard || self.options.gain <= 0.0 {
+                    for v in e.revs.voices.take().into_iter().flatten() {
+                        audio.stop(v);
+                    }
+                } else {
+                    if e.revs.voices.is_some_and(|v| !audio.playing(v[0])) {
+                        e.revs.voices = None;
+                    }
+                    let voices = *e.revs.voices.get_or_insert_with(|| {
+                        [&loops.on, &loops.off, &loops.idle].map(|s| audio.play(s, 0.0, true))
+                    });
+                    let (volume, pan, doppler) = l.hear(bike.position(), bike.velocity(), ENGINE_RANGE);
+                    for (v, (level, pitch)) in voices.into_iter().zip(e.revs.mix(loops)) {
+                        audio.place(v, volume * level * self.options.gain, pan, doppler * pitch);
+                    }
+                }
+                self.engines[i] = e;
+                continue;
+            }
             if !heard {
                 if let Some(v) = e.voice.take() {
                     audio.stop(v);
@@ -953,6 +1177,9 @@ impl RaceSounds {
             if let Some(v) = e.voice.take() {
                 audio.stop(v);
             }
+            for v in e.revs.voices.take().into_iter().flatten() {
+                audio.stop(v);
+            }
         }
         if let Some(v) = self.crowd.take() {
             audio.stop(v);
@@ -999,9 +1226,14 @@ mod tests {
     fn classes_follow_the_engine() {
         assert_eq!(class(125, false), 0);
         assert_eq!(class(250, false), 1);
-        assert_eq!(class(500, false), 1);
+        assert_eq!(class(400, false), 1);
+        assert_eq!(class(500, false), 3);
         assert_eq!(class(400, true), 2);
-        assert_eq!(class(600, true), 2);
+        assert_eq!(class(450, true), 2);
+        assert_eq!(class(600, true), 4);
+        // The original plays the big bikes with its [250] and [400] samples.
+        assert_eq!(CLASSES[ORIGINAL[class(500, false)]], "250");
+        assert_eq!(CLASSES[ORIGINAL[class(600, true)]], "400");
     }
 
     #[test]
@@ -1071,5 +1303,51 @@ mod tests {
         s.game_volume = 100;
         s.effects = false;
         assert_eq!(Options::from_profile(&s).gain, 0.0);
+    }
+}
+
+#[cfg(test)]
+mod revs_tests {
+    use super::*;
+
+    fn loops() -> Loops {
+        let quiet = Arc::new(Sound { rate: 22050, channels: 1, samples: vec![0.0; 100] });
+        Loops {
+            on: quiet.clone(),
+            off: quiet.clone(),
+            idle: quiet,
+            on_rpm: 8000.0,
+            off_rpm: 6000.0,
+            idle_rpm: 1600.0,
+            low: 1600.0,
+            high: 10000.0,
+            gears: GEARS.to_vec(),
+        }
+    }
+
+    #[test]
+    fn revs_climb_with_speed_and_drop_at_each_shift() {
+        let l = loops();
+        let mut r = Revs::default();
+        let mut last = (0, 0.0);
+        let mut drops = 0;
+        for i in 0..600 {
+            let mph = i as f32 * 0.12;
+            r.step(&l, mph, 1.0, true, 1.0 / 60.0);
+            if r.gear > last.0 {
+                drops += 1;
+            }
+            last = (r.gear, r.rpm);
+        }
+        assert_eq!(r.gear, 3, "{}", r.rpm);
+        assert!(drops >= 3);
+        assert!(r.rpm > 7000.0 && r.rpm <= 10000.0, "{}", r.rpm);
+        // Off the gas at a standstill it settles to idle, on the idle loop.
+        for _ in 0..600 {
+            r.step(&l, 0.0, 0.0, true, 1.0 / 60.0);
+        }
+        assert!((r.rpm - 1600.0).abs() < 50.0, "{}", r.rpm);
+        let mix = r.mix(&l);
+        assert!(mix[2].0 > 0.7 && mix[0].0 < 0.01);
     }
 }

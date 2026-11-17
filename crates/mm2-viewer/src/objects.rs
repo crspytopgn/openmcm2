@@ -493,6 +493,8 @@ impl ObjectMesh {
             ..Default::default()
         };
         let mut cache: HashMap<String, Option<slb::Model>> = HashMap::new();
+        // The free pack's stand-ins' own textures, by their `fp:` names.
+        let mut stand_in_images: HashMap<String, Image> = HashMap::new();
         let mut load = |name: &str| {
             // Track makers' scenes may name a model with the folder it
             // was made in (`SLTFiles\ramp_TD_001.slt`); the packs hold
@@ -515,7 +517,12 @@ impl ObjectMesh {
                             .ok()
                             .map(lift_decals);
                     }
-                    let data = models.iter().find_map(|m| m.get(&key))?;
+                    let Some(data) = models.iter().find_map(|m| m.get(&key)) else {
+                        // Not in the game's files: the free pack's stand-in.
+                        let (model, images) = crate::freepack::model(stem)?;
+                        stand_in_images.extend(images);
+                        return Some(model);
+                    };
                     slb::parse(data)
                         .map_err(|err| eprintln!("{name}: {err}"))
                         .ok()
@@ -573,7 +580,17 @@ impl ObjectMesh {
         let find = |name: &str| textures.iter().find_map(|(_, t)| t.get(bare(name)));
         let mut morphs: Option<Arc<Morphs>> = None;
         for (i, a) in animations.iter().enumerate() {
-            let Some(mcf) = find(&a.model).and_then(|b| Mcf::parse(b).ok()) else {
+            // The free pack's bikes and rider play the original's motions
+            // when it is there, and stand still when it is not.
+            let free = || {
+                let (template, shape) = crate::freepack::animated(&a.model)?;
+                let mut mcf = find(template)
+                    .and_then(|b| Mcf::parse(b).ok())
+                    .unwrap_or(Mcf { model: String::new(), motions: Vec::new() });
+                mcf.model = shape;
+                Some(mcf)
+            };
+            let Some(mcf) = find(&a.model).and_then(|b| Mcf::parse(b).ok()).or_else(free) else {
                 mesh.missing(&a.model);
                 continue;
             };
@@ -702,7 +719,15 @@ impl ObjectMesh {
                 // the game's own.
                 Some(n) => find("BikeNumbers128.tga")
                     .and_then(|e| texture::parse(e).ok())
-                    .map(|digits| Image::from_texture(&plate(&digits, n.parse().unwrap_or(0)))),
+                    .map(|digits| match n.strip_prefix(BOARD_MARK) {
+                        Some(n) => Image::from_texture(&board_plate(&plate(&digits, n.parse().unwrap_or(0)))),
+                        None => Image::from_texture(&plate(&digits, n.parse().unwrap_or(0))),
+                    }),
+                None if stand_in_images.contains_key(&name) => stand_in_images.remove(&name),
+                // A livery or outfit of the free pack's.
+                None if !name.is_empty() && find(&name).is_none() && crate::freepack::is_paint(&name) => {
+                    crate::freepack::paint(&name)
+                }
                 None => textures
                     .iter()
                     .find_map(|(archive, t)| Some((*archive, t.get(bare(&name))?)))
@@ -903,9 +928,16 @@ impl ObjectMesh {
             };
             // The bike's untextured material is the game's PROCEDURAL one:
             // the rider's number, painted for each bike.
-            let numbered = plate.is_some() && texture.is_empty();
+            // The free pack's plates are whole boards, the number printed
+            // on them; its other plain materials are just their colour.
+            let board = texture == crate::freepack::BOARD;
+            let solid = texture == crate::freepack::SOLID || (board && plate.is_none());
+            if solid || board {
+                texture.clear();
+            }
+            let numbered = plate.is_some() && texture.is_empty() && !solid;
             if let (true, Some(n)) = (numbered, plate) {
-                texture = format!("{PLATE}{n}");
+                texture = if board { format!("{PLATE}{BOARD_MARK}{n}") } else { format!("{PLATE}{n}") };
             }
             // The game lights models itself and overwrites the stored
             // colours, which are leftovers, unless the scene turns its
@@ -929,7 +961,7 @@ impl ObjectMesh {
                     normal: normal.normalize_or_zero().into(),
                     // The front plate shows the numbers smaller, in the
                     // middle (0x418470).
-                    uv: if numbered && pos[2] >= -0.5 {
+                    uv: if numbered && !board && pos[2] >= -0.5 {
                         [s.uvs[v][0] * 0.65 + 0.175, s.uvs[v][1] * 0.65 + 0.11]
                     } else {
                         s.uvs[v]
@@ -2133,6 +2165,47 @@ pub const SECOND: &str = "#m1:";
 /// A skin of `#plate:<number>` gives a bike its rider's number, and
 /// `#plate:<number>:<paint>` its paint too.
 pub const PLATE: &str = "#plate:";
+/// After [`PLATE`]: a free-pack plate, drawn as a whole board.
+const BOARD_MARK: &str = "board";
+
+/// A plate as a whole board: the number dark on white, set in the middle,
+/// for the free pack's bikes, whose plates have no paint under them.
+fn board_plate(clear: &Texture) -> Texture {
+    const SIDE: usize = 64;
+    let top = &clear.levels[0];
+    let mut level = vec![0xffffu16; SIDE * SIDE];
+    for y in 0..SIDE {
+        // The digits sit in rows 4..36; move them to the middle.
+        let Some(sy) = y.checked_sub(12).filter(|&sy| sy < SIDE) else { continue };
+        for x in 0..SIDE {
+            let a = (top[sy * SIDE + x] >> 12) as u32;
+            // Mix white towards near-black by the digit's cover.
+            let v = (15 - a * 14 / 15) as u16;
+            level[y * SIDE + x] = 0xf000 | v << 8 | v << 4 | v;
+        }
+    }
+    let mut levels = vec![level];
+    while levels.last().unwrap().len() > 1 {
+        let prev = levels.last().unwrap();
+        let side = (prev.len() as f32).sqrt() as usize;
+        let half = side / 2;
+        let mut next = Vec::with_capacity(half * half);
+        for y in 0..half {
+            for x in 0..half {
+                let mut sum = [0u32; 4];
+                for (ox, oy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let p = prev[(y * 2 + oy) * side + x * 2 + ox];
+                    for (c, s) in sum.iter_mut().enumerate() {
+                        *s += (p >> (c * 4) & 15) as u32;
+                    }
+                }
+                next.push(sum.iter().enumerate().map(|(c, s)| ((s / 4) as u16) << (c * 4)).sum());
+            }
+        }
+        levels.push(next);
+    }
+    Texture { size: SIDE as u32, format: mm2_formats::trn::PixelFormat::Argb4444, levels }
+}
 
 /// A number plate's texture as the game paints it (0x418300, 0x418380,
 /// 0x418470): a clear 64×64 surface with the digits of `BikeNumbers128.tga`

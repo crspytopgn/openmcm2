@@ -7,6 +7,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod boards;
+mod freepack;
 mod game;
 mod iso;
 mod look;
@@ -118,6 +119,12 @@ struct Launcher {
     saved: Settings,
     import: Option<Arc<game::Progress>>,
     running: Option<Child>,
+    /// The Free Pack being unpacked.
+    pack_import: Option<Arc<game::Progress>>,
+    /// The Free Pack being downloaded or updated.
+    pack_download: Option<Arc<freepack::Progress>>,
+    /// A newer Free Pack, once looked for.
+    pack_update: Slot<Option<freepack::Update>>,
     /// The last thing to tell the player, and whether it's bad news.
     note: Option<(String, bool)>,
     /// Where this copy of OpenMCM2 is installed, if it can update itself.
@@ -350,6 +357,15 @@ impl Launcher {
         if (l.settings.check_updates || asked) && l.install.is_ok() {
             l.check_updates();
         }
+        // A Free Pack since moved or deleted.
+        if l.settings.freepack.as_deref().is_some_and(|p| !game::is_pack(p)) {
+            l.settings.freepack = None;
+        }
+        // A newer Free Pack, for one downloaded here.
+        if let Some(dir) = l.settings.freepack.clone().filter(|d| freepack::local(d).is_some() && l.settings.check_updates) {
+            let slot = l.pack_update.clone();
+            std::thread::spawn(move || *slot.lock().unwrap() = Some(freepack::check(&dir)));
+        }
         // A game copied before but since moved or deleted.
         if let Some(g) = l.settings.game.clone() {
             if !game::missing(&g).is_empty() {
@@ -366,6 +382,9 @@ impl Launcher {
             saved: settings.clone(),
             settings,
             import: None,
+            pack_import: None,
+            pack_download: None,
+            pack_update: Arc::new(Mutex::new(None)),
             running: None,
             note: None,
             install,
@@ -389,6 +408,11 @@ impl Launcher {
     }
 
     fn play(&mut self, ctx: &egui::Context) {
+        self.play_with(ctx, &[]);
+    }
+
+    /// Starts the game with `extra` after the settings' own options.
+    fn play_with(&mut self, ctx: &egui::Context, extra: &[&str]) {
         let Some(viewer) = settings::viewer() else {
             self.note = Some(("Can't find mm2-viewer next to the launcher.".into(), true));
             return;
@@ -396,8 +420,8 @@ impl Launcher {
         let log = settings::user_dir().join("last-run.log");
         let err = std::fs::File::create(&log).map(Stdio::from).unwrap_or(Stdio::null());
         let mut cmd = Command::new(&viewer);
-        cmd.args(self.settings.args()).stdout(Stdio::null()).stderr(err);
-        if let Some(g) = &self.settings.game {
+        cmd.args(self.settings.args()).args(extra).stdout(Stdio::null()).stderr(err);
+        if let (false, Some(g)) = (self.settings.free_graphics, &self.settings.game) {
             cmd.current_dir(g);
         }
         // The viewer is a console program; without this Windows opens a
@@ -508,6 +532,40 @@ impl Launcher {
                 ctx.request_repaint_after(Duration::from_millis(100));
             }
         }
+        if let Some(p) = self.pack_import.clone() {
+            let r = p.result.lock().unwrap().take();
+            if let Some(r) = r {
+                match r {
+                    Ok(dir) => {
+                        self.note = Some((format!("Free Pack ready in {}", dir.display()), false));
+                        self.settings.freepack = Some(dir);
+                        self.settings.free_graphics = true;
+                    }
+                    Err(e) => self.note = Some((e, true)),
+                }
+                self.pack_import = None;
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+        }
+        if let Some(p) = self.pack_download.clone() {
+            let r = p.result.lock().unwrap().take();
+            if let Some(r) = r {
+                match r {
+                    Ok(dir) => {
+                        self.note = Some(("The Free Pack is ready.".into(), false));
+                        self.settings.freepack = Some(dir);
+                        self.settings.free_graphics = true;
+                        let _ = self.settings.save();
+                        *self.pack_update.lock().unwrap() = Some(Ok(None));
+                    }
+                    Err(e) => self.note = Some((e, true)),
+                }
+                self.pack_download = None;
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+        }
         if let Some(child) = &mut self.running {
             match child.try_wait() {
                 Ok(Some(status)) => {
@@ -579,7 +637,7 @@ impl Launcher {
             let image = egui::ColorImage::from_rgba_unmultiplied([png.width as usize, png.height as usize], &png.rgba);
             self.logo = Some(ui.ctx().load_texture("logo", image, egui::TextureOptions::LINEAR));
         }
-        let busy = self.import.is_some();
+        let busy = self.import.is_some() || self.pack_import.is_some() || self.pack_download.is_some();
         egui::Panel::left("nav")
             .exact_size(236.0)
             .resizable(false)
@@ -628,7 +686,7 @@ impl Launcher {
             let version = update::current().map_or("Built from source".to_string(), |v| format!("OpenMCM2 {v}"));
             ui.label(look::weak(version));
             ui.add_space(6.0);
-            let can = self.settings.game.is_some() && !busy;
+            let can = self.can_play() && !busy;
             if ui
                 .add_enabled(can, egui::Button::new(look::with(look::icon::ICON_SHORTCUT, "Desktop shortcut")).min_size(egui::vec2(ui.available_width(), 32.0)))
                 .on_hover_text("Starts the game straight away, skipping the launcher, with the settings here. Change them here and the shortcut follows.")
@@ -637,7 +695,7 @@ impl Launcher {
                 self.make_shortcut();
             }
             ui.add_space(4.0);
-            let ready = self.settings.game.is_some() && !busy && self.running.is_none();
+            let ready = self.can_play() && !busy && self.running.is_none();
             let label = if self.running.is_some() { "Running…".to_string() } else { look::with(look::icon::ICON_PLAY_CIRCLE, "PLAY") };
             if look::big_button(ui, &label, 54.0, ready).clicked() {
                 let _ = self.settings.save();
@@ -645,8 +703,12 @@ impl Launcher {
                 let ctx = ui.ctx().clone();
                 self.play(&ctx);
             }
-            if self.settings.game.is_none() && !busy {
-                ui.label(look::weak("Set up the game data first."));
+            if !self.can_play() && !busy {
+                ui.label(look::weak(if self.settings.free_graphics {
+                    "Add the Free Pack first (Play page)."
+                } else {
+                    "Set up the game data first."
+                }));
             }
             if let Some((text, bad)) = &self.note {
                 ui.add_space(4.0);
@@ -660,10 +722,184 @@ impl Launcher {
     fn play_page(&mut self, ui: &mut egui::Ui, busy: bool) {
         look::page_title(ui, "Ready to ride", "Motocross Madness 2, running natively on your computer.");
         self.update_banner(ui, busy);
-        self.game_card(ui, busy);
+        self.graphics_choice_card(ui, busy);
+        if self.settings.free_graphics {
+            self.freepack_card(ui, busy);
+        } else {
+            self.game_card(ui, busy);
+        }
         self.summary_card(ui);
         self.playtime_card(ui);
         self.display_card(ui);
+    }
+
+    /// Whether Play has what it needs: the game data, or the Free Pack.
+    fn can_play(&self) -> bool {
+        match self.settings.free_graphics {
+            true => self.settings.freepack.is_some(),
+            false => self.settings.game.is_some(),
+        }
+    }
+
+    /// The big choice: the original game's graphics or the Free Pack's,
+    /// and the Course Builder beside them.
+    fn graphics_choice_card(&mut self, ui: &mut egui::Ui, busy: bool) {
+        use look::icon;
+        let free = self.settings.free_graphics;
+        let (has_game, has_pack) = (self.settings.game.is_some(), self.settings.freepack.is_some());
+        let mut pick = None;
+        look::card(ui, icon::ICON_PALETTE, "How do you want to play?", |ui| {
+            let gap = 12.0;
+            let w = ((ui.available_width() - gap) / 2.0).max(220.0);
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                if look::pick_tile(
+                    ui,
+                    !free,
+                    icon::ICON_DISC_FULL,
+                    "MM2 graphics",
+                    "The original game's own art and sound, from your copy of Motocross Madness 2. The full game: every event, the menus, the Pro Circuit and multiplayer.",
+                    "Plays with the art, sounds and menus from your own Motocross Madness 2 CD, CD image or install. This is the game as it was, and it's the default.",
+                    w,
+                    |ui| match has_game {
+                        true => look::status(ui, true, "Game data ready"),
+                        false => look::status(ui, false, "Needs your MM2 files"),
+                    },
+                ) {
+                    pick = Some(false);
+                }
+                if look::pick_tile(
+                    ui,
+                    free,
+                    icon::ICON_FOREST,
+                    "Free graphics",
+                    "New art and sound made for OpenMCM2, free for anyone. No MM2 files needed. Early days: for now it opens the Course Builder, where you make a track and ride it.",
+                    "Plays with the Free Pack instead of the original's files: new bikes, riders, ground, trees, stadium and engine sounds, all openly licensed. Races and menus with the free art are still being made, so for now Play opens the Course Builder.",
+                    w,
+                    |ui| match has_pack {
+                        true => look::status(ui, true, "Free Pack ready"),
+                        false => look::status(ui, false, "Free Pack not added yet"),
+                    },
+                ) {
+                    pick = Some(true);
+                }
+            });
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new(look::with(icon::ICON_EDIT_ROAD, "Course Builder")).color(look::TEXT).family(look::bold_family()));
+                ui.label(look::weak("Make your own track and ride it. It works with either graphics, and it's on the game's main menu too (the shovel on the chain)."));
+            });
+            ui.add_space(4.0);
+            let can = self.can_play() && !busy && self.running.is_none();
+            if ui
+                .add_enabled(can, egui::Button::new(look::with(icon::ICON_CONSTRUCTION, "Open the Course Builder")))
+                .on_hover_text("Starts the game straight in the Course Builder, with the graphics picked above. Draw the track's line, drop in jumps, shape and paint the ground, then press Ride it. Your tracks join the game's track lists.")
+                .clicked()
+            {
+                let _ = self.settings.save();
+                self.saved = self.settings.clone();
+                let ctx = ui.ctx().clone();
+                self.play_with(&ctx, &["--course-builder"]);
+            }
+        });
+        if let Some(free) = pick {
+            self.settings.free_graphics = free;
+        }
+    }
+
+    /// Setting up the Free Pack: its zip, or its folder.
+    fn freepack_card(&mut self, ui: &mut egui::Ui, busy: bool) {
+        use look::icon;
+        look::card(ui, icon::ICON_FOREST, "Free Pack", |ui| {
+            match &self.settings.freepack {
+                Some(p) => look::status(ui, true, &format!("Ready: {}", p.display())),
+                None => look::status(ui, false, "Not added yet"),
+            }
+            let update = match &*self.pack_update.lock().unwrap() {
+                Some(Ok(Some(u))) => Some((u.version.clone(), u.bytes)),
+                _ => None,
+            };
+            if let Some((version, bytes)) = &update {
+                look::status(ui, true, &format!("A newer Free Pack is out ({version}): {} MB to download", (bytes >> 20).max(1)));
+            }
+            ui.label(look::weak(
+                "The Free Pack is a separate download, so OpenMCM2 itself stays small. Updates only download the parts that changed. Your Motocross Madness 2 files stay set up, so you can switch back any time.",
+            ));
+            if let Some(p) = &self.pack_download {
+                let total = p.total.load(Ordering::Relaxed).max(1);
+                let done = p.done.load(Ordering::Relaxed);
+                ui.horizontal(|ui| {
+                    ui.add(egui::ProgressBar::new(done as f32 / total as f32).show_percentage().desired_width(ui.available_width() - 90.0));
+                    if ui.button("Cancel").clicked() {
+                        p.cancel.store(true, Ordering::Relaxed);
+                    }
+                });
+                let stage = p.stage.lock().unwrap().clone();
+                ui.label(look::weak(format!("{stage} {} of {} MB", done >> 20, total >> 20)));
+            }
+            if let Some(p) = &self.pack_import {
+                let total = p.total.load(Ordering::Relaxed).max(1);
+                let done = p.done.load(Ordering::Relaxed);
+                ui.horizontal(|ui| {
+                    ui.add(egui::ProgressBar::new(done as f32 / total as f32).show_percentage().desired_width(ui.available_width() - 90.0));
+                    if ui.button("Cancel").clicked() {
+                        p.cancel.store(true, Ordering::Relaxed);
+                    }
+                });
+                ui.label(look::weak(format!("Unpacking the Free Pack… {} of {} MB", done >> 20, total >> 20)));
+            }
+            ui.add_space(2.0);
+            // Downloaded here before (with its list), or not set up yet:
+            // the download brings it up to date. A folder picked elsewhere
+            // is left alone.
+            let here = settings::user_dir().join("FreePack");
+            let target = match &self.settings.freepack {
+                Some(d) if freepack::local(d).is_some() => Some(d.clone()),
+                Some(_) => None,
+                None => Some(here.clone()),
+            };
+            ui.horizontal_wrapped(|ui| {
+                ui.add_enabled_ui(!busy && self.running.is_none(), |ui| {
+                    let label = match (&self.settings.freepack, &update) {
+                        (None, _) => "Download the Free Pack",
+                        (Some(_), Some(_)) => "Update the Free Pack",
+                        (Some(_), None) => "Check for a newer Free Pack",
+                    };
+                    if let Some(dir) = target.clone() {
+                        if ui
+                            .add(egui::Button::new(egui::RichText::new(look::with(icon::ICON_DOWNLOAD, label)).color(look::ON_ACCENT)).fill(look::ACCENT))
+                            .on_hover_text("Downloads the Free Pack from the OpenMCM2 releases on GitHub into your OpenMCM2 folder, checking every file. Next time, only the parts that changed come down.")
+                            .clicked()
+                        {
+                            self.note = None;
+                            self.pack_download = Some(freepack::install(dir));
+                        }
+                    }
+                    if ui
+                        .button(look::with(icon::ICON_FOLDER_ZIP, "Choose Free Pack zip…"))
+                        .on_hover_text("A Free Pack zip you already have. It's unpacked next to your settings, and the zip can go after.")
+                        .clicked()
+                    {
+                        if let Some(f) = rfd::FileDialog::new().set_title("The Free Pack zip").add_filter("Zip", &["zip"]).pick_file() {
+                            self.note = None;
+                            self.pack_import = Some(game::import_pack(f, here.clone()));
+                        }
+                    }
+                    if ui
+                        .button(look::with(icon::ICON_DRIVE_FOLDER_UPLOAD, "Choose Free Pack folder…"))
+                        .on_hover_text("A Free Pack you've already unpacked: the folder with stockmap.toml in it. It's used where it is.")
+                        .clicked()
+                    {
+                        if let Some(d) = rfd::FileDialog::new().set_title("The Free Pack folder").pick_folder() {
+                            self.note = None;
+                            self.pack_import = Some(game::import_pack(d, here.clone()));
+                        }
+                    }
+                });
+            });
+        });
     }
 
     /// The playtime tracker: the player's own, and everyone's.
@@ -1004,9 +1240,37 @@ impl Launcher {
             slider(ui, "Riders on the gate", "Up to 30 riders in a single race. 0 is the original game's count.", &mut s.more.riders, 0..=mm2_settings::RIDERS_MOST, 1.0, "");
             ui.label(look::weak("Extra art for added tracks goes in the game's RES/ADDONS folder; it never replaces the game's own."));
         });
+        self.builder_card(ui);
         self.leaderboard_card(ui);
         self.network_card(ui);
         ui.label(look::weak("Thanks to Daniel (github.com/dwolp) for many of these, the new launcher, the ray tracing and night races, and the fixes that came with them."));
+    }
+
+    /// The Course Builder, which opens in the game.
+    fn builder_card(&mut self, ui: &mut egui::Ui) {
+        use look::icon;
+        look::card(ui, icon::ICON_EDIT_ROAD, "Course Builder", |ui| {
+            ui.label(look::weak("Make your own track: draw its line on the land, drop jumps on it from a kit, shape and paint the ground, place objects, then ride it straight away. Your tracks join the game's track lists. It's in the game too: the shovel on the main menu's chain, or Options, Tweaks..., Course Builder..."));
+            ui.add_space(4.0);
+            let w = ui.available_width();
+            look::switch_tile(
+                ui,
+                &mut self.settings.more.builder_menu,
+                "Course Builder on the main menu",
+                "On unless you turn it off. Adds a shovel link to the empty spot on the main menu's chain, above Help, that opens the Course Builder. Off, the main menu is exactly the original's, and the builder is still under Options, Tweaks.",
+                w,
+            );
+            ui.add_space(4.0);
+            let busy = self.running.is_some();
+            if ui
+                .add_enabled(!busy, egui::Button::new(look::with(icon::ICON_CONSTRUCTION, "Open the Course Builder")))
+                .on_hover_text("Starts the game in the Course Builder, with the settings here. Exit in the builder goes on to the game's menus.")
+                .clicked()
+            {
+                let ctx = ui.ctx().clone();
+                self.play_with(&ctx, &["--course-builder"]);
+            }
+        });
     }
 
     /// Network races: lobby downloads, the server browser and its list.
@@ -1687,6 +1951,8 @@ mod shots {
             ("graphics_custom", Page::Graphics, true, 520.0),
             ("graphics_auto", Page::Graphics, true, 520.0),
             ("play_full", Page::Play, true, 1300.0),
+            ("play_free", Page::Play, true, 1300.0),
+            ("play_free_new", Page::Play, true, 1300.0),
         ] {
             let width = if name.ends_with("small") { 760.0 } else { 1000.0 };
             let custom = name.ends_with("custom");
@@ -1696,6 +1962,10 @@ mod shots {
             s.quality = Quality::RayTraced;
             s.auto = name == "graphics_auto";
             s.fullscreen = name == "play_full";
+            s.free_graphics = name.starts_with("play_free");
+            if name == "play_free" {
+                s.freepack = Some("C:/Users/rider/AppData/Roaming/mm2/FreePack".into());
+            }
             s.antialiasing = "taa".into();
             s.resolution = "75%".into();
             s.time = "night".into();

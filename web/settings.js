@@ -84,6 +84,7 @@ export const EXTRAS = [
     { key: "track_filter", flag: "track-filter", label: "Track filter", about: "All tracks, the base game's or only the ones you added, on the event page." },
     { key: "riders", flag: "gate-riders", label: "Riders on the gate", about: "Up to 30 riders in a single race. 0 is the original game's count.", range: [0, 30, 1, ""], off: 0 },
     { key: "no_leaderboards", flag: "no-leaderboards", label: "Keep my laps off the leaderboards", keep: true, about: "The lap leaderboards are on unless you tick this: after a race, your best laps go to the OpenMCM2 leaderboard under your rider name (High Scores, Online shows everyone's)." },
+    { key: "no_builder_menu", flag: "no-builder-menu", label: "No Course Builder on the main menu", keep: true, about: "The main menu has a shovel link on its chain, above Help, that opens the Course Builder, unless you tick this. Ticked, the main menu is exactly the original's, and the builder is still under Options, Tweaks." },
     { key: "no_share_playtime", flag: "no-share-playtime", label: "Don't add my time to everyone's", keep: true, about: "Unless you tick this, how long you play each event, track and bike class is added to everyone's on the OpenMCM2 server, with no name or anything else that says who you are." },
   ]],
   ["Network races", [

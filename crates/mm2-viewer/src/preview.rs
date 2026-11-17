@@ -56,9 +56,11 @@ impl Preview {
             motion: Some(motion.to_string()),
             lighting: Default::default(),
         };
+        // The free pack's outfits go on its own rider.
+        let rider = crate::freepack::outfit_model(&ride.outfit).map_or("UIRider.mcf".to_string(), |m| format!("ui{m}"));
         let animations = [
             place(&ride.bike.ui_model, "WaitB"),
-            place("UIRider.mcf", "WaitR"),
+            place(&rider, "WaitR"),
         ];
         let skins = [
             Some(format!("{PLATE}{}:{}", ride.plate, ride.bike.texture)),

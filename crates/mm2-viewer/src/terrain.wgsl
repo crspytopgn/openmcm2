@@ -30,6 +30,19 @@ struct Globals {
 // The player's shadow's mask: the bike and rider as the sun sees them.
 @group(0) @binding(6) var shadow_mask: texture_2d<f32>;
 @group(0) @binding(7) var shadow_sampler: sampler;
+// The free pack's fine ground (fine_ground.rs): per terrain sample its
+// two ground materials and the second's share, their full-size pictures,
+// and per material one over the feet a repeat covers (x) and whether it
+// has a picture (y). ground_info.on: x 1 when on, y the baked tiles' feet
+// per texel, z the pictures' side.
+struct GroundInfo {
+    on: vec4<f32>,
+    repeats: array<vec4<f32>, 12>,
+};
+@group(0) @binding(8) var ground_map: texture_2d<u32>;
+@group(0) @binding(9) var ground_pictures: texture_2d_array<f32>;
+@group(0) @binding(10) var ground_sampler: sampler;
+@group(0) @binding(11) var<uniform> ground_info: GroundInfo;
 
 // How much of the player's shadow falls on `world`: the mask laid along
 // the light (0x4df8c0's texture matrix), shrunk to half its size as
@@ -101,6 +114,65 @@ fn tile_layer(raw: u32, uv: vec2<f32>) -> vec3<f32> {
     return vec3<f32>((inside + vec2<f32>(f32(q & 1u), f32(q >> 1u))) * 0.5, f32(raw & 0x1fffu));
 }
 
+// How much material `m`'s picture brightens or darkens the baked colour
+// at `feet`: its full-size texel over the same spot blurred to the baked
+// tiles' texel size, so only the finer detail is added.
+fn fine_ratio(m: u32, feet: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec3<f32> {
+    let r = ground_info.repeats[m];
+    if (r.y == 0.0) {
+        return vec3<f32>(1.0);
+    }
+    let uv = feet * r.x;
+    let fine = textureSampleGrad(ground_pictures, ground_sampler, uv, m, dx * r.x, dy * r.x).rgb;
+    let baked = log2(max(ground_info.on.y * ground_info.on.z * r.x, 1.0));
+    let coarse = textureSampleLevel(ground_pictures, ground_sampler, uv, m, baked).rgb;
+    return clamp(fine / max(coarse, vec3<f32>(0.01)), vec3<f32>(0.35), vec3<f32>(2.2));
+}
+
+// The free pack's fine detail over the baked colour at terrain sample
+// coordinate `xz`, 1 where there is none.
+fn fine_ground(xz: vec2<f32>) -> vec3<f32> {
+    let feet = xz * globals.grid.y;
+    let dx = dpdx(feet);
+    let dy = dpdy(feet);
+    if (ground_info.on.x == 0.0) {
+        return vec3<f32>(1.0);
+    }
+    // The four samples round the pixel, each giving its two materials
+    // their shares; the two with the most between them are drawn.
+    let size = vec2<i32>(textureDimensions(ground_map));
+    let i0 = vec2<i32>(floor(xz));
+    let f = fract(xz);
+    var w = array<f32, 12>(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    for (var k = 0; k < 4; k++) {
+        let o = vec2<i32>(k & 1, k >> 1u);
+        let c = textureLoad(ground_map, clamp(i0 + o, vec2<i32>(0), size - 1), 0);
+        let bw = select(1.0 - f.x, f.x, o.x == 1) * select(1.0 - f.y, f.y, o.y == 1);
+        let share = f32(c.b) / 255.0;
+        w[min(c.r, 11u)] += bw * (1.0 - share);
+        w[min(c.g, 11u)] += bw * share;
+    }
+    var a = 0u;
+    for (var m = 1u; m < 12u; m++) {
+        if (w[m] > w[a]) {
+            a = m;
+        }
+    }
+    var b = select(0u, 1u, a == 0u);
+    for (var m = 0u; m < 12u; m++) {
+        if (m != a && w[m] > w[b]) {
+            b = m;
+        }
+    }
+    let wb = w[b] / max(w[a] + w[b], 1e-4);
+    var ratio = fine_ratio(a, feet, dx, dy) * (1.0 - wb);
+    if (wb > 0.02) {
+        ratio += fine_ratio(b, feet, dx, dy) * wb;
+    } else {
+        ratio += vec3<f32>(wb);
+    }
+    return ratio;
+}
 
 // The ground's colour at a pixel, as the game shows it, before its
 // shadow and fog.
@@ -122,7 +194,7 @@ fn ground(in: VertexOut) -> vec3<f32> {
     let across_x = tile(t, cell + vec2<i32>(towards.x, 0), ddx, ddy);
     let across_z = tile(t, cell + vec2<i32>(0, towards.y), ddx, ddy);
     let corner = tile(t, cell + towards, ddx, ddy);
-    let base = mix(mix(own, across_x, blend.x), mix(across_z, corner, blend.x), blend.y);
+    let base = mix(mix(own, across_x, blend.x), mix(across_z, corner, blend.x), blend.y) * fine_ground(in.terrain_xz);
     // The detail texture, once over each tile, blended over the texel in
     // the game's own colour space (its second texture stage,
     // BLENDTEXTUREALPHA).

@@ -101,7 +101,14 @@ fn decode(webp: &[u8]) -> Vec<u8> {
 
 /// Halves an RGBA8 image `side` texels square, linear in sRGB colour for
 /// `srgb` (only RGB; alpha is always linear).
-fn halve(level: &[u8], side: u32, srgb: bool) -> Vec<u8> {
+/// A ground material's colour picture (RGB, roughness in A), by name:
+/// dirt, packed, grass, rock or sand.
+pub(crate) fn albedo(name: &str) -> Option<&'static [u8]> {
+    let i = ["dirt", "packed", "grass", "rock", "sand"].iter().position(|n| *n == name)?;
+    Some(MATERIALS[i].0)
+}
+
+pub(crate) fn halve(level: &[u8], side: u32, srgb: bool) -> Vec<u8> {
     let half = (side / 2).max(1);
     // Each byte's value once, not four times a texel (the same sums).
     let linear: [f32; 256] = std::array::from_fn(|v| (v as f32 / 255.0).powf(2.2));

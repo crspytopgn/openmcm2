@@ -58,6 +58,9 @@ pub const OWN_MODEL: (&str, &str) = ("yamaha.mcf", "uiyamaha.mcf");
 /// The maker name of the bike the `BIKES` folder's paints go on (0x573a2c).
 pub const USER_MAP: &str = "(User Map)";
 
+/// The maker name the free pack's bikes are listed under.
+pub const FREE_MAKER: &str = "OpenMX";
+
 /// The name a loose skin is found by in `BIKE.RES`, where
 /// [`crate::addons`] puts it: `own-bikes-<file>` or `own-riders-<file>`
 /// (no slash, as texture names lose their folders).
@@ -95,11 +98,11 @@ pub fn own_files(game: &Path, folder: &str) -> Vec<(String, String)> {
 impl Roster {
     /// Reads the lists from the game's `UI/UIRES.RES`.
     pub fn load(game: &Path) -> Roster {
-        let Ok(bytes) = crate::read_archive(&game.join("UI").join("UIRES.RES")) else {
-            return Roster::default();
-        };
+        let bytes = crate::read_archive(&game.join("UI").join("UIRES.RES")).unwrap_or_default();
         let Ok(ar) = rs2::Archive::parse(&bytes) else {
-            return Roster::default();
+            let mut roster = Roster::default();
+            roster.add_free();
+            return roster;
         };
         let text = |name: &str| {
             ar.get(name)
@@ -110,7 +113,26 @@ impl Roster {
             outfits: text("riders.pb").map(|t| outfits(&t)).unwrap_or_default(),
         };
         roster.add_own(game);
+        roster.add_free();
         roster
+    }
+
+    /// The free pack's bikes and outfits, after the game's.
+    fn add_free(&mut self) {
+        for b in crate::freepack::bikes() {
+            self.bikes.push(BikeChoice {
+                name: format!("{FREE_MAKER} {}", b.name),
+                model: format!("{}.mcf", b.shape),
+                ui_model: format!("ui{}.mcf", b.shape),
+                texture: b.livery.clone(),
+                cc: b.cc,
+                four_stroke: b.four_stroke,
+                own: false,
+            });
+        }
+        for o in crate::freepack::outfits() {
+            self.outfits.push(Outfit { name: o.name.clone(), file: o.outfit.clone() });
+        }
     }
 
     /// The paints and outfits in the game's `BIKES` and `RIDERS` folders,

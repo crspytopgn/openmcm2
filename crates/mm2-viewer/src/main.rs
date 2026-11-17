@@ -54,6 +54,7 @@ mod addons;
 mod pace;
 mod dynres;
 mod bars;
+mod builder;
 mod eco;
 mod enhance;
 mod rt;
@@ -71,6 +72,7 @@ mod scenery;
 mod crowd;
 mod cull;
 mod materials;
+mod fine_ground;
 mod graphics;
 mod online;
 mod polish;
@@ -82,6 +84,8 @@ mod camera;
 mod countdown;
 mod cues;
 mod reverb;
+mod freepack;
+mod menu_link;
 mod frontend;
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -171,6 +175,21 @@ fn main() -> Result<(), BoxError> {
             .position(|a| a == name)
             .and_then(|i| args.get(i + 1))
     };
+    // "Free graphics": the free pack's art and sound (`--freepack DIR`, or
+    // `--freepack=DIR` from a browser page's address).
+    if let Some(dir) = flag("--freepack").map(String::as_str).or_else(|| args.iter().find_map(|a| a.strip_prefix("--freepack="))) {
+        freepack::set_root(PathBuf::from(dir));
+    }
+    let args: Vec<String> = {
+        // The pack's folder isn't the game's.
+        let at = args.iter().position(|a| a == "--freepack");
+        args.iter().enumerate().filter(|(i, _)| at.is_none_or(|at| *i != at + 1)).map(|(_, a)| a.clone()).collect()
+    };
+    let flag = |name: &str| {
+        args.iter()
+            .position(|a| a == name)
+            .and_then(|i| args.get(i + 1))
+    };
     // The enhanced graphics, all of them or less those named after `=`.
     if let Some(arg) = args.iter().find(|a| *a == "--enhanced" || a.starts_with("--enhanced=")) {
         let list = arg.strip_prefix("--enhanced").unwrap().trim_start_matches('=');
@@ -186,6 +205,24 @@ fn main() -> Result<(), BoxError> {
     let path = args.first().filter(|a| !a.starts_with("--")).map(Path::new);
     let is_track =
         path.is_some_and(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("env")));
+    // `--course-builder` with no menus to go behind it (the free pack on
+    // its own): the builder by itself, riding straight from it.
+    // With the free pack and no game folder to show menus from, the
+    // builder is what opens: the pack has no menus of its own yet.
+    let free_only = freepack::chosen() && path.is_none();
+    if !is_track && (free_only || args.iter().any(|a| a == "--course-builder")) {
+        let has_menus = |g: &Path| fs::is_file(g.join("UI").join("MAINMENU.DAT"));
+        let given = path.map(Path::to_path_buf);
+        if free_only || (!given.as_deref().is_some_and(has_menus) && (given.is_some() || find_game().is_none())) {
+            // No game folder: tracks are baked into the user's own folder.
+            let game = given;
+            let i = args.iter().position(|a| a == "--course-builder");
+            let file = i.and_then(|i| args.get(i + 1)).filter(|a| !a.starts_with("--")).map(PathBuf::from);
+            let mut app = App::new(None, None, None);
+            app.builder = Some(builder::Builder::new(game, file.as_deref()));
+            return run(app);
+        }
+    }
     if !is_track {
         let Some(game) = path
             .map(Path::to_path_buf)
@@ -204,8 +241,20 @@ fn main() -> Result<(), BoxError> {
         let mut front =
             frontend::Frontend::new(&game).ok_or("the game's UI/MAINMENU.DAT cannot be read")?;
         update_note::check();
-        front.intro();
-        return run(App::new(None, None, Some(front)));
+        let builder_at = args.iter().position(|a| a == "--course-builder");
+        // `--course-builder [file]`: straight into the Course Builder, with
+        // the main menu behind it rather than the intro.
+        if builder_at.is_some() {
+            front.main_menu();
+        } else {
+            front.intro();
+        }
+        let mut app = App::new(None, None, Some(front));
+        if let Some(i) = builder_at {
+            let file = args.get(i + 1).filter(|a| !a.starts_with("--")).map(PathBuf::from);
+            app.open_builder(file.as_deref());
+        }
+        return run(app);
     }
     let path = path.unwrap();
     // A tape to show at `--at` seconds instead of a race.
@@ -627,7 +676,7 @@ fn main() -> Result<(), BoxError> {
             let b = &r.racers[r.player].bike;
             let at = b.position();
             eprintln!(
-                "rode {seconds}s: at {:.0},{:.0},{:.0}, {:.0} units/s, {:.1}s in the air{}",
+                "rode {seconds}s: at {:.0},{:.0},{:.0}, {:.0} units/s, {:.1}s in the air{}, computer crashes {}",
                 at.x,
                 at.y,
                 at.z,
@@ -639,7 +688,8 @@ fn main() -> Result<(), BoxError> {
                     ", flying"
                 } else {
                     ""
-                }
+                },
+                race::AI_CRASHES.load(std::sync::atomic::Ordering::Relaxed),
             );
             eprintln!("{}", r.status());
             if let Some(b) = r.tag.as_ref().and_then(|t| t.ball) {
@@ -678,6 +728,19 @@ fn main() -> Result<(), BoxError> {
                 camera.roll = r.camera_roll();
             }
             // A close look at the player's bike from in front.
+            // The whole start from up behind it (`--grid-view`).
+            if args.iter().any(|a| a == "--grid-view") {
+                let up = Vec3::Y;
+                let left = up.cross(b.forward());
+                let eye = at - b.forward() * 45.0 + up * 30.0 + left * 25.0;
+                camera = Camera::looking_at(renderer::from_game(eye), renderer::from_game(at + b.forward() * 30.0 + left * 25.0));
+            }
+            // And from the side (`--side`, the right).
+            if args.iter().any(|a| a == "--side") {
+                let up = Vec3::Y;
+                let eye = at + b.forward().cross(up) * 8.0 + up * 3.0;
+                camera = Camera::looking_at(renderer::from_game(eye), renderer::from_game(at + up * 2.5));
+            }
             if args.iter().any(|a| a == "--front") {
                 let up = Vec3::Y;
                 let eye = at + b.forward() * 7.0 + up * 3.5 + b.forward().cross(up) * 2.0;
@@ -955,6 +1018,8 @@ pub struct Track {
     lights: renderer::SceneLights,
     /// The terrain's detail texture (0x50b140).
     detail: Option<mm2_formats::tga::Image>,
+    /// A free track's fine ground (fine_ground.rs).
+    ground_map: Option<fine_ground::GroundMap>,
     /// The dirt and dust sheet (`ParticleTextureMapName`).
     particle_sheet: Option<mm2_formats::tga::Image>,
     /// The scene's scripted vehicles.
@@ -1663,6 +1728,7 @@ fn load_track(
     };
     let entry = find(".trn").ok_or("no terrain (.trn) in this archive")?;
     let terrain = trn::parse(archive.data(entry))?;
+    let ground_map = find(".gmt").and_then(|e| fine_ground::GroundMap::parse(archive.data(e)));
     load_step();
     let used_before = hires::pack().map_or(0, HiRes::used);
     let terrain_textures = terrain_textures(&terrain, &file_name(path), hires::pack());
@@ -1748,7 +1814,9 @@ fn load_track(
     let res = path
         .ancestors()
         .map(|dir| dir.join("RES"))
-        .find(|res| fs::is_file(res.join("MODELS.RES")));
+        .find(|res| fs::is_file(res.join("MODELS.RES")))
+        // Without the original's files, the free pack stands in for them.
+        .or_else(freepack::root);
     let cc = ride.as_ref().map_or(250, |r| r.bike.cc);
     let spec = res
         .as_deref()
@@ -1828,6 +1896,11 @@ fn load_track(
                             race::set_cross_up(frames);
                         }
                     }
+                    // Without the original's bikes, the computer's riders
+                    // ride the free pack's.
+                    // (`MM2_FREE_GRID` gives them the pack's anyway.)
+                    let originals = rs2::Archive::parse(&bytes).is_ok_and(|ar| ar.get(GRID[0].0).is_some())
+                        && std::env::var_os("MM2_FREE_GRID").is_none();
                     model_files.push(bytes.clone());
                     texture_files.push(("BIKE.RES".to_string(), bytes));
                     grid_sources = start_grid(
@@ -1838,6 +1911,7 @@ fn load_track(
                         riders,
                         &rides,
                         ghost,
+                        originals,
                     );
                 }
                 Err(err) => eprintln!("{err}"),
@@ -1926,6 +2000,11 @@ fn load_track(
                             let mut k = keep.iter();
                             far.retain(|_| *k.next().unwrap());
                             solid.retain(|t| clear(t.base));
+                        }
+                        // Without the species' models (the free pack has
+                        // none yet) there are no trees to bump into.
+                        if placed.is_empty() {
+                            solid.clear();
                         }
                         eprintln!("{} trees and bushes, {} trunks", placed.len(), solid.len());
                         trees = statics.len()..statics.len() + placed.len();
@@ -2178,6 +2257,7 @@ fn load_track(
         sun,
         lights: scene_lights,
         detail,
+        ground_map,
         particle_sheet,
         traffic,
         zones,
@@ -2238,9 +2318,13 @@ fn load_sky(
     scene: Option<&scn::Scene>,
 ) -> Option<(mm2_formats::cub::Cube, hires::SkyImages)> {
     let name = scene?.cube_file.as_deref()?;
-    let skies = read_archive(&res?.join("SKIES.RES")).ok()?;
-    let skies = rs2::Archive::parse(&skies).ok()?;
-    match mm2_formats::cub::Cube::parse(skies.get(name)?) {
+    let skies = res.and_then(|res| read_archive(&res.join("SKIES.RES")).ok());
+    let skies = skies.as_deref().and_then(|s| rs2::Archive::parse(s).ok());
+    let Some(data) = skies.as_ref().and_then(|s| s.get(name)) else {
+        // Not in the game's files: the free pack's.
+        return freepack::sky(name);
+    };
+    match mm2_formats::cub::Cube::parse(data) {
         Ok(cube) => {
             let images = hires::sky_images(&cube, name, hires::pack());
             Some((cube, images))
@@ -2255,6 +2339,8 @@ fn load_sky(
 /// The bike model's root frame on each frame of its cross-up motion
 /// (`CrosBik1`), as turns of the bike.
 fn cross_up(bike_res: &rs2::Archive, bike: &str) -> Option<Vec<glam::Quat>> {
+    // The free pack's bikes play the original bike's motions.
+    let bike = freepack::animated(bike).map_or(bike, |(template, _)| template);
     let mcf = mm2_formats::anim::Mcf::parse(bike_res.get(bike)?).ok()?;
     let info = mcf
         .motions
@@ -2277,6 +2363,7 @@ fn cross_up(bike_res: &rs2::Archive, bike: &str) -> Option<Vec<glam::Quat>> {
 /// The rider's and the bike's motions for each trick, from `Rider.mcf` and
 /// the bike's `.mcf` (the bike's are named `b<trick>`).
 fn trick_motions(bike_res: &rs2::Archive, bike: &str) -> Vec<Option<race::TrickMotion>> {
+    let bike = freepack::animated(bike).map_or(bike, |(template, _)| template);
     let mcf = |name: &str| {
         bike_res
             .get(name)
@@ -2502,6 +2589,7 @@ fn start_grid(
     riders: usize,
     rides: &[Option<roster::Ride>],
     ghost: Option<usize>,
+    originals: bool,
 ) -> Vec<usize> {
     let gate = animations
         .iter()
@@ -2529,7 +2617,17 @@ fn start_grid(
             GRID[i % GRID.len()].1.to_string(),
         );
         let mut skin = Some(format!("{}{}", objects::PLATE, plate_number(i)));
-        let mut rider = "Rider.mcf";
+        let (free_bikes, free_outfits) = (freepack::bikes(), freepack::outfits());
+        if !originals && !free_bikes.is_empty() && !free_outfits.is_empty() {
+            // Spread over the shapes and colours: no two alike side by side.
+            // (`MM2_FREE_GRID=n` starts the turn at the pack's bike n.)
+            let first: usize = std::env::var("MM2_FREE_GRID").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            let b = &free_bikes[(first + i * 7) % free_bikes.len()];
+            bike = format!("{}.mcf", b.shape);
+            skin = Some(format!("{}{}:{}", objects::PLATE, plate_number(i), b.livery));
+            outfit = free_outfits[(i + 1) % free_outfits.len()].outfit.clone();
+        }
+        let mut rider = "Rider.mcf".to_string();
         if let Some(Some(r)) = rides.get(i) {
             bike = r.bike.model.clone();
             outfit = r.outfit.clone();
@@ -2544,7 +2642,7 @@ fn start_grid(
         // A ghost race's ghost rides its own models (0x41a770).
         let ghostly = ghost == Some(i);
         if ghostly {
-            (bike, rider, skin) = (GHOST.0.into(), GHOST.1, None);
+            (bike, rider, skin) = (GHOST.0.into(), GHOST.1.into(), None);
         }
         // Rows of up to eight, the player on the right: the original's
         // tapes put them 7.75 ft apart, centred 3 ft left of the line's
@@ -2572,7 +2670,11 @@ fn start_grid(
         bikes.push(animations.len());
         animations.push(place(&bike, BIKE_RIDING));
         skins.push(skin);
-        animations.push(place(rider, RIDING));
+        // An outfit of the free pack's goes on its own rider.
+        if let Some(model) = freepack::outfit_model(&outfit).filter(|_| !ghostly) {
+            rider = model;
+        }
+        animations.push(place(&rider, RIDING));
         skins.push((!ghostly).then_some(outfit));
     }
     let p = start.position;
@@ -3037,6 +3139,11 @@ fn file_name(path: &Path) -> String {
 }
 
 fn read_archive(path: &Path) -> Result<Vec<u8>, BoxError> {
+    // The free pack has none of the original's archives: each one it
+    // lacks reads as empty, and its stand-ins fill in.
+    if freepack::root().is_some_and(|root| path.parent() == Some(root.as_path())) && !fs::is_file(path) {
+        return Ok(rs2::build(&[]));
+    }
     let raw = crate::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let name = path
         .file_name()
@@ -3294,6 +3401,9 @@ fn track_renderer(track: &Track, device: &wgpu::Device, queue: &wgpu::Queue, for
     if let Some(detail) = &track.detail {
         renderer.set_detail(device, queue, detail);
     }
+    if let Some(map) = &track.ground_map {
+        renderer.set_ground_map(device, queue, map);
+    }
     if let Some(fog) = track.fog {
         renderer.set_fog(fog);
     }
@@ -3355,7 +3465,8 @@ impl Film {
         if clock + 1e-4 < self.next {
             return Ok(());
         }
-        self.next += 1.0 / 15.0;
+        // MM2_FILM_FPS: frames a second (15 by default).
+        self.next += 1.0 / std::env::var("MM2_FILM_FPS").ok().and_then(|f| f.parse::<f32>().ok()).unwrap_or(15.0);
         let format = wgpu::TextureFormat::Rgba8UnormSrgb;
         let (w, h) = self.size;
         let target = offscreen(&self.device, format, w, h);
@@ -3778,6 +3889,11 @@ struct App {
     quiet: bool,
     /// The screenshot key was pressed: save the next frame.
     shoot: bool,
+    /// The Course Builder (an extra), open over the menus.
+    builder: Option<builder::Builder>,
+    /// Leave the game at the end of this frame (the builder on its own
+    /// was closed).
+    quit: bool,
 }
 
 /// The menu button the D-pad jumps to from `at`, in direction `dir`:
@@ -3929,6 +4045,8 @@ impl App {
             shake: [0.0; 2],
             quiet: false,
             shoot: false,
+            builder: None,
+            quit: false,
         }
     }
 
@@ -4078,6 +4196,9 @@ impl App {
         renderer.set_crowd(&state.device, &track.spectators);
         if let Some(detail) = &track.detail {
             renderer.set_detail(&state.device, &state.queue, detail);
+        }
+        if let Some(map) = &track.ground_map {
+            renderer.set_ground_map(&state.device, &state.queue, map);
         }
         if let Some(fog) = track.fog {
             renderer.set_fog(fog);
@@ -4492,6 +4613,12 @@ impl App {
             state.window.set_title("Motocross Madness 2");
         }
         self.title.clear();
+        // A ride from the Course Builder goes back to it.
+        if let Some(b) = &mut self.builder {
+            b.back();
+            self.keys.clear();
+            return;
+        }
         if let Some(f) = &mut self.front {
             match results {
                 _ if replayed => f.replay_over(),
@@ -4533,7 +4660,126 @@ impl App {
 
     /// The menus are showing (not a race, nor a track loading).
     fn in_menus(&self) -> bool {
-        self.front.is_some() && self.track.is_none() && self.loading.is_none()
+        self.front.is_some() && self.track.is_none() && self.loading.is_none() && self.builder.is_none()
+    }
+
+    /// The Course Builder is showing (not riding its track).
+    fn in_builder(&self) -> bool {
+        self.builder.is_some() && self.track.is_none() && self.loading.is_none()
+    }
+
+    /// Opens the Course Builder on `file`, or on the last track made.
+    fn open_builder(&mut self, file: Option<&Path>) {
+        let game = self.front.as_ref().and_then(|f| f.game()).map(Path::to_path_buf);
+        self.keys.clear();
+        self.builder = Some(builder::Builder::new(game, file));
+    }
+
+    /// The builder's input; true when it took the event.
+    fn builder_event(&mut self, event: &WindowEvent) -> bool {
+        let Some(b) = &mut self.builder else { return false };
+        match event {
+            WindowEvent::CursorMoved { position, .. } => b.mouse_move(position.x, position.y),
+            WindowEvent::MouseInput { state, button, .. } => b.mouse_button(*button, *state == ElementState::Pressed),
+            WindowEvent::MouseWheel { delta, .. } => b.wheel(match delta {
+                winit::event::MouseScrollDelta::LineDelta(_, y) => *y,
+                winit::event::MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
+            }),
+            WindowEvent::KeyboardInput { event, .. } => {
+                let PhysicalKey::Code(code) = event.physical_key else { return true };
+                match event.state {
+                    ElementState::Pressed => self.keys.insert(code),
+                    ElementState::Released => self.keys.remove(&code),
+                };
+                let alt = self.keys.contains(&KeyCode::AltLeft) || self.keys.contains(&KeyCode::AltRight);
+                // Alt+Enter and F2 are the game's still.
+                if (alt && matches!(code, KeyCode::Enter | KeyCode::NumpadEnter)) || code == KeyCode::F2 {
+                    return false;
+                }
+                if !event.repeat || event.state == ElementState::Pressed {
+                    b.key(code, event.state == ElementState::Pressed, event.text.as_deref());
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// The builder's frame: its camera and what it asks.
+    fn builder_tick(&mut self, dt: f32) {
+        if builder::take_open() && self.in_menus() {
+            self.open_builder(None);
+        }
+        if !self.in_builder() {
+            return;
+        }
+        let now = self.start.elapsed().as_secs_f32();
+        let Some(b) = &mut self.builder else { return };
+        // The tracks to copy, listed by the menus' own track lists.
+        if std::mem::take(&mut b.wants_tracks) {
+            if let Some(f) = &mut self.front {
+                use frontend::EventKind as E;
+                for (event, mode) in [(E::Supercross, mm2_course::Mode::Supercross), (E::Nationals, mm2_course::Mode::National), (E::Baja, mm2_course::Mode::Baja), (E::Enduro, mm2_course::Mode::Enduro)] {
+                    for (name, path, course) in f.track_list(event) {
+                        b.tracks.push(builder::GameTrack { mode, name, path, course });
+                    }
+                }
+                eprintln!("course builder: {} tracks to copy", b.tracks.len());
+            } else {
+                b.tracks = builder::tracks_in_folder();
+            }
+        }
+        b.update(dt, now);
+        match b.take_ask() {
+            builder::Ask::Stay => {}
+            builder::Ask::Exit => {
+                let rode = self.builder.take().is_some_and(|b| b.rode);
+                self.keys.clear();
+                if self.front.is_none() {
+                    self.quit = true;
+                }
+                if let Some(f) = &mut self.front {
+                    f.forget_tracks();
+                    // Back to the screen it opened from, unless a ride's
+                    // loading screen took its place.
+                    if rode {
+                        f.main_menu();
+                    }
+                }
+            }
+            builder::Ask::Ride { env, mode, name } => {
+                use frontend::EventKind;
+                let event = match mode {
+                    mm2_course::Mode::Supercross => EventKind::Supercross,
+                    mm2_course::Mode::National => EventKind::Nationals,
+                    mm2_course::Mode::Baja => EventKind::Baja,
+                    mm2_course::Mode::Enduro => EventKind::Enduro,
+                };
+                let setup = match &mut self.front {
+                    Some(f) => f.practice(event, env, name),
+                    // The builder on its own: a practice lap on the
+                    // track's own bike.
+                    None => frontend::Setup {
+                        event,
+                        track: env,
+                        course: 0,
+                        laps: 99,
+                        opponents: 0,
+                        mode: frontend::PRACTICE,
+                        name,
+                        ride: None,
+                        level: 1,
+                        names: Vec::new(),
+                        rides: Vec::new(),
+                        ghost: None,
+                        net: None,
+                        random_gates: None,
+                    },
+                };
+                self.keys.clear();
+                self.load(setup);
+            }
+        }
     }
 
     fn fly(&mut self, dt: f32) {
@@ -4962,7 +5208,48 @@ impl App {
         };
         let presses = pads.poll();
         let (stick, a, b) = pads.pointer();
+        let right = [pads.axis(-9).unwrap_or(0.0), pads.axis(-11).unwrap_or(0.0)];
+        let zoom = -pads.axis(-7).unwrap_or(0.0);
         let (was_a, was_b) = std::mem::replace(&mut self.pad_click, (a, b));
+        // The Course Builder: the left stick or D-pad moves the pointer
+        // (pushed on at the edge, the view), A clicks, B backs out, X
+        // removes, Y undoes, the shoulders change tool, the right stick
+        // turns the view, the triggers zoom, Start rides, Back looks down.
+        if self.in_builder() {
+            let back = b;
+            let (Some(b), Some(s)) = (&mut self.builder, &self.state) else { return };
+            let (w, h) = (s.config.width as f64, s.config.height as f64);
+            let speed = |v: f32| if v.abs() < 0.2 { 0.0 } else { v as f64 * 600.0 * dt as f64 * h / 480.0 };
+            let (dx, dy) = (speed(stick[0]), speed(stick[1]));
+            let mut pan = [0.0f32; 2];
+            if dx != 0.0 || dy != 0.0 {
+                let (x, y) = b.pointer_px();
+                let (nx, ny) = ((x + dx).clamp(0.0, w - 1.0), (y + dy).clamp(0.0, h - 1.0));
+                // Pushed against an edge: the view moves instead.
+                if (x + dx) != nx {
+                    pan[0] = stick[0];
+                }
+                if (y + dy) != ny {
+                    pan[1] = stick[1];
+                }
+                b.mouse_move(nx, ny);
+                let _ = s.window.set_cursor_position(winit::dpi::PhysicalPosition::new(nx, ny));
+            }
+            b.pad_view(right, zoom, pan, dt);
+            if a != was_a {
+                b.mouse_button(winit::event::MouseButton::Left, a);
+            }
+            use builder::PadButton as P;
+            if back && !was_b {
+                b.pad_button(P::Back);
+            }
+            for (n, what) in [(2, P::Remove), (3, P::Undo), (4, P::Tool(-1)), (5, P::Tool(1)), (6, P::Top), (7, P::Ride)] {
+                if presses.contains(&pad::Press::Button(n)) {
+                    b.pad_button(what);
+                }
+            }
+            return;
+        }
         if !self.in_menus() {
             // Buttons the map leaves free: Back (DirectInput's button 6)
             // the fork's quick get-up, Start (7) out of the race as
@@ -5371,6 +5658,13 @@ impl App {
                 s.bars.finish(&mut encoder, &frame.texture);
                 commands.push(encoder.finish());
             }
+        } else if let (Some(b), true) = (
+            &mut self.builder,
+            self.track.is_none() && self.loading.is_none(),
+        ) {
+            let game = self.front.as_ref().and_then(|f| f.game()).map(Path::to_path_buf).unwrap_or_else(|| b.game_dir());
+            let format = s.config.format.add_srgb_suffix();
+            commands.extend(b.draw(&s.device, &s.queue, &mut s.sprites, format, view, size, &game));
         } else if let Some(front) = &mut self.front {
             let mut gfx = ui::Gfx {
                 sprites: &mut s.sprites,
@@ -5501,6 +5795,9 @@ impl ApplicationHandler for App {
             }
         }
         let now = self.start.elapsed().as_secs_f32();
+        if self.in_builder() && self.builder_event(&event) {
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Focused(on) => {
@@ -5651,7 +5948,7 @@ impl ApplicationHandler for App {
                                 let next = f.escape(now);
                                 self.next(next, event_loop);
                             }
-                        } else if self.front.is_some() {
+                        } else if self.front.is_some() || self.builder.is_some() {
                             if self.loading.is_none() {
                                 self.end_race();
                             }
@@ -5876,10 +6173,17 @@ impl ApplicationHandler for App {
                 }
                 self.poll_pads(event_loop, dt);
                 self.update(dt);
+                self.builder_tick(dt);
+                if self.quit {
+                    event_loop.exit();
+                    return;
+                }
                 self.feel_pad();
                 self.redraw();
                 #[cfg(target_arch = "wasm32")]
                 web::racing(self.race.is_some() && self.replay.is_none() && !self.in_menus());
+                #[cfg(target_arch = "wasm32")]
+                web::building(self.in_builder());
                 if tweaks::get().show_fps != self.fps.is_some() {
                     self.fps = self.fps.is_none().then(|| (Instant::now(), 0, 0.0));
                     self.fps_shown = None;

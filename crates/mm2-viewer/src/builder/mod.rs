@@ -1,0 +1,1984 @@
+//! The Course Builder (an extra, not the game's): make a track by drawing
+//! its racing line on the land, dropping jumps onto the line from a kit,
+//! shaping and painting the ground and placing objects, then ride it at
+//! once. It writes an ordinary `.ENV` into the game's `TERAFORM` folder,
+//! so the track shows in the track list like any added track.
+//!
+//! The screen: a top bar (file, undo, Ride it), a tool strip and the
+//! tool's options down the left, a hint line along the bottom and the land
+//! filling the window. Every button and slider explains itself on hover.
+
+mod panel;
+pub mod view;
+
+use crate::job::Job;
+use crate::ui::{self, Gfx};
+use glam::{Mat4, Vec3, Vec4};
+use mm2_course::bake::{self, Field};
+use mm2_course::kit::Kind;
+use mm2_course::path::Path as Line;
+use mm2_course::{Brush, Course, LandKind, Mode, Object, Paint, Point, Stroke, Surface};
+use panel::{Input, Painter};
+use std::path::{Path, PathBuf};
+
+static OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The menus' Course Builder button: the game opens the builder.
+pub fn ask_open() {
+    OPEN.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn take_open() -> bool {
+    OPEN.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A track there is to copy.
+/// The tracks in the game folder's TERAFORM, by file, when there are no
+/// menus to list them.
+pub fn tracks_in_folder() -> Vec<GameTrack> {
+    let Some(game) = GAME.get().cloned().flatten() else { return Vec::new() };
+    let mut out = Vec::new();
+    for mode in Mode::ALL {
+        let dir = game.join("TERAFORM").join(mode.folder());
+        let Ok(list) = std::fs::read_dir(&dir) else { continue };
+        let mut files: Vec<PathBuf> = list
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("env")))
+            .collect();
+        files.sort();
+        for path in files {
+            let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            out.push(GameTrack { mode, name, path, course: 0 });
+        }
+    }
+    out
+}
+
+/// The game folder the builder bakes into, for [`tracks_in_folder`].
+static GAME: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+
+/// What a gamepad's buttons do in the builder.
+pub enum PadButton {
+    Remove,
+    Tool(i32),
+    Undo,
+    Ride,
+    Top,
+    Back,
+}
+
+pub struct GameTrack {
+    pub mode: Mode,
+    pub name: String,
+    pub path: PathBuf,
+    pub course: usize,
+}
+
+/// What the builder asks the game to do.
+pub enum Ask {
+    Stay,
+    /// Ride the track baked at this path.
+    Ride { env: PathBuf, mode: Mode, name: String },
+    /// Leave the builder.
+    Exit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tool {
+    Line,
+    Jumps,
+    Shape,
+    Paint,
+    Objects,
+    Land,
+}
+
+const TOOLS: [(Tool, &str, &str); 6] = [
+    (Tool::Line, "Line", "Draw the racing line. Click the ground to add points, drag them to move. (1)"),
+    (Tool::Jumps, "Jumps", "Drop jumps, whoops and rollers onto the line from the kit. (2)"),
+    (Tool::Shape, "Shape", "Raise, lower, smooth and flatten the ground with a brush. (3)"),
+    (Tool::Paint, "Paint", "Paint dirt, grass, sand, mud or hardpack. Each grips differently. (4)"),
+    (Tool::Objects, "Objects", "Place hay bales, banners, tents and more. (5)"),
+    (Tool::Land, "Land", "The land under the track, the sky, the sun and the track's name. (6)"),
+];
+
+/// Objects to place: name, model, about.
+const OBJECTS: [(&str, &str, &str); 20] = [
+    ("Hay bale", "HayBale.slt", "A single straw bale."),
+    ("Bale stack", "TripleBale03.slt", "Three bales stacked, the Supercross edge marker."),
+    ("Wrapped bale", "AlpineStarsHB.SLT", "A bale in a sponsor wrap, as the stadiums line their tracks."),
+    ("Banner", "Fox03.SLT", "A sponsor banner on a frame."),
+    ("Tent", "Tent01.slt", "A pit tent."),
+    ("Big tent", "Tent02.slt", "A big hospitality tent."),
+    ("Camera tower", "CameraPlatform01.slt", "A TV camera platform."),
+    ("Race trailer", "NatTrailer01.slt", "A team's race trailer."),
+    ("Pit trailer", "Pit_Trailer.slt", "A small pit trailer."),
+    ("Light pole", "LightPole.slt", "A tall light pole."),
+    ("Toilet", "Toilet.slt", "A portable toilet."),
+    ("Water tank", "WaterTank01.slt", "A water tank on legs."),
+    ("Tractor", "Tractor.slt", "A farm tractor."),
+    ("Bobcat", "Bobcat.SLT", "A small track loader."),
+    ("Giant tyre", "GiantTire01.slt", "A huge earth-mover tyre."),
+    ("Barrel", "50Gal.slt", "A 50 gallon drum."),
+    ("Farm house", "FarmHouse.slt", "A farm house."),
+    ("Picket fence", "Fence_Picket.slt", "A stretch of white picket fence."),
+    ("Wire fence", "Fence_BarbedWire.slt", "A stretch of barbed wire fence."),
+    ("Scarecrow", "Scarecrow.slt", "A scarecrow."),
+];
+
+/// The stadiums' floor, ft (x, z low and high corners).
+const FLOOR: ([f32; 2], [f32; 2]) = ([780.0, 780.0], [1525.0, 1520.0]);
+
+/// The colours of the builder's panels: warm black, muted lime.
+pub const PANEL: [f32; 4] = [0.07, 0.07, 0.065, 0.86];
+pub const ACCENT: [f32; 3] = [0.64, 0.76, 0.29];
+const LINE_COLOUR: [f32; 4] = [1.0, 1.0, 1.0, 0.75];
+const JUMP_COLOUR: [f32; 4] = [1.0, 0.72, 0.25, 0.95];
+
+/// An orbiting camera over the land, in the game's coordinates.
+#[derive(Debug, Clone, Copy)]
+struct Camera {
+    target: Vec3,
+    yaw: f32,
+    pitch: f32,
+    dist: f32,
+}
+
+impl Camera {
+    fn eye(&self) -> Vec3 {
+        let (sy, cy) = self.yaw.sin_cos();
+        let (sp, cp) = self.pitch.sin_cos();
+        self.target + Vec3::new(cp * sy, sp, cp * cy) * self.dist
+    }
+
+    /// The camera's matrix in drawing space (the game's z turned round).
+    fn view_proj(&self, aspect: f32) -> Mat4 {
+        let d = |v: Vec3| Vec3::new(v.x, v.y, -v.z);
+        let up = if self.pitch > 1.5 { Vec3::new(-self.yaw.sin(), 0.0, self.yaw.cos()) } else { Vec3::Y };
+        let near = (self.dist * 0.01).clamp(1.0, 20.0);
+        Mat4::perspective_rh(50f32.to_radians(), aspect, near, 40_000.0) * Mat4::look_at_rh(d(self.eye()), d(self.target), d(up))
+    }
+}
+
+/// What the pointer is over on the land.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Hover {
+    None,
+    /// One of the line's points.
+    Point(usize),
+    /// The line, at this distance along it.
+    Line(f32),
+    Jump(usize),
+    Object(usize),
+    /// Bare ground.
+    Ground,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Drag {
+    None,
+    Point(usize),
+    /// A jump, held this far from its start.
+    Jump(usize, f32),
+    Object(usize),
+    Brush,
+    Turn,
+    Pan,
+}
+
+/// A pop-up over the screen.
+enum Popup {
+    /// A new track; with `surprise`, a whole track made up to ride now.
+    New { surprise: bool },
+    /// Your tracks, and the tracks there are to copy (of one mode, from
+    /// a row down).
+    Open { files: Vec<PathBuf>, mode: Mode, scroll: usize },
+}
+
+pub struct Builder {
+    pub course: Course,
+    history: Vec<Course>,
+    future: Vec<Course>,
+    /// The game folder, where baked tracks go (`TERAFORM`).
+    game: Option<PathBuf>,
+    /// Where `.course` files are kept.
+    dir: PathBuf,
+    land: Option<(Mode, mm2_course::Land, usize, Vec<f32>)>,
+    /// The copied track the land came from (its address), if any.
+    land_src: usize,
+    field: Option<Field>,
+    line: Line,
+    gates: Vec<([f32; 2], [f32; 2])>,
+    dirty: bool,
+    baked_at: f32,
+    view: Option<view::View>,
+    cam: Camera,
+    tool: Tool,
+    kind: Kind,
+    /// The jump picked for its sliders.
+    picked: Option<usize>,
+    brush: Brush,
+    radius: f32,
+    strength: f32,
+    surface: Surface,
+    paint_radius: f32,
+    object: usize,
+    /// The window's size, and the pointer on the builder's screen (480
+    /// high, as wide as the window's shape makes it).
+    size: (u32, u32),
+    pointer: (f32, f32),
+    ground: Option<Vec3>,
+    hover: Hover,
+    drag: Drag,
+    drag_from: (f32, f32),
+    input: Input,
+    keys: std::collections::HashSet<winit::keyboard::KeyCode>,
+    shift: bool,
+    ctrl: bool,
+    naming: bool,
+    popup: Option<Popup>,
+    toast: Option<(String, f32)>,
+    now: f32,
+    ui: Option<ui::Ui>,
+    bake_job: Option<(Job<Result<PathBuf, String>>, bool)>,
+    ask: Option<Ask>,
+    saved_at: f32,
+    unsaved: bool,
+    /// A track has been ridden from the builder.
+    pub rode: bool,
+    /// The tracks there are to copy, once the game has listed them.
+    pub tracks: Vec<GameTrack>,
+    pub wants_tracks: bool,
+}
+
+impl Builder {
+    /// Opens the builder on `file` (a `.course` or a builder `.ENV`), or
+    /// on the last track worked on, or a new National track.
+    pub fn new(game: Option<PathBuf>, file: Option<&Path>) -> Builder {
+        let _ = GAME.set(game.clone());
+        let dir = crate::profile::user_dir().join("Courses");
+        let last = crate::fs::read_to_string(dir.join("last.txt")).ok().map(|s| PathBuf::from(s.trim()));
+        let course = file
+            .or(last.as_deref())
+            .and_then(load_file)
+            .unwrap_or_else(|| Course::new(Mode::National));
+        let mut b = Builder {
+            course,
+            history: Vec::new(),
+            future: Vec::new(),
+            game,
+            dir,
+            land: None,
+            land_src: 0,
+            field: None,
+            line: Line::default(),
+            gates: Vec::new(),
+            dirty: true,
+            baked_at: -1.0,
+            view: None,
+            cam: Camera { target: Vec3::ZERO, yaw: 0.0, pitch: 0.95, dist: 1000.0 },
+            tool: Tool::Line,
+            kind: Kind::Tabletop,
+            picked: None,
+            brush: Brush::Raise,
+            radius: 60.0,
+            strength: 0.5,
+            surface: Surface::Mud,
+            paint_radius: 25.0,
+            object: 1,
+            size: (1280, 720),
+            pointer: (0.0, 0.0),
+            ground: None,
+            hover: Hover::None,
+            drag: Drag::None,
+            drag_from: (0.0, 0.0),
+            input: Input::default(),
+            keys: Default::default(),
+            shift: false,
+            ctrl: false,
+            naming: false,
+            popup: None,
+            toast: None,
+            now: 0.0,
+            ui: None,
+            bake_job: None,
+            ask: None,
+            saved_at: 0.0,
+            unsaved: false,
+            rode: false,
+            tracks: Vec::new(),
+            wants_tracks: false,
+        };
+        b.frame_track();
+        b
+    }
+
+    /// The builder's screen width (it is 480 high).
+    fn width(&self) -> f32 {
+        480.0 * self.size.0 as f32 / self.size.1.max(1) as f32
+    }
+
+    /// Looks at the whole track.
+    fn frame_track(&mut self) {
+        self.refresh_line();
+        let side = self.course.mode.side();
+        let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+        for p in &self.course.line.points {
+            lo = [lo[0].min(p.x), lo[1].min(p.z)];
+            hi = [hi[0].max(p.x), hi[1].max(p.z)];
+        }
+        if lo[0] > hi[0] {
+            lo = [side * 0.4; 2];
+            hi = [side * 0.6; 2];
+        }
+        let mid = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0];
+        let span = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(200.0);
+        let y = match &self.field {
+            Some(f) => f.height(mid[0], mid[1]),
+            None => mm2_course::land::height(&self.course.land, side, mid[0], mid[1]),
+        };
+        self.cam = Camera { target: Vec3::new(mid[0], y, mid[1]), yaw: 0.0, pitch: 0.95, dist: span * 1.25 };
+    }
+
+    fn refresh_line(&mut self) {
+        self.line = self.course.path();
+        self.gates = if self.course.mode.laps() { Vec::new() } else { mm2_course::env::gates(&self.course, &self.line) };
+    }
+
+    /// Every n-th of the game's samples the preview uses.
+    fn every(&self) -> usize {
+        match self.course.mode {
+            Mode::Supercross => 2,
+            _ => 4,
+        }
+    }
+
+    /// Bakes the quick preview again when something changed (at most 25
+    /// times a second while dragging).
+    fn rebake(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        if !self.dirty || (self.drag != Drag::None && self.now - self.baked_at < 0.04) {
+            return;
+        }
+        let every = self.every();
+        let src = self.course.source.as_ref().map_or(0, |s| std::sync::Arc::as_ptr(s) as usize);
+        let key_ok = self.land.as_ref().is_some_and(|(m, l, e, _)| *m == self.course.mode && *l == self.course.land && *e == every) && self.land_src == src;
+        self.land_src = src;
+        if !key_ok {
+            let land = bake::land(&self.course, every);
+            self.land = Some((self.course.mode, self.course.land.clone(), every, land));
+        }
+        let land = &self.land.as_ref().unwrap().3;
+        let field = bake::bake(&self.course, every, land);
+        self.refresh_line();
+        if let Some(v) = &mut self.view {
+            match &self.course.source {
+                // A copy shows its own ground's colours, except where painted.
+                Some(src) => {
+                    let (n, step) = (field.n, field.step);
+                    let surfaces = &field.surfaces;
+                    let ground = |k: usize| {
+                        let (x, z) = ((k % n) as f32 * step, (k / n) as f32 * step);
+                        (surfaces[k] == src.surface(x, z)).then(|| src.colour(x, z))
+                    };
+                    v.set_field(device, queue, &field, Some(&ground));
+                }
+                None => v.set_field(device, queue, &field, None),
+            }
+        }
+        self.field = Some(field);
+        self.dirty = false;
+        self.baked_at = self.now;
+    }
+
+    fn height(&self, x: f32, z: f32) -> f32 {
+        self.field.as_ref().map_or(0.0, |f| f.height(x, z))
+    }
+
+    /// Keeps the course as it is for Undo, before a change.
+    fn remember(&mut self) {
+        self.history.push(self.course.clone());
+        if self.history.len() > 300 {
+            self.history.remove(0);
+        }
+        self.future.clear();
+    }
+
+    /// After a change: draw it again, and save it soon.
+    fn changed(&mut self) {
+        self.dirty = true;
+        self.unsaved = true;
+    }
+
+    fn undo(&mut self) {
+        if let Some(c) = self.history.pop() {
+            self.future.push(std::mem::replace(&mut self.course, c));
+            self.picked = None;
+            self.changed();
+            self.say("Undone");
+        }
+    }
+
+    fn redo(&mut self) {
+        if let Some(c) = self.future.pop() {
+            self.history.push(std::mem::replace(&mut self.course, c));
+            self.picked = None;
+            self.changed();
+            self.say("Redone");
+        }
+    }
+
+    /// A fresh seed for the one-click helpers.
+    fn dice(&mut self) -> u32 {
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u32).unwrap_or(1);
+        t ^ (self.now * 1000.0) as u32
+    }
+
+    fn say(&mut self, text: &str) {
+        self.toast = Some((text.to_string(), self.now));
+    }
+
+    fn course_path(&self) -> PathBuf {
+        self.dir.join(format!("{}.course", self.course.stem()))
+    }
+
+    /// Writes the `.course` file.
+    fn save(&mut self) {
+        let path = self.course_path();
+        let _ = crate::fs::create_dir_all(&self.dir);
+        match crate::fs::write(&path, self.course.to_json()) {
+            Ok(()) => {
+                let _ = crate::fs::write(self.dir.join("last.txt"), path.to_string_lossy().as_bytes());
+                self.unsaved = false;
+                self.saved_at = self.now;
+            }
+            Err(e) => eprintln!("{}: {e}", path.display()),
+        }
+    }
+
+    /// Where the baked track goes: the game's `TERAFORM/<mode>` folder, or
+    /// beside the courses without the game.
+    /// The game folder it bakes into (the user's own when none is known).
+    pub fn game_dir(&self) -> PathBuf {
+        self.game.clone().unwrap_or_else(|| self.dir.clone())
+    }
+
+    fn env_path(&self) -> PathBuf {
+        let base = match &self.game {
+            Some(g) => g.join("TERAFORM"),
+            None => self.dir.join("TERAFORM"),
+        };
+        base.join(self.course.mode.folder()).join(format!("{}.ENV", self.course.stem()))
+    }
+
+    /// Saves, then bakes the full track on another thread; with `ride`,
+    /// the game rides it once it is written.
+    fn bake_track(&mut self, ride: bool) {
+        if self.bake_job.is_some() {
+            return;
+        }
+        self.save();
+        let course = self.course.clone();
+        let path = self.env_path();
+        let job = Job::spawn(move || {
+            let baked = mm2_course::env::write_with(&course, &crate::fine_ground::builder_pictures());
+            if let Some(dir) = path.parent() {
+                crate::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
+            crate::fs::write(&path, &baked.env).map_err(|e| format!("{}: {e}", path.display()))?;
+            // In a browser the game folder lasts the visit: the track is
+            // kept among the saves too, where the page puts players' tracks
+            // back into the game each time it starts.
+            #[cfg(target_arch = "wasm32")]
+            if let (Some(folder), Some(file)) = (path.parent().and_then(|p| p.file_name()), path.file_name()) {
+                let keep = PathBuf::from("/user/Tracks").join(folder).join(file);
+                crate::fs::write(&keep, &baked.env).map_err(|e| format!("{}: {e}", keep.display()))?;
+            }
+            Ok(path)
+        });
+        self.bake_job = Some((job, ride));
+    }
+
+    /// What the builder wants the game to do now.
+    pub fn take_ask(&mut self) -> Ask {
+        if self.bake_job.as_ref().is_some_and(|(j, _)| j.is_finished()) {
+            let (job, ride) = self.bake_job.take().unwrap();
+            match job.join() {
+                Ok(Ok(path)) => {
+                    if ride {
+                        self.rode = true;
+                        return Ask::Ride { env: path, mode: self.course.mode, name: self.course.name.clone() };
+                    }
+                    self.say("Saved, and in the track list");
+                }
+                Ok(Err(e)) => {
+                    eprintln!("baking the track: {e}");
+                    #[cfg(target_arch = "wasm32")]
+                    web_sys::console::error_1(&format!("baking the track: {e}").into());
+                    self.say("Couldn't write the track");
+                }
+                Err(_) => self.say("Couldn't bake the track"),
+            }
+        }
+        self.ask.take().unwrap_or(Ask::Stay)
+    }
+
+    /// Back from riding the track.
+    pub fn back(&mut self) {
+        self.keys.clear();
+        self.drag = Drag::None;
+        self.input = Input::default();
+    }
+
+    // ---- input ----
+
+    /// The pointer moved to `(x, y)` window pixels.
+    pub fn mouse_move(&mut self, x: f64, y: f64) {
+        let k = 480.0 / self.size.1.max(1) as f32;
+        let p = (x as f32 * k, y as f32 * k);
+        let (dx, dy) = (p.0 - self.pointer.0, p.1 - self.pointer.1);
+        self.pointer = p;
+        self.input.pointer = p;
+        match self.drag {
+            Drag::Turn => {
+                self.cam.yaw -= dx * 0.008;
+                self.cam.pitch = (self.cam.pitch + dy * 0.006).clamp(0.12, 1.56);
+            }
+            Drag::Pan => {
+                let s = self.cam.dist / 480.0 * 0.9;
+                let (sy, cy) = self.cam.yaw.sin_cos();
+                // Grab the ground: it moves with the pointer.
+                self.cam.target.x -= (dx * cy - dy * sy) * s;
+                self.cam.target.z -= (-dx * sy - dy * cy) * s;
+                self.clamp_target();
+            }
+            _ => {}
+        }
+    }
+
+    fn clamp_target(&mut self) {
+        let side = self.course.mode.side();
+        self.cam.target.x = self.cam.target.x.clamp(0.0, side);
+        self.cam.target.z = self.cam.target.z.clamp(0.0, side);
+        self.cam.target.y = self.height(self.cam.target.x, self.cam.target.z);
+    }
+
+    fn over_panel(&self) -> bool {
+        self.popup.is_some() || self.input.over(self.pointer)
+    }
+
+    pub fn mouse_button(&mut self, button: winit::event::MouseButton, down: bool) {
+        use winit::event::MouseButton as B;
+        if down {
+            self.drag_from = self.pointer;
+        }
+        if self.over_panel() || self.input.held {
+            if button == B::Left {
+                if down {
+                    self.input.press = Some(self.pointer);
+                    self.input.held = true;
+                } else {
+                    self.input.released = true;
+                    self.input.held = false;
+                }
+            }
+            if self.drag == Drag::None {
+                return;
+            }
+        }
+        if !down {
+            self.end_drag();
+            return;
+        }
+        match button {
+            B::Right if self.shift => self.drag = Drag::Pan,
+            B::Middle => self.drag = Drag::Pan,
+            B::Right => {
+                // A right click on a thing removes it; on the land, it turns
+                // the camera.
+                if !self.remove_hovered() {
+                    self.drag = Drag::Turn;
+                }
+            }
+            B::Left => self.press(),
+            _ => {}
+        }
+    }
+
+    fn end_drag(&mut self) {
+        if matches!(self.drag, Drag::Brush) {
+            self.say_saved_soon();
+        }
+        if !matches!(self.drag, Drag::None | Drag::Turn | Drag::Pan) {
+            self.changed();
+        }
+        self.drag = Drag::None;
+    }
+
+    fn say_saved_soon(&mut self) {
+        self.unsaved = true;
+    }
+
+    /// A gamepad's sticks and buttons (the pointer itself moves through
+    /// `mouse_move`): the right stick turns the view, the triggers zoom
+    /// (`zoom` + in), `pan` moves the view when the pointer is pushed
+    /// against the screen's edge.
+    pub fn pad_view(&mut self, right: [f32; 2], zoom: f32, pan: [f32; 2], dt: f32) {
+        let dead = |v: f32| if v.abs() < 0.2 { 0.0 } else { v };
+        self.cam.yaw -= dead(right[0]) * 2.2 * dt;
+        self.cam.pitch = (self.cam.pitch + dead(right[1]) * 1.4 * dt).clamp(0.12, 1.56);
+        if dead(zoom) != 0.0 {
+            self.cam.dist = (self.cam.dist * 0.87f32.powf(dead(zoom) * dt * 8.0)).clamp(40.0, self.course.mode.side() * 1.3);
+        }
+        if pan != [0.0, 0.0] {
+            let s = self.cam.dist * 0.9 * dt;
+            let (sy, cy) = self.cam.yaw.sin_cos();
+            self.cam.target.x += (pan[0] * cy - pan[1] * sy) * s;
+            self.cam.target.z += (-pan[0] * sy - pan[1] * cy) * s;
+            self.clamp_target();
+        }
+    }
+
+    /// A gamepad button: `Remove` takes off what the pointer is over,
+    /// `Tool` steps through the tools.
+    pub fn pad_button(&mut self, b: PadButton) {
+        match b {
+            PadButton::Remove => {
+                if !self.over_panel() {
+                    self.remove_hovered();
+                }
+            }
+            PadButton::Tool(step) => {
+                let i = TOOLS.iter().position(|t| t.0 == self.tool).unwrap_or(0) as i32;
+                self.tool = TOOLS[(i + step).rem_euclid(TOOLS.len() as i32) as usize].0;
+            }
+            PadButton::Undo => self.undo(),
+            PadButton::Ride => self.bake_track(true),
+            PadButton::Top => self.top_view(),
+            PadButton::Back => self.key(winit::keyboard::KeyCode::Escape, true, None),
+        }
+    }
+
+    /// The pointer in window pixels, for a gamepad to move on from.
+    pub fn pointer_px(&self) -> (f64, f64) {
+        let k = self.size.1.max(1) as f32 / 480.0;
+        ((self.pointer.0 * k) as f64, (self.pointer.1 * k) as f64)
+    }
+
+    pub fn wheel(&mut self, lines: f32) {
+        if self.over_panel() {
+            self.input.wheel += lines;
+            return;
+        }
+        let step = if self.shift { 5.0 } else { 1.0 };
+        match (self.tool, self.hover) {
+            (Tool::Line, Hover::Point(i)) => {
+                self.remember();
+                let p = &mut self.course.line.points[i];
+                p.width = (p.width + lines * 2.0).clamp(10.0, 120.0);
+                self.changed();
+            }
+            (Tool::Jumps, Hover::Jump(i)) => {
+                self.remember();
+                let j = &mut self.course.jumps[i];
+                if self.shift {
+                    j.length = (j.length + lines * 5.0).clamp(10.0, 400.0);
+                } else {
+                    j.height = (j.height + lines * 0.5).clamp(0.5, 30.0);
+                }
+                self.picked = Some(i);
+                self.changed();
+            }
+            (Tool::Objects, Hover::Object(i)) => {
+                self.remember();
+                self.course.objects[i].yaw = (self.course.objects[i].yaw + lines * 15.0 * step).rem_euclid(360.0);
+                self.changed();
+            }
+            _ => {
+                self.cam.dist = (self.cam.dist * 0.87f32.powf(lines)).clamp(40.0, self.course.mode.side() * 1.3);
+            }
+        }
+    }
+
+    pub fn key(&mut self, code: winit::keyboard::KeyCode, down: bool, text: Option<&str>) {
+        use winit::keyboard::KeyCode as K;
+        match code {
+            K::ShiftLeft | K::ShiftRight => self.shift = down,
+            K::ControlLeft | K::ControlRight | K::SuperLeft | K::SuperRight => self.ctrl = down,
+            _ => {}
+        }
+        if !down {
+            self.keys.remove(&code);
+            return;
+        }
+        if self.naming {
+            match code {
+                K::Enter | K::NumpadEnter | K::Escape => {
+                    self.naming = false;
+                    self.changed();
+                }
+                K::Backspace => {
+                    self.course.name.pop();
+                }
+                _ => {
+                    for c in text.unwrap_or("").chars().filter(|c| !c.is_control()) {
+                        if self.course.name.chars().count() < 28 {
+                            self.course.name.push(c);
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        self.keys.insert(code);
+        if self.ctrl {
+            match code {
+                K::KeyZ if self.shift => self.redo(),
+                K::KeyZ => self.undo(),
+                K::KeyY => self.redo(),
+                K::KeyS => {
+                    self.bake_track(false);
+                    self.say("Saving...");
+                }
+                _ => {}
+            }
+            return;
+        }
+        match code {
+            K::Escape => {
+                if self.popup.take().is_none() {
+                    if self.picked.take().is_none() {
+                        self.save();
+                        self.ask = Some(Ask::Exit);
+                    }
+                }
+            }
+            K::Digit1 => self.tool = Tool::Line,
+            K::Digit2 => self.tool = Tool::Jumps,
+            K::Digit3 => self.tool = Tool::Shape,
+            K::Digit4 => self.tool = Tool::Paint,
+            K::Digit5 => self.tool = Tool::Objects,
+            K::Digit6 => self.tool = Tool::Land,
+            K::KeyR => self.bake_track(true),
+            K::Tab => self.top_view(),
+            K::KeyF => self.frame_track(),
+            K::Delete | K::Backspace => {
+                self.remove_hovered();
+            }
+            K::BracketLeft => self.radius = (self.radius / 1.2).max(8.0),
+            K::BracketRight => self.radius = (self.radius * 1.2).min(400.0),
+            K::KeyT => {
+                // Set the start on the line where the pointer is.
+                if matches!(self.hover, Hover::Line(_) | Hover::Jump(_)) {
+                    let s = if let Hover::Line(s) = self.hover { s } else { self.line_at_pointer().unwrap_or(0.0) };
+                    self.remember();
+                    self.course.line.start = s;
+                    self.changed();
+                    self.say("Start moved here");
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn top_view(&mut self) {
+        self.cam.pitch = if self.cam.pitch > 1.5 { 0.95 } else { 1.56 };
+    }
+
+    // ---- editing ----
+
+    fn line_at_pointer(&self) -> Option<f32> {
+        let g = self.ground?;
+        self.line.nearest([g.x, g.z]).map(|n| n.s)
+    }
+
+    /// Removes what the pointer is over; true if there was something.
+    fn remove_hovered(&mut self) -> bool {
+        match self.hover {
+            Hover::Point(i) if self.tool == Tool::Line => {
+                self.remember();
+                self.course.line.points.remove(i);
+                self.changed();
+                true
+            }
+            Hover::Jump(i) if self.tool == Tool::Jumps => {
+                self.remember();
+                self.course.jumps.remove(i);
+                self.picked = None;
+                self.changed();
+                true
+            }
+            Hover::Object(i) if self.tool == Tool::Objects => {
+                self.remember();
+                self.course.objects.remove(i);
+                self.changed();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The left button went down on the land.
+    fn press(&mut self) {
+        let Some(g) = self.ground else {
+            self.drag = Drag::Turn;
+            return;
+        };
+        match self.tool {
+            Tool::Line => match self.hover {
+                Hover::Point(i) => {
+                    self.remember();
+                    self.drag = Drag::Point(i);
+                }
+                Hover::Line(_) => {
+                    // A new point on the line, where it was clicked.
+                    let n = self.line.nearest([g.x, g.z]);
+                    let seg = n.map_or(0, |n| self.segment_of(n.i));
+                    self.remember();
+                    let width = self.course.line.points.get(seg).map_or(self.course.mode.track_width(), |p| p.width);
+                    self.course.line.points.insert(seg + 1, Point { x: g.x, z: g.z, width });
+                    self.drag = Drag::Point(seg + 1);
+                    self.changed();
+                }
+                _ => {
+                    self.remember();
+                    let at = self.insert_at(g);
+                    let width = self.course.line.points.get(at.saturating_sub(1)).map_or(self.course.mode.track_width(), |p| p.width);
+                    self.course.line.points.insert(at, Point { x: g.x, z: g.z, width });
+                    self.drag = Drag::Point(at);
+                    self.changed();
+                }
+            },
+            Tool::Jumps => match self.hover {
+                Hover::Jump(i) => {
+                    self.remember();
+                    let s = self.line_at_pointer().unwrap_or(0.0);
+                    let off = self.line.ahead(self.course.jumps[i].at, s);
+                    self.drag = Drag::Jump(i, off);
+                    self.picked = Some(i);
+                }
+                Hover::Line(s) => {
+                    self.remember();
+                    let mut j = self.kind.make(self.course.mode, 0.0);
+                    j.at = s - j.length / 2.0;
+                    if self.line.closed {
+                        j.at = j.at.rem_euclid(self.line.length.max(1.0));
+                    } else {
+                        j.at = j.at.max(0.0);
+                    }
+                    self.course.jumps.push(j);
+                    self.picked = Some(self.course.jumps.len() - 1);
+                    self.drag = Drag::Jump(self.course.jumps.len() - 1, j.length / 2.0);
+                    self.changed();
+                }
+                _ => self.drag = Drag::Turn,
+            },
+            Tool::Shape => {
+                self.remember();
+                self.course.strokes.push(Stroke { brush: self.brush, radius: self.radius, strength: self.strength, target: g.y, dabs: vec![[g.x, g.z]] });
+                self.drag = Drag::Brush;
+                self.changed();
+            }
+            Tool::Paint => {
+                self.remember();
+                self.course.paint.push(Paint { surface: self.surface, radius: self.paint_radius, dabs: vec![[g.x, g.z]] });
+                self.drag = Drag::Brush;
+                self.changed();
+            }
+            Tool::Objects => match self.hover {
+                Hover::Object(i) => {
+                    self.remember();
+                    self.drag = Drag::Object(i);
+                }
+                _ => {
+                    self.remember();
+                    let yaw = self.line.nearest([g.x, g.z]).map_or(0.0, |n| {
+                        let d = self.line.dir[n.i];
+                        d[0].atan2(d[1]).to_degrees()
+                    });
+                    self.course.objects.push(Object { model: OBJECTS[self.object].1.into(), x: g.x, z: g.z, yaw, scale: 1.0 });
+                    self.drag = Drag::Object(self.course.objects.len() - 1);
+                    self.changed();
+                }
+            },
+            Tool::Land => self.drag = Drag::Turn,
+        }
+    }
+
+    /// Which of the player's points comes before path sample `i`.
+    fn segment_of(&self, i: usize) -> usize {
+        let at = &self.line.at_point;
+        let mut seg = 0;
+        for (k, &start) in at.iter().enumerate() {
+            if start <= i {
+                seg = k;
+            }
+        }
+        seg
+    }
+
+    /// Where a new point at `g` goes in the list: at the end of an open
+    /// line, or into a loop where it lengthens it least.
+    fn insert_at(&self, g: Vec3) -> usize {
+        let pts = &self.course.line.points;
+        if !self.course.line.closed || pts.len() < 3 {
+            return pts.len();
+        }
+        let d = |a: &Point, b: &Point| ((a.x - b.x).powi(2) + (a.z - b.z).powi(2)).sqrt();
+        let q = Point { x: g.x, z: g.z, width: 0.0 };
+        (0..pts.len())
+            .min_by(|&i, &j| {
+                let cost = |k: usize| {
+                    let (a, b) = (&pts[k], &pts[(k + 1) % pts.len()]);
+                    d(a, &q) + d(&q, b) - d(a, b)
+                };
+                cost(i).total_cmp(&cost(j))
+            })
+            .map_or(pts.len(), |k| k + 1)
+    }
+
+    /// Drags in progress follow the pointer.
+    fn follow_drag(&mut self) {
+        let Some(g) = self.ground else { return };
+        match self.drag {
+            Drag::Point(i) => {
+                if let Some(p) = self.course.line.points.get_mut(i) {
+                    if (p.x - g.x).abs() + (p.z - g.z).abs() > 0.2 {
+                        p.x = g.x;
+                        p.z = g.z;
+                        self.dirty = true;
+                    }
+                }
+            }
+            Drag::Jump(i, off) => {
+                if let (Some(n), true) = (self.line.nearest([g.x, g.z]), i < self.course.jumps.len()) {
+                    let mut at = n.s - off;
+                    if self.line.closed {
+                        at = at.rem_euclid(self.line.length.max(1.0));
+                    }
+                    if (self.course.jumps[i].at - at).abs() > 0.3 {
+                        self.course.jumps[i].at = at;
+                        self.dirty = true;
+                    }
+                }
+            }
+            Drag::Object(i) => {
+                if let Some(o) = self.course.objects.get_mut(i) {
+                    o.x = g.x;
+                    o.z = g.z;
+                    self.dirty = true;
+                }
+            }
+            Drag::Brush => {
+                let spacing = |r: f32| (r * 0.25).max(2.0);
+                match self.tool {
+                    Tool::Shape => {
+                        if let Some(s) = self.course.strokes.last_mut() {
+                            let last = *s.dabs.last().unwrap();
+                            if ((last[0] - g.x).powi(2) + (last[1] - g.z).powi(2)).sqrt() >= spacing(s.radius) {
+                                s.dabs.push([g.x, g.z]);
+                                self.dirty = true;
+                            }
+                        }
+                    }
+                    Tool::Paint => {
+                        if let Some(s) = self.course.paint.last_mut() {
+                            let last = *s.dabs.last().unwrap();
+                            if ((last[0] - g.x).powi(2) + (last[1] - g.z).powi(2)).sqrt() >= spacing(s.radius) {
+                                s.dabs.push([g.x, g.z]);
+                                self.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // ---- each frame ----
+
+    /// Moves the camera by the held keys, finds what the pointer is over
+    /// and follows drags.
+    pub fn update(&mut self, dt: f32, now: f32) {
+        use winit::keyboard::KeyCode as K;
+        self.now = now;
+        let keys = self.keys.clone();
+        let held = |k: K| keys.contains(&k);
+        let speed = self.cam.dist * if self.shift { 2.4 } else { 1.0 } * dt;
+        let (mut fx, mut fz) = (0.0, 0.0);
+        if held(K::KeyW) || held(K::ArrowUp) {
+            fz -= 1.0;
+        }
+        if held(K::KeyS) || held(K::ArrowDown) {
+            fz += 1.0;
+        }
+        if held(K::KeyA) || held(K::ArrowLeft) {
+            fx -= 1.0;
+        }
+        if held(K::KeyD) || held(K::ArrowRight) {
+            fx += 1.0;
+        }
+        if fx != 0.0 || fz != 0.0 {
+            let (sy, cy) = self.cam.yaw.sin_cos();
+            self.cam.target.x += (fx * cy + fz * sy) * speed;
+            self.cam.target.z += (-fx * sy + fz * cy) * speed;
+            self.clamp_target();
+        }
+        if held(K::KeyQ) {
+            self.cam.yaw += dt * 1.5;
+        }
+        if held(K::KeyE) {
+            self.cam.yaw -= dt * 1.5;
+        }
+        self.ground = if self.over_panel() { None } else { self.pick() };
+        self.follow_drag();
+        if self.drag == Drag::None {
+            self.hover = self.find_hover();
+        }
+        // Saves on its own a moment after a change.
+        if self.unsaved && self.drag == Drag::None && now - self.saved_at > 3.0 {
+            self.save();
+        }
+    }
+
+    fn aspect(&self) -> f32 {
+        self.size.0 as f32 / self.size.1.max(1) as f32
+    }
+
+    /// The land under the pointer.
+    fn pick(&self) -> Option<Vec3> {
+        let field = self.field.as_ref()?;
+        let vp = self.cam.view_proj(self.aspect());
+        let inv = vp.inverse();
+        let nx = self.pointer.0 / self.width() * 2.0 - 1.0;
+        let ny = 1.0 - self.pointer.1 / 480.0 * 2.0;
+        let a = inv * Vec4::new(nx, ny, 0.0, 1.0);
+        let b = inv * Vec4::new(nx, ny, 1.0, 1.0);
+        let (a, b) = (a.truncate() / a.w, b.truncate() / b.w);
+        // Back to the game's coordinates.
+        let g = |v: Vec3| Vec3::new(v.x, v.y, -v.z);
+        let (o, dir) = (g(a), (g(b) - g(a)).normalize());
+        let side = self.course.mode.side();
+        let step = field.step * 0.75;
+        let mut t = 0.0;
+        let mut prev = o;
+        let far = self.cam.dist * 8.0 + side;
+        while t < far {
+            let p = o + dir * t;
+            if p.x >= -1.0 && p.z >= -1.0 && p.x <= side + 1.0 && p.z <= side + 1.0 && p.y <= field.height(p.x, p.z) {
+                // Halve the last step a few times.
+                let (mut lo, mut hi) = (prev, p);
+                for _ in 0..8 {
+                    let m = (lo + hi) * 0.5;
+                    if m.y <= field.height(m.x, m.z) {
+                        hi = m;
+                    } else {
+                        lo = m;
+                    }
+                }
+                return Some(Vec3::new(hi.x.clamp(0.0, side), field.height(hi.x, hi.z), hi.z.clamp(0.0, side)));
+            }
+            prev = p;
+            t += step.max(t * 0.004);
+        }
+        None
+    }
+
+    /// Where a game position falls on the builder's screen, if in front.
+    fn project(&self, vp: &Mat4, p: Vec3) -> Option<[f32; 2]> {
+        let c = *vp * Vec4::new(p.x, p.y, -p.z, 1.0);
+        if c.w <= 0.1 {
+            return None;
+        }
+        let (x, y) = (c.x / c.w, c.y / c.w);
+        Some([(x + 1.0) / 2.0 * self.width(), (1.0 - y) / 2.0 * 480.0])
+    }
+
+    fn find_hover(&self) -> Hover {
+        let Some(g) = self.ground else { return Hover::None };
+        let vp = self.cam.view_proj(self.aspect());
+        let near_px = |p: Vec3, r: f32| {
+            self.project(&vp, p).is_some_and(|s| (s[0] - self.pointer.0).powi(2) + (s[1] - self.pointer.1).powi(2) < r * r)
+        };
+        match self.tool {
+            Tool::Line => {
+                for (i, p) in self.course.line.points.iter().enumerate() {
+                    if near_px(Vec3::new(p.x, self.height(p.x, p.z), p.z), 9.0) {
+                        return Hover::Point(i);
+                    }
+                }
+            }
+            Tool::Objects => {
+                for (i, o) in self.course.objects.iter().enumerate() {
+                    if near_px(Vec3::new(o.x, self.height(o.x, o.z), o.z), 9.0) {
+                        return Hover::Object(i);
+                    }
+                }
+                return Hover::Ground;
+            }
+            _ => {}
+        }
+        if let Some(n) = self.line.nearest([g.x, g.z]) {
+            let hw = self.line.width[n.i] / 2.0;
+            if n.side.abs() <= hw + 4.0 {
+                if self.tool == Tool::Jumps {
+                    for (i, j) in self.course.jumps.iter().enumerate() {
+                        let ds = self.line.ahead(j.at, n.s);
+                        if ds >= 0.0 && ds <= j.length {
+                            return Hover::Jump(i);
+                        }
+                    }
+                }
+                return Hover::Line(n.s);
+            }
+        }
+        Hover::Ground
+    }
+
+    // ---- drawing ----
+
+    /// Draws the builder over `target`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        sprites: &mut crate::sprites::Sprites,
+        format: wgpu::TextureFormat,
+        target: &wgpu::TextureView,
+        size: (u32, u32),
+        game: &Path,
+    ) -> Vec<wgpu::CommandBuffer> {
+        self.size = size;
+        if self.view.is_none() {
+            self.view = Some(view::View::new(device, format));
+            self.dirty = true;
+        }
+        if self.field.is_none() {
+            self.dirty = true;
+            self.drag = Drag::None;
+        }
+        let first = self.field.is_none();
+        self.rebake(device, queue);
+        if first {
+            self.frame_track();
+        }
+        let vp = self.cam.view_proj(self.aspect());
+        let ring = match (self.tool, self.ground) {
+            (Tool::Shape, Some(g)) => Some(([g.x, g.z], self.radius, [1.0, 1.0, 1.0])),
+            (Tool::Paint, Some(g)) => Some(([g.x, g.z], self.paint_radius, view::surface_colour(self.surface).map(|v| (v * 1.6).min(1.0)))),
+            _ => None,
+        };
+        let sky = [0.62, 0.70, 0.80];
+        let land = self.view.as_mut().unwrap().render(device, queue, target, size, vp, {
+            let e = self.cam.eye();
+            Vec3::new(e.x, e.y, -e.z)
+        }, ring, sky);
+
+        sprites.scale = size.1 as f32 / 480.0;
+        sprites.stretch = true;
+        let mut ui = self.ui.take().unwrap_or_else(|| ui::Ui::new(game));
+        {
+            let mut gfx = Gfx { sprites, device, queue };
+            let mut input = std::mem::take(&mut self.input);
+            input.begin();
+            let mut p = Painter::new(&mut ui, &mut gfx, self.width());
+            p.hide = input.panel_rects();
+            self.draw_marks(&mut p, &vp);
+            p.hide.clear();
+            self.draw_panels(&mut p, &mut input);
+            input.end(&mut p, self.now);
+            self.input = input;
+        }
+        self.ui = Some(ui);
+        let mut encoder = device.create_command_encoder(&Default::default());
+        sprites.render(device, &mut encoder, target, size, false);
+        sprites.stretch = false;
+        vec![land, encoder.finish()]
+    }
+
+    /// The line, its points, the jumps, the start, gates and objects, over
+    /// the land.
+    fn draw_marks(&self, p: &mut Painter, vp: &Mat4) {
+        let line = &self.line;
+        if line.is_empty() && self.course.line.points.len() < 2 {
+            for (i, pt) in self.course.line.points.iter().enumerate() {
+                if let Some(s) = self.project(vp, Vec3::new(pt.x, self.height(pt.x, pt.z) + 1.0, pt.z)) {
+                    self.handle(p, s, self.hover == Hover::Point(i));
+                }
+            }
+            return;
+        }
+        let at = |s: usize| {
+            let q = line.pts[s];
+            Vec3::new(q[0], self.height(q[0], q[1]) + 0.8, q[1])
+        };
+        // The centre line, every few samples.
+        let every = ((self.cam.dist / 300.0) as usize).clamp(1, 8);
+        let n = line.pts.len();
+        let mut prev: Option<[f32; 2]> = None;
+        let count = if line.closed { n + 1 } else { n };
+        let mut k = 0;
+        while k < count {
+            let i = k % n;
+            let s = self.project(vp, at(i));
+            if let (Some(a), Some(b)) = (prev, s) {
+                p.line(a, b, 1.3, LINE_COLOUR);
+            }
+            prev = s;
+            k += every;
+            if k >= count && k - every != count - 1 {
+                k = count - 1;
+                if line.closed {
+                    let s = self.project(vp, at(0));
+                    if let (Some(a), Some(b)) = (prev, s) {
+                        p.line(a, b, 1.3, LINE_COLOUR);
+                    }
+                    break;
+                }
+            }
+        }
+        // Arrows showing the way round.
+        let arrow_every = (self.cam.dist / 4.0).clamp(80.0, 600.0);
+        let mut s = arrow_every / 2.0;
+        while s < line.length {
+            let i = line.index_at(s);
+            let d = line.dir[i];
+            let side = line.side(i);
+            let c = at(i);
+            let tip = c + Vec3::new(d[0], 0.0, d[1]) * 6.0;
+            let l = c + Vec3::new(-d[0] * 4.0 + side[0] * 5.0, 0.0, -d[1] * 4.0 + side[1] * 5.0);
+            let r = c + Vec3::new(-d[0] * 4.0 - side[0] * 5.0, 0.0, -d[1] * 4.0 - side[1] * 5.0);
+            if let (Some(t), Some(l), Some(r)) = (self.project(vp, tip), self.project(vp, l), self.project(vp, r)) {
+                p.line(l, t, 1.6, [1.0, 1.0, 1.0, 0.5]);
+                p.line(r, t, 1.6, [1.0, 1.0, 1.0, 0.5]);
+            }
+            s += arrow_every;
+        }
+        // Jumps: their stretch of line in amber, with their name.
+        for (ji, j) in self.course.jumps.iter().enumerate() {
+            let hot = self.tool == Tool::Jumps && (self.hover == Hover::Jump(ji) || self.picked == Some(ji));
+            let steps = (j.length / 4.0).ceil().max(2.0) as usize;
+            let mut prev: Option<[f32; 2]> = None;
+            for k in 0..=steps {
+                let s = j.at + j.length * k as f32 / steps as f32;
+                let i = line.index_at(s);
+                let q = line.pts[i];
+                let y = self.height(q[0], q[1]) + 1.0;
+                let hw = line.width[i] / 2.0;
+                let side = line.side(i);
+                let here = self.project(vp, Vec3::new(q[0], y, q[1]));
+                if let (Some(a), Some(b)) = (prev, here) {
+                    p.line(a, b, if hot { 4.0 } else { 2.6 }, JUMP_COLOUR);
+                }
+                if k == 0 || k == steps {
+                    let e1 = self.project(vp, Vec3::new(q[0] + side[0] * hw, y, q[1] + side[1] * hw));
+                    let e2 = self.project(vp, Vec3::new(q[0] - side[0] * hw, y, q[1] - side[1] * hw));
+                    if let (Some(a), Some(b)) = (e1, e2) {
+                        p.line(a, b, 1.5, JUMP_COLOUR);
+                    }
+                }
+                prev = here;
+            }
+            if self.tool == Tool::Jumps || hot {
+                let mid = line.at(j.at + j.length / 2.0);
+                if let Some(s) = self.project(vp, Vec3::new(mid[0], self.height(mid[0], mid[1]) + j.height + 4.0, mid[1])) {
+                    let label = if hot { format!("{} {:.0} ft high, {:.0} long", j.kind.name(), j.height, j.length) } else { j.kind.name().to_string() };
+                    p.label(s, &label, if hot { [1.0, 0.85, 0.5, 1.0] } else { [1.0, 1.0, 1.0, 0.9] });
+                }
+            }
+        }
+        // The start line.
+        {
+            let i = line.index_at(self.course.line.start);
+            let (q, side, hw) = (line.pts[i], line.side(i), line.width[i] / 2.0);
+            let y = self.height(q[0], q[1]) + 1.0;
+            let e1 = self.project(vp, Vec3::new(q[0] + side[0] * hw, y, q[1] + side[1] * hw));
+            let e2 = self.project(vp, Vec3::new(q[0] - side[0] * hw, y, q[1] - side[1] * hw));
+            if let (Some(a), Some(b)) = (e1, e2) {
+                p.line(a, b, 3.0, [ACCENT[0], ACCENT[1], ACCENT[2], 1.0]);
+                p.label([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0 - 10.0], if self.course.mode.laps() { "START / FINISH" } else { "START" }, [0.85, 1.0, 0.6, 1.0]);
+            }
+        }
+        // Gates for Baja and Enduro.
+        for (k, (g, d)) in self.gates.iter().enumerate() {
+            let side = [-d[1], d[0]];
+            let y = self.height(g[0], g[1]);
+            for s in [-1.0, 1.0] {
+                let post = Vec3::new(g[0] + side[0] * 18.0 * s, y, g[1] + side[1] * 18.0 * s);
+                if let (Some(a), Some(b)) = (self.project(vp, post), self.project(vp, post + Vec3::Y * 20.0)) {
+                    p.line(a, b, 2.0, [0.95, 0.35, 0.25, 1.0]);
+                }
+            }
+            if let Some(top) = self.project(vp, Vec3::new(g[0], y + 24.0, g[1])) {
+                let last = k + 1 == self.gates.len();
+                p.label(top, &if last { "FINISH".to_string() } else { format!("GATE {}", k + 1) }, [1.0, 0.75, 0.7, 1.0]);
+            }
+        }
+        // The stadium's floor, which a Supercross track stays on.
+        if self.course.mode == Mode::Supercross {
+            let (lo, hi) = (FLOOR.0, FLOOR.1);
+            let corners = [[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]]];
+            let at = |c: [f32; 2]| self.project(vp, Vec3::new(c[0], self.height(c[0], c[1]) + 0.5, c[1]));
+            for k in 0..4 {
+                if let (Some(a), Some(b)) = (at(corners[k]), at(corners[(k + 1) % 4])) {
+                    p.line(a, b, 1.5, [1.0, 1.0, 1.0, 0.35]);
+                }
+            }
+            if let Some(a) = at([(lo[0] + hi[0]) / 2.0, hi[1]]) {
+                p.label([a[0], a[1] - 10.0], "STADIUM FLOOR", [1.0, 1.0, 1.0, 0.7]);
+            }
+        }
+        // The player's points.
+        if self.tool == Tool::Line {
+            for (i, pt) in self.course.line.points.iter().enumerate() {
+                if let Some(s) = self.project(vp, Vec3::new(pt.x, self.height(pt.x, pt.z) + 1.0, pt.z)) {
+                    self.handle(p, s, self.hover == Hover::Point(i) || self.drag == Drag::Point(i));
+                }
+            }
+            if let Hover::Point(i) = self.hover {
+                let pt = self.course.line.points[i];
+                if let Some(s) = self.project(vp, Vec3::new(pt.x, self.height(pt.x, pt.z) + 1.0, pt.z)) {
+                    p.label([s[0], s[1] - 14.0], &format!("{:.0} ft wide", pt.width), [1.0, 1.0, 1.0, 1.0]);
+                }
+            }
+        }
+        // Objects.
+        for (i, o) in self.course.objects.iter().enumerate() {
+            if let Some(s) = self.project(vp, Vec3::new(o.x, self.height(o.x, o.z) + 2.0, o.z)) {
+                let hot = self.hover == Hover::Object(i) || self.drag == Drag::Object(i);
+                let r = if hot { 5.0 } else { 3.5 };
+                p.fill([s[0] - r, s[1] - r, r * 2.0, r * 2.0], if hot { [ACCENT[0], ACCENT[1], ACCENT[2], 1.0] } else { [0.95, 0.9, 0.75, 0.95] });
+                if hot || self.tool == Tool::Objects {
+                    let name = OBJECTS.iter().find(|(_, m, _)| m.eq_ignore_ascii_case(&o.model)).map_or(o.model.as_str(), |(n, _, _)| n);
+                    p.label([s[0], s[1] - 12.0], name, [1.0, 1.0, 1.0, 0.9]);
+                }
+            }
+        }
+    }
+
+    fn handle(&self, p: &mut Painter, s: [f32; 2], hot: bool) {
+        let r = if hot { 5.5 } else { 4.0 };
+        p.fill([s[0] - r - 1.0, s[1] - r - 1.0, r * 2.0 + 2.0, r * 2.0 + 2.0], [0.05, 0.05, 0.05, 0.9]);
+        let c = if hot { [ACCENT[0], ACCENT[1], ACCENT[2], 1.0] } else { [1.0, 1.0, 1.0, 1.0] };
+        p.fill([s[0] - r, s[1] - r, r * 2.0, r * 2.0], c);
+    }
+
+    fn hint(&self) -> String {
+        if self.naming {
+            return "Type the track's name, then Enter.".into();
+        }
+        let common = "Right-drag turns the view, middle-drag or WASD moves, wheel zooms, Tab looks straight down.";
+        let what = match (self.tool, self.hover) {
+            (Tool::Line, Hover::Point(_)) => "Drag to move this point. Wheel: track width here. Right-click or Delete removes it.",
+            (Tool::Line, Hover::Line(_)) => "Click to add a point here and drag it. T moves the start here.",
+            (Tool::Line, _) => "Click the ground to add a point to the line.",
+            (Tool::Jumps, Hover::Jump(_)) => "Drag along the line to move it. Wheel: height, Shift+wheel: length. Right-click removes it.",
+            (Tool::Jumps, Hover::Line(_)) => "Click to drop the chosen jump here.",
+            (Tool::Jumps, _) => "Pick a jump on the left, then click the line to drop it.",
+            (Tool::Shape, _) => "Drag over the ground to shape it. [ and ] change the brush size.",
+            (Tool::Paint, _) => "Drag over the ground to paint it. Each surface grips and kicks up dust its own way.",
+            (Tool::Objects, Hover::Object(_)) => "Drag to move it. Wheel turns it. Right-click removes it.",
+            (Tool::Objects, _) => "Pick an object on the left, then click the ground to place it.",
+            (Tool::Land, _) => "Choose the land, sky and sun. Changing the land keeps your line and jumps.",
+        };
+        format!("{what}   {common}")
+    }
+
+    fn draw_panels(&mut self, p: &mut Painter, input: &mut Input) {
+        let w = self.width();
+        // ---- top bar ----
+        p.panel(input, [0.0, 0.0, w, 26.0]);
+        p.text([10.0, 7.0], "COURSE BUILDER", 13.0, true, [ACCENT[0], ACCENT[1], ACCENT[2], 1.0]);
+        let name_x = 10.0 + p.text_width("COURSE BUILDER", 13.0, true) + 14.0;
+        let name = if self.naming { format!("{}_", self.course.name) } else { self.course.name.clone() };
+        // Room up to the buttons on the right; a long name is cut short.
+        let room = w - 8.0 - 384.0 - name_x - 6.0;
+        let mut label = format!("{}  ·  {}", name, self.course.mode.name());
+        if p.text_width(&label, 12.0, false) + 12.0 > room {
+            label = name.clone();
+            while label.chars().count() > 3 && p.text_width(&format!("{label}..."), 12.0, false) + 12.0 > room {
+                label.pop();
+            }
+            if label != name {
+                label.push_str("...");
+            }
+        }
+        let nw = p.text_width(&label, 12.0, false) + 12.0;
+        if p.button(input, "name", [name_x, 4.0, nw, 18.0], &label, "Click to rename the track. Its name shows in the track list.", self.naming) {
+            self.naming = !self.naming;
+        }
+        let mut x = w - 8.0;
+        let mut right = |p: &mut Painter, input: &mut Input, id: &str, label: &str, tip: &str, width: f32, on: bool| {
+            x -= width + 4.0;
+            p.button(input, id, [x, 4.0, width, 18.0], label, tip, on)
+        };
+        if right(p, input, "exit", "Exit", "Leave the builder. Your track is saved as you go.", 44.0, false) {
+            self.save();
+            self.ask = Some(Ask::Exit);
+        }
+        let riding = self.bake_job.as_ref().is_some_and(|(_, r)| *r);
+        if right(p, input, "ride", if riding { "Baking..." } else { "RIDE IT  (R)" }, "Bake the track and ride it now. Esc comes back here.", 84.0, true) {
+            self.bake_track(true);
+        }
+        if right(p, input, "save", "Save", "Save the track and put it in the game's track list (Ctrl+S).", 44.0, false) {
+            self.bake_track(false);
+            self.say("Saving...");
+        }
+        if right(p, input, "redo", "Redo", "Redo what was undone (Ctrl+Y).", 44.0, false) {
+            self.redo();
+        }
+        if right(p, input, "undo", "Undo", "Undo the last change (Ctrl+Z).", 44.0, false) {
+            self.undo();
+        }
+        if right(p, input, "open", "Open", "Open a track you made, or edit a copy of any track in the game.", 44.0, false) {
+            self.popup = Some(Popup::Open { files: self.course_files(), mode: self.course.mode, scroll: 0 });
+            self.wants_tracks = self.tracks.is_empty();
+        }
+        if right(p, input, "new", "New", "Start a new track: Supercross, National, Baja or Enduro.", 40.0, false) {
+            self.popup = Some(Popup::New { surprise: false });
+        }
+
+        // ---- tools ----
+        let left = 8.0;
+        let col = 150.0;
+        let mut y = 34.0;
+        p.panel(input, [left - 4.0, y - 4.0, col + 8.0, 3.0 * 22.0 + 8.0]);
+        for (k, (tool, name, tip)) in TOOLS.iter().enumerate() {
+            let (cx, cy) = (left + (k % 2) as f32 * (col / 2.0 + 1.0), y + (k / 2) as f32 * 22.0);
+            if p.button(input, name, [cx, cy, col / 2.0 - 1.0, 20.0], name, tip, self.tool == *tool) {
+                self.tool = *tool;
+            }
+        }
+        y += 3.0 * 22.0 + 10.0;
+        let top = y;
+        // The options: measured by drawing them after a background the
+        // height of last frame's.
+        let height = input.panel_height;
+        p.panel(input, [left - 4.0, top - 4.0, col + 8.0, height + 8.0]);
+        match self.tool {
+            Tool::Line => self.line_options(p, input, &mut y, left, col),
+            Tool::Jumps => self.jump_options(p, input, &mut y, left, col),
+            Tool::Shape => self.shape_options(p, input, &mut y, left, col),
+            Tool::Paint => self.paint_options(p, input, &mut y, left, col),
+            Tool::Objects => self.object_options(p, input, &mut y, left, col),
+            Tool::Land => self.land_options(p, input, &mut y, left, col),
+        }
+        input.panel_height = y - top;
+
+        // ---- the view ----
+        p.panel(input, [w - 152.0, 430.0, 148.0, 26.0]);
+        if p.button(input, "top", [w - 149.0, 433.0, 66.0, 20.0], "Top view", "Look straight down on the track, or back (Tab).", self.cam.pitch > 1.5) {
+            self.top_view();
+        }
+        if p.button(input, "frame", [w - 80.0, 433.0, 73.0, 20.0], "Whole track", "Bring the whole track into view (F).", false) {
+            self.frame_track();
+        }
+
+        // ---- hint line ----
+        let hint = self.hint();
+        p.panel(input, [0.0, 460.0, w, 20.0]);
+        p.text([10.0, 465.0], &hint, 11.0, false, [0.85, 0.85, 0.8, 1.0]);
+        // Saved / baking state at the right of the hint line.
+        let state = if self.bake_job.is_some() {
+            "Baking the track...".to_string()
+        } else if self.unsaved {
+            "Not saved yet".to_string()
+        } else {
+            "Saved".to_string()
+        };
+        let sw = p.text_width(&state, 11.0, false);
+        p.text([w - sw - 10.0, 465.0], &state, 11.0, false, [0.6, 0.6, 0.55, 1.0]);
+
+        // ---- toast ----
+        if let Some((text, at)) = &self.toast {
+            let age = self.now - at;
+            if age < 2.0 {
+                let a = (2.0 - age).min(1.0);
+                let tw = p.text_width(text, 13.0, true) + 24.0;
+                p.fill([(w - tw) / 2.0, 40.0, tw, 24.0], [0.07, 0.07, 0.065, 0.85 * a]);
+                p.text([(w - tw) / 2.0 + 12.0, 46.0], text, 13.0, true, [1.0, 1.0, 1.0, a]);
+            }
+        }
+
+        // ---- pop-ups ----
+        match self.popup.take() {
+            Some(Popup::New { mut surprise }) => {
+                let (pw, ph) = (300.0, 200.0);
+                let (px, py) = ((w - pw) / 2.0, 120.0);
+                p.fill([0.0, 0.0, w, 480.0], [0.0, 0.0, 0.0, 0.35]);
+                p.panel(input, [px, py, pw, ph]);
+                p.text([px + 14.0, py + 12.0], "NEW TRACK", 14.0, true, [ACCENT[0], ACCENT[1], ACCENT[2], 1.0]);
+                p.text([px + 14.0, py + 32.0], "Pick a kind of race. You start with a ready loop to change,", 11.0, false, [0.85, 0.85, 0.8, 1.0]);
+                p.text([px + 14.0, py + 45.0], "or turn on Surprise me for a whole track to ride now.", 11.0, false, [0.85, 0.85, 0.8, 1.0]);
+                let mut keep = true;
+                for (k, mode) in Mode::ALL.iter().enumerate() {
+                    let tip = match mode {
+                        Mode::Supercross => "A tight track of jumps on a stadium floor, lined with bales.",
+                        Mode::National => "An outdoor lap track cut into the hills.",
+                        Mode::Baja => "A long run across open desert from gate to gate.",
+                        Mode::Enduro => "Gates through hills and mountains.",
+                    };
+                    let r = [px + 14.0 + (k % 2) as f32 * 138.0, py + 64.0 + (k / 2) as f32 * 30.0, 134.0, 26.0];
+                    if p.button(input, mode.name(), r, mode.name(), tip, false) {
+                        self.save();
+                        self.remember();
+                        self.course = if surprise {
+                            mm2_course::auto::surprise(*mode, self.dice())
+                        } else {
+                            Course::new(*mode)
+                        };
+                        self.course.name = self.free_name(*mode);
+                        self.field = None;
+                        self.land = None;
+                        self.picked = None;
+                        self.changed();
+                        keep = false;
+                    }
+                }
+                let label = if surprise { "Surprise me: on" } else { "Surprise me: off" };
+                if p.button(input, "surprise", [px + 14.0, py + 130.0, 272.0, 22.0], label, "On: the new track comes with its own line, hills and jumps, ready to ride. Off: a plain loop to build on.", surprise) {
+                    surprise = !surprise;
+                }
+                if p.button(input, "cancel", [px + pw - 84.0, py + ph - 30.0, 70.0, 20.0], "Cancel", "Keep working on this track.", false) {
+                    keep = false;
+                }
+                if keep {
+                    self.popup = Some(Popup::New { surprise });
+                }
+            }
+            Some(Popup::Open { files, mode, scroll }) => {
+                let (pw, ph) = (470.0, 360.0);
+                let (px, py) = ((w - pw) / 2.0, 60.0);
+                p.fill([0.0, 0.0, w, 480.0], [0.0, 0.0, 0.0, 0.35]);
+                p.panel(input, [px, py, pw, ph]);
+                let accent = [ACCENT[0], ACCENT[1], ACCENT[2], 1.0];
+                let soft = [0.85, 0.85, 0.8, 1.0];
+                let (mut keep, mut mode, mut scroll) = (true, mode, scroll);
+                let mut opened: Option<Course> = None;
+                // Your own tracks, on the left.
+                let col = 190.0;
+                p.text([px + 14.0, py + 12.0], "YOUR TRACKS", 13.0, true, accent);
+                if files.is_empty() {
+                    p.text([px + 14.0, py + 36.0], "None saved yet.", 11.0, false, soft);
+                }
+                for (k, f) in files.iter().take(13).enumerate() {
+                    let name = f.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+                    let r = [px + 14.0, py + 34.0 + k as f32 * 22.0, col, 20.0];
+                    if p.button(input, &format!("open{k}"), r, &name, "Open this track to carry on with it.", false) {
+                        match load_file(f) {
+                            Some(c) => opened = Some(c),
+                            None => self.say("Couldn't open that track"),
+                        }
+                    }
+                }
+                // A copy of any track there is, on the right.
+                let rx = px + 14.0 + col + 16.0;
+                let rw = pw - (rx - px) - 14.0;
+                p.text([rx, py + 12.0], "EDIT A COPY", 13.0, true, accent);
+                for (k, m) in Mode::ALL.iter().enumerate() {
+                    let bw = (rw - 6.0) / 4.0;
+                    let r = [rx + k as f32 * (bw + 2.0), py + 32.0, bw, 18.0];
+                    if p.button(input, &format!("copymode{k}"), r, m.name(), "Show this kind of race's tracks.", mode == *m) {
+                        mode = *m;
+                        scroll = 0;
+                    }
+                }
+                let list: Vec<(String, PathBuf, usize)> = self.tracks.iter().filter(|t| t.mode == mode).map(|t| (t.name.clone(), t.path.clone(), t.course)).collect();
+                let rows = 11;
+                if input.over((rx, py + 56.0)) || (input.pointer.0 >= rx && input.pointer.1 > py + 54.0 && input.pointer.1 < py + ph - 34.0) {
+                    let wheel = input.wheel;
+                    if wheel < 0.0 {
+                        scroll = (scroll + 1).min(list.len().saturating_sub(rows));
+                    } else if wheel > 0.0 {
+                        scroll = scroll.saturating_sub(1);
+                    }
+                }
+                if self.tracks.is_empty() {
+                    p.text([rx, py + 60.0], "Finding the tracks...", 11.0, false, soft);
+                } else if list.is_empty() {
+                    p.text([rx, py + 60.0], "No tracks of this kind.", 11.0, false, soft);
+                }
+                for (k, t) in list.iter().skip(scroll).take(rows).enumerate() {
+                    let r = [rx, py + 56.0 + k as f32 * 22.0, rw, 20.0];
+                    let tip = "Opens a copy of this track: add jumps, shape and paint its ground, place objects or redraw its line. The track itself stays as it is.";
+                    let (tname, tpath, tcourse) = t;
+                    if p.button(input, &format!("copy{}", scroll + k), r, tname, tip, false) {
+                        let name = self.copy_name(tname);
+                        match copy_of(tpath, mode, *tcourse, &name) {
+                            Ok(c) => opened = Some(c),
+                            Err(e) => {
+                                eprintln!("{}: {e}", tpath.display());
+                                self.say("That track can't be copied");
+                            }
+                        }
+                    }
+                }
+                if list.len() > rows {
+                    p.text([rx, py + ph - 28.0], &format!("{}-{} of {} (wheel scrolls)", scroll + 1, (scroll + rows).min(list.len()), list.len()), 10.0, false, soft);
+                }
+                if p.button(input, "cancel", [px + pw - 84.0, py + ph - 28.0, 70.0, 20.0], "Cancel", "Keep working on this track.", false) {
+                    keep = false;
+                }
+                if let Some(c) = opened {
+                    self.save();
+                    self.history.clear();
+                    self.future.clear();
+                    self.course = c;
+                    self.field = None;
+                    self.land = None;
+                    self.picked = None;
+                    self.dirty = true;
+                    self.unsaved = true;
+                    keep = false;
+                }
+                if keep {
+                    self.popup = Some(Popup::Open { files, mode, scroll });
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// A copy's name, numbered if a saved track has it already.
+    fn copy_name(&self, of: &str) -> String {
+        let taken: Vec<String> = self.course_files().iter().filter_map(|f| f.file_stem().map(|s| s.to_string_lossy().to_ascii_uppercase())).collect();
+        let stem = |name: &str| Course { name: name.to_string(), ..Course::default() }.stem();
+        (1..100)
+            .map(|k| if k == 1 { of.to_string() } else { format!("{of} {k}") })
+            .find(|n| !taken.contains(&stem(&format!("{n} copy"))))
+            .unwrap_or_else(|| of.to_string())
+    }
+
+    /// A name for a new track that no saved track has yet.
+    fn free_name(&self, mode: Mode) -> String {
+        let taken: Vec<String> = self.course_files().iter().filter_map(|f| f.file_stem().map(|s| s.to_string_lossy().to_ascii_uppercase())).collect();
+        for n in 1..100 {
+            let name = format!("My {} {n}", mode.name());
+            let c = Course { name: name.clone(), ..Course::default() };
+            if !taken.contains(&c.stem()) {
+                return name;
+            }
+        }
+        format!("My {} Track", mode.name())
+    }
+
+    fn course_files(&self) -> Vec<PathBuf> {
+        let mut out: Vec<PathBuf> = crate::fs::read_dir(&self.dir)
+            .map(|it| it.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("course"))).collect())
+            .unwrap_or_default();
+        out.sort();
+        out
+    }
+
+    fn heading(p: &mut Painter, y: &mut f32, left: f32, text: &str) {
+        p.text([left, *y], text, 12.0, true, [ACCENT[0], ACCENT[1], ACCENT[2], 1.0]);
+        *y += 16.0;
+    }
+
+    fn note(p: &mut Painter, y: &mut f32, left: f32, col: f32, text: &str) {
+        for line in panel::wrap(p, text, col, 10.5) {
+            p.text([left, *y], &line, 10.5, false, [0.75, 0.75, 0.7, 1.0]);
+            *y += 12.0;
+        }
+        *y += 4.0;
+    }
+
+    /// A slider that keeps the change for Undo once let go.
+    #[allow(clippy::too_many_arguments)]
+    fn slider(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32, id: &str, label: &str, tip: &str, value: f32, range: (f32, f32), shown: String) -> Option<f32> {
+        let r = [left, *y, col, 26.0];
+        *y += 30.0;
+        let (out, started) = p.slider(input, id, r, label, tip, value, range, &shown);
+        if started {
+            self.remember();
+        }
+        out
+    }
+
+    fn line_options(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {
+        Self::heading(p, y, left, "THE LINE");
+        let closed = self.course.line.closed;
+        if p.button(input, "loop", [left, *y, col / 2.0 - 2.0, 20.0], "Loop", "The line comes round to its start: a lap.", closed) && !closed {
+            self.remember();
+            self.course.line.closed = true;
+            self.changed();
+        }
+        if p.button(input, "open-line", [left + col / 2.0 + 2.0, *y, col / 2.0 - 2.0, 20.0], "Point to point", "The line ends away from its start (Baja and Enduro).", !closed) && closed {
+            self.remember();
+            self.course.line.closed = false;
+            self.changed();
+        }
+        *y += 26.0;
+        let avg = self.course.line.points.iter().map(|p| p.width).sum::<f32>() / self.course.line.points.len().max(1) as f32;
+        if let Some(v) = self.slider(p, input, y, left, col, "width", "Track width", "How wide the whole track is. The wheel over a point sets it there alone.", avg, (12.0, 90.0), format!("{avg:.0} ft")) {
+            let k = v / avg.max(1.0);
+            for pt in &mut self.course.line.points {
+                pt.width = (pt.width * k).clamp(10.0, 120.0);
+            }
+            self.changed();
+        }
+        let b = self.course.line.berms;
+        if let Some(v) = self.slider(p, input, y, left, col, "berms", "Berms", "How high the corners bank up on their outside, so you can rail them.", b, (0.0, 1.0), format!("{:.0}%", b * 100.0)) {
+            self.course.line.berms = v;
+            self.changed();
+        }
+        if p.button(input, "smooth-line", [left, *y, col / 2.0 - 2.0, 20.0], "Smooth", "Evens out the line's wiggles.", false) {
+            self.remember();
+            let pts = self.course.line.points.clone();
+            let n = pts.len();
+            if n >= 3 {
+                for i in 0..n {
+                    let (a, b) = if self.course.line.closed {
+                        (pts[(i + n - 1) % n], pts[(i + 1) % n])
+                    } else if i == 0 || i + 1 == n {
+                        continue;
+                    } else {
+                        (pts[i - 1], pts[i + 1])
+                    };
+                    let q = &mut self.course.line.points[i];
+                    q.x = q.x * 0.5 + (a.x + b.x) * 0.25;
+                    q.z = q.z * 0.5 + (a.z + b.z) * 0.25;
+                }
+            }
+            self.changed();
+        }
+        if p.button(input, "clear-line", [left + col / 2.0 + 2.0, *y, col / 2.0 - 2.0, 20.0], "Start again", "Clears the line and its jumps, to draw a new one. Undo brings it back.", false) {
+            self.remember();
+            self.course.line.points.clear();
+            self.course.jumps.clear();
+            self.course.line.start = 0.0;
+            self.changed();
+        }
+        *y += 26.0;
+        let len = self.line.length;
+        Self::note(p, y, left, col, &format!("{} points, {:.0} ft of track ({:.2} miles).", self.course.line.points.len(), len, len / 5280.0));
+    }
+
+    fn jump_options(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {
+        Self::heading(p, y, left, "JUMP KIT");
+        for (k, kind) in Kind::ALL.iter().enumerate() {
+            let r = [left + (k % 2) as f32 * (col / 2.0 + 1.0), *y + (k / 2) as f32 * 22.0, col / 2.0 - 1.0, 20.0];
+            if p.button(input, kind.name(), r, kind.name(), kind.about(), self.kind == *kind) {
+                self.kind = *kind;
+            }
+        }
+        *y += (Kind::ALL.len().div_ceil(2)) as f32 * 22.0 + 6.0;
+        let half = col / 2.0 - 1.0;
+        if p.button(input, "jfill", [left, *y, half, 20.0], "Fill with jumps", "Adds jumps along the straights, keeping the ones you placed and room to ride in and land. Click again for more, Undo to take them off.", false) {
+            self.remember();
+            let seed = self.dice();
+            let added = mm2_course::auto::fill_jumps(&mut self.course, seed);
+            self.picked = None;
+            self.changed();
+            self.say(&if added == 0 { "No room left for more jumps".to_string() } else { format!("Added {added} jumps") });
+        }
+        if p.button(input, "jclear", [left + half + 2.0, *y, half, 20.0], "Clear jumps", "Takes every jump off the line. Undo brings them back.", false) {
+            self.remember();
+            self.course.jumps.clear();
+            self.picked = None;
+            self.changed();
+        }
+        *y += 26.0;
+        if let Some(i) = self.picked.filter(|&i| i < self.course.jumps.len()) {
+            let j = self.course.jumps[i];
+            Self::heading(p, y, left, &j.kind.name().to_ascii_uppercase());
+            if let Some(v) = self.slider(p, input, y, left, col, "jh", "Height", "How tall it is. The wheel over a jump changes it too.", j.height, (0.5, 25.0), format!("{:.1} ft", j.height)) {
+                self.course.jumps[i].height = v;
+                self.changed();
+            }
+            if let Some(v) = self.slider(p, input, y, left, col, "jl", "Length", "How long it is along the track. Shift and the wheel change it too.", j.length, (10.0, 300.0), format!("{:.0} ft", j.length)) {
+                self.course.jumps[i].length = v;
+                self.changed();
+            }
+            if p.button(input, "jremove", [left, *y, col, 20.0], "Remove this jump", "Takes it off the track (right-click does too).", false) {
+                self.remember();
+                self.course.jumps.remove(i);
+                self.picked = None;
+                self.changed();
+            }
+            *y += 26.0;
+        } else {
+            Self::note(p, y, left, col, "Click the line to drop the jump picked above. Click a jump to change its size.");
+        }
+    }
+
+    fn shape_options(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {
+        Self::heading(p, y, left, "BRUSH");
+        for (k, b) in Brush::ALL.iter().enumerate() {
+            let tip = match b {
+                Brush::Raise => "Builds the ground up where you drag.",
+                Brush::Lower => "Digs the ground down where you drag.",
+                Brush::Smooth => "Evens out bumps and hard edges.",
+                Brush::Flatten => "Levels the ground to the height where you started dragging.",
+                Brush::Roughen => "Adds small lumps and ruts.",
+            };
+            let r = [left + (k % 2) as f32 * (col / 2.0 + 1.0), *y + (k / 2) as f32 * 22.0, col / 2.0 - 1.0, 20.0];
+            if p.button(input, b.name(), r, b.name(), tip, self.brush == *b) {
+                self.brush = *b;
+            }
+        }
+        *y += 3.0 * 22.0 + 4.0;
+        let r = [left, *y, col, 26.0];
+        *y += 30.0;
+        if let (Some(v), _) = p.slider(input, "size", r, "Size", "How wide the brush is ([ and ]).", self.radius, (8.0, 300.0), &format!("{:.0} ft", self.radius)) {
+            self.radius = v;
+        }
+        let r = [left, *y, col, 26.0];
+        *y += 30.0;
+        if let (Some(v), _) = p.slider(input, "strength", r, "Strength", "How much each pass of the brush changes the ground.", self.strength, (0.05, 1.0), &format!("{:.0}%", self.strength * 100.0)) {
+            self.strength = v;
+        }
+        Self::note(p, y, left, col, "Brush strokes go on top of the track, so you can shape the jumps and the land round them.");
+    }
+
+    fn paint_options(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {
+        Self::heading(p, y, left, "SURFACE");
+        for (k, s) in Surface::ALL.iter().enumerate() {
+            let tip = match s {
+                Surface::Dirt => "Loose dirt: full grip, dusty.",
+                Surface::Grass => "Grass: a little slower and less grip.",
+                Surface::Sand => "Sand: drags the bike and slides.",
+                Surface::Mud => "Mud: slow and slippery, no dust.",
+                Surface::Rock => "Hardpack: fast and grippy, throws no dirt.",
+            };
+            let r = [left + (k % 2) as f32 * (col / 2.0 + 1.0), *y + (k / 2) as f32 * 22.0, col / 2.0 - 1.0, 20.0];
+            if p.button(input, s.name(), r, s.name(), tip, self.surface == *s) {
+                self.surface = *s;
+            }
+            let c = view::surface_colour(*s);
+            p.fill([r[0] + r[2] - 12.0, r[1] + 6.0, 8.0, 8.0], [c[0], c[1], c[2], 1.0]);
+        }
+        *y += 3.0 * 22.0 + 4.0;
+        let r = [left, *y, col, 26.0];
+        *y += 30.0;
+        if let (Some(v), _) = p.slider(input, "psize", r, "Size", "How wide the paint brush is.", self.paint_radius, (5.0, 200.0), &format!("{:.0} ft", self.paint_radius)) {
+            self.paint_radius = v;
+        }
+        Self::note(p, y, left, col, "The track is dirt by itself. Paint mud in a dip or sand in a corner to change how it rides.");
+    }
+
+    fn object_options(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {
+        Self::heading(p, y, left, "OBJECTS");
+        for (k, (name, _, about)) in OBJECTS.iter().enumerate() {
+            let r = [left + (k % 2) as f32 * (col / 2.0 + 1.0), *y + (k / 2) as f32 * 20.0, col / 2.0 - 1.0, 18.0];
+            if p.button(input, name, r, name, about, self.object == k) {
+                self.object = k;
+            }
+        }
+        *y += OBJECTS.len().div_ceil(2) as f32 * 20.0 + 4.0;
+        let on = self.course.dress.edge_bales;
+        if p.button(input, "bales", [left, *y, col, 20.0], if on { "Bales along the edges: on" } else { "Bales along the edges: off" }, "Lines both edges of the track with wrapped bales, as the stadiums do.", on) {
+            self.remember();
+            self.course.dress.edge_bales = !on;
+            self.changed();
+        }
+        *y += 26.0;
+        Self::note(p, y, left, col, &format!("{} placed. Objects face along the track when placed.", self.course.objects.len()));
+    }
+
+    fn land_options(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {
+        if let Some(base) = &self.course.base {
+            Self::heading(p, y, left, "A COPY");
+            let of = std::path::Path::new(&base.file).file_name().map_or(String::new(), |n| n.to_string_lossy().to_string());
+            Self::note(p, y, left, col, &format!("This is a copy of {of}. Its land, sky, scenery and objects stay the track's own; the track itself isn't changed."));
+            Self::note(p, y, left, col, "Add jumps, shape and paint the ground, place objects, or redraw the line (Line, Start again) for a new course on the same land.");
+            Self::note(p, y, left, col, "Click the name in the top bar to rename the copy.");
+            return;
+        }
+        let sx = self.course.mode == Mode::Supercross;
+        if !sx {
+            Self::heading(p, y, left, "LAND");
+            for (k, kind) in LandKind::ALL.iter().enumerate() {
+                let tip = match kind {
+                    LandKind::Rolling => "Green rolling hills.",
+                    LandKind::Valley => "A long valley between two ridges.",
+                    LandKind::Desert => "Dry desert with dunes, pans and low mesas.",
+                    LandKind::Mountains => "A high meadow ringed by steep peaks.",
+                    LandKind::Flat => "Flat ground.",
+                };
+                let r = [left + (k % 2) as f32 * (col / 2.0 + 1.0), *y + (k / 2) as f32 * 22.0, col / 2.0 - 1.0, 20.0];
+                if p.button(input, kind.name(), r, kind.name(), tip, self.course.land.kind == *kind) && self.course.land.kind != *kind {
+                    self.remember();
+                    self.course.land.kind = *kind;
+                    self.changed();
+                }
+            }
+            *y += 3.0 * 22.0 + 4.0;
+            let h = self.course.land.hills;
+            if let Some(v) = self.slider(p, input, y, left, col, "hills", "Hills", "How tall the hills are.", h, (0.0, 1.0), format!("{:.0}%", h * 100.0)) {
+                self.course.land.hills = v;
+                self.changed();
+            }
+            let r = self.course.land.rough;
+            if let Some(v) = self.slider(p, input, y, left, col, "rough", "Bumps", "How bumpy the ground is between the hills (the track is smoothed).", r, (0.0, 1.0), format!("{:.0}%", r * 100.0)) {
+                self.course.land.rough = v;
+                self.changed();
+            }
+            if p.button(input, "reseed", [left, *y, col, 20.0], "Another land like this", "Makes new hills of the same kind. Your line and jumps stay.", false) {
+                self.remember();
+                self.course.land.seed = self.course.land.seed.wrapping_mul(1_103_515_245).wrapping_add(12_345) % 100_000;
+                self.changed();
+            }
+            *y += 26.0;
+            Self::heading(p, y, left, "SKY");
+            let skies = mm2_course::SKIES;
+            let at = skies.iter().position(|(f, _)| f.eq_ignore_ascii_case(&self.course.look.sky)).unwrap_or(0);
+            if p.button(input, "sky", [left, *y, col, 20.0], skies[at].1, "Click for the next sky.", false) {
+                self.remember();
+                self.course.look.sky = skies[(at + 1) % skies.len()].0.into();
+                self.changed();
+            }
+            *y += 26.0;
+        } else {
+            Self::heading(p, y, left, "STADIUM");
+            let st = mm2_course::STADIUMS;
+            let at = st.iter().position(|(f, _)| f.eq_ignore_ascii_case(&self.course.look.stadium)).unwrap_or(0);
+            if p.button(input, "stadium", [left, *y, col, 20.0], st[at].1, "Click for the next stadium. Keep the track inside its floor.", false) {
+                self.remember();
+                self.course.look.stadium = st[(at + 1) % st.len()].0.into();
+                self.changed();
+            }
+            *y += 26.0;
+        }
+        let sun = self.course.look.sun;
+        if let Some(v) = self.slider(p, input, y, left, col, "sun", "Sun", "Low evening sun to high midday sun.", sun, (0.0, 1.0), if sun < 0.35 { "Evening".into() } else if sun < 0.7 { "Afternoon".into() } else { "Midday".into() }) {
+            self.course.look.sun = v;
+            self.changed();
+        }
+        Self::note(p, y, left, col, "Click the name in the top bar to rename the track.");
+    }
+}
+
+/// Reads a `.course` file, or the course inside a builder `.ENV`.
+fn load_file(path: &Path) -> Option<Course> {
+    let bytes = crate::fs::read(path).ok()?;
+    let mut c = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("env")) {
+        match mm2_course::env::course_in(&bytes) {
+            Some(c) => c,
+            // Any other track: a copy of it to change.
+            None => {
+                let name = format!("{} copy", path.file_stem()?.to_string_lossy());
+                return mm2_course::copy::import(&bytes, &path.to_string_lossy(), None, 0, &name)
+                    .map_err(|e| eprintln!("{}: {e}", path.display()))
+                    .ok();
+            }
+        }
+    } else {
+        Course::from_json(&String::from_utf8_lossy(&bytes)).ok()?
+    };
+    // A copy reads its track again.
+    if let Some(base) = c.base.clone() {
+        let bytes = crate::fs::read(&base.file).map_err(|e| eprintln!("{}: {e}", base.file)).ok()?;
+        mm2_course::copy::attach(&mut c, &bytes).map_err(|e| eprintln!("{}: {e}", base.file)).ok()?;
+    }
+    Some(c)
+}
+
+/// A copy of the track at `path` (its `course`th course) to change.
+fn copy_of(path: &Path, mode: Mode, course: usize, name: &str) -> Result<Course, String> {
+    let bytes = crate::fs::read(path).map_err(|e| e.to_string())?;
+    mm2_course::copy::import(&bytes, &path.to_string_lossy(), Some(mode), course, &format!("{name} copy"))
+}

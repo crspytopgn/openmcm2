@@ -137,6 +137,8 @@ pub struct TerrainRenderer {
     /// The player's shadow's mask, as the sun sees the bike and rider.
     shadow_mask: wgpu::TextureView,
     detail: wgpu::TextureView,
+    /// The free pack's fine ground (fine_ground.rs), or none.
+    ground: crate::fine_ground::Views,
     grid: [f32; 4],
     depth: Option<(wgpu::TextureView, u32, u32)>,
     objects: Option<ObjectRenderer>,
@@ -468,6 +470,10 @@ impl TerrainRenderer {
                     (5, S::FRAGMENT, sampler()),
                     (6, S::FRAGMENT, texture(D::D2, float)),
                     (7, S::FRAGMENT, sampler()),
+                    (8, S::FRAGMENT, texture(D::D2, T::Uint)),
+                    (9, S::FRAGMENT, texture(D::D2Array, float)),
+                    (10, S::FRAGMENT, sampler()),
+                    (11, S::FRAGMENT, uniform()),
                 ],
             );
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -543,10 +549,11 @@ impl TerrainRenderer {
                 view_formats: &[],
             })
             .create_view(&Default::default());
-        let bind_group = terrain_bind_group(device, &pipeline.get_bind_group_layout(0), &globals, &terrain_views, &detail, &shadow_mask);
+        let ground = crate::fine_ground::Views::none(device, queue);
+        let bind_group = terrain_bind_group(device, &pipeline.get_bind_group_layout(0), &globals, &terrain_views, &detail, &shadow_mask, &ground);
         let enhanced = enhanced.map(|(shared, terrain_pipeline, layout)| Enhanced {
             post: crate::post::Post::new(device, samples, target_format),
-            group: terrain_bind_group(device, &layout, &globals, &terrain_views, &detail, &shadow_mask),
+            group: terrain_bind_group(device, &layout, &globals, &terrain_views, &detail, &shadow_mask, &ground),
             ruts: upgrades.is_some_and(|e| e.ruts || e.wear).then(|| {
                 // Over the whole terrain: x from 0, z up to 0.
                 let size = (n as f32 - 1.0) * terrain.scale;
@@ -641,6 +648,7 @@ impl TerrainRenderer {
             bind_group,
             terrain_views,
             shadow_mask,
+            ground,
             detail,
             grid,
             depth: None,
@@ -694,8 +702,19 @@ impl TerrainRenderer {
     /// detail spans one terrain texture tile.
     pub fn set_detail(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, image: &mm2_formats::tga::Image) {
         self.detail = detail_view(device, queue, image);
+        self.rebind(device);
+    }
+
+    /// Lays a free track's ground materials over its baked tiles as fine
+    /// detail (fine_ground.rs).
+    pub fn set_ground_map(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, map: &crate::fine_ground::GroundMap) {
+        self.ground = crate::fine_ground::Views::new(device, queue, map);
+        self.rebind(device);
+    }
+
+    fn rebind(&mut self, device: &wgpu::Device) {
         if let Some(e) = &mut self.enhanced {
-            e.group = terrain_bind_group(device, &e.layout, &self.globals, &self.terrain_views, &self.detail, &self.shadow_mask);
+            e.group = terrain_bind_group(device, &e.layout, &self.globals, &self.terrain_views, &self.detail, &self.shadow_mask, &self.ground);
         }
         self.bind_group = terrain_bind_group(
             device,
@@ -704,6 +723,7 @@ impl TerrainRenderer {
             &self.terrain_views,
             &self.detail,
             &self.shadow_mask,
+            &self.ground,
         );
     }
 
@@ -1632,6 +1652,7 @@ fn terrain_bind_group(
     (textures, tile_map, sampler): &(wgpu::TextureView, wgpu::TextureView, wgpu::Sampler),
     detail: &wgpu::TextureView,
     shadow_mask: &wgpu::TextureView,
+    ground: &crate::fine_ground::Views,
 ) -> wgpu::BindGroup {
     let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("shadow sampler"),
@@ -1684,6 +1705,22 @@ fn terrain_bind_group(
             wgpu::BindGroupEntry {
                 binding: 7,
                 resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: wgpu::BindingResource::TextureView(&ground.map),
+            },
+            wgpu::BindGroupEntry {
+                binding: 9,
+                resource: wgpu::BindingResource::TextureView(&ground.pictures),
+            },
+            wgpu::BindGroupEntry {
+                binding: 10,
+                resource: wgpu::BindingResource::Sampler(&ground.sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 11,
+                resource: ground.info.as_entire_binding(),
             },
         ],
     })
