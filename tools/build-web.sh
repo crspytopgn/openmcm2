@@ -19,5 +19,9 @@ fi
 # The page checks this to load a new build fresh and to tell players
 # when one is out while they play.
 version="$(git rev-parse --short HEAD 2>/dev/null || echo dev)-$(date -u +%Y%m%d%H%M%S)"
-printf '{"version":"%s"}\n' "$version" > web/version.json
+# The engine's size, and about what it takes to download compressed, for
+# the loading screen's progress bar.
+engine="$(wc -c < web/pkg/mm2-viewer_bg.wasm | tr -d ' ')"
+engine_gz="$(gzip -c web/pkg/mm2-viewer_bg.wasm | wc -c | tr -d ' ')"
+printf '{"version":"%s","engine":%s,"engine_gz":%s}\n' "$version" "$engine" "$engine_gz" > web/version.json
 echo "built web/; serve it with: python3 -m http.server -d web 8000"

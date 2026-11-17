@@ -4099,6 +4099,8 @@ impl App {
             setup,
             job,
         });
+        #[cfg(target_arch = "wasm32")]
+        web::track_loading(true);
     }
 
     /// Once the track has loaded, the race begins.
@@ -4107,6 +4109,8 @@ impl App {
             return;
         }
         let Loading { setup, job, .. } = self.loading.take().unwrap();
+        #[cfg(target_arch = "wasm32")]
+        web::track_loading(false);
         match job.join() {
             Ok(Ok(mut track)) => {
                 track.name = setup.name.clone();
