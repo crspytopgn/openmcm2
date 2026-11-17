@@ -901,6 +901,17 @@ impl Frontend {
         let name = name.to_ascii_lowercase();
         match &mut self.screen {
             Screen::Main(d) => {
+                // A button the free pack adds.
+                let action = crate::freepack::ui_action("MAINMENU", &name);
+                if let Some(url) = action.and_then(|a| a.strip_prefix("open_url:")) {
+                    crate::update_note::open_page(url);
+                    return Next::Stay;
+                }
+                // The Course Builder's link (or one the free pack adds).
+                if name.eq_ignore_ascii_case(crate::menu_link::NAME) || action == Some("course_builder") {
+                    crate::builder::ask_open();
+                    return Next::Stay;
+                }
                 if let Some((_, pull)) = PULL_DOWNS.iter().find(|(b, _)| *b == name) {
                     // One pull-down at a time.
                     let open = !d.is_open(pull);
@@ -1100,6 +1111,40 @@ impl Frontend {
             Screen::Extra(s) => s.preview().map_or(crate::preview::VIEWPORT, |p| p.2),
             _ => crate::preview::VIEWPORT,
         }
+    }
+
+    /// A practice ride on `track` with the player's bike, alone: the
+    /// Course Builder's Ride it. The loading screen shows while it loads.
+    pub fn practice(&mut self, event: EventKind, track: PathBuf, name: String) -> Setup {
+        // Baked tracks join the track lists.
+        self.tracks.clear();
+        self.loading(event);
+        Setup {
+            event,
+            track,
+            course: 0,
+            laps: 99,
+            opponents: 0,
+            mode: PRACTICE,
+            name,
+            ride: self.ride(),
+            level: 1,
+            names: vec![self.user.profile.name.clone()],
+            rides: Vec::new(),
+            ghost: None,
+            net: None,
+            random_gates: None,
+        }
+    }
+
+    /// Each track of `event` there is: its name, file and course.
+    pub fn track_list(&mut self, event: EventKind) -> Vec<(String, PathBuf, usize)> {
+        self.tracks(event).iter().map(|t| (t.name.clone(), t.path.clone(), t.course)).collect()
+    }
+
+    /// Forgets the track lists, so new tracks show in them.
+    pub fn forget_tracks(&mut self) {
+        self.tracks.clear();
     }
 
     /// The player's choices on the Bike & Rider page.

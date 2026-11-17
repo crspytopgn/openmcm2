@@ -143,7 +143,7 @@ pub fn open() -> bool {
 
 /// `url` in the player's web browser.
 #[cfg(not(target_arch = "wasm32"))]
-fn open_page(url: &str) {
+pub fn open_page(url: &str) {
     use std::process::Command;
     let r = if cfg!(windows) {
         Command::new("explorer").arg(url).spawn()
@@ -154,6 +154,14 @@ fn open_page(url: &str) {
     };
     if let Err(e) = r {
         eprintln!("couldn't open {url}: {e}");
+    }
+}
+
+/// `url` in a new tab.
+#[cfg(target_arch = "wasm32")]
+pub fn open_page(url: &str) {
+    if let Some(w) = web_sys::window() {
+        let _ = w.open_with_url_and_target(url, "_blank");
     }
 }
 

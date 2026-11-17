@@ -62,10 +62,12 @@ function request(r) {
 
 export async function open() {
   if (db) return db;
-  const r = indexedDB.open("openmcm2", 1);
+  const r = indexedDB.open("openmcm2", 2);
   r.onupgradeneeded = () => {
-    r.result.createObjectStore("user");
-    r.result.createObjectStore("game");
+    // Version 2 added the downloaded Free Pack's files, by their hash.
+    for (const name of ["user", "game", "pack"]) {
+      if (!r.result.objectStoreNames.contains(name)) r.result.createObjectStore(name);
+    }
   };
   db = await request(r);
   return db;
@@ -83,13 +85,32 @@ export async function loadUser() {
   keys.forEach((k, i) => put(k, new Uint8Array(values[i])));
 }
 
+// The Free Pack's zip is kept beside the game's files, under its own key.
+const PACK = "/freepack.zip";
+
 /// The kept game folder's files (File or Blob objects), by path.
 export async function keptGame() {
   await open();
   const keys = await request(store("game", "readonly").getAllKeys());
-  if (!keys.length) return null;
   const values = await request(store("game", "readonly").getAll());
-  return keys.map((k, i) => [k, values[i]]);
+  const list = keys.map((k, i) => [k, values[i]]).filter(([k]) => k !== PACK);
+  return list.length ? list : null;
+}
+
+/// The kept Free Pack zip, if any.
+export async function keptPack() {
+  await open();
+  return (await request(store("game", "readonly").get(PACK))) || null;
+}
+
+export async function keepPack(file) {
+  await open();
+  await request(store("game", "readwrite").put(file, PACK));
+}
+
+export async function forgetPack() {
+  await open();
+  await request(store("game", "readwrite").delete(PACK));
 }
 
 export async function keepGame(list) {
@@ -120,9 +141,44 @@ export async function forgetUser(path) {
   remove(path);
 }
 
+// ---- The downloaded Free Pack: each file under its SHA-256, and the
+// manifest it was last brought up to date with under "manifest". ----
+
+export async function packStored() {
+  await open();
+  return new Set(await request(store("pack", "readonly").getAllKeys()));
+}
+
+export async function packGet(key) {
+  await open();
+  return (await request(store("pack", "readonly").get(key))) || null;
+}
+
+export async function packPut(key, value) {
+  await open();
+  await request(store("pack", "readwrite").put(value, key));
+}
+
+export async function packDelete(keys) {
+  await open();
+  const s = store("pack", "readwrite");
+  for (const k of keys) s.delete(k);
+  await new Promise((ok, fail) => {
+    s.transaction.oncomplete = ok;
+    s.transaction.onerror = () => fail(s.transaction.error);
+  });
+}
+
+/// Forgets the game's files (the Free Pack stays).
 export async function forgetGame() {
   await open();
-  await request(store("game", "readwrite").clear());
+  const keys = await request(store("game", "readonly").getAllKeys());
+  const s = store("game", "readwrite");
+  for (const k of keys) if (k !== PACK) s.delete(k);
+  await new Promise((ok, fail) => {
+    s.transaction.oncomplete = ok;
+    s.transaction.onerror = () => fail(s.transaction.error);
+  });
 }
 
 // ---- What the game calls ----
@@ -144,6 +200,13 @@ function kind(path) {
 
 function write(path, data) {
   path = norm(path);
+  // The Course Builder's tracks join the game's track folders for this
+  // visit; the builder keeps them among the saves too (/user/Tracks).
+  if (/^\/game\/teraform\/[^/]+\/[^/]+\.env$/i.test(path)) {
+    const old = files.get(path.toLowerCase());
+    put(old ? old.path : path, new Uint8Array(data));
+    return true;
+  }
   if (!path.toLowerCase().startsWith("/user/")) return false;
   const copy = new Uint8Array(data);
   const old = files.get(path.toLowerCase());

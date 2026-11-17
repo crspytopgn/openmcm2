@@ -62,6 +62,8 @@ const EDGE_ROOM: f32 = 4.0;
 /// matched to it there. Run each screen frame at 120 fps they crash a
 /// third more often (whole races, 38 → 49 crashes; the tape has 31).
 pub const AI_FRAME: f32 = 0.028;
+/// The computer riders' crashes so far, for the headless checks.
+pub static AI_CRASHES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 pub const DEFAULT_LAPS: u32 = 3;
 /// Practice: laps without end.
 pub const ENDLESS: u32 = 99;
@@ -850,6 +852,11 @@ impl Computer {
     /// Off the two-wheel model onto the full one, crashed (0x414000:
     /// crash reason 4, the Endo bail).
     fn crash(&mut self, ground: &TrackGround, spec: &Spec, reset_to: Option<(Vec3, Vec3)>) {
+        AI_CRASHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if std::env::var_os("MM2_CRASH_LOG").is_some() {
+            let p = self.rider.position;
+            eprintln!("crash at {:.0},{:.0},{:.0} speed {:.0}", p.x, p.y, p.z, self.rider.velocity.length());
+        }
         let r = &self.rider;
         let mut bike = mm2_physics::Bike::with_spec(ground, r.position, r.look, spec.clone());
         let right = r.up.cross(r.look).normalize_or(Vec3::X);
@@ -2137,9 +2144,12 @@ impl Race {
                     r.timing.tick(step, true);
                 }
                 let laps = !self.gates.is_empty() || self.stunt_event;
+                // In a tag game or a stunt session a course (the free
+                // pack's) only guides the computer riders: no laps.
+                let free = self.tag.is_some() || self.stunt_event;
                 if let Some(course) = &self.course {
                     if racing {
-                        r.track(course, clock, self.laps, laps);
+                        r.track(course, clock, self.laps, laps || free);
                     }
                     // The player's place on the course, as the computer
                     // riders' (0x4eb170), for the Visual Cues.
@@ -2154,7 +2164,10 @@ impl Race {
                         }
                         r.on_course = course.follow(probe, look, &mut r.place).is_some();
                         r.off_course = if r.on_course { 0.0 } else { r.off_course + step };
-                        if !r.on_course {
+                        // Time down in a crash doesn't count against the
+                        // lap: it only ever costs time. Riding off the
+                        // course (a cut) still does.
+                        if !r.on_course && !crashed {
                             r.lap_off_now += step;
                         }
                     }
@@ -2163,7 +2176,7 @@ impl Race {
                     // crashed or not (0x492ac0 → 0x492cc0); the 3D numbers
                     // count down to it. Only the lap races' tracker
                     // (0x4eb170) counts the time off the course.
-                    if !self.practice && self.gates.is_empty() && r.off_course > OFF_COURSE_RESET {
+                    if !self.practice && !free && self.gates.is_empty() && r.off_course > OFF_COURSE_RESET {
                         if let (Some(p), Bike::Player(b)) = (r.place, &mut r.bike) {
                             let (at, way) = (course.point(p), course.way(p));
                             b.reset(ground, at - way * 3.5, way);

@@ -21,3 +21,4 @@
 *.gho
 /web/pkg
 /web/version.json
+__pycache__/

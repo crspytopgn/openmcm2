@@ -429,6 +429,12 @@ fn noise3(p: vec3<f32>) -> f32 {
     return mix(a, b, u.z);
 }
 
+// What the stands and the roof keep of their painted light at night,
+// under a stadium's own lamps, before the lamps' own on them.
+const NIGHT_PAINTED: vec3<f32> = vec3<f32>(0.2, 0.2, 0.22);
+// How far round a listed lamp's place its head glows, ft.
+const LAMP_HEAD: f32 = 7.0;
+
 @fragment
 fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(tex, tex_sampler, in.uv) * in.color;
@@ -518,6 +524,13 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         let game = min(globals.ambient.rgb + globals.sun.rgb * max(dot(n, globals.to_sun.xyz), 0.0) * lit, vec3<f32>(1.0));
         light = pow(game, vec3<f32>(2.2));
     }
+    // At night under a stadium's own lamps, what the game draws with its
+    // light painted in (the stands, the roof) is dim but for where the
+    // lamps reach it.
+    if (enh.stadium.y > 0.0 && in.mode >= UNLIT && in.moving < 0.5) {
+        let lamps = stadium_light(in.world, n) * 0.25;
+        light *= mix(vec3<f32>(1.0), NIGHT_PAINTED + lamps / (vec3<f32>(1.0) + lamps), enh.stadium.y);
+    }
     // Mud caked on as it rides: thickest low down, on the wheels, the
     // boots and the underside, in splats that spread as it gets dirtier;
     // dark and glossy when wet, pale and dusty when dry.
@@ -577,6 +590,32 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         }
         colour += vec3<f32>(1.0, 0.95, 0.85) * near * select(4.0, 6.0, pole) * (lamp.w - select(0.0, 10.0, pole));
     }
+    // A stadium's lamps, painted near-white high under its roof, glow at
+    // night while they light the floor (night.rs).
+    // Added past the haze, which hides a lamp far less than what it lights.
+    var glow = vec3<f32>(0.0);
+    // What hangs on a node of its own may be a track's dressing (a pack's
+    // arena) rather than a bike: high above where any bike flies, it is.
+    let still = in.moving < 0.5 || in.world.y > enh.stadium.z + 60.0;
+    if (enh.stadium.y > 0.0 && in.world.y > enh.stadium.z - 30.0) {
+        // The painted lamp's own colour, not the model's tint over it.
+        let paint = textureSampleLevel(tex, tex_sampler, in.uv, 0.0).rgb;
+        let hi = max(paint.r, max(paint.g, paint.b));
+        let lo = min(paint.r, min(paint.g, paint.b));
+        let lamp = smoothstep(0.72, 0.85, hi) * smoothstep(0.35, 0.5, lo) * select(0.0, 1.0, still);
+        glow += max(texel.rgb, paint * 0.8) * lamp * 2.5 * enh.stadium.y;
+        // A lamp the track lists (its `.lights` file) glows where its head
+        // is, on the faces turned the way it shines, whatever its paint.
+        if (enh.stadium_texels.w > 0.5) {
+            for (var i = 0u; i < u32(enh.stadium.x); i++) {
+                let at = enh.stadium_lamps[i].xyz;
+                let way = enh.stadium_ways[i].xyz;
+                let near = 1.0 - smoothstep(LAMP_HEAD * 0.5, LAMP_HEAD, length(in.world - at));
+                let facing = smoothstep(0.0, 0.4, dot(n, way));
+                glow += vec3<f32>(1.0, 0.97, 0.9) * near * facing * 3.0 * enh.stadium.y;
+            }
+        }
+    }
     if (caked > 0.0 && enh.world.y > 0.3 && in.mode < UNLIT) {
         // Wet mud shines.
         let v = normalize(globals.camera.xyz - in.world);
@@ -610,5 +649,6 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     if (surface.y > 0.5 && enh.night.x > 0.0) {
         colour += texel.rgb * mix(1.0, 0.4, caked) * BACKLIT * enh.night.x;
     }
-    return vec4<f32>(apply_haze(colour, in.world, dist), select(1.0, clamp(edge, 0.0, 1.0), enh.flags.x > 0.5));
+    let hazed = apply_haze(colour, in.world, dist) + glow * (1.0 - 0.6 * haze_at(dist));
+    return vec4<f32>(hazed, select(1.0, clamp(edge, 0.0, 1.0), enh.flags.x > 0.5));
 }

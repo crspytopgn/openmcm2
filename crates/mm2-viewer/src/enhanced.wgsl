@@ -61,4 +61,13 @@ struct Enh {
     sky_light: vec4<f32>,
     // The baked map's heights: the lowest (ft) and the range over them.
     sky_height: vec4<f32>,
+    // A stadium's own lights at night (night.rs): x how many, y how much
+    // they light (0 off), z the lowest lamp's height, w the shadow groups.
+    stadium: vec4<f32>,
+    stadium_views: array<mat4x4<f32>, 3>,
+    stadium_texels: vec4<f32>,
+    // Each lamp: xyz where, w power; xyz its way, w its beam's edge plus
+    // 10 times its shadow group.
+    stadium_lamps: array<vec4<f32>, 24>,
+    stadium_ways: array<vec4<f32>, 24>,
 };

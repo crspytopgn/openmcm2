@@ -11,4 +11,5 @@ path = "src/main.rs"
 
 [dependencies]
 mm2-formats = { path = "../mm2-formats" }
+mm2-course = { path = "../mm2-course" }
 png = "0.18.1"

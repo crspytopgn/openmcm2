@@ -17,8 +17,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       # Linux tests in the same AlmaLinux 8 container the release builds in.
+      # The tests skip the release builds' link-time work (Cargo.toml), to
+      # stay quick.
       - if: runner.os == 'Linux'
-        run: docker run --rm -v "$PWD":/w -w /w almalinux:8 sh tools/linux-build.sh cargo test --release --workspace
+        run: docker run --rm -e CARGO_PROFILE_RELEASE_LTO=false -e CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 -v "$PWD":/w -w /w almalinux:8 sh tools/linux-build.sh cargo test --release --workspace
       # A test AppImage of this commit, to try on a Steam Deck.
       - if: runner.os == 'Linux'
         run: |
@@ -36,4 +38,7 @@ jobs:
       - if: runner.os != 'Linux'
         uses: Swatinem/rust-cache@v2
       - if: runner.os != 'Linux'
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
         run: cargo test --release --workspace

@@ -4,6 +4,8 @@ use mm2_formats::{dtm, faoe, rs2, slb, tga, trn, Container};
 use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
+mod freetrack;
+mod freetracks;
 mod terrain;
 mod textures;
 
@@ -18,7 +20,10 @@ usage:
   mm2-tools dialog <UI/X.DAT> [out.png]  show a front-end dialog's controls, and draw it
   mm2-tools strings <X.DLL>           list a DLL's string table (UILANG.DLL, LANG.DLL)
   mm2-tools overlay <file.tga> <out.png>  convert an overlay picture from RES/GLOBAL.RES
-  mm2-tools textures <GAME-dir> <out-dir>  export every texture as PNG for upscaling";
+  mm2-tools textures <GAME-dir> <out-dir>  export every texture as PNG for upscaling
+  mm2-tools freetrack <out.env> [seed]      make a new free test track from scratch
+  mm2-tools freetracks <GAME-dir> [ground-dir] [only]  make the free pack's tracks (only: a file or event folder)
+  mm2-tools course <in.course|mode|track.env> <out.env>  bake a Course Builder track (mode: sx, national, baja, enduro; an .env: a copy of it)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -33,7 +38,13 @@ fn main() -> ExitCode {
         ["dialog", file] => dialog(file, None),
         ["strings", file] => strings(file),
         ["overlay", file, out] => overlay(file, out),
+        ["freetrack", out] => freetrack::build(Path::new(out), 1).map_err(|e| e.to_string().into()),
+        ["freetrack", out, seed] => freetrack::build(Path::new(out), seed.parse().unwrap_or(1)).map_err(|e| e.to_string().into()),
+        ["freetracks", game] => freetracks::build(Path::new(game), None, None).map_err(|e| e.to_string().into()),
+        ["freetracks", game, ground] => freetracks::build(Path::new(game), Some(Path::new(ground)), None).map_err(|e| e.to_string().into()),
+        ["freetracks", game, ground, only] => freetracks::build(Path::new(game), Some(Path::new(ground)).filter(|g| g.as_os_str() != "-"), Some(only)).map_err(|e| e.to_string().into()),
         ["dialog", file, out] => dialog(file, Some(out)),
+        ["course", from, out] => course(from, Path::new(out)),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
@@ -49,6 +60,54 @@ fn main() -> ExitCode {
 }
 
 type BoxResult = Result<(), Box<dyn std::error::Error>>;
+
+/// Bakes a Course Builder file (or a new track of a mode) into an `.ENV`.
+fn course(from: &str, out: &Path) -> BoxResult {
+    use mm2_course::{Course, Mode};
+    let c = match from.to_ascii_lowercase().as_str() {
+        "sx" | "supercross" => Course::new(Mode::Supercross),
+        "national" => Course::new(Mode::National),
+        "baja" => Course::new(Mode::Baja),
+        "enduro" => Course::new(Mode::Enduro),
+        // A copy of a track, to change.
+        f if f.ends_with(".env") => {
+            let mut c = mm2_course::copy::import(&read(from)?, from, None, 0, "Copy")?;
+            // MM2_COPY_JUMP=1: a tabletop half way round, to see it work.
+            if std::env::var_os("MM2_COPY_JUMP").is_some() {
+                let at = c.path().length / 2.0;
+                c.jumps.push(mm2_course::kit::Kind::Tabletop.make(c.mode, at));
+            }
+            c
+        }
+        _ => {
+            let mut c = Course::from_json(&String::from_utf8_lossy(&read(from)?))?;
+            // A copy: read the track it was copied from.
+            if let Some(base) = c.base.clone() {
+                mm2_course::copy::attach(&mut c, &read(&base.file)?)?;
+            }
+            c
+        }
+    };
+    let t = std::time::Instant::now();
+    // MM2_GROUND=<dir>: paint the ground from <dir>/<material>.png, as
+    // the builder does from the free pack's ground pictures.
+    let mut pictures = mm2_course::env::Pictures::default();
+    if let Some(dir) = std::env::var_os("MM2_GROUND") {
+        for (name, _) in mm2_course::env::GROUND {
+            let Ok(bytes) = std::fs::read(Path::new(&dir).join(format!("{name}.png"))) else { continue };
+            let (w, h, rgb) = freetracks::decode_png(&bytes)?;
+            if w != h {
+                continue;
+            }
+            let rgb = rgb.chunks_exact(3).map(|p| [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0]).collect();
+            pictures.by_name.insert(name.to_string(), std::sync::Arc::new(mm2_course::env::Picture { side: w, rgb }));
+        }
+    }
+    let baked = mm2_course::env::write_with(&c, &pictures);
+    std::fs::write(out, &baked.env)?;
+    eprintln!("{} {}: {:.1} MB in {:.1} s, {} ft of line, {} gates", c.mode.name(), out.display(), baked.env.len() as f32 / 1e6, t.elapsed().as_secs_f32(), baked.path.length as u32, baked.gates.len());
+    Ok(())
+}
 
 fn read(path: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     std::fs::read(path).map_err(|e| format!("{path}: {e}").into())

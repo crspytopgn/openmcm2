@@ -18,8 +18,8 @@ use std::path::{Path, PathBuf};
 pub const BEST: &str = "laps.txt";
 /// The laps not yet sent.
 pub const PENDING: &str = "laps-pending.txt";
-/// A lap with more than this off the course (seconds) doesn't count, in
-/// Nationals and Supercross.
+/// A lap with more than this ridden off the course (seconds, not counting
+/// time down in a crash) doesn't count, in Nationals and Supercross.
 pub const MOST_OFF_COURSE: f32 = 2.0;
 
 /// Whether a lap in `event` must keep to the course ([`MOST_OFF_COURSE`]):

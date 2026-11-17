@@ -634,17 +634,25 @@ impl Ui {
     /// Finds an image's file data: the dialog's own `[Set_Anim]` name, then
     /// GLOBAL's, then a file of that name in either archive.
     fn image_bytes(&mut self, pack: &str, name: &str) -> Option<Vec<u8>> {
+        self.image_source(pack, name).1
+    }
+
+    /// Where an image comes from: the archive (`MAINMENU`, or `GLOBAL`)
+    /// and its file name there, and its data when the archive has it.
+    fn image_source(&mut self, pack: &str, name: &str) -> ((String, String), Option<Vec<u8>>) {
         self.pack(pack);
         let own = self.packs[&pack.to_ascii_uppercase()].as_ref();
         let global = self.global.as_ref();
-        let file = own
-            .and_then(|p| p.dialog.anim(name))
+        let own_anim = own.and_then(|p| p.dialog.anim(name));
+        let in_global = own_anim.is_none() && global.and_then(|g| g.dialog.anim(name)).is_some();
+        let file = own_anim
             .or_else(|| global?.dialog.anim(name))
             .and_then(|a| a.frames.first().cloned())
             .unwrap_or_else(|| format!("{name}.tga"));
-        own.and_then(|p| p.file(&file))
-            .or_else(|| global?.file(&file))
-            .map(<[u8]>::to_vec)
+        let own_data = own.and_then(|p| p.file(&file));
+        let data = own_data.or_else(|| global?.file(&file)).map(<[u8]>::to_vec);
+        let stem = if in_global || (own_data.is_none() && data.is_some()) { "GLOBAL".to_string() } else { pack.to_ascii_uppercase() };
+        ((stem, file), data)
     }
 
     /// An image as a texture, magenta made clear.
@@ -653,8 +661,20 @@ impl Ui {
         if let Some(t) = self.images.get(&key) {
             return *t;
         }
-        let tex = self
-            .image_bytes(pack, name)
+        // The Course Builder's link on the main menu: made from the menu's
+        // own roller.
+        if let Some(state) = crate::menu_link::state(name) {
+            let bg = self.dialog(pack).and_then(|d| d.background().map(str::to_string));
+            let picture = bg
+                .and_then(|bg| self.image_bytes(pack, &bg))
+                .and_then(|b| tga::parse(&b).ok())
+                .and_then(|bg| crate::menu_link::picture(&bg, state));
+            let tex = picture.map(|img| gfx.sprites.upload(gfx.device, gfx.queue, &img));
+            self.images.insert(key, tex);
+            return tex;
+        }
+        let ((stem, file), bytes) = self.image_source(pack, name);
+        let original = bytes
             .and_then(|b| tga::parse(&b).map_err(|e| eprintln!("{name}: {e}")).ok())
             .map(|mut img| {
                 for p in img.rgba.chunks_exact_mut(4) {
@@ -662,8 +682,17 @@ impl Ui {
                         p[3] = 0;
                     }
                 }
-                gfx.sprites.upload(gfx.device, gfx.queue, &img)
+                img
             });
+        // The free pack's picture in its place: drawn at twice the
+        // resolution, or covering the size the pack gives.
+        let tex = match crate::freepack::ui_image(&stem, &file) {
+            Some((img, size)) => {
+                let logical = size.unwrap_or(((img.width / 2).max(1), (img.height / 2).max(1)));
+                Some(gfx.sprites.upload_covering(gfx.device, gfx.queue, &img, logical))
+            }
+            None => original.map(|img| gfx.sprites.upload(gfx.device, gfx.queue, &img)),
+        };
         if tex.is_none() {
             eprintln!("no image {name} for {pack}");
         }
@@ -937,7 +966,36 @@ pub struct Dlg {
 
 impl Dlg {
     pub fn open(ui: &mut Ui, pack: &str, origin: (f32, f32)) -> Option<Dlg> {
-        let dialog = ui.dialog(pack)?;
+        let mut dialog = ui.dialog(pack)?;
+        // The free pack may move or resize controls for its own art.
+        for c in &mut dialog.controls {
+            if let Some(rect) = crate::freepack::ui_rect(pack, &c.name) {
+                c.rect = rect;
+            }
+        }
+        // And may add buttons of its own (a Donate button on the main menu).
+        for n in crate::freepack::ui_added(pack) {
+            let mut props = Vec::new();
+            for (key, image) in ["AnimNorm", "AnimFocus", "AnimPush", "AnimDisable"].iter().zip(&n.images) {
+                if let Some(image) = image {
+                    props.push((key.to_string(), image.clone()));
+                }
+            }
+            if let Some(tip) = &n.tip {
+                props.push(("ToolTipText".to_string(), tip.clone()));
+            }
+            dialog.controls.push(Control {
+                name: n.name.clone(),
+                kind: Kind::Button,
+                rect: n.rect,
+                anchor: None,
+                props: mm2_formats::dtm::Props(props),
+            });
+        }
+        // The Course Builder's link on the main menu's chain.
+        if crate::menu_link::wanted(pack, dialog.background()) {
+            dialog.controls.push(crate::menu_link::control());
+        }
         let ctls = dialog
             .controls
             .iter()

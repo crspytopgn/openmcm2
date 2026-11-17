@@ -154,4 +154,8 @@ footer { max-width: 1120px; margin: 72px auto 0; padding: 24px 24px 48px; border
 
 /* video */
 .video-frame { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #000; }
+.video-frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.strip.three-up { grid-template-columns: repeat(3, 1fr); margin-bottom: 20px; }
+.strip.three-up img { aspect-ratio: 16 / 9; }
+@media (max-width: 700px) { .strip.three-up { grid-template-columns: 1fr; } }
 .video-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }

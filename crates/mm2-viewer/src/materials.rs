@@ -7,15 +7,15 @@
 /// Each material's colour (RGB) and roughness (A), and its normal (RGB)
 /// and height (A).
 const MATERIALS: [(&[u8], &[u8]); COUNT] = [
-    (include_bytes!("../assets/ground/dirt_albedo.png"), include_bytes!("../assets/ground/dirt_normal.png")),
-    (include_bytes!("../assets/ground/packed_albedo.png"), include_bytes!("../assets/ground/packed_normal.png")),
-    (include_bytes!("../assets/ground/grass_albedo.png"), include_bytes!("../assets/ground/grass_normal.png")),
-    (include_bytes!("../assets/ground/rock_albedo.png"), include_bytes!("../assets/ground/rock_normal.png")),
-    (include_bytes!("../assets/ground/sand_albedo.png"), include_bytes!("../assets/ground/sand_normal.png")),
-    (include_bytes!("../assets/ground/wood_albedo.png"), include_bytes!("../assets/ground/wood_normal.png")),
-    (include_bytes!("../assets/ground/metal_albedo.png"), include_bytes!("../assets/ground/metal_normal.png")),
-    (include_bytes!("../assets/ground/concrete_albedo.png"), include_bytes!("../assets/ground/concrete_normal.png")),
-    (include_bytes!("../assets/ground/straw_albedo.png"), include_bytes!("../assets/ground/straw_normal.png")),
+    (include_bytes!("../assets/ground/dirt_albedo.webp"), include_bytes!("../assets/ground/dirt_normal.webp")),
+    (include_bytes!("../assets/ground/packed_albedo.webp"), include_bytes!("../assets/ground/packed_normal.webp")),
+    (include_bytes!("../assets/ground/grass_albedo.webp"), include_bytes!("../assets/ground/grass_normal.webp")),
+    (include_bytes!("../assets/ground/rock_albedo.webp"), include_bytes!("../assets/ground/rock_normal.webp")),
+    (include_bytes!("../assets/ground/sand_albedo.webp"), include_bytes!("../assets/ground/sand_normal.webp")),
+    (include_bytes!("../assets/ground/wood_albedo.webp"), include_bytes!("../assets/ground/wood_normal.webp")),
+    (include_bytes!("../assets/ground/metal_albedo.webp"), include_bytes!("../assets/ground/metal_normal.webp")),
+    (include_bytes!("../assets/ground/concrete_albedo.webp"), include_bytes!("../assets/ground/concrete_normal.webp")),
+    (include_bytes!("../assets/ground/straw_albedo.webp"), include_bytes!("../assets/ground/straw_normal.webp")),
 ];
 pub const COUNT: usize = 9;
 const SIDE: u32 = 512;
@@ -86,22 +86,34 @@ pub struct Materials {
     pub average: [[f32; 4]; COUNT],
 }
 
-fn decode(png_bytes: &[u8]) -> Vec<u8> {
-    let mut decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
-    decoder.set_transformations(png::Transformations::normalize_to_color8());
-    let mut reader = decoder.read_info().expect("built-in material");
-    let mut buf = vec![0; reader.output_buffer_size().expect("built-in material")];
-    let info = reader.next_frame(&mut buf).expect("built-in material");
-    assert_eq!((info.width, info.height, info.color_type), (SIDE, SIDE, png::ColorType::Rgba));
-    buf.truncate(info.buffer_size());
-    buf
+fn decode(webp: &[u8]) -> Vec<u8> {
+    // Lossless WebP: the same pixels as the PNGs they were, in 16% less.
+    let mut decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(webp)).expect("built-in material");
+    assert_eq!(decoder.dimensions(), (SIDE, SIDE));
+    let mut buf = vec![0; decoder.output_buffer_size().expect("built-in material")];
+    decoder.read_image(&mut buf).expect("built-in material");
+    if decoder.has_alpha() {
+        return buf;
+    }
+    // Stored without the alpha it had, all opaque.
+    buf.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect()
 }
 
 /// Halves an RGBA8 image `side` texels square, linear in sRGB colour for
 /// `srgb` (only RGB; alpha is always linear).
-fn halve(level: &[u8], side: u32, srgb: bool) -> Vec<u8> {
+/// A ground material's colour picture (RGB, roughness in A), by name:
+/// dirt, packed, grass, rock or sand.
+pub(crate) fn albedo(name: &str) -> Option<&'static [u8]> {
+    let i = ["dirt", "packed", "grass", "rock", "sand"].iter().position(|n| *n == name)?;
+    Some(MATERIALS[i].0)
+}
+
+pub(crate) fn halve(level: &[u8], side: u32, srgb: bool) -> Vec<u8> {
     let half = (side / 2).max(1);
-    let to = |v: u8, c: usize| if srgb && c < 3 { (v as f32 / 255.0).powf(2.2) } else { v as f32 / 255.0 };
+    // Each byte's value once, not four times a texel (the same sums).
+    let linear: [f32; 256] = std::array::from_fn(|v| (v as f32 / 255.0).powf(2.2));
+    let plain: [f32; 256] = std::array::from_fn(|v| v as f32 / 255.0);
+    let to = |v: u8, c: usize| if srgb && c < 3 { linear[v as usize] } else { plain[v as usize] };
     let from = |v: f32, c: usize| {
         let v = if srgb && c < 3 { v.powf(1.0 / 2.2) } else { v };
         (v * 255.0).round().clamp(0.0, 255.0) as u8
@@ -196,6 +208,20 @@ impl Materials {
             albedo: array(device, queue, "ground colour", &albedo, wgpu::TextureFormat::Rgba8UnormSrgb),
             normal: array(device, queue, "ground normals", &normal, wgpu::TextureFormat::Rgba8Unorm),
             average,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_material_decodes_to_rgba() {
+        for (albedo, normal) in MATERIALS {
+            for m in [albedo, normal] {
+                assert_eq!(decode(m).len(), (SIDE * SIDE * 4) as usize);
+            }
         }
     }
 }

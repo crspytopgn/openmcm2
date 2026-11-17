@@ -20,7 +20,10 @@ pub fn place(eco: &EcoSystem, models: &rs2::Archive, terrain: &Terrain) -> (Vec<
         .species
         .iter()
         .map(|s| {
-            let data = models.get(&format!("{}.slt", s.name))?;
+            // Without the original's plants, the free pack's stand-in.
+            let Some(data) = models.get(&format!("{}.slt", s.name)) else {
+                return crate::freepack::plant_size(&s.name);
+            };
             let model = mm2_formats::slt::parse(data).ok()?;
             let (mut top, mut spread) = (0.0f32, 0.0f32);
             for p in model.lods.first()?.surfaces.iter().flat_map(|s| &s.positions) {
@@ -56,7 +59,9 @@ pub fn place(eco: &EcoSystem, models: &rs2::Archive, terrain: &Terrain) -> (Vec<
             // the species' own as this one is.
             let r = species.billboard_rect;
             let shape = (width / species.width[0].max(0.01)) / (height / species.height[0].max(0.01));
-            billboards.push((!species.billboard.is_empty() && r[1] > r[0] && r[2] > r[3]).then(|| crate::objects::Billboard {
+            // The free pack's plants have no far pictures: drawn whole.
+            let pictured = !species.billboard.is_empty() && models.get(&species.billboard).is_some();
+            billboards.push((pictured && r[1] > r[0] && r[2] > r[3]).then(|| crate::objects::Billboard {
                 texture: species.billboard.to_ascii_lowercase(),
                 rect: r,
                 height,

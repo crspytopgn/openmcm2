@@ -16,6 +16,7 @@ pub mod esb;
 pub mod faoe;
 
 pub mod font;
+pub mod glb;
 pub mod hires;
 pub mod lzw;
 pub mod pe;

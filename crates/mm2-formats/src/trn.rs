@@ -536,3 +536,235 @@ impl Tree<'_> {
         Ok(())
     }
 }
+
+/// A terrain to write: our own heights and textures in the game's `.trn`
+/// layout, so player-made and free-pack tracks load like any other.
+pub struct Build<'a> {
+    /// Height samples per side, `16 × n + 1` with `n` from 1 to 256.
+    pub size: usize,
+    /// Heights in world units (feet), row-major with rows along +z.
+    pub heights: &'a [f32],
+    /// Surface zone per sample (0 to 7, the scene's `[TerrainZoneN]` - 1).
+    pub surfaces: &'a [u8],
+    /// World units per terrain unit (the shipped tracks use 3).
+    pub scale: f32,
+    /// Square RGB555 textures, each `side × side` (a power of two).
+    pub textures: &'a [(u32, Vec<u16>)],
+    /// The texture of each 64-unit tile, row-major along +z, or `None`.
+    pub tiles: &'a [Option<u16>],
+}
+
+/// Heights are stored as whole steps of this many terrain units.
+const WRITE_UNIT: f32 = 1.0 / 128.0;
+
+impl Build<'_> {
+    pub fn write(&self) -> Result<Vec<u8>> {
+        let size = self.size;
+        let cells_side = (size - 1) / 16;
+        if (size - 1) % 16 != 0 || cells_side == 0 || cells_side > 256 {
+            return Err(Error::Corrupt("terrain size must be 16n + 1, up to 4097"));
+        }
+        if self.heights.len() != size * size || self.surfaces.len() != size * size {
+            return Err(Error::Corrupt("heights or surfaces do not match the size"));
+        }
+        let tiles_side = cells_side.div_ceil(4);
+        if self.tiles.len() != tiles_side * tiles_side {
+            return Err(Error::Corrupt("one texture per 64-unit tile"));
+        }
+        let unit_h = |x: usize, z: usize| self.heights[z * size + x] / self.scale;
+        // Normals from the neighbouring samples, in terrain units.
+        let normal = |x: usize, z: usize| {
+            let h = |x: isize, z: isize| unit_h(x.clamp(0, size as isize - 1) as usize, z.clamp(0, size as isize - 1) as usize);
+            let (x, z) = (x as isize, z as isize);
+            let n = [h(x - 1, z) - h(x + 1, z), 2.0, h(x, z - 1) - h(x, z + 1)];
+            let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            n.map(|v| (v / l * 127.0).round() as i8 as u8)
+        };
+
+        let mut out = Vec::new();
+        let put = |out: &mut Vec<u8>, v: u32| out.extend_from_slice(&v.to_le_bytes());
+        out.extend_from_slice(MAGIC);
+        put(&mut out, 5);
+        put(&mut out, 0); // no palette
+        put(&mut out, 0);
+        out.extend_from_slice(&self.scale.to_le_bytes());
+        let depth = if cells_side <= 16 { 1 } else { 2 };
+        put(&mut out, depth);
+        let root_at = out.len();
+        put(&mut out, 0); // root offset, filled in below
+        let cell_count = cells_side * cells_side;
+        put(&mut out, cell_count as u32);
+        put(&mut out, cell_count as u32);
+        let cell_table = out.len();
+        out.resize(out.len() + cell_count * 4, 0);
+        put(&mut out, self.textures.len() as u32);
+        put(&mut out, self.textures.len() as u32);
+        let tex_table = out.len();
+        out.resize(out.len() + self.textures.len() * 4, 0);
+
+        // Cells, one per 16-unit square, in row order.
+        for cz in 0..cells_side {
+            for cx in 0..cells_side {
+                let at = out.len() as u32;
+                let i = cz * cells_side + cx;
+                out[cell_table + i * 4..cell_table + i * 4 + 4].copy_from_slice(&at.to_le_bytes());
+                for len in [0x200u32, 0x244] {
+                    put(&mut out, len);
+                    put(&mut out, len);
+                    out.resize(out.len() + len as usize, 0);
+                }
+                put(&mut out, CELL_BYTES as u32);
+                put(&mut out, CELL_BYTES as u32);
+                for j in 0..CELL_SAMPLES * CELL_SAMPLES {
+                    let (x, z) = (cx * 16 + j % CELL_SAMPLES, cz * 16 + j / CELL_SAMPLES);
+                    let raw = (unit_h(x, z) / WRITE_UNIT).round().clamp(0.0, 65535.0) as u16;
+                    let n = normal(x, z);
+                    out.extend_from_slice(&[self.surfaces[z * size + x], 0]);
+                    out.extend_from_slice(&raw.to_le_bytes());
+                    out.extend_from_slice(&[n[0], n[1], n[2], 0]);
+                }
+                put(&mut out, 0); // base height
+            }
+        }
+
+        // Textures: a mip chain of RGB555, smallest level first, each
+        // offset counted from where it is stored.
+        for (t, (side, pixels)) in self.textures.iter().enumerate() {
+            let side = *side;
+            if !side.is_power_of_two() || side > 1024 || pixels.len() != (side * side) as usize {
+                return Err(Error::Corrupt("textures must be square powers of two"));
+            }
+            let at = out.len() as u32;
+            out[tex_table + t * 4..tex_table + t * 4 + 4].copy_from_slice(&at.to_le_bytes());
+            put(&mut out, side);
+            put(&mut out, side);
+            put(&mut out, 0x16);
+            let mut levels = vec![pixels.clone()];
+            while levels.len() <= side.trailing_zeros() as usize {
+                let s = (side >> levels.len()) as usize;
+                levels.push(halve(levels.last().unwrap(), s, PixelFormat::Rgb555));
+            }
+            levels.reverse();
+            let table = out.len();
+            out.resize(table + (levels.len() + 1) * 4, 0);
+            let mut starts = Vec::new();
+            for level in &levels {
+                starts.push(out.len());
+                for p in level {
+                    out.extend_from_slice(&p.to_le_bytes());
+                }
+            }
+            starts.push(out.len());
+            for (i, s) in starts.iter().enumerate() {
+                let field = table + i * 4;
+                out[field..field + 4].copy_from_slice(&((s - field) as u32).to_le_bytes());
+            }
+        }
+
+        // The tree: a root, then level-1 nodes with 4×4 texture tiles, then
+        // leaves pointing at the cells.
+        let node = |out: &mut Vec<u8>, cell: u16, children: bool, textures: [u32; 16]| -> usize {
+            out.extend_from_slice(&1.0f32.to_le_bytes());
+            out.extend_from_slice(&WRITE_UNIT.to_le_bytes());
+            out.extend_from_slice(&0.0f32.to_le_bytes());
+            out.extend_from_slice(&0.0f32.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&cell.to_le_bytes());
+            out.extend_from_slice(&u32::from(children).to_le_bytes());
+            for t in textures {
+                out.extend_from_slice(&t.to_le_bytes());
+            }
+            out.extend_from_slice(&0u32.to_le_bytes());
+            out.push(0);
+            let at = out.len();
+            out.extend_from_slice(&0u32.to_le_bytes());
+            at
+        };
+        let none = [0xffff_fffeu32; 16];
+        let write_level1 = |out: &mut Vec<u8>, bx: usize, bz: usize| -> u32 {
+            // Block (bx, bz) of 16×16 cells, 256 terrain units.
+            let mut textures = none;
+            for (i, t) in textures.iter_mut().enumerate() {
+                let (tx, tz) = (bx * 4 + i % 4, bz * 4 + i / 4);
+                if tx < tiles_side && tz < tiles_side {
+                    if let Some(k) = self.tiles[tz * tiles_side + tx] {
+                        *t = u32::from(k) * 2;
+                    }
+                }
+            }
+            let start = out.len() as u32;
+            let link = node(out, 0, true, textures);
+            let mut children = vec![0u32; 256];
+            for (j, c) in children.iter_mut().enumerate() {
+                let (cx, cz) = (bx * 16 + j % 16, bz * 16 + j / 16);
+                if cx < cells_side && cz < cells_side {
+                    *c = out.len() as u32;
+                    node(out, (cz * cells_side + cx) as u16, false, none);
+                }
+            }
+            let table = out.len() as u32;
+            out[link..link + 4].copy_from_slice(&table.to_le_bytes());
+            for c in children {
+                out.extend_from_slice(&c.to_le_bytes());
+            }
+            start
+        };
+        let root = if depth == 1 {
+            write_level1(&mut out, 0, 0)
+        } else {
+            let blocks = cells_side.div_ceil(16);
+            let mut children = vec![0u32; 256];
+            for bz in 0..blocks {
+                for bx in 0..blocks {
+                    children[bz * 16 + bx] = write_level1(&mut out, bx, bz);
+                }
+            }
+            let start = out.len() as u32;
+            let link = node(&mut out, 0, true, none);
+            let table = out.len() as u32;
+            out[link..link + 4].copy_from_slice(&table.to_le_bytes());
+            for c in children {
+                out.extend_from_slice(&c.to_le_bytes());
+            }
+            start
+        };
+        out[root_at..root_at + 4].copy_from_slice(&root.to_le_bytes());
+        if cell_count > usize::from(u16::MAX) {
+            return Err(Error::Corrupt("too many cells"));
+        }
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod write_tests {
+    use super::*;
+
+    /// What we write reads back with the same heights, zones and tiles.
+    #[test]
+    fn written_terrain_reads_back() {
+        for cells in [4usize, 20] {
+            let size = cells * 16 + 1;
+            let heights: Vec<f32> = (0..size * size)
+                .map(|i| ((i % size) as f32 * 0.05).sin() * 20.0 + 30.0 + (i / size) as f32 * 0.1)
+                .collect();
+            let surfaces: Vec<u8> = (0..size * size).map(|i| (i % 3) as u8).collect();
+            let textures = vec![(64u32, vec![0x7c00u16; 64 * 64]), (64, vec![0x03e0; 64 * 64])];
+            let tiles_side = cells.div_ceil(4);
+            let tiles: Vec<Option<u16>> = (0..tiles_side * tiles_side).map(|i| Some((i % 2) as u16)).collect();
+            let bytes = Build { size, heights: &heights, surfaces: &surfaces, scale: 3.0, textures: &textures, tiles: &tiles }
+                .write()
+                .unwrap();
+            let t = parse(&bytes).unwrap();
+            assert_eq!(t.size, size);
+            assert_eq!(t.scale, 3.0);
+            for (a, b) in t.heights.iter().zip(&heights) {
+                assert!((a * 3.0 - b).abs() < 0.05, "{a} vs {b}");
+            }
+            assert_eq!(t.surfaces, surfaces);
+            assert_eq!(t.textures.len(), 2);
+            assert_eq!(t.tiles.len(), tiles.len());
+            assert_eq!(t.textures[1].levels[0][0], 0x03e0);
+        }
+    }
+}

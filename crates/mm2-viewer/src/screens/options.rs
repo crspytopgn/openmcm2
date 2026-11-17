@@ -363,6 +363,10 @@ const AIR_STEP: u32 = 10;
 /// The Tweaks box's Difficulty button, where it sits and what it says
 /// when pointed at.
 const DIFFICULTY_BUTTON: [i32; 4] = [24, 250, 117, 33];
+/// The Course Builder (an extra), beside Difficulty.
+const BUILDER_BUTTON: [i32; 4] = [147, 250, 150, 33];
+const BUILDER_BUTTON_ABOUT: &str =
+    "Make your own track: draw its line on the land, drop jumps on it from a kit, shape and paint the ground, then ride it. It joins the track lists.";
 const DIFFICULTY_BUTTON_ABOUT: &str =
     "Easy, Normal and Hard, each set from 1 to 10: the other riders' speed and skill, how easily you crash, and their tricks in the Stunt Quarry.";
 
@@ -1163,6 +1167,8 @@ impl Options {
         }
         d.add_from(&self.base, "Restore", "Difficulty", DIFFICULTY_BUTTON);
         d.set_text("Difficulty", "Difficulty...");
+        d.add_from(&self.base, "Restore", "CourseBuilder", BUILDER_BUTTON);
+        d.set_text("CourseBuilder", "Course Builder...");
         for c in &TWEAK_CHECKS {
             d.add_copy("ChkForceVideoMem", c.name, c.rect);
             d.set_text(c.name, c.text);
@@ -1268,6 +1274,10 @@ impl Options {
                 self.close_tweaks();
                 self.open_difficulty(cx);
             }
+            Event::Clicked(n) if n.eq_ignore_ascii_case("CourseBuilder") => {
+                self.close_tweaks();
+                crate::builder::ask_open();
+            }
             Event::Clicked(_) | Event::Changed(_) | Event::Released(_) => {
                 let (t, strength, on) = Self::read_tweaks(d, *was);
                 Self::label_tweaks(d, &t, strength, on);
@@ -1286,6 +1296,7 @@ impl Options {
             let check = TWEAK_CHECKS.iter().find(|c| is(c.name)).map(|c| c.about);
             let vibration = is(VIBRATION_CHECK.0).then_some(VIBRATION_CHECK.3);
             let vibration = vibration.or(is("Difficulty").then_some(DIFFICULTY_BUTTON_ABOUT));
+            let vibration = vibration.or(is("CourseBuilder").then_some(BUILDER_BUTTON_ABOUT));
             let slider = [FOV_SLIDER, VIBRATION_SLIDER].into_iter().find(|s| is(s.0)).map(|s| s.1);
             let air = AIR_SLIDERS.iter().find(|s| is(s.name)).map(|s| s.about);
             check.or(vibration).or(slider).or(air)

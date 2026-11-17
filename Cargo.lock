@@ -1962,6 +1962,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "image-webp"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
+dependencies = [
+ "byteorder-lite",
+ "quick-error",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2371,19 +2381,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "mm2-course"
+version = "0.6.0"
+dependencies = [
+ "mm2-formats",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mm2-formats"
-version = "0.5.5"
+version = "0.6.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "mm2-indeo"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "mm2-formats",
 ]
 
 [[package]]
 name = "mm2-launcher"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "eframe",
  "egui_kittest",
@@ -2404,7 +2426,7 @@ dependencies = [
 
 [[package]]
 name = "mm2-physics"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "glam",
  "mm2-formats",
@@ -2412,19 +2434,20 @@ dependencies = [
 
 [[package]]
 name = "mm2-settings"
-version = "0.5.5"
+version = "0.6.0"
 
 [[package]]
 name = "mm2-tools"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
+ "mm2-course",
  "mm2-formats",
  "png",
 ]
 
 [[package]]
 name = "mm2-viewer"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "ab_glyph",
  "bytemuck",
@@ -2434,7 +2457,9 @@ dependencies = [
  "futures-util",
  "gilrs",
  "glam",
+ "image-webp",
  "js-sys",
+ "mm2-course",
  "mm2-formats",
  "mm2-indeo",
  "mm2-physics",
@@ -2455,6 +2480,7 @@ dependencies = [
  "windows-sys 0.61.2",
  "winit",
  "winresource",
+ "zune-jpeg",
 ]
 
 [[package]]

@@ -346,6 +346,36 @@ pub fn big_button(ui: &mut Ui, text: &str, height: f32, enabled: bool) -> egui::
     ui.add_enabled(enabled, b)
 }
 
+/// One of a pair of big choices side by side: a tile with a title, a
+/// line on it and whatever `body` adds, outlined in the accent when it is
+/// the one picked. Whether it was clicked; the whole tile says `hover`.
+pub fn pick_tile(ui: &mut Ui, picked: bool, i: MaterialIcon, title: &str, about: &str, hover: &str, width: f32, body: impl FnOnce(&mut Ui)) -> bool {
+    let stroke = if picked { Stroke::new(2.0, ACCENT) } else { Stroke::new(1.0, LINE) };
+    let tile = egui::Frame::new()
+        .fill(if picked { Color32::from_rgb(34, 36, 27) } else { SUNKEN })
+        .stroke(stroke)
+        .corner_radius(10)
+        .inner_margin(egui::Margin::symmetric(14, 12))
+        .show(ui, |ui| {
+            ui.set_width(width - 30.0);
+            ui.set_min_height(132.0);
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    let mark = if picked { icon::ICON_RADIO_BUTTON_CHECKED } else { icon::ICON_RADIO_BUTTON_UNCHECKED };
+                    ui.label(RichText::new(String::from(mark)).size(20.0).color(if picked { ACCENT } else { WEAK }));
+                    ui.label(RichText::new(String::from(i)).size(20.0).color(if picked { ACCENT } else { WEAK }));
+                    ui.label(RichText::new(title.to_uppercase()).size(19.0).color(TEXT).family(title_family()));
+                });
+                ui.add_space(2.0);
+                ui.add(egui::Label::new(weak(about)).wrap());
+                ui.add_space(6.0);
+                body(ui);
+            });
+        });
+    let r = ui.interact(tile.response.rect, ui.id().with(title), Sense::click()).on_hover_text(hover);
+    r.clicked()
+}
+
 /// A small coloured status line: an icon and the text, good or bad.
 pub fn status(ui: &mut Ui, good: bool, text: &str) {
     let (i, c) = if good { (icon::ICON_CHECK_CIRCLE, GOOD) } else { (icon::ICON_ERROR, BAD) };

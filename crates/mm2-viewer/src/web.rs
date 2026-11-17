@@ -29,13 +29,29 @@ extern "C" {
     fn js_fail(why: &str);
     #[wasm_bindgen(js_name = racing)]
     fn js_racing(on: bool);
+    /// The loading screen's step: "gpu", then "graphics".
+    #[wasm_bindgen(js_name = stage)]
+    fn js_stage(step: &str);
+    /// Resolves once the browser has shown the page as it is now.
+    #[wasm_bindgen(js_name = painted)]
+    fn js_painted() -> js_sys::Promise;
+    #[wasm_bindgen(js_name = trackLoading)]
+    fn js_track_loading(on: bool);
+    #[wasm_bindgen(js_name = building)]
+    fn js_building(on: bool);
 }
 
 /// Asks the browser for the GPU, and wakes the window once it answers.
 pub fn ask_gpu(window: Arc<Window>, instance: wgpu::Instance, surface: wgpu::Surface<'static>) {
     ASKED.with(|a| a.set(true));
+    js_stage("gpu");
     wasm_bindgen_futures::spawn_local(async move {
         let gpu = crate::gpu_from(&instance, Some(&surface)).await.map_err(|e| e.to_string());
+        if gpu.is_ok() {
+            // Setting up the drawing holds the page: say so first.
+            js_stage("graphics");
+            let _ = wasm_bindgen_futures::JsFuture::from(js_painted()).await;
+        }
         window.request_redraw();
         INSTANCE.with(|i| *i.borrow_mut() = Some(instance));
         READY.with(|r| *r.borrow_mut() = Some((window, surface, gpu)));
@@ -54,6 +70,20 @@ pub fn started() {
 pub fn fail(why: &str) {
     web_sys::console::error_1(&why.into());
     js_fail(why);
+}
+
+/// Tells the page a track is loading (the page can't draw while it does).
+pub fn track_loading(on: bool) {
+    js_track_loading(on);
+}
+
+/// Tells the page when the Course Builder is open, so its buttons over
+/// the game's corners keep out of the builder's way.
+pub fn building(on: bool) {
+    thread_local!(static BUILDING: Cell<bool> = const { Cell::new(false) });
+    if BUILDING.with(|b| b.replace(on)) != on {
+        js_building(on);
+    }
 }
 
 /// Tells the page when a race starts and ends, so it shows its touch

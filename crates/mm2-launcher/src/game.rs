@@ -160,33 +160,7 @@ fn unzip(path: &Path, dest: &Path, p: &Progress) -> io::Result<()> {
         l.strip_suffix("ui/mainmenu.dat").map(|r| n[..r.len()].to_string())
     });
     if let Some(root) = root {
-        let files: Vec<usize> =
-            (0..zip.len()).filter(|&i| names[i].starts_with(&root) && !names[i].ends_with('/')).collect();
-        let mut total = 0;
-        for &i in &files {
-            total += zip.by_index(i).map_err(io::Error::other)?.size();
-        }
-        p.total.store(total, Ordering::Relaxed);
-        let tmp = dest.with_extension("part");
-        fresh(&tmp)?;
-        for i in files {
-            if p.cancel.load(Ordering::Relaxed) {
-                return Err(cancelled());
-            }
-            let mut f = zip.by_index(i).map_err(io::Error::other)?;
-            let rel = names[i][root.len()..].replace('\\', "/");
-            // Only plain paths inside the folder.
-            if rel.split('/').any(|part| part == ".." || part.is_empty()) {
-                continue;
-            }
-            let out = tmp.join(&rel);
-            if let Some(dir) = out.parent() {
-                std::fs::create_dir_all(dir)?;
-            }
-            io::copy(&mut f, &mut std::fs::File::create(&out)?)?;
-            p.done.fetch_add(f.size(), Ordering::Relaxed);
-        }
-        return finish(&tmp, dest);
+        return unzip_under(&mut zip, &names, &root, dest, p);
     }
     // A CD image: unpacked to a file of its own, then read as any image.
     let image = (0..zip.len())
@@ -217,6 +191,76 @@ fn unzip(path: &Path, dest: &Path, p: &Progress) -> io::Result<()> {
     let r = extract(&unpacked, dest, p);
     let _ = std::fs::remove_file(&unpacked);
     r
+}
+
+/// Copies the zip's files under `root` into `dest`.
+fn unzip_under(zip: &mut zip::ZipArchive<std::fs::File>, names: &[String], root: &str, dest: &Path, p: &Progress) -> io::Result<()> {
+    let files: Vec<usize> = (0..zip.len()).filter(|&i| names[i].starts_with(root) && !names[i].ends_with('/')).collect();
+    let mut total = 0;
+    for &i in &files {
+        total += zip.by_index(i).map_err(io::Error::other)?.size();
+    }
+    p.total.store(total, Ordering::Relaxed);
+    let tmp = dest.with_extension("part");
+    fresh(&tmp)?;
+    for i in files {
+        if p.cancel.load(Ordering::Relaxed) {
+            return Err(cancelled());
+        }
+        let mut f = zip.by_index(i).map_err(io::Error::other)?;
+        let rel = names[i][root.len()..].replace('\\', "/");
+        // Only plain paths inside the folder.
+        if rel.split('/').any(|part| part == ".." || part.is_empty()) {
+            continue;
+        }
+        let out = tmp.join(&rel);
+        if let Some(dir) = out.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        io::copy(&mut f, &mut std::fs::File::create(&out)?)?;
+        p.done.fetch_add(f.size(), Ordering::Relaxed);
+    }
+    finish(&tmp, dest)
+}
+
+/// Whether `dir` is a free pack: its `stockmap.toml` is there.
+pub fn is_pack(dir: &Path) -> bool {
+    dir.join("stockmap.toml").is_file()
+}
+
+/// Sets up the free pack from `path`: a pack folder is used where it is;
+/// a zip is unpacked into `dest` (the folder holding `stockmap.toml`), on
+/// a thread of its own.
+pub fn import_pack(path: PathBuf, dest: PathBuf) -> Arc<Progress> {
+    let progress = Arc::new(Progress::default());
+    let p = progress.clone();
+    std::thread::spawn(move || {
+        let r = if path.is_dir() {
+            if is_pack(&path) {
+                Ok(path)
+            } else {
+                Err("that folder isn't the Free Pack (it has no stockmap.toml)".to_string())
+            }
+        } else {
+            unzip_pack(&path, &dest, &p).map(|_| dest.clone()).map_err(|e| e.to_string())
+        };
+        *p.result.lock().unwrap() = Some(r);
+    });
+    progress
+}
+
+fn unzip_pack(path: &Path, dest: &Path, p: &Progress) -> io::Result<()> {
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(path)?).map_err(io::Error::other)?;
+    let names: Vec<String> = zip.file_names().map(|n| n.map(|n| n.into_owned()).unwrap_or_default()).collect();
+    // The shallowest stockmap.toml: the pack's own folder.
+    const MAP: &str = "stockmap.toml";
+    let root = names
+        .iter()
+        .filter(|n| n.to_ascii_lowercase().ends_with(MAP))
+        .min_by_key(|n| n.len())
+        .map(|n| n[..n.len() - MAP.len()].to_string())
+        .ok_or_else(|| io::Error::other("this zip isn't the Free Pack (it has no stockmap.toml)"))?;
+    unzip_under(&mut zip, &names, &root, dest, p)
 }
 
 fn copy_folder(from: &Path, dest: &Path, p: &Progress) -> io::Result<()> {

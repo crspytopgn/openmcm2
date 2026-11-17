@@ -24,11 +24,13 @@ terminal, once a second.
 
 | Setting | What it does |
 |---|---|
-| `quality=low` | No anti-aliasing, AO, contact shadows, puddle reflections, light shafts, smooth hills, grass or replay lens; the 3D scene at most 1280×720. |
+| `quality=low` | No anti-aliasing, AO, contact shadows, puddle reflections, light shafts, smooth hills, grass or replay lens, and plain (not soft) shadow edges; the 3D scene at most 1280×720. |
 | `quality=medium` | 2× anti-aliasing (4× where the GPU has no 2×), the plain AO, no puddle reflections, light shafts or smooth hills; the scene at most 1920×1080. |
 | `quality=high` | The default: everything, the scene at most 2560×1440. |
 | `quality=ultra` | 8× anti-aliasing where the GPU has it, the scene at the screen's own size. |
 | `resolution=1080p`, `resolution=1600x900`, `resolution=native` | The most pixels the 3D scene is drawn with. On a bigger screen (Retina, 4K) it is drawn smaller and stretched over it, with the menus and race display still drawn sharp at the screen's own size. Later items win, so `quality=medium,resolution=native` works. |
+| `quality=auto` | Picks Low, Medium or High for the graphics card and screen when the game starts, and turns on `dynamic`. |
+| `dynamic` | Dynamic resolution while racing: if frames start coming late (behind the screen's beat with VSync, else 60 fps or the frame cap), the 3D scene is drawn in steps down to 60% of its size each way, and back up after a while of keeping time. A step up that comes in late is undone within half a second, and the next try waits twice as long. Menus and the race display stay sharp. `no-dynamic` turns it off under Auto. |
 
 Whatever the setting, only what can be seen is drawn: the ground, objects,
 crowd and smooth hills are cut into blocks, and blocks outside the camera's

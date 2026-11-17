@@ -137,6 +137,8 @@ pub struct TerrainRenderer {
     /// The player's shadow's mask, as the sun sees the bike and rider.
     shadow_mask: wgpu::TextureView,
     detail: wgpu::TextureView,
+    /// The free pack's fine ground (fine_ground.rs), or none.
+    ground: crate::fine_ground::Views,
     grid: [f32; 4],
     depth: Option<(wgpu::TextureView, u32, u32)>,
     objects: Option<ObjectRenderer>,
@@ -194,6 +196,20 @@ pub struct TerrainRenderer {
     sky_light: Option<[f32; 4]>,
     /// Each part of the frame timed on the GPU, when asked (gpu_time).
     gpu_timer: Option<crate::gpu_time::GpuTimer>,
+    /// A stadium's own lights at night (crate::night): those found on its
+    /// roof or ringed round it, and those its `.lights` file lists, which
+    /// light any track at night.
+    night_found: Option<crate::night::StadiumLights>,
+    night_listed: Option<crate::night::StadiumLights>,
+    /// A domed stadium's lamp banks painted on its roof (ObjectMesh::floodlights).
+    night_banks: Vec<(Vec3, f32, f32)>,
+}
+
+/// A stadium's lamps at night where its track lists none: its roof's
+/// painted banks, or a ring round the floor.
+fn found_lamps(banks: &[(Vec3, f32, f32)], floor: &crate::night::Floor) -> Option<crate::night::StadiumLights> {
+    let lamps = crate::night::from_banks(banks, floor);
+    crate::night::StadiumLights::new(if lamps.is_empty() { crate::night::ring(floor) } else { lamps }, floor)
 }
 
 /// The terrain renderer's part of the enhanced drawing.
@@ -325,7 +341,12 @@ impl TerrainRenderer {
             }
         }
         let images = textures;
-        let textures = upload_textures(device, queue, images);
+        // The same picture once, and four to a layer past what the GPU
+        // takes (a browser may take only 256).
+        // (MM2_MAX_LAYERS=256 tries a browser's limit on a desktop.)
+        let most = std::env::var("MM2_MAX_LAYERS").ok().and_then(|n| n.parse().ok()).unwrap_or(u32::MAX);
+        let fitted = fit_layers(images, &mut tile_map, device.limits().max_texture_array_layers.min(most));
+        let textures = upload_textures(device, queue, &fitted);
         let tile_map = device.create_texture_with_data(
             queue,
             &wgpu::TextureDescriptor {
@@ -411,6 +432,10 @@ impl TerrainRenderer {
             cache: None,
         });
         let objects_pole_lamps = objects.pole_lamps.clone();
+        // The stadium lights at night, should this be a stadium: its
+        // roof's painted lamps, or a ring round its floor.
+        let night_banks = if upgrades.is_some() { objects.floodlights(FLOODLIGHTS_ABOVE) } else { Vec::new() };
+        let night_found = upgrades.and_then(|_| found_lamps(&night_banks, &crate::night::Floor::guess(terrain)));
         let flood = upgrades.and_then(|_| crate::flood::FloodMap::new(device, terrain, &objects_pole_lamps));
         let mut rt = (upgrades.is_some() && crate::graphics::ray_traced()).then(|| {
             let geometry = objects.rt_geometry(device.limits().max_texture_array_layers);
@@ -445,6 +470,10 @@ impl TerrainRenderer {
                     (5, S::FRAGMENT, sampler()),
                     (6, S::FRAGMENT, texture(D::D2, float)),
                     (7, S::FRAGMENT, sampler()),
+                    (8, S::FRAGMENT, texture(D::D2, T::Uint)),
+                    (9, S::FRAGMENT, texture(D::D2Array, float)),
+                    (10, S::FRAGMENT, sampler()),
+                    (11, S::FRAGMENT, uniform()),
                 ],
             );
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -520,10 +549,11 @@ impl TerrainRenderer {
                 view_formats: &[],
             })
             .create_view(&Default::default());
-        let bind_group = terrain_bind_group(device, &pipeline.get_bind_group_layout(0), &globals, &terrain_views, &detail, &shadow_mask);
+        let ground = crate::fine_ground::Views::none(device, queue);
+        let bind_group = terrain_bind_group(device, &pipeline.get_bind_group_layout(0), &globals, &terrain_views, &detail, &shadow_mask, &ground);
         let enhanced = enhanced.map(|(shared, terrain_pipeline, layout)| Enhanced {
             post: crate::post::Post::new(device, samples, target_format),
-            group: terrain_bind_group(device, &layout, &globals, &terrain_views, &detail, &shadow_mask),
+            group: terrain_bind_group(device, &layout, &globals, &terrain_views, &detail, &shadow_mask, &ground),
             ruts: upgrades.is_some_and(|e| e.ruts || e.wear).then(|| {
                 // Over the whole terrain: x from 0, z up to 0.
                 let size = (n as f32 - 1.0) * terrain.scale;
@@ -618,6 +648,7 @@ impl TerrainRenderer {
             bind_group,
             terrain_views,
             shadow_mask,
+            ground,
             detail,
             grid,
             depth: None,
@@ -649,7 +680,20 @@ impl TerrainRenderer {
             flood,
             sky_light,
             pole_lamps: objects_pole_lamps,
+            night_found,
+            night_listed: None,
+            night_banks,
         }
+    }
+
+    /// The track's floor and the lamps its `.lights` file lists, if any
+    /// (crate::night): at night those light it, stadium or not.
+    pub fn set_night(&mut self, listed: Option<Vec<crate::night::Lamp>>, floor: crate::night::Floor) {
+        if self.enhanced.is_none() {
+            return;
+        }
+        self.night_found = found_lamps(&self.night_banks, &floor);
+        self.night_listed = listed.and_then(|l| crate::night::StadiumLights::new(l, &floor)).map(|n| crate::night::StadiumLights { listed: true, ..n });
     }
 
     /// Lays the detail texture over the terrain (0x50b140, 0x50b990): each
@@ -658,8 +702,19 @@ impl TerrainRenderer {
     /// detail spans one terrain texture tile.
     pub fn set_detail(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, image: &mm2_formats::tga::Image) {
         self.detail = detail_view(device, queue, image);
+        self.rebind(device);
+    }
+
+    /// Lays a free track's ground materials over its baked tiles as fine
+    /// detail (fine_ground.rs).
+    pub fn set_ground_map(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, map: &crate::fine_ground::GroundMap) {
+        self.ground = crate::fine_ground::Views::new(device, queue, map);
+        self.rebind(device);
+    }
+
+    fn rebind(&mut self, device: &wgpu::Device) {
         if let Some(e) = &mut self.enhanced {
-            e.group = terrain_bind_group(device, &e.layout, &self.globals, &self.terrain_views, &self.detail, &self.shadow_mask);
+            e.group = terrain_bind_group(device, &e.layout, &self.globals, &self.terrain_views, &self.detail, &self.shadow_mask, &self.ground);
         }
         self.bind_group = terrain_bind_group(
             device,
@@ -668,6 +723,7 @@ impl TerrainRenderer {
             &self.terrain_views,
             &self.detail,
             &self.shadow_mask,
+            &self.ground,
         );
     }
 
@@ -954,7 +1010,18 @@ impl TerrainRenderer {
         let aspect = width as f32 / height.max(1) as f32;
         // The size the enhanced scene is drawn at, before it is stretched
         // over the screen.
-        let scene = showing.map_or((width, height), |e| e.scene_size((width, height)));
+        let scene = showing.map_or((width, height), |e| {
+            let size = e.scene_size((width, height));
+            if !e.dynamic {
+                return size;
+            }
+            // Dynamic resolution: smaller while frames come late, bigger
+            // (up to the screen's own) while they keep time.
+            // (Not past the preset's in a browser: Enhanced::for_browser.)
+            let room = if cfg!(target_arch = "wasm32") { 1.0 } else { width as f32 / size.0.max(1) as f32 };
+            crate::dynres::set_room(room);
+            crate::dynres::scaled(size, (width, height))
+        });
         let (start, end) = self.fog_range;
         // The enhanced haze: half as thick as the game's fog at its end,
         // and the view reaching on till it has all but hidden the land.
@@ -999,9 +1066,27 @@ impl TerrainRenderer {
         // The enhanced drawing's hour and weather light the scene in
         // place of its own lights, and its real sky's colour is the haze's.
         let mut day = showing.map(|e| crate::enhance::daylight(&self.lights, e.time, e.weather));
-        // In a stadium at night the floodlights light the floor as the day
-        // would: the scene's own lights, under the night sky.
-        if let Some(d) = day.as_mut().filter(|d| self.stadium && d.night > 0.0) {
+        // At night a stadium's own lamps light it (crate::night), or any
+        // track's that lists them; not ray traced, where the traced
+        // floodlights do.
+        let night_lamps = match (showing, &day) {
+            (Some(e), Some(d)) if e.night_lights && d.night > 0.0 && !traced => {
+                self.night_listed.as_ref().or(self.night_found.as_ref().filter(|_| self.stadium)).cloned()
+            }
+            _ => None,
+        };
+        if let (Some(d), Some(e), true) = (day.as_mut(), showing, night_lamps.is_some()) {
+            // Under the roof no moon, and only the light thrown back off
+            // the floor and the stands round about: a little of the day's,
+            // a touch warm.
+            let lit = crate::enhance::daylight(&self.lights, None, e.weather);
+            let ambient = Vec3::from(lit.lights.ambient).max_element().max(0.25);
+            d.lights.ambient = (Vec3::new(1.0, 0.97, 0.93) * ambient * NIGHT_BOUNCE).into();
+            d.lights.sun = [0.0; 3];
+            d.lights.to_sun = Vec3::Y;
+        } else if let Some(d) = day.as_mut().filter(|d| self.stadium && d.night > 0.0) {
+            // In a stadium at night the floodlights light the floor as the
+            // day would: the scene's own lights, under the night sky.
             if let Some(e) = showing {
                 let lit = crate::enhance::daylight(&self.lights, None, e.weather);
                 d.lights = lit.lights;
@@ -1077,12 +1162,14 @@ impl TerrainRenderer {
             let enh = crate::enhance::EnhGlobals {
                 cascades: cascades.map(|c| c.to_cols_array_2d()),
                 splits: crate::enhance::splits(),
-                flags: [flag(on.lighting), flag(sun_shadows), flag(haze.is_some()), flag(on.sky)],
+                flags: [flag(on.lighting), flag(sun_shadows && night_lamps.is_none()), flag(haze.is_some()), flag(on.sky)],
                 haze: [h_start, density, far, on.detail],
                 sun: lights.globals().1,
                 to_sun: lights.globals().2,
                 fog: match (&day, real_sky) {
                     (Some(d), true) => d.horizon.extend(1.0).into(),
+                    // The haze in a dark arena is dark.
+                    _ if night_lamps.is_some() => [self.fog[0] * NIGHT_HAZE, self.fog[1] * NIGHT_HAZE, self.fog[2] * NIGHT_HAZE, 1.0],
                     _ => [self.fog[0], self.fog[1], self.fog[2], 1.0],
                 },
                 texel: [texels[0], texels[1], texels[2], flag(on.soft_shadows)],
@@ -1134,6 +1221,15 @@ impl TerrainRenderer {
                     let [.., low, range] = self.sky_light.unwrap_or([1.0, 1.0, 0.0, 1.0]);
                     [low, range, 0.0, 0.0]
                 },
+                stadium: night_lamps.as_ref().map_or([0.0; 4], |n| {
+                    let night = day.as_ref().map_or(0.0, |d| d.night);
+                    [n.lamps.len() as f32, night, n.lowest, if sun_shadows { crate::night::GROUPS as f32 } else { 0.0 }]
+                }),
+                stadium_views: night_lamps.as_ref().map_or([Mat4::IDENTITY; crate::night::GROUPS], |n| n.views).map(|m| m.to_cols_array_2d()),
+                // w: the lamps are a track's own list, their heads to glow.
+                stadium_texels: night_lamps.as_ref().map_or([1.0; 4], |n| [n.texels[0], n.texels[1], n.texels[2], flag(n.listed)]),
+                stadium_lamps: night_lamps.as_ref().map_or([[0.0; 4]; crate::night::MOST_LAMPS], |n| n.uniform().0),
+                stadium_ways: night_lamps.as_ref().map_or([[0.0; 4]; crate::night::MOST_LAMPS], |n| n.uniform().1),
             };
             queue.write_buffer(&e.shared.buffer, 0, bytemuck::bytes_of(&enh));
         }
@@ -1156,6 +1252,9 @@ impl TerrainRenderer {
                 objects.set_shadow_view(queue, shadow_view);
             }
             if sun_shadows && !traced {
+                // At night under a stadium's lamps, each layer is a group
+                // of lamps' view instead.
+                let cascades = night_lamps.as_ref().map_or(cascades, |n| n.views);
                 objects.set_cascades(queue, &cascades);
                 for (i, c) in cascades.iter().enumerate() {
                     objects.cull(1 + i, &crate::cull::Frustum::new(*c), camera.position);
@@ -1347,7 +1446,8 @@ impl TerrainRenderer {
                     depth_slice: None,
                     resolve_target: resolve,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.clear),
+                        // A night sky over an open stadium lit by its lamps.
+                        load: wgpu::LoadOp::Clear(if night_lamps.is_some() { NIGHT_SKY } else { self.clear }),
                         // Anti-aliased, only the resolved picture is read
                         // after: the samples themselves need not be kept
                         // (on a tiled GPU, such as Apple's, they then never
@@ -1552,6 +1652,7 @@ fn terrain_bind_group(
     (textures, tile_map, sampler): &(wgpu::TextureView, wgpu::TextureView, wgpu::Sampler),
     detail: &wgpu::TextureView,
     shadow_mask: &wgpu::TextureView,
+    ground: &crate::fine_ground::Views,
 ) -> wgpu::BindGroup {
     let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("shadow sampler"),
@@ -1604,6 +1705,22 @@ fn terrain_bind_group(
             wgpu::BindGroupEntry {
                 binding: 7,
                 resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: wgpu::BindingResource::TextureView(&ground.map),
+            },
+            wgpu::BindGroupEntry {
+                binding: 9,
+                resource: wgpu::BindingResource::TextureView(&ground.pictures),
+            },
+            wgpu::BindGroupEntry {
+                binding: 10,
+                resource: wgpu::BindingResource::Sampler(&ground.sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 11,
+                resource: ground.info.as_entire_binding(),
             },
         ],
     })
@@ -1725,6 +1842,111 @@ fn upload_textures(
     texture
 }
 
+/// A tile map value for a tile in a layer of four ([`fit_layers`]): the
+/// top bit set, the quarter in the next two, the layer in the rest.
+pub const PACKED: u16 = 0x8000;
+
+/// The terrain textures to upload for the tiles in `tile_map`, which is
+/// changed to match: each picture once (some tracks repeat the same one
+/// under many names), and when there are still more than the GPU takes
+/// in one array, four to a layer twice the size, each in a quarter
+/// ([`PACKED`]; the shaders' `tile_layer`). A layer of four blurs into its
+/// neighbours a little in the farthest mips, so it is only for those.
+pub fn fit_layers(images: &[Image], tile_map: &mut [u16], most: u32) -> Vec<Image> {
+    use std::collections::HashMap;
+    let mut seen: HashMap<(u32, &[u8]), u16> = HashMap::new();
+    let mut unique: Vec<Image> = Vec::new();
+    let mut remap = vec![0xffffu16; images.len()];
+    for (i, img) in images.iter().enumerate() {
+        let Some(top) = img.levels.first() else { continue };
+        remap[i] = *seen.entry((img.size, &top[..])).or_insert_with(|| {
+            unique.push(img.clone());
+            (unique.len() - 1) as u16
+        });
+    }
+    for t in tile_map.iter_mut() {
+        if let Some(&n) = remap.get(*t as usize) {
+            *t = n;
+        }
+    }
+    let size = unique.iter().map(|t| t.size).max().unwrap_or(1);
+    if array_layers(unique.len().max(1) as u32, size, size) <= most {
+        return unique;
+    }
+    eprintln!("{} terrain textures, more than the {most} this GPU takes in one array: four to a layer", unique.len());
+    let fits = (most.saturating_sub(1).min(0x1fff) * 4) as usize;
+    if unique.len() > fits {
+        eprintln!("{} terrain textures still left out", unique.len() - fits);
+    }
+    // Every tile at the full size with its mips, as a box filter makes them.
+    let full = |img: &Image| -> Vec<Vec<u8>> {
+        if img.size == size {
+            return img.levels.clone();
+        }
+        let k = (size / img.size.max(1)) as usize;
+        let (from, side) = (&img.levels[0], img.size as usize);
+        let mut top = vec![0u8; (size * size * 4) as usize];
+        for y in 0..size as usize {
+            for x in 0..size as usize {
+                let at = ((y / k) * side + x / k) * 4;
+                top[(y * size as usize + x) * 4..][..4].copy_from_slice(&from[at..at + 4]);
+            }
+        }
+        let mut levels = vec![top];
+        while (size >> (levels.len() - 1)) > 1 {
+            let side = (size >> (levels.len() - 1)) as usize;
+            levels.push(box_half(levels.last().unwrap(), side));
+        }
+        levels
+    };
+    let mut packed = Vec::new();
+    for four in unique[..unique.len().min(fits)].chunks(4) {
+        let quarters: Vec<Vec<Vec<u8>>> = four.iter().map(full).collect();
+        let big = size * 2;
+        let mut levels = Vec::new();
+        for level in 0..quarters[0].len() {
+            let side = (size >> level).max(1) as usize;
+            let row = side * 2;
+            let mut out = vec![0u8; row * row * 4];
+            for (q, tile) in quarters.iter().enumerate() {
+                let (qx, qy) = ((q & 1) * side, (q >> 1) * side);
+                for y in 0..side {
+                    let to = ((qy + y) * row + qx) * 4;
+                    out[to..to + side * 4].copy_from_slice(&tile[level][y * side * 4..(y + 1) * side * 4]);
+                }
+            }
+            levels.push(out);
+        }
+        // The one more mip a layer twice the size has.
+        let last = levels.last().unwrap().clone();
+        levels.push(box_half(&last, 2));
+        packed.push(Image { size: big, levels });
+    }
+    for t in tile_map.iter_mut() {
+        if *t == 0xffff {
+            continue;
+        }
+        let n = *t as usize;
+        *t = if n < fits { PACKED | (((n % 4) as u16) << 13) | (n / 4) as u16 } else { 0xffff };
+    }
+    packed
+}
+
+/// An RGBA8 image `side` square halved by a box filter.
+fn box_half(level: &[u8], side: usize) -> Vec<u8> {
+    let half = (side / 2).max(1);
+    let mut out = vec![0u8; half * half * 4];
+    for y in 0..half {
+        for x in 0..half {
+            for c in 0..4 {
+                let at = |dx: usize, dy: usize| level[(((2 * y + dy).min(side - 1)) * side + (2 * x + dx).min(side - 1)) * 4 + c] as u32;
+                out[(y * half + x) * 4 + c] = ((at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1) + 2) / 4) as u8;
+            }
+        }
+    }
+    out
+}
+
 /// The layer count to give a 2D array texture of `layers` images,
 /// `width` by `height`. wgpu's OpenGL backend takes any square array
 /// whose layer count is a multiple of six for a cube map (or cube map
@@ -1760,6 +1982,11 @@ pub fn fog_range(quality: u32, visibility: f32, haziness: f32) -> (f32, f32) {
 
 /// How high a stadium's lamps hang at least, ft, to be its floodlights.
 const FLOODLIGHTS_ABOVE: f32 = 300.0;
+/// Under a stadium's lamps at night, the light thrown back round about
+/// against the day's ambient, and the haze against the day's.
+const NIGHT_BOUNCE: f32 = 0.3;
+const NIGHT_HAZE: f32 = 0.12;
+const NIGHT_SKY: wgpu::Color = wgpu::Color { r: 0.006, g: 0.008, b: 0.016, a: 1.0 };
 
 /// How strongly the ray-traced light shafts show (crate::rt).
 const SHAFT_STRENGTH: f32 = 0.6;
@@ -1779,5 +2006,47 @@ pub fn start_camera(terrain: &Terrain) -> crate::camera::Camera {
         pitch: -0.45,
         fov: crate::camera::FOV,
         roll: 0.0,
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    fn image(size: u32, shade: u8) -> Image {
+        let mut levels = Vec::new();
+        let mut side = size;
+        loop {
+            levels.push(vec![shade; (side * side * 4) as usize]);
+            if side == 1 {
+                break;
+            }
+            side /= 2;
+        }
+        Image { size, levels }
+    }
+
+    #[test]
+    fn the_same_picture_is_uploaded_once() {
+        let images: Vec<Image> = (0..6).map(|i| image(8, (i % 2) as u8)).collect();
+        let mut map = vec![0, 1, 2, 3, 4, 5, 0xffff];
+        let out = fit_layers(&images, &mut map, 256);
+        assert_eq!(out.len(), 2);
+        assert_eq!(map, [0, 1, 0, 1, 0, 1, 0xffff]);
+    }
+
+    #[test]
+    fn too_many_go_four_to_a_layer() {
+        let images: Vec<Image> = (0..10).map(|i| image(8, i as u8)).collect();
+        let mut map: Vec<u16> = (0..10).collect();
+        let out = fit_layers(&images, &mut map, 4);
+        assert_eq!(out.len(), 3);
+        assert!(out.iter().all(|i| i.size == 16 && i.levels.len() == 5));
+        // Tile 5 is the second quarter of the second layer.
+        assert_eq!(map[5], PACKED | (1 << 13) | 1);
+        // Its texels sit in the top right quarter of that layer.
+        let top = &out[1].levels[0];
+        assert_eq!(top[(0 * 16 + 8) * 4], 5);
+        assert_eq!(top[(8 * 16 + 0) * 4], 6);
     }
 }

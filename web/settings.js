@@ -30,6 +30,7 @@ export const UPGRADES = [
   ["contact", "Contact shadows", true, "A thin, soft shadow where tyres, boots and props touch the ground."],
   ["ssr", "Reflections in puddles", true, "In the rain, puddles mirror the bikes and trees on screen. Not in a browser: too heavy."],
   ["skylight", "Sky light", true, "The sky's light worked out when a track loads: dimmer in dips and under banks."],
+  ["nightlights", "Stadium lights at night", true, "With the time of day set to Night, a stadium is lit by its own lamp banks: the floor, bikes and riders lit from above, with soft shadows from each bank."],
 ];
 
 // In a browser, Ultra draws as High does (the game caps both: see
@@ -43,7 +44,7 @@ function presetHas(quality, name) {
   return !off.includes(name) && UPGRADES.some(([n, , on]) => n === name && on);
 }
 
-const ABOUT_QUALITY = "A preset for the effects below. Auto looks at your graphics card when the game starts and picks Low, Medium or High for it. Medium suits most computers in a browser; High needs a fast one. Changing an effect below picks Medium with that change.";
+const ABOUT_QUALITY = "A preset for the effects below. Auto looks at your graphics card when the game starts and picks Low, Medium or High for it, and while you race it draws the 3D scene a little smaller if frames start coming late. Medium suits most computers in a browser; High needs a fast one. Changing an effect below picks Medium with that change.";
 const ABOUT_TIME = "Where the sun is: the track's own, or an hour of your choice.";
 const ABOUT_WEATHER = "Clear, overcast or rain, for looks only: the riding is the same.";
 const ABOUT_DETAIL = "How strongly the grain of the photo ground shows.";
@@ -83,6 +84,7 @@ export const EXTRAS = [
     { key: "track_filter", flag: "track-filter", label: "Track filter", about: "All tracks, the base game's or only the ones you added, on the event page." },
     { key: "riders", flag: "gate-riders", label: "Riders on the gate", about: "Up to 30 riders in a single race. 0 is the original game's count.", range: [0, 30, 1, ""], off: 0 },
     { key: "no_leaderboards", flag: "no-leaderboards", label: "Keep my laps off the leaderboards", keep: true, about: "The lap leaderboards are on unless you tick this: after a race, your best laps go to the OpenMCM2 leaderboard under your rider name (High Scores, Online shows everyone's)." },
+    { key: "no_builder_menu", flag: "no-builder-menu", label: "No Course Builder on the main menu", keep: true, about: "The main menu has a shovel link on its chain, above Help, that opens the Course Builder, unless you tick this. Ticked, the main menu is exactly the original's, and the builder is still under Options, Tweaks." },
     { key: "no_share_playtime", flag: "no-share-playtime", label: "Don't add my time to everyone's", keep: true, about: "Unless you tick this, how long you play each event, track and bike class is added to everyone's on the OpenMCM2 server, with no name or anything else that says who you are." },
   ]],
   ["Network races", [

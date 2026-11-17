@@ -228,8 +228,12 @@ pub fn image(hires: Option<&HiRes>, key: &str, tex: &Texture) -> Image {
 
 /// Reads a PNG as top-down RGBA8.
 fn read_png(path: &Path) -> Result<(u32, u32, Vec<u8>), Box<dyn std::error::Error>> {
-    let file = std::io::BufReader::new(crate::fs::File::open(path)?);
-    let mut decoder = png::Decoder::new(file);
+    decode_png(&crate::fs::read(path)?)
+}
+
+/// Decodes a PNG as top-down RGBA8.
+pub fn decode_png(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), Box<dyn std::error::Error>> {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info()?;
     let mut buf = vec![0; reader.output_buffer_size().ok_or("image too large")?];
