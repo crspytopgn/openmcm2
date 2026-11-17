@@ -10,6 +10,12 @@ use wgpu::util::DeviceExt as _;
 pub const SHADOW_DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Texels a side of each cascade.
 pub const SHADOW_SIDE: u32 = 2048;
+
+/// Texels a side of each cascade with the upgrades as set: twice
+/// [`SHADOW_SIDE`] on Ultra (crate::graphics::Enhanced::shadow_side).
+pub fn shadow_side() -> u32 {
+    crate::graphics::enhanced().map_or(SHADOW_SIDE, |e| e.shadow_side.clamp(512, 8192))
+}
 pub const CASCADES: usize = 3;
 /// How far each cascade reaches from the camera, ft; past the last the
 /// shadows fade out.
@@ -99,6 +105,12 @@ pub struct EnhGlobals {
     /// beam's edge (a cosine) plus 10 times its shadow group.
     pub stadium_lamps: [[f32; 4]; crate::night::MOST_LAMPS],
     pub stadium_ways: [[f32; 4]; crate::night::MOST_LAMPS],
+    /// The sky's light all round (crate::ibl): x whether the physically
+    /// based materials take it, y the cube's roughest level, z how much of
+    /// it the game's own models take (0 their old light), w unused.
+    pub ibl: [f32; 4],
+    /// Its irradiance as harmonics (crate::ibl::bake).
+    pub sh: [[f32; 4]; 9],
 }
 
 /// What the shared group is made of, kept to make it again.
@@ -117,6 +129,10 @@ pub struct Parts {
     flood: wgpu::TextureView,
     /// The sky's light over the land (crate::skylight), or a blank.
     sky: wgpu::TextureView,
+    /// The sky's light all round (crate::ibl), or a blank cube.
+    env: wgpu::TextureView,
+    /// Its sampler: smooth between levels.
+    env_sampler: wgpu::Sampler,
 }
 
 /// Texels a side of the dust's shadow map.
@@ -130,6 +146,8 @@ const DUST_BINDING: u32 = 30;
 const FLOOD_BINDING: u32 = 32;
 /// The sky's light over the land's binding (read with the flood's sampler).
 const SKY_BINDING: u32 = 34;
+/// The sky's light all round (crate::ibl), and its sampler's.
+const ENV_BINDING: u32 = 36;
 
 impl Parts {
     /// The shared group, with the ray-traced scene `traced` if drawn.
@@ -171,6 +189,14 @@ impl Parts {
             binding: SKY_BINDING,
             resource: R::TextureView(&self.sky),
         });
+        entries.push(wgpu::BindGroupEntry {
+            binding: ENV_BINDING,
+            resource: R::TextureView(&self.env),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: ENV_BINDING + 1,
+            resource: R::Sampler(&self.env_sampler),
+        });
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("enhanced"),
             layout,
@@ -192,6 +218,8 @@ pub struct Shared {
     pub material_average: [[f32; 4]; crate::materials::COUNT],
     /// The ruts' map, to draw the tyres into: its view and texels a side.
     pub ruts: (wgpu::TextureView, u32),
+    /// Texels a side of each cascade's layer.
+    pub side: u32,
 }
 
 /// The most headlights that glow on the bikes.
@@ -211,6 +239,13 @@ impl Shared {
     /// (crate::flood), and the ray-traced scene `traced` if drawn.
     pub fn set_flood(&mut self, device: &wgpu::Device, map: &wgpu::TextureView, traced: Option<&crate::rt::Scene>) {
         self.parts.flood = map.clone();
+        self.group = self.parts.group(device, &self.layout, traced);
+    }
+
+    /// Makes the group again with the sky's light all round `env`
+    /// (crate::ibl), and the ray-traced scene `traced` if drawn.
+    pub fn set_env(&mut self, device: &wgpu::Device, env: wgpu::TextureView, traced: Option<&crate::rt::Scene>) {
+        self.parts.env = env;
         self.group = self.parts.group(device, &self.layout, traced);
     }
 
@@ -374,6 +409,18 @@ impl Shared {
             ),
             count: None,
         });
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: ENV_BINDING,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: texture(wgpu::TextureViewDimension::Cube, wgpu::TextureSampleType::Float { filterable: true }),
+            count: None,
+        });
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: ENV_BINDING + 1,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: sampler(),
+            count: None,
+        });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("enhanced"),
             entries: &entries,
@@ -417,11 +464,12 @@ impl Shared {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let side = shadow_side();
         let map = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("sun shadows"),
             size: wgpu::Extent3d {
-                width: SHADOW_SIDE,
-                height: SHADOW_SIDE,
+                width: side,
+                height: side,
                 depth_or_array_layers: CASCADES as u32,
             },
             mip_level_count: 1,
@@ -501,9 +549,27 @@ impl Shared {
                 &[255, 0, 0, 255],
             )
             .create_view(&Default::default());
+        // A grey sky till the track's is baked.
+        let env = crate::ibl::upload(
+            device,
+            queue,
+            &crate::ibl::Baked {
+                levels: vec![vec![[0.2; 3]; 6]],
+                sh: [[0.0; 4]; 9],
+            },
+        );
+        let env_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("sky's light"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
         let parts = Parts {
             flood,
             sky,
+            env,
+            env_sampler,
             dust: dust.clone(),
             buffer: buffer.clone(),
             shadows: map.create_view(&wgpu::TextureViewDescriptor {
@@ -519,6 +585,7 @@ impl Shared {
         };
         let group = parts.group(device, &layout, rt);
         Shared {
+            side,
             dust,
             parts,
             layout,
@@ -532,10 +599,10 @@ impl Shared {
 }
 
 /// The cascades for a camera at `view` with `fovy` and `aspect`, lit from
-/// `to_sun`: each a box along the light round a slice of what the camera
+/// `to_sun`, in maps `side` texels a side: each a box along the light round a slice of what the camera
 /// sees, moved only in whole texels so the shadows' edges hold still as
 /// the camera moves. Returns each one's matrix and its texel, ft.
-pub fn cascades(view: Mat4, fovy: f32, aspect: f32, to_sun: Vec3) -> ([Mat4; CASCADES], [f32; CASCADES]) {
+pub fn cascades(view: Mat4, fovy: f32, aspect: f32, to_sun: Vec3, side: u32) -> ([Mat4; CASCADES], [f32; CASCADES]) {
     let inverse = view.inverse();
     let (ty, tx) = ((fovy / 2.0).tan(), (fovy / 2.0).tan() * aspect);
     let up = if to_sun.y.abs() > 0.99 { Vec3::Z } else { Vec3::Y };
@@ -556,7 +623,7 @@ pub fn cascades(view: Mat4, fovy: f32, aspect: f32, to_sun: Vec3) -> ([Mat4; CAS
         let centre = corners.iter().copied().sum::<Vec3>() / corners.len() as f32;
         let radius = corners.iter().map(|c| c.distance(centre)).fold(0.0, f32::max);
         let radius = (radius * 16.0).ceil() / 16.0;
-        let texel = 2.0 * radius / SHADOW_SIDE as f32;
+        let texel = 2.0 * radius / side as f32;
         // Snap the centre to the texel grid as the light sees it.
         let mut c = light.transform_point3(centre);
         c.x = (c.x / texel).round() * texel;
@@ -661,8 +728,9 @@ fn flooded(source: &str) -> String {
         .and_then(|r| r.split(')').next())
         .unwrap_or("1");
     let bindings = format!(
-        "{line}\n@group({group}) @binding({FLOOD_BINDING}) var flood_map: texture_2d<f32>;\n@group({group}) @binding({}) var flood_sampler: sampler;\n@group({group}) @binding({SKY_BINDING}) var sky_map: texture_2d<f32>;",
-        FLOOD_BINDING + 1
+        "{line}\n@group({group}) @binding({FLOOD_BINDING}) var flood_map: texture_2d<f32>;\n@group({group}) @binding({}) var flood_sampler: sampler;\n@group({group}) @binding({SKY_BINDING}) var sky_map: texture_2d<f32>;\n@group({group}) @binding({ENV_BINDING}) var env_map: texture_cube<f32>;\n@group({group}) @binding({}) var env_sampler: sampler;",
+        FLOOD_BINDING + 1,
+        ENV_BINDING + 1
     );
     source.replacen(line, &bindings, 1)
 }
@@ -704,6 +772,11 @@ pub fn layout(device: &wgpu::Device, label: &str, entries: &[(u32, wgpu::ShaderS
         label: Some(label),
         entries: &entries,
     })
+}
+
+/// A bind group layout's entry.
+pub fn entry(binding: u32, visibility: wgpu::ShaderStages, ty: wgpu::BindingType) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry { binding, visibility, ty, count: None }
 }
 
 pub fn uniform() -> wgpu::BindingType {

@@ -510,7 +510,18 @@ impl Post {
         let globals = PostGlobals {
             inv_proj: proj.inverse().to_cols_array_2d(),
             size: [w, h, 1.0 / w, 1.0 / h],
-            flags: [ao as u32 as f32, bloom as u32 as f32, showing.is_some() as u32 as f32, showing.is_some_and(|e| e.grade) as u32 as f32],
+            // z: 1 the neutral tone curve, 2 the film-like one (only for the
+            // free graphics: the original's art keeps its own colours).
+            flags: [
+                ao as u32 as f32,
+                bloom as u32 as f32,
+                match showing {
+                    Some(e) if e.filmic && crate::freepack::root().is_some() => 2.0,
+                    Some(_) => 1.0,
+                    None => 0.0,
+                },
+                showing.is_some_and(|e| e.grade) as u32 as f32,
+            ],
             // A 3 ft reach, its strength, the bloom's, and how many pixels a foot
             // spans 1 ft away.
             params: [3.0, if showing.is_some_and(|e| e.grade) { 2.2 } else { 1.5 }, if showing.is_some_and(|e| e.grade) { 0.9 } else { 0.6 }, proj.y_axis.y * 0.5 * h],

@@ -165,6 +165,12 @@ pub struct TerrainRenderer {
     desert: bool,
     /// A stadium track (Supercross).
     stadium: bool,
+    /// The scene's own sky box, shrunk, for the sky's light all round
+    /// (crate::ibl); none for a stadium.
+    env_painted: Option<crate::ibl::Source>,
+    /// What the sky's light was last baked from and for, its harmonics,
+    /// and its roughest level.
+    env_baked: Option<(bool, crate::ibl::Light, [[f32; 4]; 9])>,
     /// In a replay, the distance (ft) to the rider the camera follows: the
     /// enhanced drawing then blurs what is out of focus and what the
     /// camera swings past.
@@ -669,6 +675,8 @@ impl TerrainRenderer {
             shadowless: (Vec::new(), true),
             desert: false,
             stadium: false,
+            env_painted: None,
+            env_baked: None,
             cinematic: None,
             last_view_proj: None,
             taa_frame: 0,
@@ -739,6 +747,8 @@ impl TerrainRenderer {
         images: &crate::hires::SkyImages,
         _format: wgpu::TextureFormat,
     ) {
+        self.env_painted = Some(crate::ibl::shrink(images.side, &images.faces, 64));
+        self.env_baked = None;
         self.sky = Some(crate::sky::SkyRenderer::new(
             device,
             queue,
@@ -952,7 +962,8 @@ impl TerrainRenderer {
 
     /// The track's rivers, drawn over the scene in both drawings.
     pub fn set_water(&mut self, device: &wgpu::Device, rivers: &[mm2_course::nature::Water]) {
-        self.water = crate::water::WaterRenderer::new(device, rivers, &self.globals, self.scene_format, self.samples, DEPTH_FORMAT);
+        let shared = self.enhanced.as_ref().map(|e| &e.shared.layout);
+        self.water = crate::water::WaterRenderer::new(device, rivers, &self.globals, self.scene_format, self.samples, DEPTH_FORMAT, shared);
     }
 
     /// Draws bike `bike`'s models (its bike and its rider) as dirty as it
@@ -1136,7 +1147,8 @@ impl TerrainRenderer {
             self.blocks.iter().filter(|b| seen.sees(b.0, b.1)).map(|b| b.2.clone()),
             &mut self.runs,
         );
-        let (cascades, texels) = crate::enhance::cascades(camera.view(), camera.fovy(aspect), aspect, lights.to_sun);
+        let side = self.enhanced.as_ref().map_or(crate::enhance::SHADOW_SIDE, |e| e.shared.side);
+        let (cascades, texels) = crate::enhance::cascades(camera.view(), camera.fovy(aspect), aspect, lights.to_sun, side);
         // The dust clouds as the sun sees them, round those near the eye.
         let dust_view = self
             .enhanced
@@ -1161,6 +1173,34 @@ impl TerrainRenderer {
                 None => {
                     flood.bake_hills(device, queue);
                     e.shared.set_flood(device, flood.map(), None);
+                }
+            }
+        }
+        // The sky's light all round, baked again when the light changes.
+        if let (Some(e), Some(on), Some(d)) = (self.enhanced.as_mut(), showing, day.as_ref()) {
+            if on.pbr {
+                let painted = !real_sky && self.sky.is_some() && self.env_painted.is_some();
+                let light = crate::ibl::Light {
+                    to_sun: lights.to_sun,
+                    sun: Vec3::from(lights.sun),
+                    ambient: Vec3::from(lights.ambient),
+                    zenith: d.zenith,
+                    horizon: d.horizon,
+                    fog: Vec3::from(self.fog),
+                    cover: d.cover,
+                    night: d.night,
+                };
+                let fresh = self.env_baked.as_ref().is_some_and(|(p, l, _)| *p == painted && l.near(&light));
+                if !fresh {
+                    let source = match (&self.env_painted, painted, self.sky.is_some()) {
+                        (Some(s), true, _) => s.clone(),
+                        (_, _, true) => crate::ibl::Source::Real,
+                        _ => crate::ibl::Source::Indoors,
+                    };
+                    let baked = crate::ibl::bake(&source, &light, crate::ibl::SIDE);
+                    let view = crate::ibl::upload(device, queue, &baked);
+                    e.shared.set_env(device, view, e.rt.as_ref());
+                    self.env_baked = Some((painted, light, baked.sh));
                 }
             }
         }
@@ -1238,6 +1278,15 @@ impl TerrainRenderer {
                 stadium_texels: night_lamps.as_ref().map_or([1.0; 4], |n| [n.texels[0], n.texels[1], n.texels[2], flag(n.listed)]),
                 stadium_lamps: night_lamps.as_ref().map_or([[0.0; 4]; crate::night::MOST_LAMPS], |n| n.uniform().0),
                 stadium_ways: night_lamps.as_ref().map_or([[0.0; 4]; crate::night::MOST_LAMPS], |n| n.uniform().1),
+                ibl: {
+                    // w: the sunlit air in the haze, under an open sky.
+                    let air = flag(on.air && self.sky.is_some());
+                    match (&self.env_baked, on.pbr) {
+                        (Some(_), true) => [1.0, (crate::ibl::LEVELS - 1) as f32, GAME_SKY_LIGHT, air],
+                        _ => [0.0, 0.0, 0.0, air],
+                    }
+                },
+                sh: self.env_baked.as_ref().map_or([[0.0; 4]; 9], |b| b.2),
             };
             queue.write_buffer(&e.shared.buffer, 0, bytemuck::bytes_of(&enh));
         }
@@ -1539,7 +1588,7 @@ impl TerrainRenderer {
             mark_pass!(self.gpu_timer, &mut pass, "scene: objects");
             if let Some(water) = &self.water {
                 water.set_time(queue, time, day.as_ref().map_or(1.0, |d| 1.0 - d.night));
-                water.draw(&mut pass);
+                water.draw(&mut pass, shared.map(|s| s.0));
             }
             if let Some((dust, own, group)) = self
                 .enhanced
@@ -2002,6 +2051,11 @@ const NIGHT_SKY: wgpu::Color = wgpu::Color { r: 0.006, g: 0.008, b: 0.016, a: 1.
 
 /// How strongly the ray-traced light shafts show (crate::rt).
 const SHAFT_STRENGTH: f32 = 0.6;
+
+/// How much of the sky's light all round (crate::ibl) the game's own
+/// models take in place of their old even ambient, 0 to 1: gently, so
+/// they keep their look.
+const GAME_SKY_LIGHT: f32 = 0.5;
 
 pub fn from_game(v: Vec3) -> Vec3 {
     Vec3::new(v.x, v.y, -v.z)

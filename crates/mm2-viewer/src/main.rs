@@ -52,6 +52,7 @@
 
 mod free_text;
 mod addons;
+mod ibl;
 mod pace;
 mod dynres;
 mod bars;

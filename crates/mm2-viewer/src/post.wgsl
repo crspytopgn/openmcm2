@@ -6,7 +6,8 @@ struct Post {
     inv_proj: mat4x4<f32>,
     // Width, height, and one over each.
     size: vec4<f32>,
-    // x ambient occlusion, y bloom, z tone mapping: 1 on.
+    // x ambient occlusion, y bloom, z tone mapping: 1 on, 2 the
+    // film-like curve (filmic).
     flags: vec4<f32>,
     // x occlusion radius (ft), y its strength, z bloom strength, w how
     // far (px per ft at 1 ft) the radius spreads on the screen.
@@ -330,6 +331,37 @@ fn neutral(colour: vec3<f32>) -> vec3<f32> {
     return mix(c, vec3<f32>(new_peak), g);
 }
 
+// The film-like curve (AgX, after Sobotka, in Wrensch's fitted form):
+// colours go through a log encoding and an S-curve in a slightly
+// narrowed colour space, so bright light rolls off softly toward white
+// and shadows gain a gentle toe, as on film. The log range is set so the
+// game's middle tones land close to where they were (0.18 shows at about
+// 0.5, white at 0.87), not darker as the curve's own range would.
+fn agx_curve(x: vec3<f32>) -> vec3<f32> {
+    let x2 = x * x;
+    let x4 = x2 * x2;
+    return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+}
+
+fn filmic(colour: vec3<f32>) -> vec3<f32> {
+    let inset = mat3x3<f32>(
+        0.842479062253094, 0.0423282422610123, 0.0423756549057051,
+        0.0784335999999992, 0.878468636469772, 0.0784336,
+        0.0792237451477643, 0.0791661274605434, 0.879142973793104,
+    );
+    let outset = mat3x3<f32>(
+        1.19687900512017, -0.0528968517574562, -0.0529716355144438,
+        -0.0980208811401368, 1.15190312990417, -0.0980434501171241,
+        -0.0990297440797205, -0.0989611768448433, 1.15107367264116,
+    );
+    let lo = -10.0;
+    let hi = 2.3;
+    var c = inset * max(colour, vec3<f32>(1e-6));
+    c = (clamp(log2(c), vec3<f32>(lo), vec3<f32>(hi)) - lo) / (hi - lo);
+    c = outset * agx_curve(c);
+    return pow(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2));
+}
+
 // The bolder look: richer colour, more contrast round the middle grey
 // (worked in the screen's gamma, as the eye sees it), and the corners a
 // little darker.
@@ -514,7 +546,9 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
     if (post.flags.y > 0.5) {
         c += textureSampleLevel(bloom_tex, smooth_sampler, in.uv, 0.0).rgb * post.params.z;
     }
-    if (post.flags.z > 0.5) {
+    if (post.flags.z > 1.5) {
+        c = filmic(c);
+    } else if (post.flags.z > 0.5) {
         c = neutral(c);
     }
     if (post.flags.w > 0.5) {
