@@ -33,6 +33,7 @@ on:
     inputs:
       version: { type: string, required: true }
       source: { type: string, default: pack.zip }
+      branch: { type: string, default: "" }
       dry_run: { type: boolean, default: false }
 
 permissions:
