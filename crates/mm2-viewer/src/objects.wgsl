@@ -594,11 +594,16 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     // night while they light the floor (night.rs).
     // Added past the haze, which hides a lamp far less than what it lights.
     var glow = vec3<f32>(0.0);
-    if (enh.stadium.y > 0.0 && in.moving < 0.5 && in.world.y > enh.stadium.z - 30.0) {
-        let hi = max(texel.r, max(texel.g, texel.b));
-        let lo = min(texel.r, min(texel.g, texel.b));
-        let lamp = smoothstep(0.72, 0.85, hi) * smoothstep(0.35, 0.5, lo);
-        glow += texel.rgb * lamp * 2.5 * enh.stadium.y;
+    // What hangs on a node of its own may be a track's dressing (a pack's
+    // arena) rather than a bike: high above where any bike flies, it is.
+    let still = in.moving < 0.5 || in.world.y > enh.stadium.z + 60.0;
+    if (enh.stadium.y > 0.0 && in.world.y > enh.stadium.z - 30.0) {
+        // The painted lamp's own colour, not the model's tint over it.
+        let paint = textureSampleLevel(tex, tex_sampler, in.uv, 0.0).rgb;
+        let hi = max(paint.r, max(paint.g, paint.b));
+        let lo = min(paint.r, min(paint.g, paint.b));
+        let lamp = smoothstep(0.72, 0.85, hi) * smoothstep(0.35, 0.5, lo) * select(0.0, 1.0, still);
+        glow += max(texel.rgb, paint * 0.8) * lamp * 2.5 * enh.stadium.y;
         // A lamp the track lists (its `.lights` file) glows where its head
         // is, on the faces turned the way it shines, whatever its paint.
         if (enh.stadium_texels.w > 0.5) {
