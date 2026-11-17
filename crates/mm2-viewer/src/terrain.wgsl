@@ -211,7 +211,19 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // painted in. 0x47fed0 could light it as the objects, but only when
     // 0x50b140 is asked to (+0xc34), and the scene loader (0x4e3f14)
     // never asks.
-    let light = 1.0 - shadow_at(in.world);
+    var light = 1.0 - shadow_at(in.world);
+    // Ground with no light painted into it (the Free Pack's and the
+    // Course Builder's tracks): shaded softly as it faces the sun, level
+    // ground as it was, so hills read as hills.
+    if (globals.shadow_on.y > 0.0) {
+        let n = normalize(in.normal);
+        let lum = vec3<f32>(0.3, 0.59, 0.11);
+        let amb = dot(globals.ambient.rgb, lum);
+        let sun = dot(globals.sun.rgb, lum);
+        let level = amb + sun * max(globals.to_sun.y, 0.25);
+        let here = amb + sun * max(dot(n, globals.to_sun.xyz), 0.0);
+        light *= clamp(mix(1.0, here / max(level, 0.05), 0.75 * globals.shadow_on.y), 0.55, 1.2);
+    }
     let sky = globals.fog.rgb;
     let dist = length(in.world - globals.camera.xyz);
     let range = max(globals.fog_range.y - globals.fog_range.x, 1.0);

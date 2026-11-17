@@ -107,6 +107,21 @@ def billboard(lo, hi, name):
     for x in (lo.x + (hi.x - lo.x) * 0.2, hi.x - (hi.x - lo.x) * 0.2):
         box(Vector((x - 0.25, y0 + th + 0.02, lo.z)), Vector((x + 0.25, y0 + th + 0.52, top - 0.3)), wood(), uv_scale=3)
 
+# The race-day banners (fp_banner_2 .. fp_banner_7): each its own sponsor
+# in strong colour, so a track's banners aren't all one pale sign.
+RACE_BRANDS = ["ridgeback", "kestrel", "granite", "bluegum", "highmoor", "slatepeak", "northfork", "redtail"]
+def race_banner(lo, hi, name):
+    k = int(name.rsplit("_", 1)[1])
+    b = RACE_BRANDS[(k - 2) % len(RACE_BRANDS)]
+    m = image_mat(os.path.join(BUILD, "brands", b + "_race.png"), "race_" + b, rough=0.8)
+    top = hi.z; panel_h = min(7.0, (hi.z - max(lo.z, 0)) * 0.95); bottom = top - panel_h
+    th = max(hi.y - lo.y, 0.25); y0 = lo.y
+    box(Vector((lo.x, y0 + th * 0.4, bottom)), Vector((hi.x, y0 + th, top)), plywood(), uv_scale=4)
+    _banner_quad(Vector((lo.x + 0.1, y0 + th * 0.4 - 0.02, bottom + 0.1)), Vector((hi.x - 0.1, y0 + th * 0.4 - 0.02, top - 0.1)), m, -1)
+    _banner_quad(Vector((lo.x + 0.1, y0 + th + 0.02, bottom + 0.1)), Vector((hi.x - 0.1, y0 + th + 0.02, top - 0.1)), m, 1)
+    for x in (lo.x + (hi.x - lo.x) * 0.2, hi.x - (hi.x - lo.x) * 0.2):
+        box(Vector((x - 0.25, y0 + th + 0.02, lo.z)), Vector((x + 0.25, y0 + th + 0.52, top - 0.3)), wood(), uv_scale=3)
+
 def giant_tyre(lo, hi, name):
     # two upright earthmover tyres side by side, filling the footprint
     n = 2 if (hi.x - lo.x) > 1.5 * (hi.z - lo.z) else 1
@@ -968,11 +983,12 @@ FP_PROPS = {  # name: (game lo, game hi) in feet, y up
     "fp_tirewall": ((-4.6, 0, -1.15), (4.6, 2.8, 1.15)),
     "fp_flagman_stand": ((-2, 0, -2), (2, 8, 2)),
     "fp_banner": ((-6, 0, -0.2), (6, 6, 0.2)),
+    **{f"fp_banner_{k}": ((-6, 0, -0.2), (6, 6, 0.2)) for k in range(2, 8)},
 }
 
 RULES = [
     (r"^fp_haybale$", single_bale), (r"^fp_tuffblock$", tuffblock), (r"^fp_startgate_post$", startgate_post),
-    (r"^fp_fence$", mesh_fence), (r"^fp_tirewall$", tirewall), (r"^fp_flagman_stand$", flagman_stand), (r"^fp_banner$", billboard),
+    (r"^fp_fence$", mesh_fence), (r"^fp_tirewall$", tirewall), (r"^fp_flagman_stand$", flagman_stand), (r"^fp_banner$", billboard), (r"^fp_banner_\d$", race_banner),
     (r"^triplebale\d+$", triplebale), (r"^haybale$", bale_stack), (r"^haybale_", single_bale),
     (r"^(fox\d+|.*hb)$", single_bale), (r"^billboard", billboard), (r"^gianttire", giant_tyre),
     (r"^cameraplatform", camera_platform), (r"^rail$", rail), (r"^50gal$|^trash_can", drum),

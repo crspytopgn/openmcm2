@@ -64,6 +64,12 @@ pub struct SceneLights {
     pub sun: [f32; 3],
     /// The way to the sun, in viewer coordinates.
     pub to_sun: Vec3,
+    /// How much the terrain is lit by them in the original look, 0 to 1.
+    /// The game's own tracks have their light painted into the ground's
+    /// textures, so 0; the Free Pack's tracks and the Course Builder's
+    /// don't (`LightGround=1` in the scene), so their hills are shaded
+    /// as they face the sun.
+    pub light_ground: f32,
 }
 
 impl SceneLights {
@@ -94,6 +100,7 @@ impl SceneLights {
             ambient,
             sun,
             to_sun: from_game(to).normalize_or(Vec3::Y),
+            light_ground: 0.0,
         }
     }
 }
@@ -105,6 +112,7 @@ impl Default for SceneLights {
             ambient: [0.5; 3],
             sun: [0.6; 3],
             to_sun: Vec3::new(0.4, 0.8, 0.3).normalize(),
+            light_ground: 0.0,
         }
     }
 }
@@ -1135,7 +1143,7 @@ impl TerrainRenderer {
             sun: lights.globals().1,
             to_sun: lights.globals().2,
             shadow_view: shadow_view.to_cols_array_2d(),
-            shadow_on: [shadow.is_some() as u32 as f32, 0.0, 0.0, 0.0],
+            shadow_on: [shadow.is_some() as u32 as f32, lights.light_ground, 0.0, 0.0],
         };
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         let seen = crate::cull::Frustum::new(plain * camera.view());

@@ -685,6 +685,8 @@ fn scene(course: &Course, field: &Field, path: &Path, stem: &str) -> String {
     let mut s = String::new();
     s += "; made by the OpenMCM2 Course Builder\r\n[SceneInfo]\r\n";
     s += &format!("SceneName=\"{}\"\r\n", course.name.replace('"', "'"));
+    // The ground's textures have no light painted in: OpenMCM2 shades it.
+    s += "LightGround=1\r\n";
     s += &format!(
         "DefaultStartPosition={:.1},{:.1},{:.1}\r\nEventType={}\r\n",
         p[0],

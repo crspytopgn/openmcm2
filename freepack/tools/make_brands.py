@@ -38,12 +38,18 @@ def mark(d, x, y, r, style, fg):
         for i in range(3): d.ellipse([x - r + i * r * 0.75, y - r * 0.3, x - r + i * r * 0.75 + r * 0.6, y + r * 0.3], fill=fg)
     else:
         for i in range(3): d.rectangle([x - r + i * r * 0.7, y - r, x - r + i * r * 0.7 + r * 0.4, y + r], fill=fg)
-def banner(name, tag, hue, style, w, h):
+def banner(name, tag, hue, style, w, h, race=False):
     rnd = random.Random(name)
     dark = rnd.random() < 0.5
     bg = col(hue, 0.45, 0.32) if dark else col(hue, 0.08, 0.86)
     fg = col(hue, 0.08, 0.92) if dark else col(hue, 0.55, 0.42)
     acc = col((hue + 0.5) % 1, 0.4, 0.7) if dark else col(hue, 0.5, 0.6)
+    if race:
+        # Race-day vinyl, as hung round a real track: the sponsor's own
+        # strong colour behind bold white or black lettering.
+        bg = col(hue, 0.78, 0.62 if dark else 0.78)
+        fg = col(hue, 0.04, 0.97) if dark or hue > 0.55 or hue < 0.04 else col(hue, 0.6, 0.12)
+        acc = col(hue, 0.25, 0.97) if fg[0] > 128 else col(hue, 0.9, 0.3)
     im = Image.new("RGB", (w, h), bg); d = ImageDraw.Draw(im)
     if style == "stripe": d.rectangle([0, h * 0.82, w, h * 0.9], fill=acc)
     r = h * 0.28; mx = h * 0.55
@@ -65,4 +71,5 @@ if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     for name, tag, hue, style in BRANDS:
         banner(name, tag, hue, style, 2048, 512).save(os.path.join(OUT, slug(name) + ".png"))
+        banner(name, tag, hue, style, 2048, 1024, race=True).save(os.path.join(OUT, slug(name) + "_race.png"))
     print(len(BRANDS), "banners")
