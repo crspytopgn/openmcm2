@@ -13,22 +13,28 @@ from PIL import Image, ImageFilter
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); OUT = os.path.join(HERE, "build", "global")
 rng = np.random.default_rng(7)
 
-def tile_noise(n, octaves, seed):
-    r = np.random.default_rng(seed); acc = np.zeros((n, n)); amp = 1.0; tot = 0
-    for o in range(octaves):
-        f = 4 * 2 ** o
-        g = r.standard_normal((f, f))
-        img = Image.fromarray(((g - g.min()) / (np.ptp(g) + 1e-9) * 255).astype(np.uint8)).resize((n, n), Image.BICUBIC)
-        # wrap-safe: blend with a rolled copy so edges tile
-        a = np.asarray(img, np.float32) / 255
-        acc += amp * a; tot += amp; amp *= 0.55
-    acc /= tot
-    acc = (acc + np.roll(acc, n // 2, 0) + np.roll(acc, n // 2, 1) + np.roll(np.roll(acc, n // 2, 0), n // 2, 1)) / 4
-    return (acc - acc.mean()) / (acc.std() + 1e-9)
+def tile_noise(n, seed):
+    """Seamless fine grain, as the game's own GrayNoise: nearly all of it
+    at the pixel scale and none of it in blobs. Shaped in frequency, so it
+    wraps exactly and a detail laid once over each terrain tile shows no
+    squares (the old blend of rolled copies left blobs a tile apart, cut
+    by seams at the tile's middle)."""
+    r = np.random.default_rng(seed)
+    f = np.fft.fft2(r.standard_normal((n, n)))
+    k = np.hypot(*np.meshgrid(np.fft.fftfreq(n) * n, np.fft.fftfreq(n) * n, indexing="ij"))
+    # The game's spectrum: a gentle roll-off at the finest scale, and
+    # nothing coarser than about a sixteenth of the picture.
+    shape = np.exp(-(k / (0.55 * n)) ** 2) * (1 - np.exp(-(k / 12.0) ** 2))
+    z = np.real(np.fft.ifft2(f * shape))
+    return (z - z.mean()) / (z.std() + 1e-9)
 
-def detail(name, contrast, seed):
-    z = tile_noise(256, 6, seed)
-    v = np.clip(128 + z * contrast, 0, 255).astype(np.uint8)
+def detail(name, alpha_mean, alpha_std, seed):
+    """A grey noise the viewer turns into the game's detail (freepack.rs
+    global_image: alpha = (grey - 83) * 1.53 over a dark earth colour),
+    made to give the game's own alpha mean and spread."""
+    z = tile_noise(256, seed)
+    grey = 83 + (alpha_mean + z * alpha_std) / 1.53
+    v = np.clip(np.round(grey), 0, 255).astype(np.uint8)
     Image.fromarray(v).convert("RGB").save(os.path.join(OUT, name + ".png"))
 
 def blob(size, rgb, soft=0.35, seed=0):
@@ -59,8 +65,9 @@ def sheet(name, rgb, puff_rgb, spark=(1.0, 0.72, 0.35), S=256):
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
-    detail("graynoise", 22, 1); detail("whitenoise", 14, 2)
-    for i, n in enumerate(["mxunat03noise", "mxunat13noise", "mxusx16noise"]): detail(n, 20, 10 + i)
+    # The game's GrayNoise: alpha 68 about, spread 21; its whitenoise 28, 9.
+    detail("graynoise", 68, 21, 1); detail("whitenoise", 28, 9, 2)
+    for i, n in enumerate(["mxunat03noise", "mxunat13noise", "mxusx16noise"]): detail(n, 68, 21, 10 + i)
     dirt = {"track01p": (0.36, 0.26, 0.17), "track02p": (0.33, 0.24, 0.16), "track03p": (0.40, 0.30, 0.20), "track04p": (0.30, 0.22, 0.15),
             "track05p": (0.38, 0.28, 0.18), "track06p": (0.35, 0.27, 0.19), "track07p": (0.32, 0.25, 0.18), "track11p": (0.42, 0.32, 0.22),
             "track13p": (0.29, 0.21, 0.14), "track14p": (0.37, 0.29, 0.21), "track15p": (0.34, 0.25, 0.17), "track16p": (0.39, 0.29, 0.19),
