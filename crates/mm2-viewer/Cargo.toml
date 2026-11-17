@@ -33,7 +33,7 @@ console_error_panic_hook = "0.1"
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Document", "Window", "Element", "HtmlCanvasElement", "Location", "console", "Request", "RequestInit", "Response"] }
+web-sys = { version = "0.3", features = ["Document", "Window", "Element", "HtmlCanvasElement", "Location", "Navigator", "console", "Request", "RequestInit", "Response"] }
 # Sound through the browser's Web Audio.
 cpal = { version = "0.16.0", features = ["wasm-bindgen"], optional = true }
 
