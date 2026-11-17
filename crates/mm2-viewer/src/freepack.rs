@@ -732,6 +732,34 @@ pub fn ui_image(stem: &str, file: &str) -> Option<(mm2_formats::tga::Image, Opti
     Some((mm2_formats::tga::Image { width, height, rgba }, art.sizes.get(&format!("{key}.png")).copied()))
 }
 
+/// The pack's stand-in for the game's `RES/GLOBAL.RES` picture `name`
+/// (the dirt particles, the terrain's detail noise): `global/<name>.png`.
+pub fn global_image(name: &str) -> Option<mm2_formats::tga::Image> {
+    let stem = name.rsplit_once('.').map_or(name, |(s, _)| s).to_ascii_lowercase();
+    let png = root()?.join("global").join(format!("{stem}.png"));
+    let bytes = crate::fs::read(&png).ok()?;
+    let (width, height, mut rgba) = crate::hires::decode_png(&bytes)
+        .map_err(|e| eprintln!("{}: {e}", png.display()))
+        .ok()?;
+    // The detail noises are grey pictures, but the terrain blends to the
+    // detail's colour by its alpha (the game's are one dark earth colour
+    // with the noise in alpha): turn the grey into that.
+    if rgba.chunks_exact(4).all(|p| p[3] == 255 && p[0] == p[1] && p[1] == p[2]) {
+        for p in rgba.chunks_exact_mut(4) {
+            let a = ((p[0] as f32 - DETAIL_GREY) * DETAIL_GAIN).clamp(0.0, 255.0) as u8;
+            p.copy_from_slice(&[DETAIL_EARTH[0], DETAIL_EARTH[1], DETAIL_EARTH[2], a]);
+        }
+    }
+    Some(mm2_formats::tga::Image { width, height, rgba })
+}
+
+/// A grey detail noise's turn into the terrain's detail: the earth colour
+/// it darkens towards, and how its grey becomes the blend (the pack's
+/// greys, 70 to 175 about a middle of 127, to the game's 0 to 150 about 67).
+const DETAIL_EARTH: [u8; 3] = [34, 17, 0];
+const DETAIL_GREY: f32 = 83.0;
+const DETAIL_GAIN: f32 = 1.53;
+
 /// The pack's place for control `name` of dialog `stem`.
 pub fn ui_rect(stem: &str, name: &str) -> Option<[i32; 4]> {
     ui_art()?.rects.get(&(stem.to_ascii_lowercase(), name.to_ascii_lowercase())).copied()

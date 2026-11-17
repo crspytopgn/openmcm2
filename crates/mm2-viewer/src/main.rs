@@ -50,6 +50,7 @@
 // keeps stderr in last-run.log.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod free_text;
 mod addons;
 mod pace;
 mod dynres;
@@ -1687,10 +1688,8 @@ fn player_spec(res: &Path, cc: u32) -> Spec {
             let text = String::from_utf8_lossy(archive.get("presets.pb")?).into_owned();
             Spec::from_presets(&text, spec::category(cc), Some(0))
         });
-    presets.unwrap_or_else(|| {
-        eprintln!("no presets.pb in UI/UIRES.RES, so the bike uses the default spec");
-        Spec::default()
-    })
+    // Without the file (the Free Pack alone), the same numbers built in.
+    presets.unwrap_or_else(|| Spec::stock(spec::category(cc)))
 }
 
 /// Where a race starts, in game coordinates.
@@ -2294,8 +2293,14 @@ fn detail_texture(res: &std::path::Path, scene: Option<&scn::Scene>) -> Option<m
 }
 
 /// A texture in `RES/GLOBAL.RES`.
+/// Without the game's archive (the Free Pack alone), the pack's own
+/// picture of that name in its `global` folder.
 fn global_texture(res: &std::path::Path, name: &str) -> Option<mm2_formats::tga::Image> {
-    let bytes = read_archive(&res.join("GLOBAL.RES")).ok()?;
+    let path = res.join("GLOBAL.RES");
+    if !fs::is_file(&path) {
+        return freepack::global_image(name);
+    }
+    let bytes = read_archive(&path).ok()?;
     let archive = mm2_formats::rs2::Archive::parse(&bytes).ok()?;
     let data = archive
         .entries()
@@ -2306,14 +2311,7 @@ fn global_texture(res: &std::path::Path, name: &str) -> Option<mm2_formats::tga:
 }
 
 fn dirt_sheet(res: &std::path::Path) -> Option<mm2_formats::tga::Image> {
-    let bytes = read_archive(&res.join("GLOBAL.RES")).ok()?;
-    let archive = mm2_formats::rs2::Archive::parse(&bytes).ok()?;
-    let data = archive
-        .entries()
-        .iter()
-        .find(|e| e.name.eq_ignore_ascii_case("DirtPart.TGA"))
-        .map(|e| archive.data(e))?;
-    mm2_formats::texture::parse_overlay(data).ok()
+    global_texture(res, "DirtPart.TGA")
 }
 
 fn load_sky(

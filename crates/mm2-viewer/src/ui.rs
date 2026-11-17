@@ -400,6 +400,7 @@ impl Ui {
     /// `UILANG.DLL`).
     pub fn new(game: &Path) -> Self {
         let dir = game.join("UI");
+        crate::hud::find_pictures(game);
         let strings = |name: &str| {
             crate::fs::read(game.join(name))
                 .ok()
@@ -432,7 +433,13 @@ impl Ui {
 
     /// A string the game's code shows, from `LANG.DLL`.
     pub fn lang(&self, id: u32) -> String {
-        self.lang.get(&id).cloned().unwrap_or_default()
+        // Without the game's LANG.DLL (the Free Pack alone), our own
+        // English wording.
+        self.lang
+            .get(&id)
+            .cloned()
+            .or_else(|| crate::free_text::lang(id).map(str::to_string))
+            .unwrap_or_default()
     }
 
     /// A white pixel's texture, made on first use.
