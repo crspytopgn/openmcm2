@@ -5,7 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
 mod freetrack;
-mod freetracks;
+use mm2_course::free as freetracks;
 mod terrain;
 mod textures;
 

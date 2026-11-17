@@ -202,7 +202,7 @@ function write(path, data) {
   path = norm(path);
   // The Course Builder's tracks join the game's track folders for this
   // visit; the builder keeps them among the saves too (/user/Tracks).
-  if (/^\/game\/teraform\/[^/]+\/[^/]+\.env$/i.test(path)) {
+  if (/^\/game\/teraform\/[^/]+\/[^/]+\.(env|lights)$/i.test(path)) {
     const old = files.get(path.toLowerCase());
     put(old ? old.path : path, new Uint8Array(data));
     return true;

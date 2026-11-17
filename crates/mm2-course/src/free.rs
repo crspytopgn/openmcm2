@@ -13,7 +13,6 @@
 //! Ground textures come from `<ground dir>/<material>.png` (512 px,
 //! seamless) when given, or are painted from flat colours and noise.
 
-use crate::freetrack::{fbm, hash, noise, rgb555};
 use mm2_formats::{rs2, trn};
 use std::collections::HashMap;
 use std::f32::consts::{PI, TAU};
@@ -31,7 +30,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    fn folder(self) -> &'static str {
+    pub fn folder(self) -> &'static str {
         match self {
             Kind::National => "NATIONAL",
             Kind::Supercross => "SX",
@@ -1131,13 +1130,13 @@ struct Ground {
 }
 
 impl Ground {
-    fn load(dir: Option<&Path>, tex: usize, tile_feet: f32) -> Ground {
+    fn load(read: &dyn Fn(&str) -> Option<Vec<u8>>, tex: usize, tile_feet: f32) -> Ground {
         let images = MATERIALS
             .iter()
             .map(|&(name, _, period)| {
-                let path = dir?.join(format!("{name}.png"));
-                let bytes = std::fs::read(&path).ok()?;
-                let (w, h, rgb) = decode_png(&bytes).map_err(|e| eprintln!("{}: {e}", path.display())).ok()?;
+                let file = format!("{name}.png");
+                let bytes = read(&file)?;
+                let (w, h, rgb) = decode_png(&bytes).map_err(|e| eprintln!("ground {file}: {e}")).ok()?;
                 // Whole repeats per tile, a power of two so they divide
                 // the texture's side.
                 let repeats = 2f32.powf((tile_feet / period).log2().round()).clamp(1.0, 16.0) as usize;
@@ -2204,7 +2203,7 @@ fn open_country(def: &Def) -> Made {
     Made { land, courses, lap_lines: None, start, models, keep: vec![(camp, 80.0)], podium: None, infield: None }
 }
 
-fn race_names(def: &Def) -> Vec<String> {
+pub fn race_names(def: &Def) -> Vec<String> {
     let parts: [&str; 3] = match def.kind {
         Kind::Baja => ["Short Run", "Long Haul", "Outer Loop"],
         _ => ["Trail One", "Trail Two", "The Big Loop"],
@@ -2366,8 +2365,10 @@ fn tag(def: &Def) -> Made {
 
 // ---------------------------------------------------------------------
 
-pub fn build_one(def: &Def, game: &Path, ground_dir: Option<&Path>) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    eprint!("{} ({}): ", def.file, def.name);
+/// Makes one free track: its `.ENV`, and for arenas its `.lights`
+/// (`(file name, bytes)`). `ground` reads one of the pack's ground
+/// pictures (`grass.png`) by name; without them the ground is painted flat.
+pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(String, Vec<u8>)>, Box<dyn std::error::Error>> {
     let mut made = match def.kind {
         Kind::National => national(def),
         Kind::Supercross => supercross(def),
@@ -2402,7 +2403,7 @@ pub fn build_one(def: &Def, game: &Path, ground_dir: Option<&Path>) -> Result<Pa
             }
         })
         .collect();
-    let ground = Ground::load(ground_dir, def.kind.texture(), 64.0 * land.scale);
+    let ground = Ground::load(ground, def.kind.texture(), 64.0 * land.scale);
     let (textures, tiles) = paint(land, def.kind, def.biome, &ground, def.seed);
     let terrain = trn::Build { size: land.size, heights: &land.heights, surfaces: &surfaces, scale: land.scale, textures: &textures, tiles: &tiles }.write()?;
 
@@ -2430,15 +2431,34 @@ pub fn build_one(def: &Def, game: &Path, ground_dir: Option<&Path>) -> Result<Pa
     let scene = write_scene(&Scene { def, land, start: made.start, models: std::mem::take(&mut made.models), races, podium: made.podium });
     files.push((format!("{stem}.scn"), scene.into_bytes()));
     let refs: Vec<(&str, &[u8])> = files.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect();
+    let mut out = vec![(format!("{stem}.ENV"), rs2::build(&refs))];
+    if matches!(def.kind, Kind::Supercross | Kind::Tag) {
+        out.push((format!("{stem}.lights"), arena_lights(land, def.kind).into_bytes()));
+    }
+    Ok(out)
+}
+
+/// The free track whose file is `stem` (`FPNAT01`), any case.
+pub fn find(stem: &str) -> Option<&'static Def> {
+    SET.iter().find(|d| d.file.eq_ignore_ascii_case(stem))
+}
+
+/// Makes the free track `def` into `<game>/TERAFORM/<event>/`.
+pub fn build_one(def: &Def, game: &Path, ground_dir: Option<&Path>) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    eprint!("{} ({}): ", def.file, def.name);
+    let read = |name: &str| std::fs::read(ground_dir?.join(name)).ok();
     let dir = game.join("TERAFORM").join(def.kind.folder());
     std::fs::create_dir_all(&dir)?;
-    let out = dir.join(format!("{stem}.ENV"));
-    std::fs::write(&out, rs2::build(&refs))?;
-    if matches!(def.kind, Kind::Supercross | Kind::Tag) {
-        std::fs::write(dir.join(format!("{stem}.lights")), arena_lights(land, def.kind))?;
+    let mut env = None;
+    for (name, bytes) in make(def, &read)? {
+        let path = dir.join(&name);
+        std::fs::write(&path, &bytes)?;
+        if name.ends_with(".ENV") {
+            eprintln!(" {} MB", bytes.len() / 1_000_000);
+            env = Some(path);
+        }
     }
-    eprintln!(" {} MB, {} plants", std::fs::metadata(&out)?.len() / 1_000_000, plants.len());
-    Ok(out)
+    env.ok_or_else(|| "no .ENV made".into())
 }
 
 pub fn build(game: &Path, ground: Option<&Path>, only: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
@@ -2449,6 +2469,36 @@ pub fn build(game: &Path, ground: Option<&Path>, only: Option<&str>) -> Result<(
         build_one(def, game, ground)?;
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------
+// Noise helpers.
+
+pub fn hash(x: i32, z: i32, seed: u32) -> f32 {
+    let mut h = (x as u32).wrapping_mul(0x9e37_79b1) ^ (z as u32).wrapping_mul(0x85eb_ca77) ^ seed.wrapping_mul(0xc2b2_ae3d);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2c1b_3c6d);
+    h ^= h >> 12;
+    (h & 0xffff) as f32 / 65535.0
+}
+
+pub fn noise(x: f32, z: f32, seed: u32) -> f32 {
+    let (xi, zi) = (x.floor() as i32, z.floor() as i32);
+    let (fx, fz) = (x - xi as f32, z - zi as f32);
+    let s = |t: f32| t * t * (3.0 - 2.0 * t);
+    let (sx, sz) = (s(fx), s(fz));
+    let a = hash(xi, zi, seed) * (1.0 - sx) + hash(xi + 1, zi, seed) * sx;
+    let b = hash(xi, zi + 1, seed) * (1.0 - sx) + hash(xi + 1, zi + 1, seed) * sx;
+    a * (1.0 - sz) + b * sz
+}
+
+pub fn fbm(x: f32, z: f32, seed: u32) -> f32 {
+    (0..5).map(|o| noise(x * (1 << o) as f32, z * (1 << o) as f32, seed + o) / (1 << o) as f32).sum::<f32>() / 1.94
+}
+
+pub fn rgb555(r: f32, g: f32, b: f32) -> u16 {
+    let c = |v: f32| ((v.clamp(0.0, 1.0) * 31.0).round() as u16) & 31;
+    c(r) << 10 | c(g) << 5 | c(b)
 }
 
 #[cfg(test)]

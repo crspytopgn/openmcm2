@@ -1957,6 +1957,23 @@ pub fn list_tracks(folder: &Path, event: EventKind) -> Vec<TrackEntry> {
         .unwrap_or_default();
     files.sort_by_key(|p| p.file_name().map(|n| n.to_ascii_uppercase()));
     let mut out = Vec::new();
+    // The Free Pack's tracks, listed whether or not they are built yet
+    // (each is built from its recipe the first time it is ridden).
+    let (teraform, name) = (folder.parent(), folder.file_name().and_then(|n| n.to_str()));
+    let free = teraform.zip(name).map(|(t, n)| crate::free_tracks::listed(t, n)).unwrap_or_default();
+    files.retain(|p| !free.iter().any(|(f, _)| f.file_name().is_some_and(|n| p.file_name().is_some_and(|m| m.eq_ignore_ascii_case(n)))));
+    let mut extra = Vec::new();
+    for (path, def) in &free {
+        let stem = def.file;
+        let courses = crate::free_tracks::courses(def);
+        if event.courses() && !courses.is_empty() {
+            for (c, course) in courses.into_iter().enumerate() {
+                extra.push(TrackEntry { path: path.clone(), course: c, name: course, preview: format!("{stem}{:02}.tga", c + 1) });
+            }
+        } else {
+            extra.push(TrackEntry { path: path.clone(), course: 0, name: def.name.to_string(), preview: format!("{stem}.tga") });
+        }
+    }
     for path in files {
         let Ok(bytes) = crate::read_archive(&path) else {
             continue;
@@ -2007,6 +2024,8 @@ pub fn list_tracks(folder: &Path, event: EventKind) -> Vec<TrackEntry> {
             });
         }
     }
+    // After the game's own.
+    out.extend(extra);
     out
 }
 

@@ -1,3 +1,29 @@
+# OpenMCM2 0.6.1
+
+A quick follow-up to 0.6.0 that makes the Free Pack much smaller and gives
+it much better sound.
+
+* **The Free Pack is now about 590 MB instead of 1.9 GB.** Its 28 tracks
+  aren't downloaded any more. Each one is a recipe built into the game,
+  and the first time you ride or copy one, your computer builds it from
+  the recipe and the pack's shared ground textures in a few seconds
+  (about 10 to 20). When you play with free graphics they're in each
+  event's track list, and in the Course Builder under *Edit a copy*.
+* **Real sounds for the Free Pack.** The engines are now made from real
+  public-domain recordings (a two-stroke and a four-stroke), cut into
+  single engine firings and rebuilt for each class at several rev levels.
+  The game blends the two nearest your revs, so nothing sounds sped up or
+  slowed down. Falls, crashes, landings, the crowd and applause are real
+  recordings too. All of it is CC0, from BigSoundBank (thank you, Joseph
+  Sardin).
+* **Course Builder:** renaming a track now shows what you type, and a new
+  **Race** button (also *Kind of race* on the Land panel) turns a track
+  into Supercross, National, Baja or Enduro, fitting its line, jumps and
+  objects to the new land.
+* **Browser:** the Free Pack download now shows a clear progress bar with
+  megabytes and percent, and a plain message with a retry button if it
+  fails.
+
 # OpenMCM2 0.6.0
 
 A big one. You can now build your own tracks, and play without a copy of
@@ -15,7 +41,7 @@ the original game.
   want it on the menu? Turn it off in the launcher's Extras.
 * **Free graphics (the Free Pack):** a whole new set of art made for
   OpenMCM2: bikes and riders, a supercross stadium, 28 new tracks across
-  every event, skies, trees, vehicles and aircraft. It's all our own work or openly licensed, so it's free
+  every event (playable from 0.6.1), skies, trees, vehicles and aircraft. It's all our own work or openly licensed, so it's free
   for anyone. The launcher and the browser page now ask **MM2 graphics or
   free graphics?** and download the pack for you. Updates fetch only the
   parts that changed. Early days: without MM2 files, the free graphics

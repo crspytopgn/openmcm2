@@ -16,6 +16,7 @@ pub mod auto;
 pub mod bake;
 pub mod copy;
 pub mod env;
+pub mod free;
 pub mod kit;
 pub mod land;
 pub mod path;
@@ -583,6 +584,70 @@ impl Course {
     }
 
     /// The smooth line through the points, sampled every couple of feet.
+    /// Makes this a track of another kind of race, keeping its shape:
+    /// the line, jumps, brush work and objects moved and sized to fit the
+    /// new land (a stadium's floor for Supercross). Not for a copy of a
+    /// track, whose land is that track's.
+    pub fn change_mode(&mut self, mode: Mode) -> bool {
+        if mode == self.mode || self.base.is_some() {
+            return false;
+        }
+        let fresh = Course::new(mode);
+        let bounds = |pts: &[Point]| {
+            pts.iter().fold(([f32::MAX; 2], [f32::MIN; 2]), |(lo, hi), p| ([lo[0].min(p.x), lo[1].min(p.z)], [hi[0].max(p.x), hi[1].max(p.z)]))
+        };
+        let (lo, hi) = bounds(&self.line.points);
+        let (mid, half) = if lo[0] <= hi[0] {
+            ([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0], [((hi[0] - lo[0]) / 2.0).max(1.0), ((hi[1] - lo[1]) / 2.0).max(1.0)])
+        } else {
+            ([self.mode.side() / 2.0; 2], [1.0; 2])
+        };
+        let c = mode.side() / 2.0;
+        let k = if mode == Mode::Supercross {
+            // Inside the stadium's floor, as the new track's own line is.
+            let (flo, fhi) = bounds(&fresh.line.points);
+            (((fhi[0] - flo[0]) / 2.0 + 20.0) / half[0]).min(((fhi[1] - flo[1]) / 2.0 + 20.0) / half[1])
+        } else {
+            // As big as it was on its old land, kept well inside the new.
+            let room = mode.side() * 0.42;
+            (mode.side() / self.mode.side()).min(room / half[0]).min(room / half[1])
+        };
+        let at = |x: f32, z: f32| [c + (x - mid[0]) * k, c + (z - mid[1]) * k];
+        let width = fresh.mode.track_width() / self.mode.track_width();
+        for p in &mut self.line.points {
+            [p.x, p.z] = at(p.x, p.z);
+            p.width = (p.width * width).clamp(10.0, 120.0);
+        }
+        self.line.start *= k;
+        for j in &mut self.jumps {
+            j.at *= k;
+        }
+        for d in self.strokes.iter_mut().flat_map(|s| s.dabs.iter_mut()).chain(self.paint.iter_mut().flat_map(|p| p.dabs.iter_mut())) {
+            *d = at(d[0], d[1]);
+        }
+        for o in &mut self.objects {
+            [o.x, o.z] = at(o.x, o.z);
+        }
+        if mode.laps() {
+            self.line.closed = true;
+        }
+        // A stadium's flat floor, or open land again after one.
+        if mode == Mode::Supercross || self.mode == Mode::Supercross {
+            self.land = fresh.land.clone();
+        }
+        self.dress = fresh.dress.clone();
+        self.look.stadium = fresh.look.stadium.clone();
+        if self.mode == Mode::Supercross || mode == Mode::Baja {
+            self.look.sky = fresh.look.sky.clone();
+        }
+        let old = format!("My {} ", self.mode.name());
+        if let Some(rest) = self.name.strip_prefix(&old) {
+            self.name = format!("My {} {rest}", mode.name());
+        }
+        self.mode = mode;
+        true
+    }
+
     pub fn path(&self) -> path::Path {
         path::Path::new(&self.line.points, self.line.closed)
     }
@@ -624,6 +689,23 @@ mod tests {
             let back = Course::from_json(&c.to_json()).unwrap();
             assert_eq!(c, back);
             assert!(!c.jumps.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_track_changes_kind_and_keeps_its_shape() {
+        for from in Mode::ALL {
+            for to in Mode::ALL {
+                let mut c = crate::auto::surprise(from, 3);
+                let (points, jumps) = (c.line.points.len(), c.jumps.len());
+                c.change_mode(to);
+                assert_eq!(c.mode, to);
+                assert_eq!((c.line.points.len(), c.jumps.len()), (points, jumps));
+                let side = to.side();
+                assert!(c.line.points.iter().all(|p| p.x > 0.0 && p.z > 0.0 && p.x < side && p.z < side), "{from:?} to {to:?}");
+                let baked = crate::env::write(&c);
+                assert!(!baked.env.is_empty());
+            }
         }
     }
 
