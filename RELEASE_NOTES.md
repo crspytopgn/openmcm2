@@ -1,7 +1,8 @@
 # OpenMCM2 0.6.1
 
-A quick follow-up to 0.6.0 that makes the Free Pack much smaller and gives
-it much better sound.
+The Free Pack gets much smaller, sounds much better and now plays a
+proper race. The Course Builder grows plants, rivers and aircraft, and
+there are free roam rooms that are always open.
 
 * **The Free Pack is now about 590 MB instead of 1.9 GB.** Its 28 tracks
   aren't downloaded any more. Each one is a recipe built into the game,
@@ -29,6 +30,10 @@ it much better sound.
   one in Europe and one in the US, on Copper Ridge. Pick one from the
   online races list and ride with whoever is there. No one needs to host.
   Other riders' bikes now move more smoothly too.
+* **Better light in Enhanced:** realistic materials and sky reflections,
+  film-like colour (with free graphics) and sunlit haze, and sharper
+  shadows on Ultra. Rivers reflect the sky. The original look is
+  unchanged.
 * **Course Builder:** renaming a track now shows what you type, and a new
   **Race** button (also *Kind of race* on the Land panel) turns a track
   into Supercross, National, Baja or Enduro, fitting its line, jumps and
