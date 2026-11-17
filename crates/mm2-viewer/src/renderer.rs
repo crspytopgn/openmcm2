@@ -209,6 +209,8 @@ pub struct TerrainRenderer {
     night_listed: Option<crate::night::StadiumLights>,
     /// A domed stadium's lamp banks painted on its roof (ObjectMesh::floodlights).
     night_banks: Vec<(Vec3, f32, f32)>,
+    /// Rivers' water (crate::water), on tracks that have them.
+    water: Option<crate::water::WaterRenderer>,
 }
 
 /// A stadium's lamps at night where its track lists none: its roof's
@@ -691,6 +693,7 @@ impl TerrainRenderer {
             night_found,
             night_listed: None,
             night_banks,
+            water: None,
         }
     }
 
@@ -955,6 +958,11 @@ impl TerrainRenderer {
             crate::crowd::Crowd::new(device, spots, &e.layout, &e.shared.layout, crate::graphics::HDR_FORMAT, samples, DEPTH_FORMAT)
         });
         eprintln!("{} spectators", spots.len().div_ceil(spots.len().div_ceil(crate::crowd::MOST).max(1)));
+    }
+
+    /// The track's rivers, drawn over the scene in both drawings.
+    pub fn set_water(&mut self, device: &wgpu::Device, rivers: &[mm2_course::nature::Water]) {
+        self.water = crate::water::WaterRenderer::new(device, rivers, &self.globals, self.scene_format, self.samples, DEPTH_FORMAT);
     }
 
     /// Draws bike `bike`'s models (its bike and its rider) as dirty as it
@@ -1572,6 +1580,10 @@ impl TerrainRenderer {
                 }
             }
             mark_pass!(self.gpu_timer, &mut pass, "scene: objects");
+            if let Some(water) = &self.water {
+                water.set_time(queue, time, day.as_ref().map_or(1.0, |d| 1.0 - d.night));
+                water.draw(&mut pass);
+            }
             if let Some((dust, own, group)) = self
                 .enhanced
                 .as_ref()

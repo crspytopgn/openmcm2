@@ -178,16 +178,16 @@ struct Bank {
     loops: Option<Loops>,
 }
 
-/// A free pack class's engine as three steady loops, each recorded at a
-/// known engine speed, pitched to the revs of the moment: on the gas, off
-/// it, and at idle (`engine.ini` in the class's folder).
+/// A free pack class's engine as steady loops, each recorded at a known
+/// engine speed, pitched to the revs of the moment: on the gas, off it,
+/// and at idle (`engine.ini` in the class's folder). With several loops
+/// on and off the gas (`OnLoops = a.wav@3000, b.wav@4500, ...`), the two
+/// nearest the revs are heard together, so none is pitched far.
 struct Loops {
-    on: Arc<Sound>,
-    off: Arc<Sound>,
+    /// Each loop and the revs it was recorded at, slowest first.
+    on: Vec<(Arc<Sound>, f32)>,
+    off: Vec<(Arc<Sound>, f32)>,
     idle: Arc<Sound>,
-    /// The revs each loop was recorded at.
-    on_rpm: f32,
-    off_rpm: f32,
     idle_rpm: f32,
     /// The engine's idle and its top, rpm.
     low: f32,
@@ -201,20 +201,36 @@ impl Loops {
         let ini = scn::Ini::parse(&crate::fs::read_to_string(dir.join("engine.ini")).ok()?);
         let get = |key: &str| ini.sections.iter().find_map(|s| s.get(key)).map(|v| v.trim().to_string());
         let num = |key: &str| get(key).and_then(|v| v.parse::<f32>().ok());
-        let wav = |key: &str| {
-            let name = get(key)?;
-            let bytes = crate::fs::read(dir.join(&name)).map_err(|e| eprintln!("{}: {e}", dir.join(&name).display())).ok()?;
+        let file = |name: &str| {
+            let bytes = crate::fs::read(dir.join(name)).map_err(|e| eprintln!("{}: {e}", dir.join(name).display())).ok()?;
             mm2_formats::wav::parse(&bytes).ok().map(Arc::new)
+        };
+        let wav = |key: &str| file(&get(key)?);
+        // `OnLoops = a.wav@3000, ...`, or the one `OnLoop` at `OnLoopRpm`.
+        let set = |many: &str, one: &str, rpm: &str| -> Option<Vec<(Arc<Sound>, f32)>> {
+            let mut list: Vec<(Arc<Sound>, f32)> = get(many)
+                .map(|v| {
+                    v.split(',')
+                        .filter_map(|item| {
+                            let (name, at) = item.trim().rsplit_once('@')?;
+                            Some((file(name.trim())?, at.trim().parse::<f32>().ok()?))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if list.is_empty() {
+                list.push((wav(one)?, num(rpm)?));
+            }
+            list.sort_by(|a, b| a.1.total_cmp(&b.1));
+            Some(list)
         };
         let gears: Vec<f32> = get("GearTopSpeeds")
             .map(|v| v.split(',').filter_map(|g| g.trim().parse().ok()).collect())
             .unwrap_or_else(|| GEARS.to_vec());
         Some(Loops {
-            on: wav("OnLoop")?,
-            off: wav("OffLoop")?,
+            on: set("OnLoops", "OnLoop", "OnLoopRpm")?,
+            off: set("OffLoops", "OffLoop", "OffLoopRpm")?,
             idle: wav("IdleLoop")?,
-            on_rpm: num("OnLoopRpm")?,
-            off_rpm: num("OffLoopRpm")?,
             idle_rpm: num("IdleLoopRpm")?,
             low: num("IdleRpm").unwrap_or(1600.0),
             high: num("MaxRpm").unwrap_or(10000.0),
@@ -240,7 +256,9 @@ struct Revs {
     mph: f32,
     /// How much of the on-gas loop is heard, 0 to 1.
     load: f32,
-    voices: Option<[Voice; 3]>,
+    /// The loops' voices (on, off, idle, as [`Loops::all`] lists them),
+    /// each playing only while it is heard.
+    voices: Vec<Option<Voice>>,
 }
 
 impl Revs {
@@ -285,15 +303,43 @@ impl Revs {
         self.load += (load - self.load) * (1.0 - (-14.0 * dt).exp());
     }
 
-    /// Each loop's volume and pitch: on, off, idle.
-    fn mix(&self, loops: &Loops) -> [(f32, f32); 3] {
+    /// Each loop's volume and pitch, in [`Loops::all`]'s order.
+    fn mix(&self, loops: &Loops) -> Vec<(f32, f32)> {
         let near_idle = ((loops.low * 1.7 - self.rpm) / (loops.low * 0.7)).clamp(0.0, 1.0);
         let off = 1.0 - self.load;
-        [
-            (self.load, self.rpm / loops.on_rpm),
-            (off * (1.0 - near_idle) * 0.7, self.rpm / loops.off_rpm),
-            (off * near_idle * 0.8, self.rpm / loops.idle_rpm),
-        ]
+        let mut out = Vec::with_capacity(loops.on.len() + loops.off.len() + 1);
+        for (set, level) in [(&loops.on, self.load), (&loops.off, off * (1.0 - near_idle) * 0.7)] {
+            let weights = blend(set, self.rpm);
+            out.extend(set.iter().zip(weights).map(|((_, at), w)| (level * w, self.rpm / at)));
+        }
+        out.push((off * near_idle * 0.8, self.rpm / loops.idle_rpm));
+        out
+    }
+}
+
+/// How much of each loop in `set` (slowest first) to hear at `rpm`: the
+/// two recorded either side of it, crossfaded at equal power.
+fn blend(set: &[(Arc<Sound>, f32)], rpm: f32) -> Vec<f32> {
+    let mut w = vec![0.0; set.len()];
+    let Some(i) = set.iter().position(|(_, at)| *at >= rpm) else {
+        *w.last_mut().unwrap() = 1.0;
+        return w;
+    };
+    if i == 0 {
+        w[0] = 1.0;
+        return w;
+    }
+    let (a, b) = (set[i - 1].1, set[i].1);
+    let t = ((rpm / a).ln() / (b / a).ln()).clamp(0.0, 1.0);
+    w[i - 1] = (t * std::f32::consts::FRAC_PI_2).cos();
+    w[i] = (t * std::f32::consts::FRAC_PI_2).sin();
+    w
+}
+
+impl Loops {
+    /// Every loop: on the gas, off it, then idle.
+    fn all(&self) -> Vec<&Arc<Sound>> {
+        self.on.iter().chain(&self.off).map(|(s, _)| s).chain([&self.idle]).collect()
     }
 }
 
@@ -567,6 +613,8 @@ pub struct RaceSounds {
     tagged: Option<f32>,
     /// The scene's ambient sounds.
     emitters: Vec<Emitter>,
+    /// Till another splash may sound, s.
+    splash_wait: f32,
     /// Only the engines sound: no landings, crashes, chimes or crowd (for
     /// recording the engine note on its own, as the game's engine buffer
     /// is captured to compare with).
@@ -627,6 +675,9 @@ impl RaceSounds {
                 }
             }
         }
+        // The rivers' own sounds (OpenMCM2's, none of the game's).
+        effects.insert(RIVER.into(), Arc::new(river_sound()));
+        effects.insert(SPLASH.into(), Arc::new(splash_sound()));
         let engines = classes
             .iter()
             .map(|&class| Engine {
@@ -657,6 +708,7 @@ impl RaceSounds {
             popup: None,
             tagged: None,
             emitters: Vec::new(),
+            splash_wait: 0.0,
             engines_only: false,
         };
         // The crowd loops from the start, flat (0x4e81a0).
@@ -943,18 +995,26 @@ impl RaceSounds {
                 let road = Vec3::new(flat.x, 0.0, flat.z).length() * MPH;
                 e.revs.step(loops, road, gas, grounded, dt);
                 if !heard || self.options.gain <= 0.0 {
-                    for v in e.revs.voices.take().into_iter().flatten() {
+                    for v in e.revs.voices.drain(..).flatten() {
                         audio.stop(v);
                     }
                 } else {
-                    if e.revs.voices.is_some_and(|v| !audio.playing(v[0])) {
-                        e.revs.voices = None;
-                    }
-                    let voices = *e.revs.voices.get_or_insert_with(|| {
-                        [&loops.on, &loops.off, &loops.idle].map(|s| audio.play(s, 0.0, true))
-                    });
+                    let sounds = loops.all();
+                    e.revs.voices.resize(sounds.len(), None);
                     let (volume, pan, doppler) = l.hear(bike.position(), bike.velocity(), ENGINE_RANGE);
-                    for (v, (level, pitch)) in voices.into_iter().zip(e.revs.mix(loops)) {
+                    let mix = e.revs.mix(loops);
+                    for ((slot, sound), (level, pitch)) in e.revs.voices.iter_mut().zip(sounds).zip(mix) {
+                        if slot.is_some_and(|v| !audio.playing(v)) {
+                            *slot = None;
+                        }
+                        // Only the loops being heard play.
+                        if level < 0.002 {
+                            if let Some(v) = slot.take() {
+                                audio.stop(v);
+                            }
+                            continue;
+                        }
+                        let v = *slot.get_or_insert_with(|| audio.play(sound, 0.0, true));
                         audio.place(v, volume * level * self.options.gain, pan, doppler * pitch);
                     }
                 }
@@ -1155,6 +1215,20 @@ impl RaceSounds {
         }
     }
 
+    /// A bike splashing through a river at `at`, `strength` 0 to 1.
+    pub fn splash(&mut self, audio: &Audio, l: &Listener, at: Vec3, strength: f32, dt: f32) {
+        self.splash_wait -= dt;
+        if self.splash_wait > 0.0 {
+            return;
+        }
+        self.splash_wait = 0.28 - 0.12 * strength.clamp(0.0, 1.0);
+        if let Some(v) = self.play_at(audio, SPLASH, at, (30.0, 260.0), l) {
+            let (volume, pan, pitch) = l.hear(at, Vec3::ZERO, (30.0, 260.0));
+            let k = 0.45 + 0.55 * strength.clamp(0.0, 1.0);
+            audio.place(v, volume * k * self.options.gain, pan, pitch * (0.9 + 0.2 * (self.random(100) as f32 / 100.0)));
+        }
+    }
+
     /// The podium: the engines stop and the crowd cheers (0x45e490's
     /// `CrowdLoop.wav`).
     pub fn podium(&mut self, audio: &Audio) {
@@ -1177,7 +1251,7 @@ impl RaceSounds {
             if let Some(v) = e.voice.take() {
                 audio.stop(v);
             }
-            for v in e.revs.voices.take().into_iter().flatten() {
+            for v in e.revs.voices.drain(..).flatten() {
                 audio.stop(v);
             }
         }
@@ -1313,11 +1387,9 @@ mod revs_tests {
     fn loops() -> Loops {
         let quiet = Arc::new(Sound { rate: 22050, channels: 1, samples: vec![0.0; 100] });
         Loops {
-            on: quiet.clone(),
-            off: quiet.clone(),
+            on: vec![(quiet.clone(), 4000.0), (quiet.clone(), 8000.0)],
+            off: vec![(quiet.clone(), 6000.0)],
             idle: quiet,
-            on_rpm: 8000.0,
-            off_rpm: 6000.0,
             idle_rpm: 1600.0,
             low: 1600.0,
             high: 10000.0,
@@ -1348,6 +1420,89 @@ mod revs_tests {
         }
         assert!((r.rpm - 1600.0).abs() < 50.0, "{}", r.rpm);
         let mix = r.mix(&l);
-        assert!(mix[2].0 > 0.7 && mix[0].0 < 0.01);
+        assert!(mix.last().unwrap().0 > 0.7 && mix[0].0 < 0.01 && mix[1].0 < 0.01);
+        // Between two loops, both are heard, at equal power.
+        let w = blend(&l.on, 5657.0);
+        assert!((w[0] - w[1]).abs() < 0.01 && (w[0] * w[0] + w[1] * w[1] - 1.0).abs() < 0.01);
     }
+}
+
+/// The flowing water a river's banks sound with, and a bike's splash:
+/// made here, so they need no files.
+pub const RIVER: &str = "openmcm2-river.wav";
+pub const SPLASH: &str = "openmcm2-splash.wav";
+
+/// A small steady noise source.
+struct Noise(u32);
+
+impl Noise {
+    fn next(&mut self) -> f32 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 17;
+        self.0 ^= self.0 << 5;
+        self.0 as f32 / u32::MAX as f32 * 2.0 - 1.0
+    }
+}
+
+/// Six seconds of running water, looping: rumbling low noise with the
+/// chuckle of small bubbles over it, its ends faded into each other.
+fn river_sound() -> Sound {
+    let rate = 22050u32;
+    let n = rate as usize * 6;
+    let mut noise = Noise(0x1234_5678);
+    let (mut low, mut mid, mut band) = (0.0f32, 0.0f32, 0.0f32);
+    let mut raw = Vec::with_capacity(n);
+    let mut bubbles: Vec<(usize, f32, f32)> = Vec::new();
+    for i in 0..n {
+        let w = noise.next();
+        low += (w - low) * 0.02;
+        mid += (w - mid) * 0.25;
+        band += (mid - band) * 0.12;
+        let t = i as f32 / rate as f32;
+        // The flow swells and settles.
+        let swell = 0.75 + 0.25 * (t * 0.9).sin() * (t * 0.37 + 1.0).sin();
+        let mut v = low * 2.6 * swell + (mid - band) * 0.55 * swell;
+        // Now and then a bubble: a quick falling tone.
+        if noise.next() > 0.9985 {
+            bubbles.push((i, 500.0 + (noise.next() + 1.0) * 700.0, 0.08 + (noise.next() + 1.0) * 0.05));
+        }
+        bubbles.retain(|&(at, f, a)| {
+            let age = (i - at) as f32 / rate as f32;
+            if age > 0.06 {
+                return false;
+            }
+            v += (std::f32::consts::TAU * f * (1.0 + age * 6.0) * age).sin() * a * (1.0 - age / 0.06);
+            true
+        });
+        raw.push(v);
+    }
+    // Loop: the last second faded into the first.
+    let fade = rate as usize;
+    let mut samples: Vec<f32> = raw[..n - fade].to_vec();
+    for k in 0..fade {
+        let t = k as f32 / fade as f32;
+        samples[k] = raw[k] * t + raw[n - fade + k] * (1.0 - t);
+    }
+    let peak = samples.iter().fold(0.0f32, |m, v| m.max(v.abs())).max(1e-3);
+    Sound { rate, channels: 1, samples: samples.into_iter().map(|v| v / peak * 0.6).collect() }
+}
+
+/// A splash: a burst of hiss falling away, with a low slap at its start.
+fn splash_sound() -> Sound {
+    let rate = 22050u32;
+    let n = (rate as f32 * 0.7) as usize;
+    let mut noise = Noise(0x9e37_79b9);
+    let (mut a, mut b) = (0.0f32, 0.0f32);
+    let samples = (0..n)
+        .map(|i| {
+            let t = i as f32 / rate as f32;
+            let w = noise.next();
+            a += (w - a) * 0.45;
+            b += (a - b) * 0.08;
+            let hiss = (a - b) * (-t * 7.0).exp() * (1.0 - (-t * 120.0).exp());
+            let slap = (std::f32::consts::TAU * 90.0 * t).sin() * (-t * 30.0).exp() * 0.5;
+            (hiss * 1.4 + slap) * 0.8
+        })
+        .collect();
+    Sound { rate, channels: 1, samples }
 }

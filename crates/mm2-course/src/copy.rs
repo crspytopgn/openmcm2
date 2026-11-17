@@ -421,12 +421,29 @@ pub fn files(
     let mut out = Vec::new();
     let mut tdf = Some(tdf);
     let mut wpt = Some(wpt);
+    // The plants laid over the track's own, the rivers and the flights,
+    // after the track's own animations.
+    let scn = src.files.iter().find(|(n, _)| n.to_ascii_lowercase().ends_with(".scn"));
+    let stem = scn.map_or(c.stem(), |(n, _)| n[..n.len() - 4].to_string());
+    let anims = scn.map_or(0, |(_, d)| {
+        mm2_formats::scn::Ini::parse(&String::from_utf8_lossy(d))
+            .section("Animations")
+            .and_then(|s| s.get("NumberOfAnimations"))
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(0)
+    });
+    let own_esb = src.files.iter().find(|(n, _)| n.to_ascii_lowercase().ends_with(".esb")).map(|(n, d)| (n.as_str(), d.as_slice()));
+    let (living, flights) = crate::env::living(c, field, &stem, own_esb, anims + 1);
+    let replaced: Vec<String> = living.iter().map(|(n, _)| n.to_ascii_lowercase()).collect();
     for (name, data) in &src.files {
         let l = name.to_ascii_lowercase();
+        if replaced.contains(&l) {
+            continue;
+        }
         if l.ends_with(".trn") {
             out.push((name.clone(), terrain.clone()));
         } else if l.ends_with(".scn") {
-            out.push((name.clone(), scene(c, src, field, added, redrawn, start, data).into_bytes()));
+            out.push((name.clone(), scene(c, src, field, added, redrawn, start, data, anims, &flights).into_bytes()));
         } else if l.ends_with(".tdf") {
             if *name == src.tdf {
                 let data = if redrawn { (tdf.take().unwrap())() } else { data.clone() };
@@ -445,6 +462,7 @@ pub fn files(
     if !laps && (redrawn || src.wpt.is_none()) {
         out.push((new_wpt, (wpt.take().unwrap())().into_bytes()));
     }
+    out.extend(living);
     Ok(out)
 }
 
@@ -458,6 +476,8 @@ fn scene(
     redrawn: bool,
     start: ([f32; 2], [f32; 2]),
     data: &[u8],
+    anims: usize,
+    flights: &[String],
 ) -> String {
     let text = String::from_utf8_lossy(data);
     let mut out = String::new();
@@ -501,6 +521,10 @@ fn scene(
                 out += &format!("DefaultStartDirection={:.3},0.0,{:.3}\r\n", d[0], d[1]);
                 continue;
             }
+            ("animations", "numberofanimations") => {
+                out += &format!("NumberOfAnimations={}\r\n", anims + flights.len());
+                continue;
+            }
             ("staticmodels", "numberofstaticmodels") => {
                 models = value.parse().unwrap_or(0);
                 counted = true;
@@ -529,6 +553,15 @@ fn scene(
     }
     for (k, m) in added.iter().enumerate() {
         out += &crate::env::model_section(models + k + 1, m);
+    }
+    if !flights.is_empty() {
+        if anims == 0 {
+            out += &format!("\r\n[Animations]\r\nNumberOfAnimations={}\r\n", flights.len());
+        }
+        out += "\r\n";
+        for f in flights {
+            out += f;
+        }
     }
     out
 }

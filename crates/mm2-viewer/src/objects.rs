@@ -617,6 +617,12 @@ impl ObjectMesh {
                         .then(|| (info.name.clone(), motion, info.fps, info.looping))
                 })
                 .collect();
+            // Without the original's motions the free rider sits on its
+            // bike in a pose of the pack's own, rather than standing.
+            let mut motions = motions;
+            if motions.is_empty() && crate::freepack::is_rider(&a.model) {
+                motions.push(("Ride".to_string(), crate::freepack::seated_motion(), 1.0, true));
+            }
             let named = |name: &String| motions.iter().position(|m| m.0.eq_ignore_ascii_case(name));
             let motion = a
                 .motion

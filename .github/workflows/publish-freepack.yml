@@ -28,6 +28,10 @@ on:
       leave_out:
         description: "Folders of the source to leave out of the pack, space separated (e.g. TERAFORM)"
         default: ""
+      sounds:
+        description: "Remake sound/ from the CC0 recordings (tools/freepack/make_sounds.py)"
+        type: boolean
+        default: false
       dry_run:
         description: "Only pack it and list what would change, upload nothing"
         type: boolean
@@ -38,6 +42,7 @@ on:
       source: { type: string, default: pack.zip }
       branch: { type: string, default: "" }
       leave_out: { type: string, default: "" }
+      sounds: { type: boolean, default: false }
       dry_run: { type: boolean, default: false }
 
 permissions:
@@ -76,6 +81,11 @@ jobs:
             case "$d" in */*|..*|"") echo "leave_out takes top folder names only: $d"; exit 1;; esac
             rm -rf "$PACK/$d"
           done
+          if [ "${{ inputs.sounds }}" = "true" ]; then
+            sudo apt-get install -y -q python3-numpy
+            rm -rf "$PACK/sound"
+            python3 tools/freepack/make_sounds.py "$PACK" "$RUNNER_TEMP/sounds"
+          fi
           python3 tools/freepack/pack.py "$PACK" out "${{ inputs.version }}"
 
       - name: Set up rclone for R2
