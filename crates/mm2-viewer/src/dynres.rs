@@ -13,6 +13,11 @@
 //! of how much time it had to spare. A step up is tried after a quiet
 //! spell; if it comes in late it is undone within half a second, and the
 //! next try waits twice as long.
+//!
+//! Where even the smallest scene comes late for a few seconds, a step of
+//! the costliest effects is set aside (crate::graphics::Enhanced::shed_to),
+//! and given back after a long spell of frames with time to spare. A
+//! browser keeps what it learned for the next time (web.rs `auto_shed`).
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -80,6 +85,14 @@ const FIRST_WAIT: f32 = 6.0;
 const LONGEST_WAIT: f32 = 120.0;
 /// A step up kept this long has held, s.
 const TRIAL: f32 = 4.0;
+/// Late this long at the smallest size sets a step of effects aside, s.
+const SHED_AFTER: f32 = 3.0;
+/// Time to spare this long at the preset's size or bigger gives a step
+/// back, s; doubled each time one given back is soon set aside again.
+const GIVE_BACK: f32 = 45.0;
+const LONGEST_GIVE_BACK: f32 = 600.0;
+/// A step given back and set aside again within this long was too much, s.
+const TOO_SOON: f32 = 20.0;
 
 #[derive(Debug, Clone)]
 pub struct Governor {
@@ -93,6 +106,20 @@ pub struct Governor {
     wait: f32,
     /// Stepped up and not yet held for [`TRIAL`].
     trying: bool,
+    /// Steps of effects set aside now, and the fewest (those the race
+    /// was loaded without, which cannot come back).
+    pub shed: u8,
+    pub least_shed: u8,
+    /// Late at the smallest size, and with time to spare, for so long, s.
+    starved: f32,
+    roomy: f32,
+    /// How long to have time to spare before giving a step back, s, and
+    /// since the last one was, s.
+    give_back: f32,
+    since_given: f32,
+    /// Kept time with nothing more set aside than the race was loaded
+    /// with, long enough to say the next start can set one fewer aside.
+    pub spare: bool,
 }
 
 impl Default for Governor {
@@ -103,6 +130,13 @@ impl Default for Governor {
             since: 0.0,
             wait: FIRST_WAIT,
             trying: false,
+            shed: 0,
+            least_shed: 0,
+            starved: 0.0,
+            roomy: 0.0,
+            give_back: GIVE_BACK,
+            since_given: f32::MAX,
+            spare: false,
         }
     }
 }
@@ -142,7 +176,39 @@ impl Governor {
             self.trying = true;
             self.changed();
         }
+        self.effects(real);
         STEPS[self.step]
+    }
+
+    /// Sets a step of effects aside after [`SHED_AFTER`] late at the
+    /// smallest size, and gives one back after a long spell with time to
+    /// spare at the preset's size or bigger.
+    fn effects(&mut self, real: f32) {
+        self.since_given += real;
+        let smallest = self.step + 1 == STEPS.len();
+        self.starved = if smallest && self.late > LATE { self.starved + real } else { 0.0 };
+        self.roomy = if self.step <= PRESET && self.late < ON_TIME { self.roomy + real } else { 0.0 };
+        if self.starved >= SHED_AFTER && self.shed < crate::graphics::MOST_SHED {
+            if self.since_given < TOO_SOON {
+                self.give_back = (self.give_back * 2.0).min(LONGEST_GIVE_BACK);
+            }
+            self.shed += 1;
+            self.starved = 0.0;
+            self.roomy = 0.0;
+            // The effects cost more than the pixels: back to the preset's
+            // size, and down again from there if it is still too much.
+            self.step = PRESET;
+            self.changed();
+        } else if self.roomy >= self.give_back {
+            self.roomy = 0.0;
+            if self.shed > self.least_shed {
+                self.shed -= 1;
+                self.since_given = 0.0;
+                self.changed();
+            } else if self.least_shed > 0 {
+                self.spare = true;
+            }
+        }
     }
 
     fn changed(&mut self) {
@@ -153,9 +219,24 @@ impl Governor {
 
     /// Feeds a frame and puts the share in use for the drawing.
     pub fn apply(&mut self, real: f32, wanted: f32) {
+        // Set aside in an earlier race, or at the start.
+        let (now, least) = (crate::graphics::shed(), crate::graphics::enhanced().map_or(0, |e| e.shed));
+        self.least_shed = least;
+        self.shed = self.shed.max(now).max(least);
+        let spare = self.spare;
         let k = self.frame(real, wanted, room());
         if k != scale() {
             set_scale(k);
+        }
+        if self.shed != now {
+            eprintln!("dynamic resolution: {} step(s) of effects set aside", self.shed);
+            crate::graphics::set_shed(self.shed);
+            #[cfg(target_arch = "wasm32")]
+            crate::web::auto_shed(self.shed);
+        }
+        if self.spare && !spare {
+            #[cfg(target_arch = "wasm32")]
+            crate::web::auto_shed(self.least_shed - 1);
         }
     }
 }
@@ -226,6 +307,30 @@ mod tests {
         run(&mut g, 20.0, BEAT * 2.0, 1.0);
         assert!(STEPS[g.step] < 1.0);
         assert_eq!(run(&mut g, 120.0, BEAT * 0.5, 1.0).0, 1.0);
+    }
+
+    #[test]
+    fn sets_effects_aside_when_the_smallest_scene_is_too_much_and_gives_them_back() {
+        let mut g = Governor::default();
+        // Three times too much at full size: 0.6 each way still comes late.
+        run(&mut g, 30.0, BEAT * 3.0, 1.0);
+        assert!(g.shed >= 1, "{}", g.shed);
+        // Lighter now (as if the effects cost what they did): kept time
+        // for long enough, a step comes back.
+        let before = g.shed;
+        run(&mut g, 200.0, BEAT * 0.3, 1.0);
+        assert!(g.shed < before);
+        // None set aside when the frames keep time.
+        let mut g = Governor::default();
+        run(&mut g, 60.0, BEAT * 0.9, 1.0);
+        assert_eq!(g.shed, 0);
+    }
+
+    #[test]
+    fn says_when_the_next_start_can_set_fewer_aside() {
+        let mut g = Governor { shed: 2, least_shed: 2, ..Governor::default() };
+        run(&mut g, 120.0, BEAT * 0.3, 1.0);
+        assert!(g.spare && g.shed == 2);
     }
 
     #[test]

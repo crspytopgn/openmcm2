@@ -47,7 +47,7 @@ function presetHas(quality, name) {
   return !off.includes(name) && UPGRADES.some(([n, , on]) => n === name && on);
 }
 
-const ABOUT_QUALITY = "A preset for the effects below. Auto looks at your graphics card when the game starts and picks Low, Medium or High for it, and while you race it draws the 3D scene a little smaller if frames start coming late. Medium suits most computers in a browser; High needs a fast one. Changing an effect below picks Medium with that change.";
+const ABOUT_QUALITY = "A preset for the effects below. Auto looks at your graphics card when the game starts and picks Low, Medium or High for it. While you race it draws the 3D scene a little smaller if frames start coming late, and if that isn't enough it turns the costliest effects off, one step at a time, giving them back once there is time to spare. It remembers what this computer needed for next time. Medium suits most computers in a browser; High needs a fast one. Changing an effect below picks Medium with that change.";
 const ABOUT_TIME = "Where the sun is: the track's own, or an hour of your choice.";
 const ABOUT_WEATHER = "Clear, overcast or rain, for looks only: the riding is the same.";
 const ABOUT_DETAIL = "How strongly the grain of the photo ground shows.";
@@ -95,6 +95,23 @@ export const EXTRAS = [
     { key: "no_list_races", flag: "no-list-races", label: "Keep my races out of the server browser", keep: true, about: "Unless you tick this, a race you host shows in everyone's Host or Join list (Multiplayer) with its name, track and riders, so players anywhere can join with a click. Ticked, only people you send the race code or invite link to can join." },
   ]],
 ];
+
+/// With Auto: how many steps of the costliest effects the game found it
+/// had to set aside on this computer (0 to 3), kept for the next start.
+const SHED_KEY = "mm2shed";
+export function learnedShed() {
+  try {
+    const n = parseInt(localStorage.getItem(SHED_KEY) || "0", 10);
+    return n >= 0 && n <= 3 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+export function learnShed(n) {
+  try {
+    localStorage.setItem(SHED_KEY, String(Math.max(0, Math.min(3, n | 0))));
+  } catch {}
+}
 
 /// Picks a quality preset, its effects with it.
 export function setQuality(s, q) {
@@ -161,6 +178,12 @@ export function args(s) {
     // Auto picks the effects itself.
     if (s.quality !== "auto") for (const [n] of UPGRADES) {
       if (!!s.upgrades[n] !== presetHas(s.quality, n)) list.push(s.upgrades[n] ? n : `no-${n}`);
+    }
+    // Auto: the effects this computer needed set aside last time
+    // (the game tells the page, mm2page.autoShed), so it starts there.
+    if (s.quality === "auto") {
+      const shed = learnedShed();
+      if (shed > 0) list.push(`shed=${shed}`);
     }
     if (s.time) list.push(`time=${s.time}`);
     if (s.weather !== "clear") list.push(`weather=${s.weather}`);

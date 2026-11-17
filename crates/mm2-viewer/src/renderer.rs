@@ -129,6 +129,8 @@ pub struct TerrainRenderer {
     blocks: Vec<(Vec3, Vec3, std::ops::Range<u32>)>,
     /// The runs of indices in view this frame.
     runs: Vec<std::ops::Range<u32>>,
+    /// The blocks in view by distance, kept between frames for its room.
+    nearest: Vec<(f32, std::ops::Range<u32>)>,
     globals: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     /// The terrain's textures, tile map and sampler, kept to rebind with
@@ -652,6 +654,7 @@ impl TerrainRenderer {
             indices,
             blocks,
             runs: Vec::new(),
+            nearest: Vec::new(),
             globals,
             bind_group,
             terrain_views,
@@ -1143,10 +1146,20 @@ impl TerrainRenderer {
             }
         });
         self.taa_last = taa.then(|| (plain * camera.view(), camera.position, camera.forward()));
-        crate::cull::runs(
-            self.blocks.iter().filter(|b| seen.sees(b.0, b.1)).map(|b| b.2.clone()),
-            &mut self.runs,
+        // Nearest first: the ground's shading is the dearest part of an
+        // enhanced frame, and a block hidden behind a nearer hill then
+        // fails the depth test before it is shaded. The ground never lies
+        // over itself at one depth, so the picture is the same.
+        let eye = camera.position;
+        self.nearest.clear();
+        self.nearest.extend(
+            self.blocks
+                .iter()
+                .filter(|b| seen.sees(b.0, b.1))
+                .map(|b| (eye.clamp(b.0, b.1).distance_squared(eye), b.2.clone())),
         );
+        self.nearest.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.start.cmp(&b.1.start)));
+        crate::cull::runs(self.nearest.iter().map(|(_, r)| r.clone()), &mut self.runs);
         let side = self.enhanced.as_ref().map_or(crate::enhance::SHADOW_SIDE, |e| e.shared.side);
         let (cascades, texels) = crate::enhance::cascades(camera.view(), camera.fovy(aspect), aspect, lights.to_sun, side);
         // The dust clouds as the sun sees them, round those near the eye.
@@ -1533,13 +1546,6 @@ impl TerrainRenderer {
                 .as_ref()
                 .filter(|_| showing.is_some_and(|e| e.grass))
                 .and_then(|e| Some((e.grass.as_ref()?, &e.group, &e.shared.group)));
-            if let Some(sky) = self.sky.as_ref().filter(|_| self.sky_on) {
-                match shared {
-                    Some((group, ..)) => sky.draw_enhanced(&mut pass, group, real_sky),
-                    None => sky.draw(&mut pass),
-                }
-            }
-            mark_pass!(self.gpu_timer, &mut pass, "scene: sky");
             match shared {
                 Some((group, terrain, own)) => {
                     pass.set_pipeline(terrain);
@@ -1586,6 +1592,21 @@ impl TerrainRenderer {
                 }
             }
             mark_pass!(self.gpu_timer, &mut pass, "scene: objects");
+            // The sky last of the solid scene, squeezed to the far depth so
+            // it only colours what nothing nearer covered (each sample, as
+            // before): it was drawn first, under it all, and most of it then
+            // hidden. What is laid over it after (water, dust, particles) is
+            // laid over the same colours.
+            if let Some(sky) = self.sky.as_ref().filter(|_| self.sky_on) {
+                let (w, h) = if self.enhanced.is_some() { scene } else { (width, height) };
+                pass.set_viewport(0.0, 0.0, w as f32, h as f32, 1.0, 1.0);
+                match shared {
+                    Some((group, ..)) => sky.draw_enhanced(&mut pass, group, real_sky),
+                    None => sky.draw(&mut pass),
+                }
+                pass.set_viewport(0.0, 0.0, w as f32, h as f32, 0.0, 1.0);
+            }
+            mark_pass!(self.gpu_timer, &mut pass, "scene: sky");
             if let Some(water) = &self.water {
                 water.set_time(queue, time, day.as_ref().map_or(1.0, |d| 1.0 - d.night));
                 water.draw(&mut pass, shared.map(|s| s.0));
