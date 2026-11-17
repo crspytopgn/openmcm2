@@ -355,6 +355,62 @@ pub fn animated(name: &str) -> Option<(&'static str, String)> {
     Some((template, shape))
 }
 
+/// The free rider's own seated riding pose, for when the original's
+/// motions aren't there (the free graphics on their own): each of
+/// [`RIDER_FRAMES`]' look, up and position relative to its parent. Made
+/// for the pack (hips on the seat, feet on the pegs, hands on the grips,
+/// worked out from the free bikes' seat, pegs and bars), not taken from
+/// the game's motions.
+const SEATED: [([f32; 3], [f32; 3], [f32; 3]); 16] = [
+    // Pelvis
+    ([0.0000, -0.2419, 0.9703], [0.0000, 0.9703, 0.2419], [0.0000, 3.6200, -1.0200]),
+    // LwrTorso
+    ([0.0000, -0.2079, 0.9781], [0.0000, 0.9781, 0.2079], [0.0000, 0.1780, -0.1470]),
+    // UprLegL
+    ([-0.2565, 0.8730, 0.4148], [0.4396, 0.4875, -0.7544], [-0.2760, 0.0000, 0.0000]),
+    // UprLegR
+    ([0.2565, 0.8730, 0.4148], [-0.4396, 0.4875, -0.7544], [0.2760, 0.0000, 0.0000]),
+    // UprTorso
+    ([0.0000, -0.2756, 0.9613], [0.0000, 0.9613, 0.2756], [0.0000, 0.6210, 0.0000]),
+    // Head
+    ([0.0000, 0.7431, 0.6691], [0.0000, 0.6691, -0.7431], [0.0000, 1.2170, 0.0000]),
+    // UprArmL
+    ([0.3310, 0.1371, 0.9336], [0.6679, 0.6649, -0.3344], [-0.6500, 0.9250, 0.0620]),
+    // UprArmR
+    ([-0.3310, 0.1371, 0.9336], [-0.6679, 0.6649, -0.3344], [0.6500, 0.9250, 0.0620]),
+    // LwrArmL
+    ([0.1848, 0.9773, -0.1034], [-0.1877, -0.0682, -0.9799], [-0.1910, -1.0890, -0.0100]),
+    // HandL
+    ([-0.7064, 0.3086, 0.6370], [0.5442, 0.8123, 0.2099], [-0.1510, -0.8620, 0.0670]),
+    // LwrArmR
+    ([-0.1848, 0.9773, -0.1034], [0.1877, -0.0682, -0.9799], [0.1910, -1.0890, -0.0100]),
+    // HandR
+    ([0.7064, 0.3086, 0.6370], [-0.5442, 0.8123, 0.2099], [0.1510, -0.8620, 0.0670]),
+    // LwrLegL
+    ([0.0008, -0.9803, 0.1976], [0.0006, 0.1976, 0.9803], [0.0010, -1.4700, 0.1330]),
+    // FootL
+    ([0.5616, 0.5762, 0.5938], [-0.1925, 0.7890, -0.5835], [0.0010, -1.3770, -0.1430]),
+    // LwrLegR
+    ([-0.0008, -0.9803, 0.1976], [-0.0006, 0.1976, 0.9803], [-0.0010, -1.4700, 0.1330]),
+    // FootR
+    ([-0.5616, 0.5762, 0.5938], [0.1925, 0.7890, -0.5835], [-0.0010, -1.3770, -0.1430]),
+];
+
+/// The free rider's seated pose as a one-frame motion (see [`SEATED`]).
+pub fn seated_motion() -> mm2_formats::anim::Motion {
+    let keys = SEATED
+        .iter()
+        .enumerate()
+        .map(|(frame, &(look, up, position))| mm2_formats::anim::Key { frame, look, up, position })
+        .collect();
+    mm2_formats::anim::Motion { frames: vec![keys] }
+}
+
+/// Whether `name` (an animated model's `.mcf`) is one of the pack's riders.
+pub fn is_rider(name: &str) -> bool {
+    animated(name).is_some_and(|(template, _)| template.ends_with("Rider.mcf"))
+}
+
 /// Whether `name` is one of the pack's liveries or outfits.
 pub fn is_paint(name: &str) -> bool {
     rides().paints.contains_key(&stem_of(name))
