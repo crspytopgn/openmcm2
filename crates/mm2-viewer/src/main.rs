@@ -5478,6 +5478,13 @@ impl ApplicationHandler for App {
             WindowEvent::Focused(on) => {
                 eprintln!("{now:.2}s: the game {} focus", if on { "has" } else { "lost" });
                 self.quiet = !on;
+                // Keys let go while another window had focus (Alt+Tab,
+                // another browser tab) send no release here, so they
+                // would stay held: the gas or a lean stuck on, or Alt
+                // still down so the next Enter goes full screen.
+                if !on {
+                    self.keys.clear();
+                }
                 // An extra: the original played on in the background.
                 if tweaks::get().mute_in_background {
                     self.audio.set_muted(!on);
