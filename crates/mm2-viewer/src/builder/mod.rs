@@ -17,7 +17,7 @@ use glam::{Mat4, Vec3, Vec4};
 use mm2_course::bake::{self, Field};
 use mm2_course::kit::Kind;
 use mm2_course::path::Path as Line;
-use mm2_course::{Brush, Course, LandKind, Mode, Object, Paint, Point, Stroke, Surface};
+use mm2_course::{Brush, Course, Craft, Flight, Flora, LandKind, Mode, Object, Paint, Planting, Point, River, Stroke, Surface};
 use panel::{Input, Painter};
 use std::path::{Path, PathBuf};
 
@@ -108,16 +108,20 @@ enum Tool {
     Shape,
     Paint,
     Objects,
+    Nature,
+    Motion,
     Land,
 }
 
-const TOOLS: [(Tool, &str, &str); 6] = [
+const TOOLS: [(Tool, &str, &str); 8] = [
     (Tool::Line, "Line", "Draw the racing line. Click the ground to add points, drag them to move. (1)"),
     (Tool::Jumps, "Jumps", "Drop jumps, whoops and rollers onto the line from the kit. (2)"),
     (Tool::Shape, "Shape", "Raise, lower, smooth and flatten the ground with a brush. (3)"),
     (Tool::Paint, "Paint", "Paint dirt, grass, sand, mud or hardpack. Each grips differently. (4)"),
     (Tool::Objects, "Objects", "Place hay bales, banners, tents and more. (5)"),
-    (Tool::Land, "Land", "The land under the track, the sky, the sun and the track's name. (6)"),
+    (Tool::Nature, "Nature", "Paint trees, bushes and grass, and draw rivers to splash through. (6)"),
+    (Tool::Motion, "Flying", "Planes, a helicopter or the blimp flying round paths you draw over the track. (7)"),
+    (Tool::Land, "Land", "The land under the track, the sky, the sun and the track's name. (8)"),
 ];
 
 /// Objects to place: name, model, about.
@@ -188,8 +192,20 @@ enum Hover {
     Line(f32),
     Jump(usize),
     Object(usize),
+    /// A river's point: the river, the point.
+    River(usize, usize),
+    /// A flight path's point.
+    Flight(usize, usize),
     /// Bare ground.
     Ground,
+}
+
+/// What the Nature tool does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NatureMode {
+    Plant,
+    Clear,
+    River,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -199,6 +215,8 @@ enum Drag {
     /// A jump, held this far from its start.
     Jump(usize, f32),
     Object(usize),
+    River(usize, usize),
+    Flight(usize, usize),
     Brush,
     Turn,
     Pan,
@@ -243,6 +261,18 @@ pub struct Builder {
     surface: Surface,
     paint_radius: f32,
     object: usize,
+    nature: NatureMode,
+    flora: Flora,
+    plant_radius: f32,
+    plant_density: f32,
+    /// The river and the flight path being drawn.
+    river: Option<usize>,
+    flight: Option<usize>,
+    craft: Craft,
+    /// The plants as the preview's ground grows them (where, which kind),
+    /// and when they were last grown.
+    plants: Vec<([f32; 3], Flora)>,
+    plants_at: f32,
     /// The window's size, and the pointer on the builder's screen (480
     /// high, as wide as the window's shape makes it).
     size: (u32, u32),
@@ -310,6 +340,15 @@ impl Builder {
             surface: Surface::Mud,
             paint_radius: 25.0,
             object: 1,
+            nature: NatureMode::Plant,
+            flora: Flora::Mixed,
+            plant_radius: 60.0,
+            plant_density: 0.6,
+            river: None,
+            flight: None,
+            craft: Craft::Biplane,
+            plants: Vec::new(),
+            plants_at: -10.0,
             size: (1280, 720),
             pointer: (0.0, 0.0),
             ground: None,
@@ -411,6 +450,13 @@ impl Builder {
                 None => v.set_field(device, queue, &field, None),
             }
         }
+        // The plants, grown again while nothing is dragged (or now and
+        // then while painting them).
+        if self.drag == Drag::None || self.now - self.plants_at > 0.4 {
+            let species = mm2_course::nature::species(&self.course);
+            self.plants = mm2_course::nature::plants(&self.course, &field).iter().map(|p| (p.at, species[p.species as usize].flora)).collect();
+            self.plants_at = self.now;
+        }
         self.field = Some(field);
         self.dirty = false;
         self.baked_at = self.now;
@@ -439,6 +485,8 @@ impl Builder {
         if let Some(c) = self.history.pop() {
             self.future.push(std::mem::replace(&mut self.course, c));
             self.picked = None;
+            self.river = None;
+            self.flight = None;
             self.changed();
             self.say("Undone");
         }
@@ -714,6 +762,19 @@ impl Builder {
                 self.picked = Some(i);
                 self.changed();
             }
+            (Tool::Motion, Hover::Flight(f, i)) => {
+                self.remember();
+                let p = &mut self.course.flights[f].points[i];
+                p[1] = (p[1] + lines * 10.0 * step).clamp(20.0, 1500.0);
+                self.flight = Some(f);
+                self.changed();
+            }
+            (Tool::Nature, Hover::River(r, _)) => {
+                self.remember();
+                let r = &mut self.course.rivers[r];
+                r.width = (r.width + lines * 2.0 * step).clamp(6.0, 120.0);
+                self.changed();
+            }
             (Tool::Objects, Hover::Object(i)) => {
                 self.remember();
                 self.course.objects[i].yaw = (self.course.objects[i].yaw + lines * 15.0 * step).rem_euclid(360.0);
@@ -783,7 +844,7 @@ impl Builder {
         }
         match code {
             K::Escape => {
-                if self.popup.take().is_none() {
+                if self.popup.take().is_none() && self.river.take().is_none() && self.flight.take().is_none() {
                     if self.picked.take().is_none() {
                         self.save();
                         self.ask = Some(Ask::Exit);
@@ -795,7 +856,9 @@ impl Builder {
             K::Digit3 => self.tool = Tool::Shape,
             K::Digit4 => self.tool = Tool::Paint,
             K::Digit5 => self.tool = Tool::Objects,
-            K::Digit6 => self.tool = Tool::Land,
+            K::Digit6 => self.tool = Tool::Nature,
+            K::Digit7 => self.tool = Tool::Motion,
+            K::Digit8 => self.tool = Tool::Land,
             K::KeyR => self.bake_track(true),
             K::Tab => self.top_view(),
             K::KeyF => self.frame_track(),
@@ -848,6 +911,26 @@ impl Builder {
             Hover::Object(i) if self.tool == Tool::Objects => {
                 self.remember();
                 self.course.objects.remove(i);
+                self.changed();
+                true
+            }
+            Hover::River(r, i) if self.tool == Tool::Nature => {
+                self.remember();
+                self.course.rivers[r].points.remove(i);
+                if self.course.rivers[r].points.is_empty() {
+                    self.course.rivers.remove(r);
+                    self.river = None;
+                }
+                self.changed();
+                true
+            }
+            Hover::Flight(f, i) if self.tool == Tool::Motion => {
+                self.remember();
+                self.course.flights[f].points.remove(i);
+                if self.course.flights[f].points.is_empty() {
+                    self.course.flights.remove(f);
+                    self.flight = None;
+                }
                 self.changed();
                 true
             }
@@ -938,8 +1021,79 @@ impl Builder {
                     self.changed();
                 }
             },
+            Tool::Nature => match (self.nature, self.hover) {
+                (NatureMode::River, Hover::River(r, i)) => {
+                    self.remember();
+                    self.river = Some(r);
+                    self.drag = Drag::River(r, i);
+                }
+                (NatureMode::River, _) => {
+                    self.remember();
+                    match self.river.filter(|&r| r < self.course.rivers.len()) {
+                        Some(r) => self.course.rivers[r].points.push([g.x, g.z]),
+                        None => {
+                            self.course.rivers.push(River { points: vec![[g.x, g.z]], width: 28.0, depth: 2.5 });
+                            self.river = Some(self.course.rivers.len() - 1);
+                        }
+                    }
+                    let r = self.river.unwrap();
+                    self.drag = Drag::River(r, self.course.rivers[r].points.len() - 1);
+                    self.changed();
+                }
+                _ => {
+                    self.remember();
+                    let clear = self.nature == NatureMode::Clear;
+                    self.course.plants.push(Planting { flora: self.flora, radius: self.plant_radius, density: self.plant_density, clear, everywhere: false, dabs: vec![[g.x, g.z]] });
+                    self.drag = Drag::Brush;
+                    self.changed();
+                }
+            },
+            Tool::Motion => match self.hover {
+                Hover::Flight(f, i) => {
+                    self.remember();
+                    self.flight = Some(f);
+                    self.craft = self.course.flights[f].craft;
+                    self.drag = Drag::Flight(f, i);
+                }
+                _ => {
+                    self.remember();
+                    let height = self.craft.height();
+                    match self.flight.filter(|&f| f < self.course.flights.len()) {
+                        Some(f) => {
+                            // After the point nearest, or at the end.
+                            let at = self.flight_insert(f, g);
+                            self.course.flights[f].points.insert(at, [g.x, height, g.z]);
+                            self.drag = Drag::Flight(f, at);
+                        }
+                        None => {
+                            self.course.flights.push(Flight { craft: self.craft, points: vec![[g.x, height, g.z]], speed: self.craft.speed() });
+                            let f = self.course.flights.len() - 1;
+                            self.flight = Some(f);
+                            self.drag = Drag::Flight(f, 0);
+                        }
+                    }
+                    self.changed();
+                }
+            },
             Tool::Land => self.drag = Drag::Turn,
         }
+    }
+
+    /// Where a new point at `g` goes in flight `f`'s loop: where it
+    /// lengthens the loop least.
+    fn flight_insert(&self, f: usize, g: Vec3) -> usize {
+        let pts = &self.course.flights[f].points;
+        if pts.len() < 3 {
+            return pts.len();
+        }
+        let d = |a: [f32; 3], b: [f32; 3]| ((a[0] - b[0]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+        let q = [g.x, 0.0, g.z];
+        (0..pts.len())
+            .min_by(|&i, &j| {
+                let cost = |k: usize| d(pts[k], q) + d(q, pts[(k + 1) % pts.len()]) - d(pts[k], pts[(k + 1) % pts.len()]);
+                cost(i).total_cmp(&cost(j))
+            })
+            .map_or(pts.len(), |k| k + 1)
     }
 
     /// Which of the player's points comes before path sample `i`.
@@ -1006,6 +1160,20 @@ impl Builder {
                     self.dirty = true;
                 }
             }
+            Drag::River(r, i) => {
+                if let Some(p) = self.course.rivers.get_mut(r).and_then(|r| r.points.get_mut(i)) {
+                    if (p[0] - g.x).abs() + (p[1] - g.z).abs() > 0.5 {
+                        *p = [g.x, g.z];
+                        self.dirty = true;
+                    }
+                }
+            }
+            Drag::Flight(f, i) => {
+                if let Some(p) = self.course.flights.get_mut(f).and_then(|f| f.points.get_mut(i)) {
+                    p[0] = g.x;
+                    p[2] = g.z;
+                }
+            }
             Drag::Brush => {
                 let spacing = |r: f32| (r * 0.25).max(2.0);
                 match self.tool {
@@ -1020,6 +1188,15 @@ impl Builder {
                     }
                     Tool::Paint => {
                         if let Some(s) = self.course.paint.last_mut() {
+                            let last = *s.dabs.last().unwrap();
+                            if ((last[0] - g.x).powi(2) + (last[1] - g.z).powi(2)).sqrt() >= spacing(s.radius) {
+                                s.dabs.push([g.x, g.z]);
+                                self.dirty = true;
+                            }
+                        }
+                    }
+                    Tool::Nature => {
+                        if let Some(s) = self.course.plants.last_mut() {
                             let last = *s.dabs.last().unwrap();
                             if ((last[0] - g.x).powi(2) + (last[1] - g.z).powi(2)).sqrt() >= spacing(s.radius) {
                                 s.dabs.push([g.x, g.z]);
@@ -1160,6 +1337,27 @@ impl Builder {
                     }
                 }
             }
+            Tool::Nature if self.nature == NatureMode::River => {
+                for (r, river) in self.course.rivers.iter().enumerate() {
+                    for (i, p) in river.points.iter().enumerate() {
+                        if near_px(Vec3::new(p[0], self.height(p[0], p[1]), p[1]), 9.0) {
+                            return Hover::River(r, i);
+                        }
+                    }
+                }
+                return Hover::Ground;
+            }
+            Tool::Nature => return Hover::Ground,
+            Tool::Motion => {
+                for (f, flight) in self.course.flights.iter().enumerate() {
+                    for (i, p) in flight.points.iter().enumerate() {
+                        if near_px(Vec3::new(p[0], self.height(p[0], p[2]) + p[1], p[2]), 10.0) {
+                            return Hover::Flight(f, i);
+                        }
+                    }
+                }
+                return Hover::Ground;
+            }
             Tool::Objects => {
                 for (i, o) in self.course.objects.iter().enumerate() {
                     if near_px(Vec3::new(o.x, self.height(o.x, o.z), o.z), 9.0) {
@@ -1219,6 +1417,7 @@ impl Builder {
         let ring = match (self.tool, self.ground) {
             (Tool::Shape, Some(g)) => Some(([g.x, g.z], self.radius, [1.0, 1.0, 1.0])),
             (Tool::Paint, Some(g)) => Some(([g.x, g.z], self.paint_radius, view::surface_colour(self.surface).map(|v| (v * 1.6).min(1.0)))),
+            (Tool::Nature, Some(g)) if self.nature != NatureMode::River => Some(([g.x, g.z], self.plant_radius, if self.nature == NatureMode::Clear { [1.0, 0.55, 0.4] } else { [0.55, 0.95, 0.4] })),
             _ => None,
         };
         let sky = [0.62, 0.70, 0.80];
@@ -1407,6 +1606,102 @@ impl Builder {
                 }
             }
         }
+        self.draw_nature(p, vp);
+        self.draw_flights(p, vp);
+    }
+
+    /// The plants as dots, and the rivers' points.
+    fn draw_nature(&self, p: &mut Painter, vp: &Mat4) {
+        // At most a few thousand dots, spread over them all.
+        let every = (self.plants.len() / 5000).max(1);
+        for (at, flora) in self.plants.iter().step_by(every) {
+            let Some(s) = self.project(vp, Vec3::new(at[0], at[1] + 1.0, at[2])) else { continue };
+            let (r, c) = match flora {
+                Flora::Trees => (2.2, [0.13, 0.32, 0.12, 0.95]),
+                Flora::Bushes => (1.5, [0.30, 0.45, 0.16, 0.9]),
+                _ => (1.0, [0.62, 0.72, 0.35, 0.8]),
+            };
+            p.fill([s[0] - r, s[1] - r, r * 2.0, r * 2.0], c);
+        }
+        if self.tool != Tool::Nature || self.nature != NatureMode::River {
+            return;
+        }
+        for (ri, river) in self.course.rivers.iter().enumerate() {
+            let line = mm2_course::nature::river_line(river);
+            let mut prev: Option<[f32; 2]> = None;
+            for q in line.iter().step_by(4) {
+                let s = self.project(vp, Vec3::new(q[0], self.height(q[0], q[1]) + 1.0, q[1]));
+                if let (Some(a), Some(b)) = (prev, s) {
+                    p.line(a, b, 1.5, [0.55, 0.8, 1.0, 0.8]);
+                }
+                prev = s;
+            }
+            for (i, q) in river.points.iter().enumerate() {
+                if let Some(s) = self.project(vp, Vec3::new(q[0], self.height(q[0], q[1]) + 1.0, q[1])) {
+                    self.handle(p, s, self.hover == Hover::River(ri, i) || self.drag == Drag::River(ri, i) || (self.river == Some(ri) && i + 1 == river.points.len()));
+                }
+            }
+        }
+    }
+
+    /// Each flight's loop in the sky, its points, and the craft flying it.
+    fn draw_flights(&self, p: &mut Painter, vp: &Mat4) {
+        let ground = |x: f32, z: f32| self.height(x, z);
+        let showing = self.tool == Tool::Motion;
+        for (fi, f) in self.course.flights.iter().enumerate() {
+            let route = mm2_course::flight::Route::new(mm2_course::flight::path(f, &ground));
+            let picked = self.flight == Some(fi);
+            if showing && route.length > 10.0 {
+                let pts = mm2_course::flight::path(f, &ground);
+                let step = (pts.len() / 160).max(1);
+                let mut prev: Option<[f32; 2]> = None;
+                let first = pts.first().and_then(|q| self.project(vp, Vec3::from(*q)));
+                for q in pts.iter().step_by(step) {
+                    let s = self.project(vp, Vec3::from(*q));
+                    if let (Some(a), Some(b)) = (prev, s) {
+                        p.line(a, b, if picked { 1.8 } else { 1.2 }, [0.75, 0.88, 1.0, if picked { 0.85 } else { 0.5 }]);
+                    }
+                    prev = s;
+                }
+                if let (Some(a), Some(b)) = (prev, first) {
+                    p.line(a, b, 1.2, [0.75, 0.88, 1.0, 0.5]);
+                }
+                for (i, q) in f.points.iter().enumerate() {
+                    let top = Vec3::new(q[0], ground(q[0], q[2]) + q[1], q[2]);
+                    let foot = Vec3::new(q[0], ground(q[0], q[2]), q[2]);
+                    if let (Some(a), Some(b)) = (self.project(vp, top), self.project(vp, foot)) {
+                        p.line(a, b, 1.0, [1.0, 1.0, 1.0, 0.35]);
+                        let hot = self.hover == Hover::Flight(fi, i) || self.drag == Drag::Flight(fi, i);
+                        self.handle(p, a, hot);
+                        if hot {
+                            p.label([a[0], a[1] - 14.0], &format!("{:.0} ft up", q[1]), [1.0, 1.0, 1.0, 1.0]);
+                        }
+                    }
+                }
+            }
+            // The craft itself, going round as it will in the race.
+            if route.length > 10.0 {
+                let pose = route.pose(f.craft, self.now * f.speed, f.speed);
+                let at = Vec3::from(pose.at);
+                let look = Vec3::from(pose.look);
+                let side = look.cross(Vec3::Y).normalize_or_zero();
+                let size = match f.craft {
+                    Craft::Blimp => 60.0,
+                    Craft::CargoPlane => 50.0,
+                    _ => 22.0,
+                };
+                let (nose, l, r) = (at + look * size, at - look * size * 0.6 + side * size * 0.7, at - look * size * 0.6 - side * size * 0.7);
+                if let (Some(n), Some(a), Some(b)) = (self.project(vp, nose), self.project(vp, l), self.project(vp, r)) {
+                    let c = [1.0, 0.9, 0.55, 1.0];
+                    p.line(a, n, 2.2, c);
+                    p.line(b, n, 2.2, c);
+                    p.line(a, b, 2.2, c);
+                    if showing {
+                        p.label([n[0], n[1] - 12.0], f.craft.name(), [1.0, 0.95, 0.8, 1.0]);
+                    }
+                }
+            }
+        }
     }
 
     fn handle(&self, p: &mut Painter, s: [f32; 2], hot: bool) {
@@ -1432,6 +1727,12 @@ impl Builder {
             (Tool::Paint, _) => "Drag over the ground to paint it. Each surface grips and kicks up dust its own way.",
             (Tool::Objects, Hover::Object(_)) => "Drag to move it. Wheel turns it. Right-click removes it.",
             (Tool::Objects, _) => "Pick an object on the left, then click the ground to place it.",
+            (Tool::Nature, Hover::River(..)) => "Drag to move this point of the river. Wheel: how wide the river is. Right-click removes the point.",
+            (Tool::Nature, _) if self.nature == NatureMode::River => "Click along the ground to draw a river from its start to its end. It runs downhill and cuts its own bed.",
+            (Tool::Nature, _) if self.nature == NatureMode::Clear => "Drag over the ground to take plants away.",
+            (Tool::Nature, _) => "Drag over the ground to plant it. They never grow on the track.",
+            (Tool::Motion, Hover::Flight(..)) => "Drag to move this point. Wheel: how high it flies here (Shift: faster). Right-click removes it.",
+            (Tool::Motion, _) => "Click over the land to add points to the flight path. It flies round them in a loop.",
             (Tool::Land, _) => "Choose the land, sky and sun. Changing the land keeps your line and jumps.",
         };
         format!("{what}   {common}")
@@ -1526,14 +1827,14 @@ impl Builder {
         let left = 8.0;
         let col = 150.0;
         let mut y = 34.0;
-        p.panel(input, [left - 4.0, y - 4.0, col + 8.0, 3.0 * 22.0 + 8.0]);
+        p.panel(input, [left - 4.0, y - 4.0, col + 8.0, 4.0 * 22.0 + 8.0]);
         for (k, (tool, name, tip)) in TOOLS.iter().enumerate() {
             let (cx, cy) = (left + (k % 2) as f32 * (col / 2.0 + 1.0), y + (k / 2) as f32 * 22.0);
             if p.button(input, name, [cx, cy, col / 2.0 - 1.0, 20.0], name, tip, self.tool == *tool) {
                 self.tool = *tool;
             }
         }
-        y += 3.0 * 22.0 + 10.0;
+        y += 4.0 * 22.0 + 10.0;
         let top = y;
         // The options: measured by drawing them after a background the
         // height of last frame's.
@@ -1545,6 +1846,8 @@ impl Builder {
             Tool::Shape => self.shape_options(p, input, &mut y, left, col),
             Tool::Paint => self.paint_options(p, input, &mut y, left, col),
             Tool::Objects => self.object_options(p, input, &mut y, left, col),
+            Tool::Nature => self.nature_options(p, input, &mut y, left, col),
+            Tool::Motion => self.motion_options(p, input, &mut y, left, col),
             Tool::Land => self.land_options(p, input, &mut y, left, col),
         }
         input.panel_height = y - top;
@@ -1991,6 +2294,145 @@ impl Builder {
             self.paint_radius = v;
         }
         Self::note(p, y, left, col, "The track is dirt by itself. Paint mud in a dip or sand in a corner to change how it rides.");
+    }
+
+    fn nature_options(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {
+        Self::heading(p, y, left, "NATURE");
+        let third = (col - 4.0) / 3.0;
+        for (k, (mode, name, tip)) in [
+            (NatureMode::Plant, "Plant", "Paint trees, bushes and grass onto the land."),
+            (NatureMode::Clear, "Clear", "Take plants away where you drag."),
+            (NatureMode::River, "River", "Draw a river or stream to splash through."),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if p.button(input, &format!("nm{k}"), [left + k as f32 * (third + 2.0), *y, third, 20.0], name, tip, self.nature == mode) {
+                self.nature = mode;
+            }
+        }
+        *y += 26.0;
+        if self.nature == NatureMode::River {
+            let r = self.river.filter(|&r| r < self.course.rivers.len());
+            let (w, d) = r.map_or((28.0, 2.5), |r| (self.course.rivers[r].width, self.course.rivers[r].depth));
+            if let Some(i) = r {
+                if let Some(v) = self.slider(p, input, y, left, col, "rwidth", "Width", "How wide the river is. The wheel over one of its points changes it too.", w, (6.0, 120.0), format!("{w:.0} ft")) {
+                    self.course.rivers[i].width = v;
+                    self.changed();
+                }
+                if let Some(v) = self.slider(p, input, y, left, col, "rdepth", "Depth", "How deep the water is. Shallow water is a splash; deep water slows a bike right down.", d, (0.5, 8.0), format!("{d:.1} ft")) {
+                    self.course.rivers[i].depth = v;
+                    self.changed();
+                }
+            }
+            let half = col / 2.0 - 1.0;
+            if p.button(input, "rnew", [left, *y, half, 20.0], "New river", "Finish this river; the next click starts another.", false) {
+                self.river = None;
+            }
+            if p.button(input, "rdel", [left + half + 2.0, *y, half, 20.0], "Remove river", "Takes this river away and fills its bed back in. Undo brings it back.", false) {
+                if let Some(i) = r {
+                    self.remember();
+                    self.course.rivers.remove(i);
+                    self.river = None;
+                    self.changed();
+                }
+            }
+            *y += 26.0;
+            Self::note(p, y, left, col, "Click along the ground from where the river starts to where it ends. It flows downhill, cuts its own muddy bed, and riders splash through it.");
+            Self::note(p, y, left, col, &format!("{} rivers. They show in the original game as a muddy bed; the water itself shows in OpenMCM2.", self.course.rivers.len()));
+            return;
+        }
+        for (k, f) in Flora::ALL.iter().enumerate() {
+            let tip = match f {
+                Flora::Mixed => "Trees with bushes and grass round them, as the land grows on its own.",
+                Flora::Trees => "Trees only. The trunks are solid, so keep them off the racing line.",
+                Flora::Bushes => "Low bushes and shrubs.",
+                Flora::Grass => "Tufts of tall grass.",
+            };
+            let r = [left + (k % 2) as f32 * (col / 2.0 + 1.0), *y + (k / 2) as f32 * 22.0, col / 2.0 - 1.0, 20.0];
+            if p.button(input, f.name(), r, f.name(), tip, self.flora == *f) {
+                self.flora = *f;
+            }
+        }
+        *y += 2.0 * 22.0 + 4.0;
+        let r = [left, *y, col, 26.0];
+        *y += 30.0;
+        if let (Some(v), _) = p.slider(input, "plsize", r, "Size", "How wide the brush is.", self.plant_radius, (10.0, 400.0), &format!("{:.0} ft", self.plant_radius)) {
+            self.plant_radius = v;
+        }
+        if self.nature == NatureMode::Plant {
+            let r = [left, *y, col, 26.0];
+            *y += 30.0;
+            if let (Some(v), _) = p.slider(input, "pldense", r, "Density", "How thickly they grow: a few here and there, up to a forest.", self.plant_density, (0.05, 1.0), &format!("{:.0}%", self.plant_density * 100.0)) {
+                self.plant_density = v;
+            }
+        }
+        let half = col / 2.0 - 1.0;
+        if p.button(input, "plall", [left, *y, half, 20.0], "Cover the land", "Grows the chosen plants over the whole land at this density, off the track. Paint or clear on top after.", false) {
+            self.remember();
+            self.course.plants.push(Planting { flora: self.flora, radius: 0.0, density: self.plant_density, clear: false, everywhere: true, dabs: Vec::new() });
+            self.changed();
+        }
+        if p.button(input, "plnone", [left + half + 2.0, *y, half, 20.0], "Clear all", "Takes every plant away. Undo brings them back.", false) {
+            self.remember();
+            self.course.plants.clear();
+            self.changed();
+        }
+        *y += 26.0;
+        Self::note(p, y, left, col, &format!("{} plants. They never grow on the track, and they show in the original game too.", self.plants.len()));
+    }
+
+    fn motion_options(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {
+        Self::heading(p, y, left, "FLYING");
+        for (k, c) in Craft::ALL.iter().enumerate() {
+            let tip = match c {
+                Craft::Biplane => "A crop-dusting biplane, buzzing low over the track.",
+                Craft::Helicopter => "A news helicopter, slow and steady over the action.",
+                Craft::CargoPlane => "A big cargo plane, high and wide.",
+                Craft::Blimp => "The blimp, drifting slowly overhead.",
+            };
+            let r = [left + (k % 2) as f32 * (col / 2.0 + 1.0), *y + (k / 2) as f32 * 22.0, col / 2.0 - 1.0, 20.0];
+            if p.button(input, c.name(), r, c.name(), tip, self.craft == *c) {
+                self.craft = *c;
+                if let Some(f) = self.flight.filter(|&f| f < self.course.flights.len()) {
+                    if self.course.flights[f].craft != *c {
+                        self.remember();
+                        self.course.flights[f].craft = *c;
+                        self.course.flights[f].speed = c.speed();
+                        self.changed();
+                    }
+                }
+            }
+        }
+        *y += 2.0 * 22.0 + 4.0;
+        let half = col / 2.0 - 1.0;
+        if let Some(f) = self.flight.filter(|&f| f < self.course.flights.len()) {
+            let v = self.course.flights[f].speed;
+            if let Some(v) = self.slider(p, input, y, left, col, "fspeed", "Speed", "How fast it flies round its path.", v, (5.0, 300.0), format!("{:.0} mph", v * 0.6818)) {
+                self.course.flights[f].speed = v;
+                self.changed();
+            }
+            let h = self.course.flights[f].points.iter().map(|p| p[1]).sum::<f32>() / self.course.flights[f].points.len().max(1) as f32;
+            if let Some(v) = self.slider(p, input, y, left, col, "fheight", "Height", "How high it flies over the ground. The wheel over a point sets that point alone.", h, (20.0, 1200.0), format!("{h:.0} ft")) {
+                let k = v - h;
+                for p in &mut self.course.flights[f].points {
+                    p[1] = (p[1] + k).clamp(20.0, 1500.0);
+                }
+                self.changed();
+            }
+            if p.button(input, "fdel", [left + half + 2.0, *y, half, 20.0], "Remove it", "Takes this flight away. Undo brings it back.", false) {
+                self.remember();
+                self.course.flights.remove(f);
+                self.flight = None;
+                self.changed();
+            }
+        }
+        if p.button(input, "fnew", [left, *y, half, 20.0], "New flight", "The next click starts another flight path, for the craft picked above.", false) {
+            self.flight = None;
+        }
+        *y += 26.0;
+        Self::note(p, y, left, col, "Click over the land to add points; it flies round them in a loop. One or two points make a circle. Drag points to move them, the wheel sets their height.");
+        Self::note(p, y, left, col, &format!("{} flying. They use the game's own models and sounds, so they fly in the original game too.", self.course.flights.len()));
     }
 
     fn object_options(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {

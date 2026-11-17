@@ -118,6 +118,7 @@ mod roster;
 mod rumble;
 mod lapgap;
 mod tweaks;
+mod water;
 mod display;
 mod screens;
 mod servers;
@@ -573,6 +574,7 @@ fn main() -> Result<(), BoxError> {
                     out.extend(audio.render(n).chunks(2).map(|f| (f[0] + f[1]) / 2.0));
                 }
                 throw_dirt(&r, &track.ground(), &mut dirt, frame);
+                splash_water(&r, &track.water, &mut dirt, frame);
                 ride_tyres.push((tyre_places(&r, &track.ground()), frame));
                 if let Some(out) = &mut ai_csv {
                     use std::fmt::Write as _;
@@ -1033,6 +1035,8 @@ pub struct Track {
     /// The enhanced drawing's spectators (game coordinates) and which way
     /// each looks.
     spectators: Vec<(Vec3, Vec3)>,
+    /// Rivers' water (a builder track's `.wtr`), game coordinates.
+    water: Vec<mm2_course::nature::Water>,
     /// The scene's ambient sounds and what each hangs on.
     sounds: Vec<(scn::SoundSpec, sound::Site)>,
 }
@@ -1341,6 +1345,28 @@ fn throw_dirt(race: &Race, ground: &TrackGround, dirt: &mut particles::Particles
         dirt.bike(i, &feed, dt);
     }
     dirt.update(dt);
+}
+
+/// Bikes running through a river throw water up (`water`, the track's
+/// rivers); returns where each splashes and how hard, for its sound.
+fn splash_water(race: &Race, water: &[mm2_course::nature::Water], dirt: &mut particles::Particles, dt: f32) -> Vec<(Vec3, f32)> {
+    let mut out = Vec::new();
+    if water.is_empty() {
+        return out;
+    }
+    for r in &race.racers {
+        let at = r.bike.position();
+        let Some((level, _)) = crate::water::level_at(water, at.x, at.z) else { continue };
+        let speed = r.bike.speed();
+        // In the water, not over it in the air.
+        if at.y > level + 3.5 || speed < 3.0 {
+            continue;
+        }
+        let amount = (speed / 45.0).min(1.0);
+        dirt.splash(Vec3::new(at.x, level, at.z), r.bike.velocity(), amount, dt);
+        out.push((Vec3::new(at.x, level, at.z), amount));
+    }
+    out
 }
 
 /// The thrown rider's collision shapes (`Rider.col`, loaded by 0x4337c0
@@ -2229,6 +2255,32 @@ fn load_track(
         eprintln!("using {} high-res textures", h.used() - used_before);
     }
     load_step();
+    let water = archive
+        .entries()
+        .iter()
+        .find(|e| e.name.to_ascii_lowercase().ends_with(".wtr"))
+        .map_or_else(Vec::new, |e| mm2_course::nature::read_water(&String::from_utf8_lossy(archive.data(e))));
+    // The rivers sound along their banks.
+    for r in &water {
+        let mut since = f32::MAX;
+        for w in r.points.windows(2) {
+            since += Vec3::from(w[1]).distance(Vec3::from(w[0]));
+            if since >= 140.0 {
+                since = 0.0;
+                let spec = scn::SoundSpec {
+                    file: sound::RIVER.into(),
+                    min_distance: 20.0 + r.width * 0.5,
+                    max_distance: 150.0 + r.width,
+                    looping: true,
+                    one_shot: false,
+                    one_shot_distance: 20.0,
+                    trigger_percent: 100.0,
+                    force_2d: false,
+                };
+                scene_sounds.push((spec, sound::Site::Fixed(Vec3::from(w[0]))));
+            }
+        }
+    }
     Ok(Track {
         terrain,
         terrain_textures,
@@ -2265,6 +2317,7 @@ fn load_track(
         zones,
         crowd,
         spectators,
+        water,
         sounds: scene_sounds,
     })
 }
@@ -3399,6 +3452,7 @@ fn track_renderer(track: &Track, device: &wgpu::Device, queue: &wgpu::Queue, for
     renderer.set_stadium(track.supercross);
     renderer.set_night(track.night_lights.clone(), track.floor());
     renderer.set_crowd(device, &track.spectators);
+    renderer.set_water(device, &track.water);
     if let Some(detail) = &track.detail {
         renderer.set_detail(device, queue, detail);
     }
@@ -4195,6 +4249,7 @@ impl App {
     renderer.set_stadium(track.supercross);
         renderer.set_night(track.night_lights.clone(), track.floor());
         renderer.set_crowd(&state.device, &track.spectators);
+        renderer.set_water(&state.device, &track.water);
         if let Some(detail) = &track.detail {
             renderer.set_detail(&state.device, &state.queue, detail);
         }
@@ -5467,8 +5522,10 @@ impl App {
                     [false; 2]
                 };
                 let (eye, target) = r.update(&track.ground(), controls, dt);
+                let mut splashes = Vec::new();
                 if let Some(renderer) = &mut state.renderer {
                     throw_dirt(r, &track.ground(), &mut renderer.particles, dt);
+                    splashes = splash_water(r, &track.water, &mut renderer.particles, dt);
                     renderer.tyres(&tyre_places(r, &track.ground()), dt);
                 }
                 if let Some(rec) = &mut self.recording {
@@ -5501,6 +5558,9 @@ impl App {
                     let l = listener(r, eye, target);
                     sounds.update(&self.audio, r, &l, dt);
                     sounds.ambient(&self.audio, &l, |site| track.site(site, r.time), dt);
+                    for (at, amount) in &splashes {
+                        sounds.splash(&self.audio, &l, *at, *amount, dt);
+                    }
                 }
                 if self.follow {
                     let bike = &r.racers[r.player].bike;

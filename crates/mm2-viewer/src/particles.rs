@@ -300,6 +300,32 @@ impl Particles {
         }
     }
 
+    /// Water thrown up where a bike runs through a river (OpenMCM2's own):
+    /// `amount` 0 to 1 by its speed, `velocity` the bike's.
+    pub fn splash(&mut self, at: Vec3, velocity: Vec3, amount: f32, dt: f32) {
+        let n = (amount.clamp(0.0, 1.0) * 220.0 * dt).ceil() as usize;
+        let speed = velocity.length();
+        for _ in 0..n {
+            let (a, b, c, d) = (self.rand.next(), self.rand.next(), self.rand.next(), self.rand.next());
+            // Sprayed up and out to the sides, a little ahead of the bike.
+            let side = Vec3::new(velocity.z, 0.0, -velocity.x).normalize_or(Vec3::X) * (a * 2.0 - 1.0);
+            let v = side * (6.0 + speed * 0.35) + Vec3::Y * (6.0 + b * (8.0 + speed * 0.3)) + velocity * (0.15 + c * 0.25);
+            let size = 0.25 + d * 0.45 + amount * 0.3;
+            let cell = (self.rand.next() * 13.0) as usize;
+            self.add(Particle {
+                position: at + Vec3::new(a - 0.5, 0.2, b - 0.5) * 1.5,
+                velocity: v,
+                colour: Vec3::new(0.78, 0.82, 0.84),
+                cell,
+                age: 0.0,
+                life: 650.0 + c * 450.0,
+                size,
+                growth: size * 1.4,
+                flags: COLOURED | MOVES | FALLS | FADES | GROWS,
+            });
+        }
+    }
+
     /// Feeds bike `i`'s emitters for this frame and runs them (0x507340,
     /// then each emitter's update).
     pub fn bike(&mut self, i: usize, feed: &Feed, dt: f32) {

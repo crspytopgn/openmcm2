@@ -191,7 +191,7 @@ impl View {
                 let (dx, dz) = (h(x + 1, z) - h(x.saturating_sub(1), z), h(x, z + 1) - h(x, z.saturating_sub(1)));
                 let span = 2.0 * field.step;
                 // Drawing space is the game's with z turned round.
-                let normal = Vec3::new(-dx / span, 1.0, dz / span).normalize();
+                let mut normal = Vec3::new(-dx / span, 1.0, dz / span).normalize();
                 let k = z * n + x;
                 let mut c = ground.and_then(|g| g(k)).unwrap_or_else(|| surface_colour(Surface::from_zone(field.surfaces[k])));
                 // The racing line, a shade darker.
@@ -199,8 +199,16 @@ impl View {
                 if t < 1.0 {
                     c = c.map(|v| v * 0.8);
                 }
+                // A river shows its water.
+                let mut y = field.heights[k];
+                let w = field.water[k];
+                if !w.is_nan() && w > y {
+                    c = [0.16, 0.30, 0.38];
+                    y = w;
+                    normal = Vec3::Y;
+                }
                 vertices.push(Vertex {
-                    position: [x as f32 * field.step, field.heights[k], -(z as f32) * field.step],
+                    position: [x as f32 * field.step, y, -(z as f32) * field.step],
                     normal: normal.to_array(),
                     color: linear(c),
                 });
