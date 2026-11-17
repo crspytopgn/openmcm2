@@ -84,8 +84,23 @@ fn tile(t: vec2<f32>, cell: vec2<i32>, ddx: vec2<f32>, ddy: vec2<f32>) -> vec3<f
     if (layer == 0xffffu) {
         return vec3<f32>(0.45, 0.42, 0.36);
     }
-    return textureSampleGrad(textures, tex_sampler, t - vec2<f32>(c), layer, ddx, ddy).rgb;
+    let at = tile_layer(layer, t - vec2<f32>(c));
+    let k = select(1.0, 0.5, layer >= 0x8000u);
+    return textureSampleGrad(textures, tex_sampler, at.xy, u32(at.z), ddx * k, ddy * k).rgb;
 }
+
+// A tile map value's layer, and where `uv` (0 to 1 over the tile) falls in
+// it: four tiles to a layer (renderer::fit_layers) when the top bit is set.
+fn tile_layer(raw: u32, uv: vec2<f32>) -> vec3<f32> {
+    if (raw < 0x8000u) {
+        return vec3<f32>(uv, f32(raw));
+    }
+    let q = (raw >> 13u) & 3u;
+    let edge = 1.0 / f32(textureDimensions(textures).x);
+    let inside = clamp(uv, vec2<f32>(edge), vec2<f32>(1.0 - edge));
+    return vec3<f32>((inside + vec2<f32>(f32(q & 1u), f32(q >> 1u))) * 0.5, f32(raw & 0x1fffu));
+}
+
 
 // The ground's colour at a pixel, as the game shows it, before its
 // shadow and fog.

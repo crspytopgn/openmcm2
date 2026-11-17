@@ -52,6 +52,7 @@
 
 mod addons;
 mod pace;
+mod dynres;
 mod bars;
 mod eco;
 mod enhance;
@@ -3690,6 +3691,8 @@ struct App {
     last: Instant,
     /// Evens the frame times to the screen's beat (`pace`).
     pace: pace::Pace,
+    /// Dynamic resolution's governor (`dynres`), while racing.
+    dynres: dynres::Governor,
     /// The screen's beat, s, and when it was last asked for.
     beat: (Option<Instant>, Option<f32>),
     /// F2 (or the Show frame rate tweak): the frame rate, at the bottom
@@ -3873,6 +3876,7 @@ impl App {
             looking: false,
             last: Instant::now(),
             pace: pace::Pace::default(),
+            dynres: dynres::Governor::default(),
             beat: (None, None),
             fps: tweaks::get().show_fps.then(|| (Instant::now(), 0, 0.0)),
             fps_shown: None,
@@ -5824,6 +5828,21 @@ impl ApplicationHandler for App {
                 let beat = self.beat.1.filter(|_| tweaks::get().vsync);
                 let dt = self.pace.even(real, beat);
                 self.frame = dt;
+                // Dynamic resolution: the time a frame should take is the
+                // screen's beat with VSync (60 fps on a faster screen:
+                // sharpness first past that), else the frame cap's or 60 fps.
+                if self.track.is_some() && self.loading.is_none() && graphics::showing().is_some_and(|e| e.dynamic) {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let cap = tweaks::more().fps_cap;
+                    #[cfg(target_arch = "wasm32")]
+                    let cap = 0;
+                    let free = if cap > 0 { 1.0 / cap as f32 } else { 1.0 / 60.0 };
+                    let wanted = if tweaks::get().vsync { self.beat.1.unwrap_or(0.0).max(1.0 / 60.0) } else { free };
+                    self.dynres.apply(real, wanted);
+                } else if self.track.is_none() {
+                    self.dynres = dynres::Governor::default();
+                    dynres::reset();
+                }
                 self.poll_pads(event_loop, dt);
                 self.update(dt);
                 self.feel_pad();

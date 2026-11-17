@@ -58,8 +58,21 @@ fn ground_colour(xz: vec2<f32>) -> vec3<f32> {
     if (layer == 0xffffu) {
         return vec3<f32>(0.35, 0.28, 0.2);
     }
-    return textureSampleLevel(textures, tex_sampler, tc - vec2<f32>(cell), layer, 4.0).rgb;
+    let at = tile_layer(layer, tc - vec2<f32>(cell));
+    return textureSampleLevel(textures, tex_sampler, at.xy, u32(at.z), 4.0 + select(0.0, 1.0, layer >= 0x8000u)).rgb;
 }
+// A tile map value's layer, and where `uv` (0 to 1 over the tile) falls in
+// it: four tiles to a layer (renderer::fit_layers) when the top bit is set.
+fn tile_layer(raw: u32, uv: vec2<f32>) -> vec3<f32> {
+    if (raw < 0x8000u) {
+        return vec3<f32>(uv, f32(raw));
+    }
+    let q = (raw >> 13u) & 3u;
+    let edge = 1.0 / f32(textureDimensions(textures).x);
+    let inside = clamp(uv, vec2<f32>(edge), vec2<f32>(1.0 - edge));
+    return vec3<f32>((inside + vec2<f32>(f32(q & 1u), f32(q >> 1u))) * 0.5, f32(raw & 0x1fffu));
+}
+
 
 @vertex
 fn vs_main(@builtin(vertex_index) vi: u32, @location(0) place: vec4<f32>, @location(1) look: vec4<f32>, @location(2) home: vec4<f32>) -> Out {

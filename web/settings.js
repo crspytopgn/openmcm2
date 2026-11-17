@@ -43,7 +43,7 @@ function presetHas(quality, name) {
   return !off.includes(name) && UPGRADES.some(([n, , on]) => n === name && on);
 }
 
-const ABOUT_QUALITY = "A preset for the effects below. Auto looks at your graphics card when the game starts and picks Low, Medium or High for it. Medium suits most computers in a browser; High needs a fast one. Changing an effect below picks Medium with that change.";
+const ABOUT_QUALITY = "A preset for the effects below. Auto looks at your graphics card when the game starts and picks Low, Medium or High for it, and while you race it draws the 3D scene a little smaller if frames start coming late. Medium suits most computers in a browser; High needs a fast one. Changing an effect below picks Medium with that change.";
 const ABOUT_TIME = "Where the sun is: the track's own, or an hour of your choice.";
 const ABOUT_WEATHER = "Clear, overcast or rain, for looks only: the riding is the same.";
 const ABOUT_DETAIL = "How strongly the grain of the photo ground shows.";

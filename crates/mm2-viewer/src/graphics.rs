@@ -103,6 +103,9 @@ pub struct Enhanced {
     /// Or a share of the screen's width and height to draw it at, in
     /// place of `pixels` (`resolution=85%`).
     pub scale: Option<f32>,
+    /// Draws the scene smaller while frames come late, and back up once
+    /// they keep time (crate::dynres): on with `quality=auto`.
+    pub dynamic: bool,
 }
 
 /// The weather, for looks only.
@@ -154,6 +157,7 @@ impl Default for Enhanced {
             time: None,
             pixels: Some(QHD),
             scale: None,
+            dynamic: false,
         }
     }
 }
@@ -175,6 +179,9 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             e.gtao = false;
             e.contact = false;
             e.ssr = false;
+            // The plain 3×3 filter on the shadows' edges: the soft one's
+            // 32 taps a pixel were a third of the frame.
+            e.soft_shadows = false;
             e.pixels = Some(1280 * 720);
         }
         // Temporal anti-aliasing in place of MSAA: about as cheap as 2x, and
@@ -207,7 +214,10 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
         }
         // For the computer it's on: Medium until the graphics card is
         // known, then [`pick_auto`]'s.
-        "auto" => preset(e, "medium")?,
+        "auto" => {
+            preset(e, "medium")?;
+            e.dynamic = true;
+        }
         _ => return Err(format!("quality must be auto, low, medium, high, raytraced or ultra, not {name}")),
     }
     Ok(())
@@ -352,9 +362,10 @@ impl Enhanced {
                 "skylight" | "sky-light" => e.skylight = on,
                 "raytracing" | "rt" => e.raytracing = on,
                 "taa" | "temporal" => e.taa = on,
+                "dynamic" | "dynamic-resolution" => e.dynamic = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-gtao, no-contact, no-ssr, no-skylight, raytracing, taa, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra, resolution=1080p or 85%, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-gtao, no-contact, no-ssr, no-skylight, no-dynamic, raytracing, taa, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra, resolution=1080p or 85%, weather=rain or time=dusk"
                     ))
                 }
             }
@@ -476,7 +487,7 @@ pub fn pick_auto(info: &wgpu::AdapterInfo) {
     let q = auto_quality(&info.name, info.device_type, info.backend, pixels, cfg!(target_arch = "wasm32"));
     let list: Vec<String> = list
         .split(',')
-        .map(|i| if i.trim() == "quality=auto" { format!("quality={q}") } else { i.trim().to_string() })
+        .map(|i| if i.trim() == "quality=auto" { format!("quality={q},dynamic") } else { i.trim().to_string() })
         .collect();
     match Enhanced::parse(&list.join(",")) {
         Ok(e) => enable(e),

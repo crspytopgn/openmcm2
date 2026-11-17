@@ -1603,7 +1603,7 @@ fn preset_of(s: &Settings) -> Option<Quality> {
 }
 
 /// What the Auto preset does, for its hover text.
-const AUTO_TEXT: &str = "Auto: each time the game starts it looks at your graphics card and screen and picks Low, Medium or High to keep the racing smooth. Change any setting below to choose yourself.";
+const AUTO_TEXT: &str = "Auto: each time the game starts it looks at your graphics card and screen and picks Low, Medium or High to keep the racing smooth. While you race it also draws the 3D scene a little smaller if frames start coming late, and sharp again once they keep up (the menus and race display stay sharp). Change any setting below to choose yourself.";
 
 /// What Auto picked when the game last started, and for which card, as
 /// the game left it in `auto-graphics.txt`.
