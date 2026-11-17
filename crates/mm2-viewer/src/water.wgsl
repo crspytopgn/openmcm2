@@ -65,6 +65,22 @@ fn ripples(q: vec2<f32>, t: f32) -> f32 {
     return h;
 }
 
+// The sky the water mirrors along `r`: the fog's colour, paler at the
+// horizon. (The enhanced drawing puts its sky's own light in its place,
+// water.rs.)
+fn mirrored(r: vec3<f32>, rough: f32) -> vec3<f32> {
+    let sky = globals.fog.rgb * (1.05 + 0.25 * water.time.y);
+    return mix(sky * 0.82, sky * vec3<f32>(0.5, 0.58, 0.66), clamp(r.y * 1.6, 0.0, 1.0));
+}
+
+// The game's fog over the water, and how much of it shows.
+fn fogged(colour: vec3<f32>, alpha: f32, world: vec3<f32>) -> vec4<f32> {
+    let dist = length(world - globals.camera.xyz);
+    let range = max(globals.fog_range.y - globals.fog_range.x, 1.0);
+    let fog = clamp((dist - globals.fog_range.x) / range, 0.0, 1.0);
+    return vec4<f32>(mix(colour, globals.fog.rgb, fog), alpha * (1.0 - fog * 0.5));
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let t = water.time.x;
@@ -90,10 +106,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let cos_v = max(dot(n, to_eye), 0.0);
     let fresnel = (0.02 + 0.98 * pow(1.0 - cos_v, 5.0)) * 0.62;
     let to_sun = normalize(globals.to_sun.xyz);
-    let sky = globals.fog.rgb * (1.05 + 0.25 * water.time.y);
-    // The sky it shows: paler at the horizon.
     let r = reflect(-to_eye, n);
-    let reflected = mix(sky * 0.82, sky * vec3<f32>(0.5, 0.58, 0.66), clamp(r.y * 1.6, 0.0, 1.0));
+    let reflected = mirrored(r, rough);
     // The water itself: dark and a little green where deep, the sandy
     // bed showing through at the edges.
     let deep = vec3<f32>(0.035, 0.06, 0.05);
@@ -110,8 +124,5 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     colour = mix(colour, light * vec3<f32>(0.62, 0.63, 0.6), froth * 0.22);
     // Seen through at the very edge, so it meets the bank softly.
     let alpha = mix(0.88, 0.0, smoothstep(0.8, 1.0, abs(across)));
-    let dist = length(in.world - globals.camera.xyz);
-    let range = max(globals.fog_range.y - globals.fog_range.x, 1.0);
-    let fog = clamp((dist - globals.fog_range.x) / range, 0.0, 1.0);
-    return vec4<f32>(mix(colour, globals.fog.rgb, fog), alpha * (1.0 - fog * 0.5));
+    return fogged(colour, alpha, in.world);
 }

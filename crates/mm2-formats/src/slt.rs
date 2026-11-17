@@ -77,6 +77,7 @@ pub fn parse(bytes: &[u8]) -> Result<Model> {
                 let t = t.trim();
                 materials.push(Material {
                     texture: if t.eq_ignore_ascii_case("PROCEDURAL") { String::new() } else { t.to_string() },
+                    pbr: None,
                 });
             }
         } else if section == "Object Hierarchy" {

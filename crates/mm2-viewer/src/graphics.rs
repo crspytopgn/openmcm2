@@ -83,6 +83,19 @@ pub struct Enhanced {
     /// The sky's light baked over the land once a race: dimmer in dips,
     /// under banks and between hills.
     pub skylight: bool,
+    /// Physically based materials (the free pack's) and the sky's light
+    /// all round (crate::ibl) on every model.
+    pub pbr: bool,
+    /// The film-like colour curve (crate::post `filmic`) in place of the
+    /// neutral one, for the free graphics; the original's art keeps the
+    /// neutral one.
+    pub filmic: bool,
+    /// The haze as real air makes it (enhanced_fns.wgsl `apply_haze`):
+    /// brighter and warmer toward the sun, thinner higher up.
+    pub air: bool,
+    /// Texels a side of each of the sun's shadow cascades: sharper on
+    /// Ultra.
+    pub shadow_side: u32,
     /// The sun's shadows traced as rays through the scene, in place of
     /// the shadow maps, and reflections in wet ground and glossy paint,
     /// where the GPU can (crate::rt); off unless asked.
@@ -152,6 +165,10 @@ impl Default for Enhanced {
             contact: true,
             ssr: true,
             skylight: true,
+            pbr: true,
+            filmic: true,
+            air: true,
+            shadow_side: crate::enhance::SHADOW_SIDE,
             raytracing: false,
             taa: false,
             mud_start: 0.0,
@@ -214,6 +231,9 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             e.msaa = 8;
             e.pixels = None;
             e.ruts = true;
+            // Twice the shadow maps' texels a side: crisper edges near
+            // the rider, for four times the memory (200 MB).
+            e.shadow_side = 2 * crate::enhance::SHADOW_SIDE;
         }
         // For the computer it's on: Medium until the graphics card is
         // known, then [`pick_auto`]'s.
@@ -364,12 +384,15 @@ impl Enhanced {
                 "contact" | "contact-shadows" => e.contact = on,
                 "ssr" | "reflections" => e.ssr = on,
                 "skylight" | "sky-light" => e.skylight = on,
+                "pbr" => e.pbr = on,
+                "filmic" => e.filmic = on,
+                "air" => e.air = on,
                 "raytracing" | "rt" => e.raytracing = on,
                 "taa" | "temporal" => e.taa = on,
                 "dynamic" | "dynamic-resolution" => e.dynamic = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-dynamic, raytracing, taa, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra, resolution=1080p or 85%, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-dynamic, raytracing, taa, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra, resolution=1080p or 85%, weather=rain or time=dusk"
                     ))
                 }
             }
@@ -575,6 +598,7 @@ impl Enhanced {
         // and the horizon-based occlusion many taps a pixel: too heavy here.
         self.ssr = false;
         self.gtao = false;
+        self.shadow_side = self.shadow_side.min(crate::enhance::SHADOW_SIDE);
         self
     }
 }

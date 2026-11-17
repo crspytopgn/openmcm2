@@ -57,6 +57,8 @@ fn the_shaders_compile_for_every_card() {
         shaders.push((format!("post, {depth}"), include_str!("post.wgsl").replace("DEPTH_TEXTURE", depth)));
     }
     shaders.push(("ruts".into(), include_str!("ruts.wgsl").into()));
+    shaders.push(("water".into(), include_str!("water.wgsl").into()));
+    shaders.push(("water, enhanced".into(), crate::enhance::full_source(&crate::water::enhanced_source(), false)));
     shaders.push(("floodlights' bake".into(), crate::flood::hills_source()));
     for (name, source) in &shaders {
         let (module, info) = module(name, source);

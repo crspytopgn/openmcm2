@@ -48,10 +48,54 @@ pub struct Frame {
     pub parent: Option<usize>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Material {
     /// Texture file name, empty when untextured.
     pub texture: String,
+    /// The rest of a physically based material (the free pack's glTF
+    /// models); the game's own materials have none.
+    pub pbr: Option<Pbr>,
+}
+
+/// A glTF metallic-roughness material beyond its base colour: the names
+/// of its other pictures (empty for none, named as the model's images
+/// are) and its factors, as glTF gives them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pbr {
+    /// Tangent-space normals (glTF's: +Y green).
+    pub normal: String,
+    /// Roughness in green, metal in blue (linear).
+    pub metal_rough: String,
+    /// Ambient occlusion in red (linear); often the same picture as
+    /// `metal_rough` (an ORM map).
+    pub occlusion: String,
+    /// Emitted light (sRGB).
+    pub emissive: String,
+    pub metallic: f32,
+    pub roughness: f32,
+    pub normal_scale: f32,
+    pub occlusion_strength: f32,
+    pub emissive_factor: [f32; 3],
+    /// `KHR_materials_specular`'s factor: how much of the usual 4%
+    /// reflection a non-metal has (1 for the usual).
+    pub specular: f32,
+}
+
+impl Default for Pbr {
+    fn default() -> Pbr {
+        Pbr {
+            normal: String::new(),
+            metal_rough: String::new(),
+            occlusion: String::new(),
+            emissive: String::new(),
+            metallic: 1.0,
+            roughness: 1.0,
+            normal_scale: 1.0,
+            occlusion_strength: 1.0,
+            emissive_factor: [0.0; 3],
+            specular: 1.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -176,7 +220,7 @@ pub fn parse(bytes: &[u8]) -> Result<Model> {
         } else {
             texture
         };
-        materials.push(Material { texture });
+        materials.push(Material { texture, pbr: None });
     }
 
     let lod_count = count(&mut r, "LOD count")?;

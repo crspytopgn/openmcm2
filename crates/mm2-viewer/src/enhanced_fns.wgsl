@@ -31,6 +31,11 @@ fn soft_clamp(c: vec3<f32>) -> vec3<f32> {
 // its distance from the camera falls in, filtered over 3×3 texels; seen
 // from `lift` ft off the surface, so what lies flat on it (painted ruts,
 // planks) casts nothing.
+// Texels a side of the sun's shadow maps: 2048, or 4096 on Ultra.
+fn sun_side() -> f32 {
+    return f32(textureDimensions(sun_map).x);
+}
+
 fn sun_visible(world: vec3<f32>, n: vec3<f32>, dist: f32, lift: f32) -> f32 {
     if (enh.flags.y < 0.5 || dist > enh.splits.w) {
         return 1.0;
@@ -50,7 +55,7 @@ fn sun_visible(world: vec3<f32>, n: vec3<f32>, dist: f32, lift: f32) -> f32 {
     if (any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || p.z > 1.0) {
         return 1.0;
     }
-    let step = 1.0 / 2048.0;
+    let step = 1.0 / sun_side();
     if (enh.texel.w > 0.5) {
         return mix(soft_sun(uv, p.z, c, texel), 1.0, smoothstep(enh.splits.w * 0.9, enh.splits.w, dist));
     }
@@ -82,7 +87,10 @@ const POISSON: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
 // sun's disc blurs a real one: sharp where a tyre meets the ground, softer
 // under a tree's crown.
 fn soft_sun(uv: vec2<f32>, z: f32, c: u32, texel: f32) -> f32 {
-    let side = 2048.0;
+    let side = sun_side();
+    // The search and the blur reach as far in ft as at 2048 texels a
+    // side, so a finer map (Ultra) is sharper, not smaller.
+    let k = side / 2048.0;
     // The cascade's depth, ft (enhance::cascades: 2 radii plus the reach
     // toward the sun).
     let depth_ft = side * texel + 1500.0;
@@ -94,8 +102,8 @@ fn soft_sun(uv: vec2<f32>, z: f32, c: u32, texel: f32) -> f32 {
     var blockers = 0.0;
     var count = 0.0;
     for (var i = 0; i < 16; i++) {
-        let at = uv + turn * POISSON[i] * 6.0 / side;
-        let t = clamp(vec2<i32>(at * side), vec2<i32>(0), vec2<i32>(2047));
+        let at = uv + turn * POISSON[i] * 6.0 * k / side;
+        let t = clamp(vec2<i32>(at * side), vec2<i32>(0), vec2<i32>(i32(side) - 1));
         let d = textureLoad(sun_map, t, c, 0);
         if (d < z) {
             blockers += d;
@@ -107,7 +115,7 @@ fn soft_sun(uv: vec2<f32>, z: f32, c: u32, texel: f32) -> f32 {
     }
     let gap_ft = (z - blockers / count) * depth_ft;
     // The sun's disc, about half a degree across.
-    let radius = clamp(gap_ft * 0.022 / texel, 1.0, 8.0);
+    let radius = clamp(gap_ft * 0.022 / texel, 1.0, 8.0 * k);
     var sum = 0.0;
     for (var i = 0; i < 16; i++) {
         sum += textureSampleCompareLevel(sun_map, sun_sampler, uv + turn * POISSON[i] * radius / side, c, z);
@@ -130,8 +138,34 @@ fn haze_at(dist: f32) -> f32 {
     return clamp((dist - globals.fog_range.x) / range, 0.0, 1.0);
 }
 
+// The haze as real air makes it (enh.ibl.w): thinner higher up, so far
+// hilltops stand clearer than the valleys; blue light lost a little
+// sooner than red, so distant land cools a touch; and the air's own glow
+// brighter and warmer looking toward the sun (its forward scattering,
+// Henyey-Greenstein), dimmer looking away. Averaged round the horizon it
+// is the plain haze's colour, so it still meets the sky.
+fn sunlit_air(c: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
+    let to = world - globals.camera.xyz;
+    let v = to / max(length(to), 1e-3);
+    // Thinner by e every 900 ft up, along the whole way from the eye.
+    let k = to.y / 900.0;
+    let height = select((1.0 - exp(-k)) / k, 1.0 - 0.5 * k, abs(k) < 0.01);
+    let depth = max(dist - enh.haze.x, 0.0) * enh.haze.y * clamp(height, 0.55, 1.6);
+    let amount = 1.0 - exp(-depth * vec3<f32>(0.92, 1.0, 1.1));
+    let cos_t = dot(v, enh.to_sun.xyz);
+    let g = 0.7;
+    // Scaled so straight at the sun is 1.
+    let forward = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cos_t, 1.5) * (1.0 - g) * (1.0 - g) / (1.0 + g);
+    let up = smoothstep(-0.05, 0.15, enh.to_sun.y) * (1.0 - 0.8 * enh.world.w);
+    let air = enh.fog.rgb * (1.0 + 0.1 * cos_t * up) + enh.sun.rgb * forward * 0.3 * up;
+    return mix(c, air, amount);
+}
+
 fn apply_haze(c: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
     if (enh.flags.z > 0.5) {
+        if (enh.ibl.w > 0.5) {
+            return sunlit_air(c, world, dist);
+        }
         return mix(c, enh.fog.rgb, haze_amount(dist));
     }
     let range = max(globals.fog_range.y - globals.fog_range.x, 1.0);
@@ -210,7 +244,7 @@ fn stadium_seen(world: vec3<f32>, n: vec3<f32>, g: u32) -> f32 {
     let spin = fract(sin(dot(world.xz, vec2<f32>(12.9898, 78.233))) * 43758.547) * 6.2832;
     let turn = mat2x2<f32>(cos(spin), sin(spin), -sin(spin), cos(spin));
     // About 0.4 ft round, however fine the map.
-    let radius = clamp(0.4 / texel, 1.0, 4.0) / 2048.0;
+    let radius = clamp(0.4 / texel, 1.0, 4.0 * sun_side() / 2048.0) / sun_side();
     var sum = 0.0;
     for (var i = 0; i < 8; i++) {
         sum += textureSampleCompareLevel(sun_map, sun_sampler, uv + turn * POISSON[i * 2] * radius, g, q.z);
@@ -283,4 +317,148 @@ fn sky_seen(world: vec3<f32>) -> f32 {
     // ground (nearly all of it) hardly changes.
     let seen = mix(m.r * m.r, 1.0, smoothstep(2.0, 30.0, world.y - ground));
     return mix(1.0, seen, enh.sky_light.z);
+}
+
+// ---- Physically based light (ibl.rs), for the free pack's materials. ----
+
+const PI: f32 = 3.14159265;
+
+// The irradiance (over pi) of the sky all round toward `n`, from its
+// harmonics: what a white matte surface facing `n` takes from it.
+fn irradiance(n: vec3<f32>) -> vec3<f32> {
+    let s = enh.sh;
+    var e = s[0].rgb + s[1].rgb * n.y + s[2].rgb * n.z + s[3].rgb * n.x;
+    e += s[4].rgb * (n.x * n.y) + s[5].rgb * (n.y * n.z) + s[6].rgb * (3.0 * n.z * n.z - 1.0);
+    e += s[7].rgb * (n.x * n.z) + s[8].rgb * (n.x * n.x - n.y * n.y);
+    return max(e, vec3<f32>(0.0));
+}
+
+// The sky's light round about on the game's own models, as a tint of
+// their old even ambient (a surface facing up keeps 1.15, as before):
+// a little bluer from the sky, warmer and dimmer from the ground; by
+// `enh.ibl.z`, gently.
+fn sky_tint(n: vec3<f32>, old: f32) -> vec3<f32> {
+    if (enh.ibl.z <= 0.0) {
+        return vec3<f32>(old);
+    }
+    let up = max(luminance(irradiance(vec3<f32>(0.0, 1.0, 0.0))), 1e-4);
+    return mix(vec3<f32>(old), irradiance(n) / up * 1.15, enh.ibl.z);
+}
+
+// What the sky all round shows along `r` to a surface of `roughness`
+// (perceptual), blurred as it would be.
+fn sky_reflected(r: vec3<f32>, roughness: f32) -> vec3<f32> {
+    return textureSampleLevel(env_map, env_sampler, r, roughness * enh.ibl.y).rgb;
+}
+
+// GGX's spread of microfacets, with `a` the roughness squared.
+fn ggx(nh: f32, a: f32) -> f32 {
+    let a2 = a * a;
+    let d = nh * nh * (a2 - 1.0) + 1.0;
+    return a2 / (PI * d * d + 1e-7);
+}
+
+// Smith's height-correlated visibility for GGX (Heitz 2014), with the
+// 4 n.l n.v of the microfacet model taken in.
+fn smith(nv: f32, nl: f32, a: f32) -> f32 {
+    let a2 = a * a;
+    let v = nl * sqrt(nv * nv * (1.0 - a2) + a2);
+    let l = nv * sqrt(nl * nl * (1.0 - a2) + a2);
+    return 0.5 / max(v + l, 1e-5);
+}
+
+fn schlick(f0: vec3<f32>, cos_t: f32) -> vec3<f32> {
+    let f = pow(1.0 - clamp(cos_t, 0.0, 1.0), 5.0);
+    return f0 + (vec3<f32>(1.0) - f0) * f;
+}
+
+// The split sum's scale and bias on f0 for the sky's reflection, fitted
+// (Karis 2014, mobile), so no lookup table is needed.
+fn sky_brdf(f0: vec3<f32>, roughness: f32, nv: f32) -> vec3<f32> {
+    let c0 = vec4<f32>(-1.0, -0.0275, -0.572, 0.022);
+    let c1 = vec4<f32>(1.0, 0.0425, 1.04, -0.04);
+    let r = roughness * c0 + c1;
+    let a004 = min(r.x * r.x, exp2(-9.28 * nv)) * r.x + r.y;
+    let ab = vec2<f32>(-1.04, 1.04) * a004 + r.zw;
+    return f0 * ab.x + vec3<f32>(ab.y);
+}
+
+// How much of the sky's reflection a crease that hides `ao` of its light
+// still lets out (Lagarde 2014).
+fn reflection_seen(nv: f32, ao: f32, roughness: f32) -> f32 {
+    return clamp(pow(nv + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao, 0.0, 1.0);
+}
+
+// The normal a tangent-space normal map's `t` gives, on a surface facing
+// `n` at `world` with texture coordinates `uv`: its frame worked out
+// from how they change across the screen (Schüler 2006), so the models
+// need no tangents.
+fn mapped_normal(n: vec3<f32>, world: vec3<f32>, uv: vec2<f32>, t: vec3<f32>) -> vec3<f32> {
+    let dp1 = dpdx(world);
+    let dp2 = dpdy(world);
+    let duv1 = dpdx(uv);
+    let duv2 = dpdy(uv);
+    let dp2perp = cross(dp2, n);
+    let dp1perp = cross(n, dp1);
+    let tangent = dp2perp * duv1.x + dp1perp * duv2.x;
+    let bitangent = dp2perp * duv1.y + dp1perp * duv2.y;
+    let size = max(dot(tangent, tangent), dot(bitangent, bitangent));
+    if (size < 1e-20) {
+        return n;
+    }
+    let s = inverseSqrt(size);
+    let bent = tangent * s * t.x + bitangent * s * t.y + n * t.z;
+    if (dot(bent, bent) < 1e-12) {
+        return n;
+    }
+    return normalize(bent);
+}
+
+// The parts of a physically based material at a pixel.
+struct Pbr {
+    base: vec3<f32>,
+    metal: f32,
+    // Perceptual roughness, widened where the normal changes fast across
+    // the pixel so highlights don't sparkle (Tokuyoshi and Kaplanyan 2019).
+    roughness: f32,
+    ao: f32,
+    n: vec3<f32>,
+    // How much of the usual 4% a non-metal reflects (KHR_materials_specular).
+    specular: f32,
+};
+
+// What a physically based material sends to the eye from the sun and the
+// sky all round: (the diffuse part, over its colour; what it reflects).
+// The sun as the game's light gives it, `sun_lin` square on (ibl.rs
+// linear_light), `lit` of it past the shadows; `sky` of the sky seen past
+// the hills.
+struct Shaded {
+    diffuse: vec3<f32>,
+    reflected: vec3<f32>,
+};
+
+fn shade_pbr(m: Pbr, v: vec3<f32>, l: vec3<f32>, sun_lin: vec3<f32>, lit: f32, sky: f32) -> Shaded {
+    let n = m.n;
+    let nv = max(dot(n, v), 1e-3);
+    let nl = max(dot(n, l), 0.0);
+    let h = normalize(l + v);
+    let nh = max(dot(n, h), 0.0);
+    let vh = max(dot(v, h), 0.0);
+    let rough = clamp(m.roughness, 0.045, 1.0);
+    let a = rough * rough;
+    let f0 = mix(vec3<f32>(0.04 * m.specular), m.base, m.metal);
+    let f = schlick(f0, vh);
+    var out: Shaded;
+    // The sun: Lambert under what the surface doesn't reflect, and GGX.
+    let sun = sun_lin * nl * lit;
+    out.diffuse = (vec3<f32>(1.0) - f) * (1.0 - m.metal) * sun;
+    out.reflected = f * (ggx(nh, a) * smith(nv, nl, a) * PI) * sun;
+    // The sky all round, darker in creases and past the hills.
+    let env = sky_brdf(f0, rough, nv);
+    out.diffuse += irradiance(n) * (1.0 - m.metal) * m.ao * sky * (vec3<f32>(1.0) - env);
+    let r = reflect(-v, n);
+    // What lies below the horizon is mostly the ground's, nearer than
+    // the sky: let a reflection pointed into it fade toward it softly.
+    out.reflected += sky_reflected(r, rough) * env * reflection_seen(nv, m.ao, rough) * sky;
+    return out;
 }

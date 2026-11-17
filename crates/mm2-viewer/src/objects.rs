@@ -63,6 +63,9 @@ pub const TREE_BAND: f32 = 60.0;
 /// texture name ends with the tag.
 const NEAR_TAG: &str = "\u{1}near";
 const FAR_TAG: &str = "\u{1}far";
+/// What a draw's texture name carries after it for its physically based
+/// material: this, then the material's place in [`ObjectMesh::pbr`].
+const PBR_TAG: &str = "\u{1}pbr";
 
 /// A tree's far billboard: its picture in the eco-system's LOD3 picture
 /// (`rect`: left, right, base and top, and the trunk's place across), how
@@ -92,6 +95,11 @@ pub struct ObjectMesh {
     draws: Vec<(std::ops::Range<u32>, Option<Image>)>,
     /// Each draw's texture name.
     names: Vec<String>,
+    /// The physically based materials the models bring (the free pack's),
+    /// each once, each draw's of them, and their other pictures by name.
+    pbr: Vec<slb::Pbr>,
+    draw_pbr: Vec<Option<usize>>,
+    pbr_images: HashMap<String, Image>,
     /// Whether the enhanced drawing lays photo materials over the objects
     /// (materials::surfaced).
     pub surfaced: bool,
@@ -712,14 +720,35 @@ impl ObjectMesh {
             mesh.placed += 1;
         }
 
+        // The physically based materials' other pictures, before the
+        // colours are taken.
+        for pbr in &mesh.pbr {
+            for name in [&pbr.normal, &pbr.metal_rough, &pbr.occlusion, &pbr.emissive] {
+                if let Some(image) = stand_in_images.get(name).filter(|_| !mesh.pbr_images.contains_key(name)) {
+                    mesh.pbr_images.insert(name.clone(), image.clone());
+                }
+            }
+        }
         let mut names: Vec<_> = batches.keys().cloned().collect();
         names.sort();
+        // How many draws use each colour picture: two materials may share
+        // one, and the last takes it.
+        let mut uses: HashMap<String, usize> = HashMap::new();
+        for tagged in &names {
+            *uses.entry(tagged.split('\u{1}').next().unwrap_or_default().to_string()).or_default() += 1;
+        }
         for tagged in names {
             let start = mesh.indices.len() as u32;
             mesh.add_blocks(&batches[&tagged]);
             // The texture's own name, and what the draw is for the trees.
             let name = tagged.split('\u{1}').next().unwrap_or_default().to_string();
             mesh.lods.push(if tagged.ends_with(FAR_TAG) { 2 } else if tagged.ends_with(NEAR_TAG) { 1 } else { 0 });
+            mesh.draw_pbr.push(
+                tagged
+                    .split('\u{1}')
+                    .find_map(|t| t.strip_prefix(&PBR_TAG[1..]))
+                    .and_then(|i| i.parse().ok()),
+            );
             let tex = match name.strip_prefix(PLATE) {
                 // Plates are painted from the digits texture, so they stay
                 // the game's own.
@@ -729,7 +758,17 @@ impl ObjectMesh {
                         Some(n) => Image::from_texture(&board_plate(&plate(&digits, n.parse().unwrap_or(0)))),
                         None => Image::from_texture(&plate(&digits, n.parse().unwrap_or(0))),
                     }),
-                None if stand_in_images.contains_key(&name) => stand_in_images.remove(&name),
+                None if stand_in_images.contains_key(&name) => {
+                    let left = uses.get_mut(&name).map_or(0, |n| {
+                        *n -= 1;
+                        *n
+                    });
+                    if left == 0 {
+                        stand_in_images.remove(&name)
+                    } else {
+                        stand_in_images.get(&name).cloned()
+                    }
+                }
                 // A livery or outfit of the free pack's.
                 None if !name.is_empty() && find(&name).is_none() && crate::freepack::is_paint(&name) => {
                     crate::freepack::paint(&name)
@@ -925,6 +964,9 @@ impl ObjectMesh {
                 Some(p) => (1, Some(p)),
                 None => (0, paint),
             };
+            // A livery or outfit keeps its material's other pictures (its
+            // bumps, roughness and metal): only the colour is its own.
+            let pbr = s.materials.first().and_then(|&i| model.materials.get(i as usize)).and_then(|m| m.pbr.clone());
             let mut texture = match (s.materials.first(), paint) {
                 (Some(&m), Some(paint)) if m == slot => paint.to_ascii_lowercase(),
                 (first, _) => first
@@ -996,6 +1038,16 @@ impl ObjectMesh {
             if place.is_none() && mode == 0 {
                 smooth_normals(&self.vertices[base as usize..], &mut self.extras[base as usize..]);
             }
+            let texture = match pbr {
+                Some(pbr) => {
+                    let i = self.pbr.iter().position(|p| *p == pbr).unwrap_or_else(|| {
+                        self.pbr.push(pbr);
+                        self.pbr.len() - 1
+                    });
+                    format!("{texture}{PBR_TAG}{i}")
+                }
+                None => texture,
+            };
             let key = match self.tag {
                 Some(tag) => format!("{texture}{tag}"),
                 None => texture,
@@ -1248,6 +1300,13 @@ impl ObjectRenderer {
                     },
                     count: None,
                 },
+                // The physically based material's other pictures (normal,
+                // metal and roughness, occlusion, emissive) and factors.
+                crate::enhance::entry(3, wgpu::ShaderStages::FRAGMENT, crate::enhance::texture(wgpu::TextureViewDimension::D2, wgpu::TextureSampleType::Float { filterable: true })),
+                crate::enhance::entry(4, wgpu::ShaderStages::FRAGMENT, crate::enhance::texture(wgpu::TextureViewDimension::D2, wgpu::TextureSampleType::Float { filterable: true })),
+                crate::enhance::entry(5, wgpu::ShaderStages::FRAGMENT, crate::enhance::texture(wgpu::TextureViewDimension::D2, wgpu::TextureSampleType::Float { filterable: true })),
+                crate::enhance::entry(6, wgpu::ShaderStages::FRAGMENT, crate::enhance::texture(wgpu::TextureViewDimension::D2, wgpu::TextureSampleType::Float { filterable: true })),
+                crate::enhance::entry(7, wgpu::ShaderStages::FRAGMENT, crate::enhance::uniform()),
             ],
         });
         let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1595,18 +1654,59 @@ impl ObjectRenderer {
             levels: vec![vec![255; 4]],
         };
         let layout = texture_layout;
+        // The physically based materials' pictures, each uploaded once;
+        // what a material without one of them reads instead: flat, white.
+        let one = |pixel: [u8; 4], srgb: bool| {
+            let image = Image { size: 1, levels: vec![pixel.to_vec()] };
+            upload_as(device, queue, &image, srgb).create_view(&Default::default())
+        };
+        let flat = one([128, 128, 255, 255], false);
+        let plain = one([255; 4], false);
+        let mut pictures: HashMap<(String, bool), wgpu::TextureView> = HashMap::new();
+        let mut picture = |name: &str, srgb: bool, blank: &wgpu::TextureView| -> (wgpu::TextureView, bool) {
+            if let Some(view) = pictures.get(&(name.to_string(), srgb)) {
+                return (view.clone(), true);
+            }
+            match mesh.pbr_images.get(name) {
+                Some(image) if !name.is_empty() => {
+                    let view = upload_as(device, queue, image, srgb).create_view(&Default::default());
+                    pictures.insert((name.to_string(), srgb), view.clone());
+                    (view, true)
+                }
+                _ => (blank.clone(), false),
+            }
+        };
         let draws = mesh
             .draws
             .iter()
             .zip(&mesh.names)
             .zip(&mesh.lods)
-            .map(|(((range, tex), name), &lod)| {
+            .enumerate()
+            .map(|(d, (((range, tex), name), &lod))| {
                 let tex = upload(device, queue, tex.as_ref().unwrap_or(&white));
                 // Its photo material's layer, or -1 for none.
                 let surface = mesh.surfaced.then(|| crate::materials::surface(name)).flatten();
                 let surface = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("object surface"),
                     contents: bytemuck::cast_slice(&[surface.map_or(-1.0, |m| m as f32), crate::materials::backlit(name) as u32 as f32, lod as f32, 0.0]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+                let pbr = mesh.draw_pbr.get(d).copied().flatten().and_then(|i| mesh.pbr.get(i));
+                let none = slb::Pbr::default();
+                let p = pbr.unwrap_or(&none);
+                let (normal, has_normal) = picture(&p.normal, false, &flat);
+                let (metal_rough, has_mr) = picture(&p.metal_rough, false, &plain);
+                let (occlusion, has_occlusion) = picture(&p.occlusion, false, &plain);
+                let (emissive, _) = picture(&p.emissive, true, &plain);
+                let e = p.emissive_factor;
+                let look: [[f32; 4]; 3] = [
+                    [p.metallic, p.roughness, p.normal_scale, p.occlusion_strength],
+                    [e[0], e[1], e[2], p.specular],
+                    [pbr.is_some() as u32 as f32, has_normal as u32 as f32, has_mr as u32 as f32, has_occlusion as u32 as f32],
+                ];
+                let look = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("object look"),
+                    contents: bytemuck::cast_slice(&look),
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
                 let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1627,6 +1727,11 @@ impl ObjectRenderer {
                             binding: 2,
                             resource: surface.as_entire_binding(),
                         },
+                        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&normal) },
+                        wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&metal_rough) },
+                        wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&occlusion) },
+                        wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&emissive) },
+                        wgpu::BindGroupEntry { binding: 7, resource: look.as_entire_binding() },
                     ],
                 });
                 (range.clone(), group)
@@ -2281,6 +2386,12 @@ fn plate(digits: &Texture, number: u32) -> Texture {
 }
 
 fn upload(device: &wgpu::Device, queue: &wgpu::Queue, tex: &Image) -> wgpu::Texture {
+    upload_as(device, queue, tex, true)
+}
+
+/// `tex` as a texture of colours (`srgb`), or of plain numbers (normals,
+/// roughness).
+fn upload_as(device: &wgpu::Device, queue: &wgpu::Queue, tex: &Image, srgb: bool) -> wgpu::Texture {
     let data = tex.levels.concat();
     device.create_texture_with_data(
         queue,
@@ -2294,7 +2405,7 @@ fn upload(device: &wgpu::Device, queue: &wgpu::Queue, tex: &Image) -> wgpu::Text
             mip_level_count: tex.levels.len() as u32,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: if srgb { wgpu::TextureFormat::Rgba8UnormSrgb } else { wgpu::TextureFormat::Rgba8Unorm },
             usage: wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         },
