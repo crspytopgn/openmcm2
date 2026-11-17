@@ -259,6 +259,8 @@ pub struct Builder {
     now: f32,
     ui: Option<ui::Ui>,
     bake_job: Option<(Job<Result<PathBuf, String>>, bool)>,
+    /// A Free Pack track being built from its recipe to copy.
+    copy_job: Option<Job<Result<Course, String>>>,
     ask: Option<Ask>,
     saved_at: f32,
     unsaved: bool,
@@ -320,6 +322,7 @@ impl Builder {
             now: 0.0,
             ui: None,
             bake_job: None,
+            copy_job: None,
             ask: None,
             saved_at: 0.0,
             unsaved: false,
@@ -1021,6 +1024,19 @@ impl Builder {
     pub fn update(&mut self, dt: f32, now: f32) {
         use winit::keyboard::KeyCode as K;
         self.now = now;
+        if self.copy_job.as_ref().is_some_and(|j| j.is_finished()) {
+            match self.copy_job.take().unwrap().join() {
+                Ok(Ok(c)) => {
+                    self.open_copy(c);
+                    self.say("Built. This is your copy to change");
+                }
+                Ok(Err(e)) => {
+                    eprintln!("copying the track: {e}");
+                    self.say("That track can't be copied");
+                }
+                Err(_) => self.say("That track can't be copied"),
+            }
+        }
         let keys = self.keys.clone();
         let held = |k: K| keys.contains(&k);
         let speed = self.cam.dist * if self.shift { 2.4 } else { 1.0 } * dt;
@@ -1624,11 +1640,20 @@ impl Builder {
                     let (tname, tpath, tcourse) = t;
                     if p.button(input, &format!("copy{}", scroll + k), r, tname, tip, false) {
                         let name = self.copy_name(tname);
-                        match copy_of(tpath, mode, *tcourse, &name) {
-                            Ok(c) => opened = Some(c),
-                            Err(e) => {
-                                eprintln!("{}: {e}", tpath.display());
-                                self.say("That track can't be copied");
+                        if !crate::fs::is_file(tpath) && self.copy_job.is_none() {
+                            // A Free Pack track not built yet: built on
+                            // another thread, the builder saying so.
+                            let (path, course) = (tpath.clone(), *tcourse);
+                            self.copy_job = Some(Job::spawn(move || copy_of(&path, mode, course, &name)));
+                            self.say("Building the track from its recipe...");
+                            keep = false;
+                        } else {
+                            match copy_of(tpath, mode, *tcourse, &name) {
+                                Ok(c) => opened = Some(c),
+                                Err(e) => {
+                                    eprintln!("{}: {e}", tpath.display());
+                                    self.say("That track can't be copied");
+                                }
                             }
                         }
                     }
@@ -1640,15 +1665,7 @@ impl Builder {
                     keep = false;
                 }
                 if let Some(c) = opened {
-                    self.save();
-                    self.history.clear();
-                    self.future.clear();
-                    self.course = c;
-                    self.field = None;
-                    self.land = None;
-                    self.picked = None;
-                    self.dirty = true;
-                    self.unsaved = true;
+                    self.open_copy(c);
                     keep = false;
                 }
                 if keep {
@@ -1657,6 +1674,19 @@ impl Builder {
             }
             None => {}
         }
+    }
+
+    /// Starts work on a copied track.
+    fn open_copy(&mut self, c: Course) {
+        self.save();
+        self.history.clear();
+        self.future.clear();
+        self.course = c;
+        self.field = None;
+        self.land = None;
+        self.picked = None;
+        self.dirty = true;
+        self.unsaved = true;
     }
 
     /// A copy's name, numbered if a saved track has it already.
