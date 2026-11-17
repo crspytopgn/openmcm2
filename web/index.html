@@ -763,8 +763,14 @@ async function start(list) {
     at.step = "start";
     loader.step("start");
     await loader.painted();
-    // Runs the game's start; it reports its own steps from here.
-    await game.default({ module_or_path: module });
+    // Runs the game's start; it reports its own steps from here. The
+    // Course Builder is in the address only while the game reads it.
+    setParam("course-builder", builderOnce || $("builder").checked ? "" : null);
+    try {
+      await game.default({ module_or_path: module });
+    } finally {
+      setParam("course-builder", null);
+    }
   } catch (err) {
     console.warn(err);
     if (stopped) return;
@@ -978,15 +984,23 @@ $("trackfile").addEventListener("change", async (e) => {
   listTracks();
 });
 listTracks();
-// "Start in the Course Builder": the game reads it from the address.
-$("builder").checked = new URLSearchParams(location.search).has("course-builder");
+// "Start in the Course Builder": kept in this browser, not in the
+// address. The game reads it from the address, so start() puts it there
+// only for the start that wants it and takes it out once the game has
+// read it. (It used to stay in the address, so after "Open the Course
+// Builder" once, every Play and reload opened the builder.)
+try {
+  $("builder").checked = localStorage.getItem("mm2startbuilder") === "1";
+} catch {}
 $("builder").addEventListener("change", (e) => {
-  const q = new URLSearchParams(location.search);
-  if (e.target.checked) q.set("course-builder", "");
-  else q.delete("course-builder");
-  const query = q.toString().replace(/=(&|$)/g, "$1");
-  history.replaceState(null, "", location.pathname + (query ? "?" + query : "") + location.hash);
+  try {
+    localStorage.setItem("mm2startbuilder", e.target.checked ? "1" : "0");
+  } catch {}
 });
+// "Open the Course Builder": the next start only.
+let builderOnce = false;
+// An address left with it by an older page.
+if (params.has("course-builder")) setParam("course-builder", null);
 
 // ---- MM2 graphics or free graphics ----
 // The choice is kept in this browser: MM2 graphics unless picked.
@@ -1211,8 +1225,7 @@ $("forgetpack").addEventListener("click", async () => {
 // The Course Builder button: straight into the builder, with the graphics
 // picked, once there are files to start from.
 $("openbuilder").addEventListener("click", () => {
-  setParam("course-builder", "");
-  $("builder").checked = true;
+  builderOnce = true;
   if (free && keptPack) {
     $("freekept").hidden = true;
     return go(keptPack, true);
