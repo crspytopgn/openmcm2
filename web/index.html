@@ -67,6 +67,50 @@
   #tracklist li { display: flex; justify-content: space-between; gap: .5rem; color: var(--dim); padding: .15rem 0; }
   @media (max-width: 30rem) { .grid { grid-template-columns: 1fr; } }
   [hidden] { display: none !important; }
+
+  /* The loading screen: what the page is doing at each step, and a plain
+     answer when something goes wrong. */
+  @font-face { font-family: "Archivo Expanded"; src: url(../fonts/archivo-expanded-black-italic.woff2) format("woff2");
+    font-weight: 900; font-style: italic; font-display: swap; }
+  #loader { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 16px;
+    overflow-y: auto; color: var(--fg);
+    background: radial-gradient(ellipse at 50% 30%, #1d1b17 0%, var(--bg) 62%), var(--bg); transition: opacity .35s; }
+  #loader.gone { opacity: 0; pointer-events: none; }
+  #loader .plate { width: min(30rem, 100%); }
+  #loader .logo { display: block; width: min(15rem, 62vw); height: auto; margin: 0 auto 1.6rem; }
+  #loader .tag { display: inline-block; background: var(--accent); color: #151410; font-weight: 800; font-size: .72rem;
+    letter-spacing: .14em; text-transform: uppercase; padding: 2px 12px; transform: skewX(-14deg); }
+  #loader.failed .tag { background: #c9a227; }
+  #ldTitle { margin: .7rem 0 .2rem; font: 900 italic 1.45rem/1.1 "Archivo Expanded", system-ui, sans-serif;
+    text-transform: uppercase; letter-spacing: -.01em; }
+  #ldDetail { margin: 0; min-height: 1.5em; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #loader .track { position: relative; height: 12px; margin: .9rem 0 1.2rem; background: #24221d;
+    border: 1px solid #36332b; transform: skewX(-14deg); overflow: hidden; }
+  #ldFill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); }
+  #loader .track.busy #ldFill { width: 100% !important; transition: none; opacity: .85;
+    background: repeating-linear-gradient(-60deg, var(--accent) 0 12px, #7e9638 12px 24px); background-size: 28px 100%;
+    animation: ldroll .7s linear infinite; }
+  @keyframes ldroll { to { background-position: 28px 0; } }
+  @media (prefers-reduced-motion: reduce) { #loader .track.busy #ldFill { animation: none; } }
+  #ldSteps { list-style: none; margin: 0; padding: .7rem 0 0; border-top: 1px solid #2c2a24; font-size: .9rem; }
+  #ldSteps li { display: grid; grid-template-columns: 1.4rem 1fr auto; gap: .2rem; color: #6f6a5f; padding: .12rem 0; }
+  #ldSteps li::before { content: "\25CB"; }
+  #ldSteps li.now { color: var(--fg); }
+  #ldSteps li.now::before { content: "\25B8"; color: var(--accent); }
+  #ldSteps li.done { color: var(--dim); }
+  #ldSteps li.done::before { content: "\2713"; color: var(--accent); }
+  #ldSteps li.bad { color: #d9b54a; }
+  #ldSteps li.bad::before { content: "\2715"; color: #d9b54a; }
+  #ldSteps li span:last-child { font-variant-numeric: tabular-nums; }
+  #ldError p { color: var(--dim); white-space: pre-line; }
+  #ldError .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
+  #ldError details { font-size: .85rem; color: var(--dim); }
+  #ldError pre { white-space: pre-wrap; word-break: break-word; background: #0c0b0a; border: 1px solid #2c2a24;
+    padding: .6rem; max-height: 12rem; overflow: auto; font-size: .8rem; }
+  /* Over the game while a track loads: the page can't draw then. */
+  #trackload { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 6;
+    padding: .45rem 1rem; background: rgba(18,17,16,.88); border-left: 4px solid var(--accent);
+    border-radius: 4px; font-size: .9rem; color: var(--fg); max-width: calc(100vw - 32px); pointer-events: none; }
 </style>
 </head>
 <body>
@@ -130,6 +174,21 @@
     <a class="button" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener"><span aria-hidden="true">♥</span> Donate on GitHub Sponsors</a>
   </div>
 </div></div>
+<div id="loader" hidden role="status" aria-live="polite"><div class="plate">
+  <img class="logo" src="../img/logo-worn.png" alt="OpenMCM2" width="720" height="427">
+  <span class="tag" id="ldTag">Loading</span>
+  <h2 id="ldTitle">Getting ready</h2>
+  <p id="ldDetail"></p>
+  <div class="track busy" id="ldTrack"><div id="ldFill"></div></div>
+  <div id="ldError" hidden>
+    <p id="ldWhy"></p>
+    <div class="actions" id="ldActions"></div>
+    <details><summary>Details, for a bug report</summary><pre id="ldTech"></pre>
+      <button class="small plain" id="ldCopy">Copy details</button></details>
+  </div>
+  <ol id="ldSteps"></ol>
+</div></div>
+<div id="trackload" hidden>Loading the track. The picture can stop for a few seconds while it does.</div>
 <div id="slow" class="banner" hidden>The game is running slowly on this computer.
   <button id="slowlow">Use Low quality</button> <button id="sloworig">Use the original look</button>
   <button id="slowkeep" class="plain">Keep going</button></div>
@@ -140,13 +199,17 @@
 <script type="module">
 // This build's version: everything below is fetched for it, so a new
 // release never mixes with old files the browser kept.
-async function latest() {
+// It also says how big the engine is, for the loading screen.
+async function build() {
   return fetch("./version.json", { cache: "no-store" })
     .then((r) => r.json())
-    .then((j) => j.version)
     .catch(() => null);
 }
-const version = (await latest()) || "dev";
+async function latest() {
+  return (await build())?.version ?? null;
+}
+const built = (await build()) || {};
+const version = built.version || "dev";
 const fresh = (path) => `${path}?v=${encodeURIComponent(version)}`;
 const fs = await import(fresh("./mm2fs.js"));
 const zip = await import(fresh("./zip.js"));
@@ -156,6 +219,192 @@ const net = await import(fresh("./net.js"));
 
 const $ = (id) => document.getElementById(id);
 const status = (t) => ($("status").textContent = t);
+
+// The loading screen. Each step shows as it starts, ticked off with its
+// time once the next one begins; the game itself reports its own steps
+// (mm2page.stage, from crates/mm2-viewer/src/web.rs).
+const STEPS = {
+  browser: ["Checking your browser", "Looking for WebGPU and a graphics card."],
+  unpack: ["Unpacking the CD image", "Taking the game's files out of the image. Big images take a moment."],
+  keep: ["Keeping your game in this browser", "So next time, Play starts it straight away. This only happens the first time."],
+  files: ["Reading your game files", ""],
+  saves: ["Loading your saves and tracks", ""],
+  engine: ["Downloading the game engine", ""],
+  compile: ["Getting the engine ready", "Your browser is turning the download into code it can run."],
+  start: ["Starting the game", "Reading the menus, sounds and your settings."],
+  gpu: ["Connecting to your graphics card", "Asking the browser for the graphics card."],
+  graphics: ["Setting up the graphics", "Building the shaders the game draws with."],
+};
+const MB = (n) => (n / 1048576).toFixed(n < 10 * 1048576 ? 1 : 0);
+const loader = {
+  now: null,
+  since: 0,
+  shown: false,
+  show() {
+    if (this.shown) return;
+    this.shown = true;
+    $("loader").hidden = false;
+    $("loader").classList.remove("gone", "failed");
+    $("ldError").hidden = true;
+    $("ldSteps").replaceChildren();
+    $("ldTag").textContent = "Loading";
+  },
+  row(id) {
+    let li = document.querySelector(`#ldSteps li[data-id="${id}"]`);
+    if (!li) {
+      li = document.createElement("li");
+      li.dataset.id = id;
+      li.append(document.createElement("span"), document.createElement("span"));
+      li.firstChild.textContent = STEPS[id]?.[0] ?? id;
+      $("ldSteps").append(li);
+    }
+    return li;
+  },
+  // The step `id` begins; the one before it is done.
+  step(id, detail) {
+    this.show();
+    this.finish();
+    this.now = id;
+    this.since = performance.now();
+    this.row(id).className = "now";
+    $("ldFill").style.width = "0";
+    $("ldTitle").textContent = STEPS[id]?.[0] ?? id;
+    $("ldDetail").textContent = detail ?? STEPS[id]?.[1] ?? "";
+    this.progress(null);
+  },
+  finish() {
+    if (!this.now) return;
+    const li = this.row(this.now);
+    li.className = "done";
+    li.lastChild.textContent = `${((performance.now() - this.since) / 1000).toFixed(1)} s`;
+    this.now = null;
+  },
+  // A share done, 0 to 1, with a line saying how far; null for a step
+  // that can't tell.
+  progress(share, text) {
+    $("ldTrack").classList.toggle("busy", share == null);
+    if (share != null) $("ldFill").style.width = `${Math.min(100, share * 100).toFixed(1)}%`;
+    if (text != null) $("ldDetail").textContent = text;
+  },
+  // Lets the browser show the screen before work that holds the page.
+  painted() {
+    return new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => ok())));
+  },
+  // Back to the start page (a kept CD image unpacked as the page opened).
+  hide() {
+    this.now = null;
+    this.shown = false;
+    $("loader").hidden = true;
+  },
+  done() {
+    this.finish();
+    $("loader").classList.add("gone");
+    setTimeout(() => ($("loader").hidden = true), 400);
+  },
+  // Something went wrong: what happened, in plain words, what to try, and
+  // the technical detail tucked away for a bug report.
+  fail(title, why, tech, actions = [], tag = "Couldn't start") {
+    this.show();
+    if (this.now) this.row(this.now).className = "bad";
+    this.now = null;
+    $("loader").hidden = false;
+    $("loader").classList.remove("gone");
+    $("loader").classList.add("failed");
+    $("ldTag").textContent = tag;
+    $("ldTitle").textContent = title;
+    $("ldDetail").hidden = true;
+    $("ldTrack").hidden = true;
+    $("ldWhy").textContent = why;
+    const box = $("ldActions");
+    box.replaceChildren();
+    for (const [label, act, plain] of [...actions, ["Try again", () => location.reload()], ["Back to the start page", backToStart, true]]) {
+      const b = document.createElement("button");
+      b.textContent = label;
+      if (plain) b.className = "plain";
+      b.addEventListener("click", act);
+      box.append(b);
+    }
+    const logs = recent.length ? "\n\nLast messages:\n" + recent.join("\n") : "";
+    $("ldTech").textContent = `${tech || "(no detail)"}\n\nOpenMCM2 ${version}\n${navigator.userAgent}${logs}`;
+    $("ldTech").parentElement.hidden = false;
+    $("ldError").hidden = false;
+  },
+};
+function backToStart() {
+  try {
+    sessionStorage.removeItem("mm2autoplay");
+  } catch {}
+  location.reload();
+}
+$("ldCopy").addEventListener("click", () =>
+  navigator.clipboard?.writeText($("ldTech").textContent).then(() => ($("ldCopy").textContent = "Copied"))
+);
+// The game's last few error lines, for the details of a failure.
+const recent = [];
+{
+  const error = console.error.bind(console);
+  console.error = (...a) => {
+    recent.push(a.map(String).join(" ").slice(0, 600));
+    if (recent.length > 6) recent.shift();
+    error(...a);
+  };
+}
+
+// What went wrong, for a player: a title and what to try.
+function explain(raw) {
+  const t = String(raw);
+  if (/adapter/i.test(t))
+    return [
+      "No graphics card for the game",
+      "Your browser has WebGPU, but didn't hand the game a graphics card.\n" +
+        "This usually means hardware acceleration is turned off, or the browser doesn't trust this computer's graphics driver yet. " +
+        "Check that \"Use graphics acceleration when available\" is on in the browser's settings, update the graphics driver, and restart the browser.",
+    ];
+  if (/lost|destroyed/i.test(t))
+    return [
+      "The graphics card stopped answering",
+      "The browser lost touch with the graphics card while the game was starting. " +
+        "That can happen when the computer is short of graphics memory or the driver restarted. Close other tabs or games and try again.",
+    ];
+  if (/allocation failed|out of memory|could not allocate|memory\.grow/i.test(t))
+    return [
+      "Not enough memory",
+      "The browser ran out of memory starting the game. Close some tabs and try again. " +
+        "On a phone or tablet, the game folder is easier on memory than a CD image.",
+    ];
+  if (/MAINMENU|TERAFORM|no such file|not found/i.test(t))
+    return [
+      "Some game files are missing",
+      "The game couldn't find a file it needs. Pick the whole installed game folder (the one with UI, RES and TERAFORM in it), or your CD image.",
+    ];
+  return [
+    "Something went wrong",
+    "The game hit a problem while starting. Trying again often works. If it keeps happening, the details below help us fix it: " +
+      "you can post them at github.com/crspytopgn/openmcm2/issues.",
+  ];
+}
+// A crash in the game after it's up, too: say so, rather than a frozen picture.
+addEventListener("error", (e) => {
+  if (e.error instanceof WebAssembly.RuntimeError) gameStopped(e.error);
+});
+addEventListener("unhandledrejection", (e) => {
+  if (e.reason instanceof WebAssembly.RuntimeError) gameStopped(e.reason);
+});
+let stopped = false;
+function gameStopped(err) {
+  if (stopped) return;
+  stopped = true;
+  if (loader.shown && loader.now) return loader.fail(...explain(err), String(err.stack || err));
+  // While playing: the start's steps are old news.
+  $("ldSteps").replaceChildren();
+  loader.fail(
+    "The game stopped",
+    "The game hit a bug and had to stop. Your saves are kept. Reload to carry on; if it happens again, the details below help us fix it.",
+    String(err.stack || err),
+    [],
+    "Stopped"
+  );
+}
 
 // Browsers keep sound off until the player clicks or presses a key, and
 // Safari keeps it off even then unless asked again: every sound context
@@ -268,6 +517,7 @@ $("slowkeep").addEventListener("click", () => ($("slow").hidden = true));
 
 globalThis.mm2page = {
   started() {
+    loader.done();
     $("setup").hidden = true;
     $("mm2").focus();
     pad?.show(false);
@@ -283,10 +533,21 @@ globalThis.mm2page = {
     }, 8000);
   },
   fail(why) {
-    $("setup").hidden = false;
-    $("bar").hidden = true;
-    status("The game could not start.");
-    $("why").textContent = why;
+    const [title, text] = explain(why);
+    const lighter = look === "enhanced" ? [["Try the original look", () => restartWith(() => (s.enhanced = false))]] : [];
+    loader.fail(title, text, why, lighter);
+  },
+  // The game's own steps: connecting to the GPU, setting up the drawing.
+  stage(id) {
+    loader.step(id);
+  },
+  // Waits for the browser to show what the page says.
+  painted() {
+    return loader.painted();
+  },
+  // A track starts or finishes loading.
+  trackLoading(on) {
+    $("trackload").hidden = !on;
   },
   // A race started or ended: the touch buttons come and go with it.
   racing(on) {
@@ -314,41 +575,132 @@ function gameRoot(paths) {
 }
 
 async function readAll(list) {
-  const bar = $("bar");
-  bar.hidden = false;
-  bar.max = list.reduce((n, [, b]) => n + b.size, 0);
-  bar.value = 0;
+  const total = list.reduce((n, [, b]) => n + b.size, 0);
+  let read = 0;
   let next = 0;
   async function worker() {
     while (next < list.length) {
       const [path, blob] = list[next++];
       fs.put(path, new Uint8Array(await blob.arrayBuffer()));
-      bar.value += blob.size;
-      status(`Reading your game… ${Math.round((100 * bar.value) / bar.max)}%`);
+      read += blob.size;
+      loader.progress(read / total, `${MB(read)} of ${MB(total)} MB · ${list.length} files`);
     }
   }
   await Promise.all(Array.from({ length: 8 }, worker));
 }
 
-async function start(list) {
-  if (!navigator.gpu) {
-    mm2page.fail(
-      "This browser can't run the game yet: it needs WebGPU.\n" +
-        "It works in Chrome or Edge 113 or newer (Windows, Mac, ChromeOS, Android 12+), " +
-        "Safari 26 (Mac, iPhone, iPad), and Firefox 141 or newer on Windows. " +
-        "On Linux, Chrome needs WebGPU turned on at chrome://flags/#enable-unsafe-webgpu."
-    );
-    return;
+// Which browsers run it, said for the one in use.
+function noWebGPU() {
+  const ua = navigator.userAgent;
+  const linux = /Linux/.test(ua) && !/Android/.test(ua);
+  let tip;
+  if (/Firefox\//.test(ua))
+    tip = /Windows/.test(ua)
+      ? "Update Firefox to version 141 or newer, or use Chrome or Edge."
+      : "Firefox has WebGPU on Windows only for now. On this computer, Chrome or Edge works" + (/Mac/.test(ua) ? ", and Safari 26 too." : ".");
+  else if (/Safari\//.test(ua) && !/Chrom(e|ium)\//.test(ua))
+    tip = "Safari runs it from version 26 (macOS 26, iOS 26 and iPadOS 26). Update the system, or use Chrome.";
+  else if (linux)
+    tip = "On Linux, Chrome needs WebGPU switched on: open chrome://flags/#enable-unsafe-webgpu, set it to Enabled and restart Chrome.";
+  else tip = "Update the browser to the newest version. Chrome or Edge 113 or newer runs it.";
+  loader.fail(
+    "This browser can't run the game yet",
+    "The game draws with WebGPU, and this browser doesn't have it (or has it switched off).\n\n" +
+      tip +
+      "\n\nIt runs in Chrome or Edge 113+ (Windows, Mac, ChromeOS, Android 12+), Safari 26 (Mac, iPhone, iPad) and Firefox 141+ on Windows. " +
+      "Or get the desktop version from the OpenMCM2 site.",
+    "navigator.gpu is missing"
+  );
+}
+
+// The engine, with a progress bar: about 12 MB to download, more once
+// the browser unpacks it.
+async function fetchEngine() {
+  const r = await fetch(fresh("./pkg/mm2-viewer_bg.wasm"));
+  if (!r.ok) throw new Error(`the engine download answered ${r.status} ${r.statusText}`);
+  // A compressed download's length is the compressed one, and the stream
+  // gives unpacked bytes: the build says how big the unpacked file is.
+  const packed = r.headers.get("content-encoding") ? +r.headers.get("content-length") || built.engine_gz : 0;
+  const total = built.engine || (!packed && +r.headers.get("content-length")) || 0;
+  const size = packed || total;
+  if (!r.body || !total) {
+    loader.progress(null, size ? `${MB(size)} MB` : "");
+    return new Uint8Array(await r.arrayBuffer());
   }
-  $("pick").hidden = $("kept").hidden = true;
+  const out = new Uint8Array(total);
+  const parts = [];
+  let got = 0;
+  const reader = r.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (got + value.length <= total) out.set(value, got);
+    else parts.push(value);
+    got += value.length;
+    const share = Math.min(1, got / total);
+    loader.progress(share, `${MB(share * size)} of ${MB(size)} MB`);
+  }
+  if (got === total && !parts.length) return out;
+  // The build's size was off: put it together as it came.
+  const whole = new Uint8Array(got);
+  whole.set(out.subarray(0, Math.min(got, total)));
+  let at = Math.min(got, total);
+  for (const p of parts) whole.set(p, at), (at += p.length);
+  return whole;
+}
+
+// Whether this browser can run the game, checked before anything slow.
+let canRun = false;
+async function checkBrowser() {
+  if (canRun) return true;
+  loader.step("browser");
+  if (!navigator.gpu) return noWebGPU(), false;
+  const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" }).catch(() => null);
+  if (!adapter) {
+    const [title, why] = explain("adapter");
+    return loader.fail(title, why, "navigator.gpu.requestAdapter() gave no adapter"), false;
+  }
+  canRun = true;
+  return true;
+}
+
+let starting = false;
+async function start(list) {
+  if (starting) return;
+  starting = true;
   $("why").textContent = "";
-  await readAll(list);
-  await fs.loadUser().catch((e) => console.warn("saves not read", e));
-  addTracks();
-  status("Starting…");
-  setLookInAddress();
-  const game = await import(fresh("./pkg/mm2-viewer.js"));
-  await game.default({ module_or_path: fresh("./pkg/mm2-viewer_bg.wasm") });
+  if (!(await checkBrowser())) return;
+  const at = { step: "files" };
+  try {
+    loader.step("files");
+    await readAll(list);
+    at.step = "saves";
+    loader.step("saves");
+    await fs.loadUser().catch((e) => console.warn("saves not read", e));
+    addTracks();
+    setLookInAddress();
+    at.step = "engine";
+    loader.step("engine", "");
+    const [game, bytes] = await Promise.all([import(fresh("./pkg/mm2-viewer.js")), fetchEngine()]);
+    at.step = "compile";
+    loader.step("compile");
+    await loader.painted();
+    const module = await WebAssembly.compile(bytes);
+    at.step = "start";
+    loader.step("start");
+    await loader.painted();
+    // Runs the game's start; it reports its own steps from here.
+    await game.default({ module_or_path: module });
+  } catch (err) {
+    console.warn(err);
+    if (stopped) return;
+    let [title, why] = explain(err);
+    if (at.step === "files")
+      [title, why] = ["Couldn't read your game files", "The browser couldn't read some of the files you picked. If they're on a CD, USB stick or network drive, copy the game folder to this computer first and pick that."];
+    if (at.step === "engine")
+      [title, why] = ["Couldn't download the game engine", "The download stopped part way. Check your internet connection and try again."];
+    loader.fail(title, why, String(err.stack || err));
+  }
 }
 
 $("folder").addEventListener("change", (e) => {
@@ -368,6 +720,7 @@ async function fromZip(file) {
       .sort((a, b) => b[1].size - a[1].size)[0];
     if (!image) return null;
     status("Unpacking the CD image…");
+    loader.step("unpack");
     const files = await iso.entries(new Blob([await image[1].arrayBuffer()]));
     if (!files) throw new Error("The CD image in that zip has no GAME folder on it.");
     return files.map(([name, e]) => ["/game/" + name, e]);
@@ -391,7 +744,9 @@ async function useFile(file) {
       : "Pick the .mdf file that goes with the .mds.";
     return;
   }
+  if (!(await checkBrowser())) return;
   const list = await fromFile(file).catch((err) => {
+    loader.hide();
     $("why").textContent = String(err.message || err);
     return undefined;
   });
@@ -401,6 +756,7 @@ async function useFile(file) {
   if (!list) return;
   if ($("keep").checked) {
     navigator.storage?.persist?.();
+    loader.step("keep");
     await fs.forgetGame().catch(() => {});
     await fs.keepGame([["/file", file]]).catch((e) => console.warn("game not kept", e));
   }
@@ -413,11 +769,13 @@ async function useFolder(picked) {
     $("why").textContent = "That folder has no UI/MAINMENU.DAT in it. Pick the folder the game is installed in, or the CD.";
     return;
   }
+  if (!(await checkBrowser())) return;
   const list = picked
     .filter(([path]) => path.startsWith(root))
     .map(([path, f]) => ["/game/" + path.slice(root.length), f]);
   if ($("keep").checked) {
     navigator.storage?.persist?.();
+    loader.step("keep");
     await fs.forgetGame().catch(() => {});
     await fs.keepGame(list).catch((e) => console.warn("game not kept", e));
   }
@@ -548,17 +906,18 @@ listTracks();
 let kept = await fs.keptGame().catch(() => null);
 const keptFile = kept?.find(([path]) => path === "/file");
 if (keptFile) kept = await fromFile(keptFile[1]).catch(() => null);
+let again = false;
+try {
+  again = sessionStorage.getItem("mm2autoplay") === "1";
+  sessionStorage.removeItem("mm2autoplay");
+} catch {}
+if (!(kept && again)) loader.hide();
 if (kept) {
   $("pick").hidden = true;
   $("kept").hidden = false;
   status("Your game folder is remembered in this browser.");
   $("play").addEventListener("click", () => start(kept));
   // Back from switching the look: straight into the game again.
-  let again = false;
-  try {
-    again = sessionStorage.getItem("mm2autoplay") === "1";
-    sessionStorage.removeItem("mm2autoplay");
-  } catch {}
   if (again) start(kept);
 }
 </script>
