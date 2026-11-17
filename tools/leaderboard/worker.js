@@ -13,8 +13,11 @@
 //                key<TAB>value lines (see addRace); answers "ok", or
 //                "closed" when a computer's race port can't be reached
 //   POST /race/end   id<TAB>the host's id: the race is gone
-//   GET  /races?kind=pc|web   the open races (the server browser):
+//   GET  /races?kind=pc|web|room   the open races (the server browser):
 //                address<TAB>name<TAB>event<TAB>track<TAB>players<TAB>racing<TAB>version
+//                (a room's address is its WebSocket address)
+//   GET  /room/<name>   a WebSocket into one of the always-open free roam
+//                rooms (ROOMS): the game's own messages, as a host's
 //
 // Each board keeps one lap per rider (their best), at most KEEP of them.
 
@@ -237,6 +240,18 @@ async function endRace(request, env) {
 }
 
 async function listRaces(url, env) {
+  // Several kinds at once (`kinds=web,room,pc`): one request, and one
+  // call to the races object, for the whole server browser.
+  const kinds = url.searchParams.get("kinds");
+  if (kinds) {
+    const want = new Set(kinds.split(","));
+    const races = env.RACES.get(env.RACES.idFromName("all"));
+    const { rows, counts } = await races.listAll([...want].filter((k) => k === "web" || k === "pc"));
+    const lines = rows.map((r) => [r.address, r.name, r.event, r.track, r.players, r.racing, r.version].join("\t"));
+    if (want.has("room")) lines.push(...roomLines(url, counts));
+    return text(lines.map((l) => `${l}\n`).join(""));
+  }
+  if (url.searchParams.get("kind") === "room") return listRooms(url, env);
   const kind = url.searchParams.get("kind") === "web" ? "web" : "pc";
   const races = env.RACES.get(env.RACES.idFromName("all"));
   const rows = await races.list(kind);
@@ -247,6 +262,7 @@ export class Races extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    this.sql.exec("CREATE TABLE IF NOT EXISTS rooms (name TEXT PRIMARY KEY, players INTEGER)");
     this.sql.exec(`CREATE TABLE IF NOT EXISTS races (
       id TEXT PRIMARY KEY, kind TEXT, address TEXT, origin TEXT, name TEXT,
       event INTEGER, track TEXT, players INTEGER, racing INTEGER,
@@ -288,6 +304,19 @@ export class Races extends DurableObject {
     this.sql.exec("DELETE FROM races WHERE id = ?", id);
   }
 
+  // How many are in each free roam room, as the rooms tell it.
+  roomPlayers(name, players) {
+    this.sql.exec("INSERT OR REPLACE INTO rooms VALUES (?, ?)", name, players);
+  }
+
+  listAll(kinds) {
+    return { rows: kinds.flatMap((k) => this.list(k)), counts: this.rooms() };
+  }
+
+  rooms() {
+    return Object.fromEntries(this.sql.exec("SELECT name, players FROM rooms").toArray().map((r) => [r.name, r.players]));
+  }
+
   list(kind) {
     this.sweep();
     return this.sql
@@ -302,6 +331,7 @@ export default {
     if (request.method === "POST" && url.pathname === "/race") return addRace(request, env);
     if (request.method === "POST" && url.pathname === "/race/end") return endRace(request, env);
     if (request.method === "GET" && url.pathname === "/races") return listRaces(url, env);
+    if (url.pathname.startsWith("/room/")) return joinRoom(request, url, env);
     if (request.method === "POST" && url.pathname === "/laps") return addLaps(request, env);
     if (request.method === "GET" && url.pathname === "/board") return board(url, env);
     if (request.method === "GET" && url.pathname === "/boards") return boards(url, env);
@@ -311,3 +341,313 @@ export default {
     return text("OpenMCM2 lap leaderboards\n", url.pathname === "/" ? 200 : 404);
   },
 };
+
+// ---------------------------------------------------------------------
+// The always-open free roam rooms. Each is one Durable Object that hosts
+// a free roam session the way a player's game does (net.rs, Session):
+// players come over a WebSocket, say Hello, press Ready to drop into a
+// free place, and their bikes are passed to everyone else. The room
+// isn't a player and rides nowhere, so all eight places are theirs.
+// The messages are the game's own (net.rs, Msg::encode), one per
+// WebSocket message. Each player's state rides on their socket
+// (serializeAttachment), so the room can sleep between messages.
+
+// One room in Europe and one in North America (where each Durable Object
+// lives: its location hint), so everyone has one near.
+export const ROOMS = {
+  "copper-eu": { name: "OpenMCM2 Free Roam (Europe)", event: 2, track: "FPNAT01", title: "Copper Ridge", where: "weur" },
+  "copper-us": { name: "OpenMCM2 Free Roam (America)", event: 2, track: "FPNAT01", title: "Copper Ridge", where: "enam" },
+};
+const ROOM_PLACES = 8;
+const EMPTY = 254;
+const MOST_MESSAGE = 1 << 20;
+
+function roomLines(url, counts) {
+  const ws = url.protocol === "http:" ? "ws:" : "wss:";
+  return Object.entries(ROOMS).map(([key, r]) =>
+    [`${ws}//${url.host}/room/${key}`, r.name, r.event, `Free roam: ${r.title}`, counts[key] ?? 0, 0, "room"].join("\t"),
+  );
+}
+
+async function listRooms(url, env) {
+  const races = env.RACES.get(env.RACES.idFromName("all"));
+  const rows = roomLines(url, await races.rooms());
+  return text(rows.map((r) => `${r}\n`).join(""));
+}
+
+function joinRoom(request, url, env) {
+  const key = url.pathname.slice("/room/".length).toLowerCase();
+  if (!ROOMS[key]) return text("no such room\n", 404);
+  if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return text("a WebSocket, please\n", 426);
+  return env.ROOM.get(env.ROOM.idFromName(key), { locationHint: ROOMS[key].where }).fetch(request);
+}
+
+// The game's message encoding: little-endian, strings with a length.
+class Writer {
+  constructor() {
+    this.parts = [];
+  }
+  u8(v) {
+    this.parts.push(Uint8Array.of(v & 255));
+    return this;
+  }
+  u32(v) {
+    const b = new Uint8Array(4);
+    new DataView(b.buffer).setUint32(0, v >>> 0, true);
+    this.parts.push(b);
+    return this;
+  }
+  str(s) {
+    const b = new TextEncoder().encode(s ?? "");
+    this.u32(b.length);
+    this.parts.push(b);
+    return this;
+  }
+  ride(r) {
+    return this.str(r.model).str(r.texture).str(r.outfit).u32(r.cc).u32(r.plate);
+  }
+  player(p) {
+    return this.u8(p.id).str(p.name).u8(p.ready ? 1 : 0).ride(p.ride);
+  }
+  players(ps) {
+    this.u32(ps.length);
+    for (const p of ps) this.player(p);
+    return this;
+  }
+  game(g) {
+    return this.u8(g.event).u8(0).u32(99).u32(0).str(g.track).u8(0).u8(0).u8(0).u8(0).u8(0);
+  }
+  done() {
+    const n = this.parts.reduce((a, p) => a + p.length, 0);
+    const out = new Uint8Array(n);
+    let at = 0;
+    for (const p of this.parts) {
+      out.set(p, at);
+      at += p.length;
+    }
+    return out;
+  }
+}
+
+class Reader {
+  constructor(b) {
+    this.b = b;
+    this.at = 0;
+    this.view = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  }
+  u8() {
+    if (this.at + 1 > this.b.length) throw new Error("short");
+    return this.b[this.at++];
+  }
+  u32() {
+    if (this.at + 4 > this.b.length) throw new Error("short");
+    const v = this.view.getUint32(this.at, true);
+    this.at += 4;
+    return v;
+  }
+  str() {
+    const n = this.u32();
+    if (this.at + n > this.b.length) throw new Error("short");
+    const s = new TextDecoder().decode(this.b.subarray(this.at, this.at + n));
+    this.at += n;
+    return s;
+  }
+  ride() {
+    return { model: this.str().slice(0, 64), texture: this.str().slice(0, 64), outfit: this.str().slice(0, 64), cc: this.u32(), plate: this.u32() };
+  }
+}
+
+const NO_RIDE = { model: "", texture: "", outfit: "", cc: 0, plate: 0 };
+const M = { HELLO: 1, WELCOME: 2, PLAYERS: 3, READY: 4, RIDE: 5, CHAT: 6, GAME: 7, START: 8, BIKE: 9, FINISHED: 10, LEAVE: 11, FILE_ASK: 12, FILE_PART: 13, FILE_NONE: 14, POS: 15 };
+
+export class Room extends DurableObject {
+  // Everyone here: each socket and its player (null before Hello).
+  here() {
+    return this.ctx.getWebSockets().map((ws) => ({ ws, p: ws.deserializeAttachment() })).filter((x) => x.p);
+  }
+
+  async fetch(request) {
+    const key = new URL(request.url).pathname.slice("/room/".length).toLowerCase();
+    const taken = new Set(this.here().map((x) => x.p.id));
+    if (taken.size >= ROOM_PLACES) return text("full\n", 503);
+    let id = 1;
+    while (taken.has(id)) id++;
+    const [client, server] = Object.values(new WebSocketPair());
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ room: key, id, hello: false, name: "", ready: false, ride: NO_RIDE, place: -1 });
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  players() {
+    return this.here()
+      .filter((x) => x.p.hello)
+      .map((x) => x.p)
+      .sort((a, b) => a.id - b.id);
+  }
+
+  send(ws, bytes) {
+    try {
+      ws.send(bytes);
+    } catch {}
+  }
+
+  everyone(bytes, except = null) {
+    for (const { ws, p } of this.here()) if (p.hello && ws !== except) this.send(ws, bytes);
+  }
+
+  tellPlayers() {
+    this.everyone(new Writer().u8(M.PLAYERS).players(this.players()).done());
+  }
+
+  async count() {
+    const room = this.here()[0]?.p.room;
+    const n = this.players().length;
+    if (!room || n === this.lastCount) return;
+    this.lastCount = n;
+    try {
+      await this.env.RACES.get(this.env.RACES.idFromName("all")).roomPlayers(room, n);
+    } catch {}
+  }
+
+  // Free roam's comings and goings (net.rs, drop_in_out): a place whose
+  // player is gone or no longer ready is free again; a ready player not
+  // riding takes a free place. Those riding hear who is where.
+  dropInOut(game, changed = false) {
+    const all = this.here().filter((x) => x.p.hello);
+    const used = new Set();
+    for (const x of all) {
+      if (x.p.place >= 0 && !x.p.ready) {
+        x.p.place = -1;
+        x.ws.serializeAttachment(x.p);
+        changed = true;
+      }
+      if (x.p.place >= 0) used.add(x.p.place);
+    }
+    for (const x of all) {
+      if (!x.p.ready || x.p.place >= 0) continue;
+      let free = 0;
+      while (free < ROOM_PLACES && used.has(free)) free++;
+      if (free >= ROOM_PLACES) break;
+      used.add(free);
+      x.p.place = free;
+      x.ws.serializeAttachment(x.p);
+      changed = true;
+    }
+    if (!changed) return;
+    const places = Array.from({ length: ROOM_PLACES }, () => ({ id: EMPTY, name: "", ready: false, ride: NO_RIDE }));
+    for (const x of all) if (x.p.place >= 0) places[x.p.place] = x.p;
+    const start = new Writer().u8(M.START).game(game).players(places).done();
+    for (const x of all) if (x.p.place >= 0) this.send(x.ws, start);
+  }
+
+  async webSocketMessage(ws, data) {
+    const me = ws.deserializeAttachment();
+    const room = ROOMS[me?.room];
+    if (!room || typeof data === "string" || data.byteLength > MOST_MESSAGE) return;
+    const b = new Uint8Array(data);
+    let r;
+    let kind;
+    try {
+      r = new Reader(b);
+      kind = r.u8();
+    } catch {
+      return;
+    }
+    if (!me.hello && kind !== M.HELLO) return;
+    try {
+      switch (kind) {
+        case M.HELLO: {
+          if (me.hello) return;
+          me.name = r.str().replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 24) || "Rider";
+          me.ride = r.ride();
+          me.hello = true;
+          ws.serializeAttachment(me);
+          this.send(ws, new Writer().u8(M.WELCOME).u8(me.id).done());
+          this.send(ws, new Writer().u8(M.GAME).game(room).done());
+          this.send(ws, new Writer().u8(M.CHAT).str(`Server: Welcome to free roam at ${room.title}! Press Ready to ride, and leave the race any time to come back here.`).done());
+          this.tellPlayers();
+          await this.count();
+          return;
+        }
+        case M.READY:
+          me.ready = r.u8() !== 0;
+          ws.serializeAttachment(me);
+          this.tellPlayers();
+          this.dropInOut(room);
+          return;
+        case M.RIDE:
+          me.ride = r.ride();
+          ws.serializeAttachment(me);
+          this.tellPlayers();
+          return;
+        case M.CHAT: {
+          const line = r.str().slice(0, 300);
+          this.everyone(new Writer().u8(M.CHAT).str(line).done());
+          return;
+        }
+        case M.BIKE:
+        case M.POS:
+        case M.FINISHED:
+          // Passed on as it came, to everyone else riding: those waiting
+          // in the lobby don't need bikes.
+          for (const x of this.here()) if (x.ws !== ws && x.p.hello && x.p.place >= 0) this.send(x.ws, b);
+          return;
+        case M.LEAVE:
+          ws.close(1000, "left");
+          await this.gone(ws);
+          return;
+        case M.FILE_ASK:
+        case M.FILE_PART:
+        case M.FILE_NONE: {
+          // A lobby download: to whom (the room has no files), stamped
+          // with who it's from.
+          const to = b[1];
+          if (b.length < 3) return;
+          if (to === 0) {
+            if (kind === M.FILE_ASK) {
+              const out = b.slice();
+              out[0] = M.FILE_NONE;
+              out[1] = me.id;
+              out[2] = 0;
+              this.send(ws, out);
+            }
+            return;
+          }
+          const out = b.slice();
+          out[2] = me.id;
+          const target = this.here().find((x) => x.p.id === to && x.p.hello);
+          if (target) this.send(target.ws, out);
+          return;
+        }
+      }
+    } catch {
+      // A message cut short: ignored, as the game does.
+    }
+  }
+
+  // A player has gone: off the list and out of their place.
+  async gone(ws) {
+    const me = ws.deserializeAttachment();
+    ws.serializeAttachment(null);
+    if (!me?.hello) return;
+    this.tellPlayers();
+    const room = ROOMS[me.room];
+    // A place freed: those still riding hear it.
+    if (room) this.dropInOut(room, me.place >= 0);
+    const n = this.players().length;
+    if (n !== this.lastCount) {
+      this.lastCount = n;
+      try {
+        await this.env.RACES.get(this.env.RACES.idFromName("all")).roomPlayers(me.room, n);
+      } catch {}
+    }
+  }
+
+  async webSocketClose(ws) {
+    await this.gone(ws);
+  }
+
+  async webSocketError(ws) {
+    await this.gone(ws);
+  }
+}

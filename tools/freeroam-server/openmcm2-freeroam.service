@@ -1,0 +1,19 @@
+# The always-open free roam server as a Linux service (see README.md).
+# Copy to /etc/systemd/system/, then:
+#   sudo systemctl enable --now openmcm2-freeroam
+#   journalctl -u openmcm2-freeroam -f
+[Unit]
+Description=OpenMCM2 free roam server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=openmcm2
+ExecStart=/opt/openmcm2/mm2-viewer --serve
+Restart=always
+RestartSec=10
+# The game's settings and logs go under the user's home.
+Environment=HOME=/home/openmcm2
+
+[Install]
+WantedBy=multi-user.target

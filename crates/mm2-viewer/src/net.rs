@@ -155,6 +155,14 @@ pub enum Msg {
         data: Vec<u8>,
     },
     FileNone(FileNote),
+    /// One bike, packed small ([`mm2_formats::vcr::State::write_small`]):
+    /// only in a free roam room, where everyone has a version that knows
+    /// it. Heard as a [`Heard::Bike`] with the game's full packet.
+    Pos {
+        racer: u8,
+        time: f32,
+        data: Vec<u8>,
+    },
 }
 
 /// Which file a lobby download is about, and between whom.
@@ -332,6 +340,11 @@ impl Msg {
             Msg::FileAsk(n) => w.u8(12).note(n),
             Msg::FilePart { note, offset, total, data } => w.u8(13).note(note).u32(*offset).u32(*total).bytes(data),
             Msg::FileNone(n) => w.u8(14).note(n),
+            Msg::Pos { racer, time, data } => {
+                w.u8(15).u8(*racer).f32(*time);
+                w.0.extend(data);
+                &mut w
+            }
         };
         w.0
     }
@@ -372,6 +385,11 @@ impl Msg {
                 data: r.bytes()?,
             },
             14 => Msg::FileNone(r.note()?),
+            15 => Msg::Pos {
+                racer: r.u8()?,
+                time: r.f32()?,
+                data: r.0.to_vec(),
+            },
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -389,6 +407,8 @@ impl Msg {
 pub enum Addr {
     Ip(SocketAddr),
     Code(String),
+    /// An always-open free roam room's WebSocket address (`wss://…`).
+    Room(String),
 }
 #[cfg(target_arch = "wasm32")]
 pub type Addr = String;
@@ -399,6 +419,7 @@ impl std::fmt::Display for Addr {
         match self {
             Addr::Ip(a) => write!(f, "{a}"),
             Addr::Code(c) => write!(f, "race {c}"),
+            Addr::Room(_) => write!(f, "the free roam room"),
         }
     }
 }
@@ -411,6 +432,9 @@ impl std::str::FromStr for Addr {
         let s = s.trim();
         if rtc::is_code(s) {
             return Ok(Addr::Code(s.to_uppercase()));
+        }
+        if s.starts_with("wss://") || s.starts_with("ws://") {
+            return Ok(Addr::Room(s.to_string()));
         }
         s.parse().map(Addr::Ip)
     }
@@ -464,6 +488,21 @@ fn receive(stream: &mut TcpStream) -> io::Result<Msg> {
     let mut body = vec![0u8; n];
     stream.read_exact(&mut body)?;
     Msg::decode(&body)
+}
+
+/// The next player's number from `next`: never the host's (0), an empty
+/// place's ([`EMPTY`]) or 255, going round again after 249, so a server
+/// that runs for weeks never runs out (a number still in use is turned
+/// away in [`Session::poll`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn take_id(next: &AtomicU8) -> u8 {
+    loop {
+        let id = next.fetch_add(1, Ordering::Relaxed);
+        if (1..250).contains(&id) {
+            return id;
+        }
+        let _ = next.compare_exchange(id.wrapping_add(1), 1, Ordering::Relaxed, Ordering::Relaxed);
+    }
 }
 
 /// What the connections' threads tell the session.
@@ -532,6 +571,12 @@ pub struct Session {
     pub racing: bool,
     /// The host's free roam session, while it rides in one.
     pub roam: Option<Roam>,
+    /// An always-open server (`--serve`): it hosts without riding, so it
+    /// isn't one of the players and every place is free for them.
+    pub dedicated: bool,
+    /// In a free roam room on the leaderboard server, where bikes go
+    /// packed small ([`Msg::Pos`]).
+    pub room: bool,
     /// The host's race in the server browser, if it is listed.
     listing: Option<crate::servers::Listing>,
     /// Lines for the lobby's chat: what the server browser said.
@@ -579,7 +624,7 @@ impl Session {
                     }
                     let Ok(stream) = stream else { continue };
                     let _ = stream.set_nodelay(true);
-                    let id = next.fetch_add(1, Ordering::Relaxed);
+                    let id = take_id(&next);
                     let Ok(read) = stream.try_clone() else {
                         continue;
                     };
@@ -607,12 +652,31 @@ impl Session {
             title: String::new(),
             racing: false,
             roam: None,
+            dedicated: false,
+            room: false,
             listing: crate::servers::Listing::new(),
             notes: Vec::new(),
             port,
             rtc,
             code: String::new(),
         })
+    }
+
+    /// An always-open server called `name`: a host that doesn't ride and
+    /// isn't one of the players (`--serve`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn serve(name: &str) -> io::Result<Session> {
+        let mut s = Session::host(name, Player::default())?;
+        s.players.clear();
+        s.dedicated = true;
+        Ok(s)
+    }
+
+    /// Sends `m` to player `id` alone (the host's way to greet one).
+    pub fn tell(&mut self, id: u8, m: &Msg) {
+        if let Some((_, link)) = self.peers.iter_mut().find(|(p, _)| *p == id) {
+            let _ = send(link, m);
+        }
     }
 
     /// Joins the session at `addr` (or with that race code) as `me`.
@@ -627,6 +691,7 @@ impl Session {
                 (Link::Tcp(stream), addr.port())
             }
             Addr::Code(code) => (Link::Rtc(rtc::join(code, tx)), 0),
+            Addr::Room(url) => (Link::Rtc(rtc::room(url, tx)), 0),
         };
         send(
             &mut link,
@@ -647,6 +712,8 @@ impl Session {
             title: String::new(),
             racing: false,
             roam: None,
+            dedicated: false,
+            room: matches!(addr, Addr::Room(_)),
             listing: None,
             notes: Vec::new(),
             port,
@@ -711,7 +778,7 @@ impl Session {
         while let Ok(i) = self.rx.try_recv() {
             match i {
                 In::Joined(id, stream) => {
-                    if self.players.len() >= MAX_PLAYERS {
+                    if self.players.len() >= MAX_PLAYERS || self.peers.iter().any(|(p, _)| *p == id) {
                         continue;
                     }
                     self.peers.push((id, stream));
@@ -749,7 +816,9 @@ impl Session {
         let Some(mut roam) = self.roam.take() else { return };
         let before = roam.places.clone();
         let ready = |id: u8, ps: &[Player]| ps.iter().any(|p| p.id == id && p.ready);
-        for place in roam.places.iter_mut().skip(1) {
+        // The host rides in the first place, unless it is a server.
+        let first = usize::from(!self.dedicated);
+        for place in roam.places.iter_mut().skip(first) {
             if place.is_some_and(|id| !ready(id, &self.players)) {
                 *place = None;
             }
@@ -758,7 +827,7 @@ impl Session {
             if roam.places.contains(&Some(p.id)) {
                 continue;
             }
-            if let Some(free) = roam.places.iter_mut().skip(1).find(|x| x.is_none()) {
+            if let Some(free) = roam.places.iter_mut().skip(first).find(|x| x.is_none()) {
                 *free = Some(p.id);
             }
         }
@@ -987,6 +1056,11 @@ impl Session {
                 data,
             }),
             Msg::Finished { racer, time } => out.push(Heard::Finished { racer, time }),
+            Msg::Pos { racer, time, data } => {
+                if let Some(st) = mm2_formats::vcr::State::small(&data) {
+                    out.push(Heard::Bike { racer, time, kind: mm2_formats::vcr::FULL, data: st.write_full() });
+                }
+            }
             Msg::Leave => out.push(Heard::Lost),
             _ => {}
         }
@@ -1458,6 +1532,8 @@ mod web {
                 title: String::new(),
                 racing: false,
                 roam: None,
+                dedicated: false,
+                room: false,
                 listing: crate::servers::Listing::new(),
                 notes: Vec::new(),
                 tx,
@@ -1486,6 +1562,8 @@ mod web {
                 title: String::new(),
                 racing: false,
                 roam: None,
+                dedicated: false,
+                room: code.starts_with("ws"),
                 listing: None,
                 notes: Vec::new(),
                 tx,
@@ -1506,7 +1584,7 @@ mod web {
                 let news = match kind.as_str() {
                     "join" if self.host => {
                         let id = self.next;
-                        self.next = self.next.wrapping_add(1).max(1);
+                        self.next = if self.next >= 249 { 1 } else { self.next + 1 };
                         self.ids.push((link, id));
                         Some(In::Joined(id, Link(link)))
                     }

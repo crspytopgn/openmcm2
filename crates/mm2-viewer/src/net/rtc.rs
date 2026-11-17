@@ -372,7 +372,7 @@ async fn serve(
             }
             "OFFER" => {
                 let probe = payload["metadata"]["probe"].as_bool() == Some(true);
-                let id = if probe { 0 } else { next.fetch_add(1, Ordering::Relaxed) };
+                let id = if probe { 0 } else { super::take_id(next) };
                 match answer(&src, &connection, payload, probe, id, name, &out, tx).await {
                     Ok(pc) => {
                         pcs.insert(connection, pc);
@@ -459,6 +459,50 @@ async fn answer(
         }
     });
     Ok(pc)
+}
+
+/// Joins an always-open free roam room on the leaderboard server
+/// (`tools/leaderboard/worker.js`, Room) over a WebSocket at `url`. The
+/// room is the host (player 0); the game's messages go whole, one per
+/// WebSocket message, as over a data channel.
+pub fn room(url: &str, tx: Sender<In>) -> Channel {
+    let (ch, mut rx, closed) = channel();
+    let url = url.to_string();
+    runtime().spawn(async move {
+        let gone = on_gone(tx.clone(), 0);
+        match tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(url.as_str())).await {
+            Ok(Ok((ws, _))) => {
+                debug(format_args!("in the room at {url}"));
+                let (mut write, mut read) = ws.split();
+                let shut = closed.clone();
+                tokio::spawn(async move {
+                    while let Some(m) = rx.recv().await {
+                        if write.send(Message::binary(m)).await.is_err() {
+                            break;
+                        }
+                    }
+                    let _ = write.close().await;
+                    shut.store(true, Ordering::Relaxed);
+                });
+                while let Some(Ok(m)) = read.next().await {
+                    match m {
+                        Message::Binary(b) => {
+                            if let Ok(m) = Msg::decode(&b) {
+                                let _ = tx.send(In::Got(0, m));
+                            }
+                        }
+                        Message::Close(_) => break,
+                        _ => {}
+                    }
+                }
+            }
+            Ok(Err(e)) => eprintln!("network: joining the room at {url}: {e}"),
+            Err(_) => eprintln!("network: the room at {url} didn't answer"),
+        }
+        closed.store(true, Ordering::Relaxed);
+        gone();
+    });
+    ch
 }
 
 /// Connects to the host with race `code`. The channel is the host (player

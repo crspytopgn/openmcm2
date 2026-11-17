@@ -50,6 +50,21 @@ table), which the free plan allows and `npx wrangler deploy` sets up from
   `address<TAB>name<TAB>event<TAB>track<TAB>players<TAB>racing<TAB>version`
   lines. A computer's address is the one its word came from, with its port.
 
+- `GET /races?kind=room`: the always-open free roam rooms, in the same
+  lines, with each room's WebSocket address and how many are in it.
+- `GET /room/<name>` (a WebSocket): into a free roam room. Each room
+  (`ROOMS` in `worker.js`, one `Room` Durable Object each) hosts a free
+  roam session as a player's game would: players say Hello, press Ready
+  to drop into one of the 8 places, and their bikes and chat are passed
+  to the others. The room isn't a player. Messages are the game's own
+  (`net.rs`, `Msg`), one per WebSocket message. Add a room by adding a
+  line to `ROOMS` (its event, track file and name) and deploying.
+
+Cost: on the free plan each incoming WebSocket message counts as 1/20 of
+a request, and riders send 20 a second, so the free 100,000 requests a
+day cover roughly 25 rider-hours a day; past that the rooms stop until
+midnight UTC. The $5 a month Workers plan covers far more.
+
 A race not heard of for 90 seconds drops off. Each address can list four
 races at once, and the list holds at most 300.
 

@@ -9,7 +9,7 @@ use mm2_settings::races::{self, OpenRace};
 use web_time::{Duration, Instant};
 
 /// How often the Host or Join box asks for the list again.
-const LOOK_EVERY: Duration = Duration::from_secs(5);
+const LOOK_EVERY: Duration = Duration::from_secs(8);
 
 /// A random name for a hosted race, only the host knows: the server takes
 /// word of the race only with it.
@@ -94,9 +94,9 @@ impl Listing {
 }
 
 /// The races a player can join: those hosted by race code (browsers' and
-/// this version's), and on a desktop also those hosted by address (older
-/// versions').
-const KINDS: &[&str] = if cfg!(target_arch = "wasm32") { &["web"] } else { &["web", "pc"] };
+/// this version's), the server's always-open free roam rooms, and on a
+/// desktop also those hosted by address (older versions').
+const KINDS: &[&str] = if cfg!(target_arch = "wasm32") { &["web", "room"] } else { &["web", "room", "pc"] };
 
 /// The open races, fetched while the Host or Join box is up.
 #[derive(Default)]
@@ -106,7 +106,7 @@ pub struct Browser {
     asked: Option<Instant>,
     /// The answers on their way, and the races each kind had.
     replies: Vec<(usize, Reply)>,
-    got: [Vec<OpenRace>; 2],
+    got: Vec<OpenRace>,
     pub races: Vec<OpenRace>,
 }
 
@@ -124,20 +124,19 @@ impl Browser {
                 i += 1;
                 continue;
             };
-            let (kind, _) = self.replies.remove(i);
+            self.replies.remove(i);
             match r {
-                Ok(text) => self.got[kind] = races::parse(&text),
+                Ok(text) => self.got = races::parse(&text),
                 Err(e) => eprintln!("the server browser: {e}"),
             }
-            let races: Vec<OpenRace> = self.got.concat();
+            let races: Vec<OpenRace> = self.got.clone();
             changed |= races != self.races;
             self.races = races;
         }
         if self.replies.is_empty() && self.asked.is_none_or(|t| t.elapsed() > LOOK_EVERY) {
             self.asked = Some(Instant::now());
-            for (k, kind) in KINDS.iter().enumerate() {
-                self.replies.push((k, online::get(format!("{url}/races?kind={kind}"))));
-            }
+            // Every kind in one request, which the server's free plan counts.
+            self.replies.push((0, online::get(format!("{url}/races?kinds={}", KINDS.join(",")))));
         }
         changed
     }

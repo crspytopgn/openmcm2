@@ -142,8 +142,12 @@ pub fn taped_like(b: &Bike) -> Bike {
 
 /// How far behind another machine's bikes are shown, so there is a packet
 /// either side to slide between, and how often ours go out.
-pub const NET_DELAY: f32 = 0.1;
+pub const NET_DELAY: f32 = 0.08;
 pub const NET_SEND: f32 = 1.0 / 20.0;
+/// How far a late bike is carried on by its speed.
+const PREDICT_MOST: f32 = 0.3;
+/// How much the clock offset may grow with each packet (seconds).
+const OFFSET_CREEP: f32 = 0.002;
 
 /// Another machine's bike: its last packets, by its race clock, and how
 /// far that clock is from ours (a rider who dropped into a free roam
@@ -168,7 +172,14 @@ impl Remote {
         if self.states.back().is_some_and(|b| b.0 >= time) {
             return;
         }
-        self.offset.get_or_insert(now - time);
+        // The quickest any packet has come sets how far their clock is
+        // from ours, so one slow first packet doesn't leave them behind
+        // for good; it creeps up again slowly if the way gets slower.
+        let o = now - time;
+        self.offset = Some(match self.offset {
+            Some(old) if o >= old => old + (o - old).min(OFFSET_CREEP),
+            _ => o,
+        });
         self.heard = Some(now);
         self.states.push_back((time, s));
         while self.states.len() > 40 {
@@ -188,6 +199,16 @@ impl Remote {
             (Some(a), Some(b)) => {
                 let f = ((time - a.0) / (b.0 - a.0).max(1e-3)).clamp(0.0, 1.0);
                 Some(a.1.lerp(&b.1, f))
+            }
+            // Past their last packet (a late one): on where it was going,
+            // for a little while.
+            (Some(a), None) => {
+                let ahead = (time - a.0).clamp(0.0, PREDICT_MOST);
+                let mut s = a.1;
+                for k in 0..3 {
+                    s.position[k] += s.velocity[k] * ahead;
+                }
+                Some(s)
             }
             (a, b) => a.or(b).map(|s| s.1),
         }

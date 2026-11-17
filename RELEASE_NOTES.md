@@ -24,6 +24,10 @@ it much better sound.
 * **Living courses:** the Course Builder can now plant trees and
   bushes, run rivers and streams through your track (ride through them
   for a splash), and send aircraft flying overhead.
+* **Always-open free roam:** two free roam rooms that are always open,
+  one in Europe and one in the US, on Copper Ridge. Pick one from the
+  online races list and ride with whoever is there. No one needs to host.
+  Other riders' bikes now move more smoothly too.
 * **Course Builder:** renaming a track now shows what you type, and a new
   **Race** button (also *Kind of race* on the Land panel) turns a track
   into Supercross, National, Baja or Enduro, fitting its line, jumps and

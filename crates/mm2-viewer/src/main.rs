@@ -122,6 +122,8 @@ mod water;
 mod display;
 mod screens;
 mod servers;
+#[cfg(not(target_arch = "wasm32"))]
+mod serve;
 mod share;
 mod sky;
 mod skylight;
@@ -193,6 +195,12 @@ fn main() -> Result<(), BoxError> {
             .position(|a| a == name)
             .and_then(|i| args.get(i + 1))
     };
+    // An always-open free roam server, with no window (`serve.rs`).
+    #[cfg(not(target_arch = "wasm32"))]
+    if args.iter().any(|a| a == "--serve") {
+        let options = serve::Options::from_args(|f| flag(f).cloned())?;
+        return serve::run(options);
+    }
     // The enhanced graphics, all of them or less those named after `=`.
     if let Some(arg) = args.iter().find(|a| *a == "--enhanced" || a.starts_with("--enhanced=")) {
         let list = arg.strip_prefix("--enhanced").unwrap().trim_start_matches('=');
@@ -2963,17 +2971,37 @@ fn net_race(
     *wait = replay::NET_SEND;
     let order = race.standings();
     let clock = (race.time * 1000.0) as u32;
+    // In a free roam room bikes go packed small; elsewhere as the game's
+    // full packet, which every version knows.
+    let small = net::with(|s| s.room).unwrap_or(false);
+    // In free roam, how far the nearest other rider is: a bike nobody is
+    // near is sent less often (see `due`).
+    let nearest = |i: usize| -> Option<f32> {
+        let me = race.racers[i].bike.position();
+        (0..race.racers.len())
+            .filter(|&k| !owned(n, k) && !race.empty.get(k).copied().unwrap_or(false))
+            .map(|k| (race.racers[k].bike.position() - me).length())
+            .min_by(f32::total_cmp)
+    };
     let msgs: Vec<net::Msg> = (0..race.racers.len())
         .filter(|&i| owned(n, i))
-        .map(|i| {
+        .filter_map(|i| {
             let place = order.iter().position(|&k| k == i).unwrap_or(0) as u8 + 1;
             let st = replay::state_of(&race.racers[i], clock, place, i as u8, race.clock());
-            net::Msg::Bike {
-                racer: i as u8,
-                time: race.time,
-                kind: mm2_formats::vcr::FULL,
-                data: st.write_full(),
+            let every = if n.roam { send_every(nearest(i)) } else { replay::NET_SEND };
+            if !due(i, &st, race.time, every) {
+                return None;
             }
+            Some(if small {
+                net::Msg::Pos { racer: i as u8, time: race.time, data: st.write_small() }
+            } else {
+                net::Msg::Bike {
+                    racer: i as u8,
+                    time: race.time,
+                    kind: mm2_formats::vcr::FULL,
+                    data: st.write_full(),
+                }
+            })
         })
         .collect();
     net::with(|s| {
@@ -2983,6 +3011,60 @@ fn net_race(
     });
     chat
 }
+
+/// How often a free roam bike is sent, by how far the nearest other
+/// rider is: 20 a second near anyone, fewer when they're far off and the
+/// bike is a speck on their screen (their game carries it on by its
+/// speed between), and twice a second with nobody else riding.
+fn send_every(nearest: Option<f32>) -> f32 {
+    match nearest {
+        None => 0.5,
+        Some(d) if d < NEAR => replay::NET_SEND,
+        Some(d) if d < FAR => 0.1,
+        Some(_) => 0.25,
+    }
+}
+
+/// Feet within which a rider gets every update, and beyond which a few.
+const NEAR: f32 = 500.0;
+const FAR: f32 = 1500.0;
+
+/// Whether racer `i`'s bike is due to be sent, `every` seconds apart; a
+/// bike standing still (in the start, waiting at the side) only every
+/// [`STILL_EVERY`] seconds, which saves most of the traffic of a free
+/// roam session where riders stop to chat.
+fn due(i: usize, st: &mm2_formats::vcr::State, now: f32, every: f32) -> bool {
+    use std::cell::RefCell;
+    thread_local! {
+        static LAST: RefCell<Vec<Option<(f32, mm2_formats::vcr::State)>>> = const { RefCell::new(Vec::new()) };
+    }
+    LAST.with(|l| {
+        let mut l = l.borrow_mut();
+        if l.len() <= i {
+            l.resize(i + 1, None);
+        }
+        let still = |a: &mm2_formats::vcr::State| {
+            let moved: f32 = (0..3).map(|k| (a.position[k] - st.position[k]).powi(2)).sum::<f32>().sqrt();
+            let speed: f32 = st.velocity.iter().map(|v| v * v).sum::<f32>().sqrt();
+            moved < 0.1 && speed < 1.0 && a.pose == st.pose && a.flags == st.flags
+        };
+        // A little slack: sends come on the 20-a-second beat.
+        let due = match &l[i] {
+            Some((t, a)) => {
+                let wait = if still(a) { STILL_EVERY.max(every) } else { every };
+                now - t >= wait - 0.01 || now < *t
+            }
+            None => true,
+        };
+        if due {
+            l[i] = Some((now, *st));
+        }
+        due
+    })
+}
+
+/// How often a bike standing still is sent.
+const STILL_EVERY: f32 = 0.25;
 
 /// Moto-Tag's packets: who is IT, from the host (0x87), and a player's
 /// claim to the host (0x87 + 0x8c); one byte, the racer or 0xff for none.
