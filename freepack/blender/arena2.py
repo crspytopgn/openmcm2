@@ -256,8 +256,8 @@ def build():
         cyl(A + side, B + side, 0.3, M["rail"], 6); cyl(A - side, B - side, 0.3, M["rail"], 6)
         box(Vector((min(A.x, B.x) - 2.5 * abs(t.y), min(A.y, B.y) - 2.5 * abs(t.x), cz - 0.6)),
             Vector((max(A.x, B.x) + 2.5 * abs(t.y), max(A.y, B.y) + 2.5 * abs(t.x), cz - 0.3)), M["steel"])
-        for s in np.arange(10, L - 5, 22):
-            c = A + t * s; lb = box(c - Vector((3, 3, 4.5)), c + Vector((3, 3, -0.6)), M["lamp"])
+        for s in np.arange(10, L - 5, 16):
+            c = A + t * s; lb = box(c - Vector((4.5, 4.5, 6.0)), c + Vector((4.5, 4.5, -0.6)), M["lamp"])
     ob = join_all("fp_arena")
     tris = sum(len(p.vertices) - 2 for p in ob.data.polygons)
     export(os.path.join(BUILD, "objects", "fp_arena.glb"))

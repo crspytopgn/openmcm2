@@ -27,7 +27,11 @@ def pose_person(arm, kind):
     return R.wpos(arm, R.bone(arm, "CC_Base_R_Hand")), R.wpos(arm, R.bone(arm, "CC_Base_L_Hand"))
 
 def build(src, name):
-    lo, hi = stock_bounds(name)
+    out = name
+    if name == "fp_flagger":     # the Free Pack's own SX flag marshal: same pose, origin at the feet
+        lo, hi = Vector((-1, -1, 0)), Vector((1, 1, 5.8)); name = "flaggirl"
+    else:
+        lo, hi = stock_bounds(name)
     reset(); bpy.ops.import_scene.gltf(filepath=src)
     arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
     for o in list(bpy.data.objects):
@@ -55,7 +59,7 @@ def build(src, name):
     bpy.ops.object.join()
     for im in bpy.data.images:
         if max(im.size) > 1024: im.scale(1024, 1024)
-    export(os.path.join(BUILD, "objects", name + ".glb")); print("person", name)
+    export(os.path.join(BUILD, "objects", out + ".glb")); print("person", out)
 
 if __name__ == "__main__":
     a = [x for x in sys.argv[1:] if not x.startswith("--")]

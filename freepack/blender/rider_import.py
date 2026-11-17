@@ -172,6 +172,63 @@ def push(me, amount, mask=None):
     for v, n in zip(me.vertices, nrm):
         if mask is None or mask(v.co): v.co += n * amount
 
+def reloft(me, a, b, nr=18, ns=36, pct=75, trim=(3, 97), grow=0.0, pad=0.04, smooth=2, neck=None):
+    """Replace a clothing piece by a clean tube that follows its shape:
+    the radius around the a->b axis per (height, angle) bin, outliers
+    (buttons, collar, ragged hems) cut by a percentile and smoothed.
+    Opening ends are trimmed straight."""
+    import numpy as np
+    d = (b - a); L = d.length; d = d / L
+    fwd = Vector((0, 1, 0)) - d * d.y
+    if fwd.length < 1e-4: fwd = Vector((0, 0, 1)) - d * d.z
+    fwd.normalize(); side = d.cross(fwd)
+    V = np.array([v.co[:] for v in me.vertices]) if me.vertices else None
+    if V is None or len(V) < 30: return False
+    A = np.array(a[:]); D = np.array(d[:]); F = np.array(fwd[:]); S = np.array(side[:])
+    P_ = V - A; t = P_ @ D; Q = P_ - np.outer(t, D)
+    ang = np.arctan2(Q @ S, Q @ F) % (2 * np.pi); r = np.hypot(Q @ S, Q @ F)
+    t0, t1 = np.percentile(t, trim[0]) - pad, np.percentile(t, trim[1]) + pad
+    R = np.full((nr, ns), np.nan)
+    ti = np.clip(((t - t0) / (t1 - t0) * nr).astype(int), 0, nr - 1); ai = (ang / (2 * np.pi) * ns).astype(int) % ns
+    for i in range(nr):
+        for j in range(ns):
+            m = (ti == i) & (ai == j)
+            if m.sum(): R[i, j] = np.percentile(r[m], pct)
+    for i in range(nr):                          # fill gaps around each ring
+        row = R[i]; ok = ~np.isnan(row)
+        if ok.sum() >= 3:
+            xs = np.arange(ns); R[i] = np.interp(xs, xs[ok], row[ok], period=ns)
+    for j in range(ns):                          # then along the tube
+        col = R[:, j]; ok = ~np.isnan(col)
+        if ok.sum(): R[:, j] = np.interp(np.arange(nr), np.arange(nr)[ok], col[ok])
+        else: R[:, j] = np.nanmean(R)
+    for _ in range(smooth):
+        R = (R + np.roll(R, 1, 1) + np.roll(R, -1, 1)) / 3
+        R[1:-1] = (R[1:-1] * 2 + R[:-2] + R[2:]) / 4
+    R += grow
+    if neck:                                     # slope the shoulders in to the neck
+        for k, w in zip(range(nr - 4, nr), (0.15, 0.4, 0.65, 0.85)): R[k] = R[k] * (1 - w) + neck * w
+    bm = bmesh.new(); rings = []
+    for i in range(nr + 1):
+        ii = min(i, nr - 1); tt = t0 + (t1 - t0) * i / nr
+        ring = []
+        for j in range(ns):
+            th = 2 * np.pi * (j + 0.5) / ns
+            ring.append(bm.verts.new(a + d * tt + (fwd * math.cos(th) + side * math.sin(th)) * float(R[ii, j] if i < nr else R[nr - 1, j])))
+        rings.append(ring)
+    for i in range(nr):
+        for j in range(ns):
+            bm.faces.new((rings[i][j], rings[i][(j + 1) % ns], rings[i + 1][(j + 1) % ns], rings[i + 1][j]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    c = bm.faces[0].calc_center_median(); n0 = bm.faces[0].normal
+    axis_pt = a + d * (c - a).dot(d)
+    if n0.dot(c - axis_pt) < 0:
+        for f in bm.faces: f.normal_flip()
+    me.clear_geometry(); bm.to_mesh(me); bm.free()
+    for poly in me.polygons: poly.use_smooth = True
+    if not me.uv_layers: me.uv_layers.new(name="UVMap")
+    return True
+
 def dress(pieces, O, dark):
     for o in pieces:
         me = o.data; n = o["node"]; src = o["src"]
@@ -189,6 +246,18 @@ def dress(pieces, O, dark):
         else:
             weld(me)
         if not me.polygons: continue
+        if os.environ.get("FP_RELOFT", "1") == "1":
+            if src == "Plaid_Punk_Shirt" and n.startswith(("UprLeg", "LwrLeg", "Pelvis")):
+                me.clear_geometry(); continue          # loose shirt tails over the thighs
+            if src == "Plaid_Punk_Shirt" and n in ("LwrTorso", "UprTorso"):
+                cx = sum(v.co.x for v in me.vertices) / len(me.vertices); cy = sum(v.co.y for v in me.vertices) / len(me.vertices)
+                reloft(me, Vector((0, cy, 2.0)), Vector((0, cy, 5.6)), nr=16 if n != "UprTorso" else 22, ns=40, trim=(0, 98) if n != "UprTorso" else (2, 99.5), pad=0.04 if n == "UprTorso" else 0.12, neck=0.42 if n == "UprTorso" else None)
+            elif src == "Plaid_Punk_Shirt" and n.startswith(("UprArm", "LwrArm")):
+                ka, kb = axis_of(n); reloft(me, ka, kb, nr=12, ns=24)
+            elif src == "Std_Skin_Arm" and n.startswith("LwrArm"):
+                ka, kb = axis_of(n); reloft(me, ka, kb, nr=12, ns=24)
+            elif src == "Slim_Jeans" and n.startswith(("UprLeg", "LwrLeg")):
+                ka, kb = axis_of(n); reloft(me, ka, kb, nr=14, ns=28, pct=85)
         if src == "Plaid_Punk_Shirt":
             if not n.startswith(("UprArm", "LwrArm", "Hand")):
                 lo, hi = 2.85, 4.95
@@ -352,15 +421,28 @@ def paint(name):
     x0, y0, x1, y1 = REG["jersey"]          # plain collar and hem so loose fabric edges don't flash the accent
     d.rectangle([x0, y0, x1, y0 + 70], fill=C(main)); d.rectangle([x0, y1 - 75, x1, y1], fill=C(main))
     x0, y0, x1, y1 = REG["helmet"]; W = x1 - x0; H = y1 - y0
+    # u: 0.5 front, 0.25 / 0.75 the sides, 0 / 1 the back; rows: top of the shell at y0
+    import random as _r
+    rr = _r.Random(name); two = sum(abs(a_ - b_) for a_, b_ in zip(main, helm)) > 0.3
+    panel = main if two else acc
     d.rectangle([x0, y0, x1, y1], fill=C(helm))
-    d.rectangle([x0, y1 - int(H * 0.22), x1, y1], fill=C(acc))                  # lower edge band
-    for u in (0.5,):                                                            # front-to-back stripe
-        xa = x0 + int(u * W); d.rectangle([xa - 18, y0, xa + 18, y1], fill=C(acc))
-    for u in (0.0, 1.0):
-        xa = x0 + int(u * W); d.rectangle([max(x0, xa - 26), y0, min(x1, xa + 26), y1], fill=C(acc))
-    for u in (0.25, 0.75):                                                      # flame-ish side swoosh
-        xa = x0 + int(u * W)
-        d.polygon([(xa - 110, y1 - int(H * 0.22)), (xa + 90, y0 + int(H * 0.45)), (xa + 130, y0 + int(H * 0.5)), (xa - 40, y1 - int(H * 0.22))], fill=C(acc))
+    X = lambda u: x0 + int(u * W); Y = lambda t: y1 - int(t * H)      # t: 0 bottom edge, 1 crown
+    for c in (0.25, 0.75):                                             # big swept side panels, rising toward the back
+        sgn = 1 if c < 0.5 else -1
+        pts = [(X(c - 0.2 * sgn), Y(0.0)), (X(c + 0.22 * sgn), Y(0.0)), (X(c + 0.2 * sgn), Y(0.18)), (X(c - 0.05 * sgn), Y(0.62)), (X(c - 0.2 * sgn), Y(0.72))]
+        d.polygon(pts, fill=C(panel))
+        d.line(pts[2:] + [pts[2]], fill=C(acc), width=10)                 # pinstripe along the panel edge
+        d.line([(X(c + 0.12 * sgn), Y(0.06)), (X(c - 0.1 * sgn), Y(0.5))], fill=C(acc), width=16)
+    d.rectangle([X(0.47), y0, X(0.53), Y(0.25)], fill=C(panel))          # centre stripe over the crown
+    d.rectangle([X(0.485), y0, X(0.515), Y(0.25)], fill=C(acc))
+    d.rectangle([x0, Y(0.08), x1, y1], fill=(24, 24, 26))                  # rubber edge trim
+    from PIL import ImageFont as _F
+    f = _F.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
+    for c in (0.25, 0.75):                                             # made-up maker name on each side
+        txt = rr.choice(["KESTREL", "HALCYON", "RIDGEBACK", "COPPERHEAD", "NORTHFORK"])
+        tw = d.textlength(txt, font=f); d.text((X(c) - tw / 2, Y(0.36)), txt, font=f, fill=C(acc) if two else (20, 20, 22))
+    tw = d.textlength(num, font=_F.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 70))
+    d.text((X(0.0) + 20, Y(0.9)), num, font=_F.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 70), fill=C(panel))
     # boots: shell colour, dark cuff, three buckle straps wrapping round from the front
     x0, y0, x1, y1 = REG["boot"]; W = x1 - x0; H = y1 - y0
     d.rectangle([x0, y0, x1, y1], fill=C(boot))

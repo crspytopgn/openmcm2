@@ -19,7 +19,7 @@ WIDTH, ROWS, RUN, RISE = 40.0, 15, 2.8, 1.6        # ft: texture width, rows per
 SLOPE = math.atan2(RISE, RUN); ROWLEN = math.hypot(RUN, RISE)
 SEAT = 1.75                                        # seat pitch along the row
 DROP = ("Tearline", "Eye_Occlusion", "Cornea", "Teeth", "Tongue")
-OUT = os.path.join(BUILD, "tex"); os.makedirs(OUT, exist_ok=True)
+OUT = os.environ.get("CROWD_OUT") or os.path.join(BUILD, "tex"); os.makedirs(OUT, exist_ok=True)
 
 def person(src, kind, hat=True):
     """One posed fan as a single mesh object (ft, facing -Y toward the camera, seat point at the origin)."""
@@ -144,6 +144,8 @@ def mat(name, rgb, rough=0.7):
     m = bpy.data.materials.new(name); m.use_nodes = True; b = m.node_tree.nodes["Principled BSDF"]
     b.inputs["Base Color"].default_value = (*rgb, 1); b.inputs["Roughness"].default_value = rough; return m
 
+FAN_Y = float(os.environ.get("FAN_Y", "0.9"))
+
 def render(src, variant):
     reset(); rnd = random.Random(100 + variant)
     kinds = ["sit", "sit", "sit", "clap", "cheer", "stand"]
@@ -165,7 +167,7 @@ def render(src, variant):
             for rep in (-1, 0, 1):
                 x = -WIDTH / 2 + (i + 0.5) * SEAT + rep * WIDTH
                 o = bpy.data.objects.new("f", fans[kind + ("_bare" if bare else "")].data); bpy.context.scene.collection.objects.link(o)
-                o.location = (x + rr.uniform(-0.08, 0.08), y0 + 1.5, z0 + 1.45 if kind != "stand" else z0)
+                o.location = (x + rr.uniform(-0.08, 0.08), y0 + FAN_Y, z0 + 1.45 if kind != "stand" else z0)
                 o.rotation_euler = (0, 0, rr.uniform(-0.25, 0.25))
                 o.scale = (rr.uniform(0.92, 1.06),) * 3
                 o.pass_index = 0
