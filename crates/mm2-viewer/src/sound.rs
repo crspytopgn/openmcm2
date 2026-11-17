@@ -1367,11 +1367,9 @@ mod revs_tests {
     fn loops() -> Loops {
         let quiet = Arc::new(Sound { rate: 22050, channels: 1, samples: vec![0.0; 100] });
         Loops {
-            on: quiet.clone(),
-            off: quiet.clone(),
+            on: vec![(quiet.clone(), 4000.0), (quiet.clone(), 8000.0)],
+            off: vec![(quiet.clone(), 6000.0)],
             idle: quiet,
-            on_rpm: 8000.0,
-            off_rpm: 6000.0,
             idle_rpm: 1600.0,
             low: 1600.0,
             high: 10000.0,
@@ -1402,6 +1400,9 @@ mod revs_tests {
         }
         assert!((r.rpm - 1600.0).abs() < 50.0, "{}", r.rpm);
         let mix = r.mix(&l);
-        assert!(mix[2].0 > 0.7 && mix[0].0 < 0.01);
+        assert!(mix.last().unwrap().0 > 0.7 && mix[0].0 < 0.01 && mix[1].0 < 0.01);
+        // Between two loops, both are heard, at equal power.
+        let w = blend(&l.on, 5657.0);
+        assert!((w[0] - w[1]).abs() < 0.01 && (w[0] * w[0] + w[1] * w[1] - 1.0).abs() < 0.01);
     }
 }
