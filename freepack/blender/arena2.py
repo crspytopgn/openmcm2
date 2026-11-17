@@ -86,8 +86,11 @@ def roof_png(path):
     Image.fromarray((grime(a, 3, 0.15) * 255).astype(np.uint8)).save(path)
 
 def lamp_png(path):
-    W, H = 256, 64; im = Image.new("RGB", (W, H), (40, 42, 46)); d = ImageDraw.Draw(im)
-    for k in range(8): d.ellipse([6 + k * 31, 10, 30 + k * 31, 54], fill=(255, 250, 235)); d.ellipse([10 + k * 31, 14, 26 + k * 31, 50], fill=(255, 255, 250))
+    """Catwalk lamp heads: pure white lenses (the night lighting makes
+    near-white texels glow) in a thin dark housing."""
+    W, H = 256, 64; im = Image.new("RGB", (W, H), (255, 255, 255)); d = ImageDraw.Draw(im)
+    d.rectangle([0, 0, W - 1, H - 1], outline=(38, 40, 44), width=3)
+    for k in range(1, 8): d.line([(k * 32, 0), (k * 32, H)], fill=(38, 40, 44), width=2)
     im.save(path)
 
 def tunnel_png(path):

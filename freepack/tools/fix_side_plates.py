@@ -38,6 +38,7 @@ def fix(path):
                 half = (y[near].max() - y[near].min()) / 2 * 1.3       # board a bit taller than the panel: digits fill about 2/3 of it
                 u = (zc - z) / (2 * half) + 0.5 if side > 0 else (z - zc) / (2 * half) + 0.5
                 v = (yc - y) / (2 * half) + 0.5
+                u, v = 1 - u, 1 - v                  # checked in the game on both sides
                 new[s, 0], new[s, 1] = np.clip(u, 0.01, 0.99), np.clip(v, 0.01, 0.99)
             b[off:off + new.nbytes] = new.astype(np.float32).tobytes(); done += int(len(new))
     open(path, "wb").write(b); print(path, "side plate verts", done)
