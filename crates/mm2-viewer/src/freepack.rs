@@ -385,6 +385,126 @@ pub fn animated(name: &str) -> Option<(&'static str, String)> {
     Some((template, shape))
 }
 
+/// The pack's supercross start gate, which the free tracks place as a
+/// still model (mm2-course free.rs), and the animation the viewer makes
+/// of it so that it drops as the original's `StartGate.mcf` does.
+pub const GATE: &str = "fp_startgate";
+pub const GATE_MCF: &str = "fp_startgate.mcf";
+
+/// Whether `name` is the pack's start gate, still or animated.
+pub fn is_gate(name: &str) -> bool {
+    stem_of(name.trim()) == GATE
+}
+
+/// How long the pack's gate bars take to fall, in seconds (the original's
+/// `Gate.mot`: 7 frames at 30 a second), and how far past upright they
+/// come to rest, in degrees: forward over the hinge onto the dirt in
+/// front, as a real one slaps down. (The original's own tips 36°.)
+const GATE_FALL: f32 = 0.2;
+const GATE_REST: f32 = 104.0;
+const GATE_FPS: f32 = 30.0;
+
+/// The pack's start gate made to drop. Its model is one piece, so the
+/// drop bars (every face reaching 2 ft or more up: nothing else on it
+/// stands that tall) go onto a frame of their own, hinged along their
+/// foot; with them comes the motion ("Drop") that lays them forward,
+/// away from the pad the riders stand on, from its first frame (the bars
+/// up) when the race's gate drops. A model without such faces comes back
+/// as it was, with no motion.
+pub fn gate_drop(mut model: mm2_formats::slb::Model) -> (mm2_formats::slb::Model, Vec<(String, mm2_formats::anim::Motion, f32, bool)>) {
+    use mm2_formats::anim::{Key, Motion};
+    const TALL: f32 = 2.0;
+    if model.frames.len() != 1 {
+        return (model, Vec::new());
+    }
+    let Some(lod) = model.lods.first_mut() else { return (model, Vec::new()) };
+    let is_bar = |s: &mm2_formats::slb::Surface, f: &[u16; 3]| f.iter().any(|&v| s.positions.get(v as usize).is_some_and(|p| p[1] >= TALL));
+    // The hinge (the bars' lowest edge) and which way they fall.
+    let (mut foot, mut bar_z, mut bars, mut rest_z, mut rest) = (f32::MAX, 0.0, 0usize, 0.0, 0usize);
+    for s in &lod.surfaces {
+        for f in &s.faces {
+            let bar = is_bar(s, f);
+            for &v in f {
+                let p = s.positions[v as usize];
+                if bar {
+                    foot = foot.min(p[1]);
+                    bar_z += p[2];
+                    bars += 1;
+                } else {
+                    rest_z += p[2];
+                    rest += 1;
+                }
+            }
+        }
+    }
+    if bars == 0 || rest == 0 {
+        return (model, Vec::new());
+    }
+    let (bar_z, rest_z) = (bar_z / bars as f32, rest_z / rest as f32);
+    let ahead = if bar_z >= rest_z { 1.0 } else { -1.0 };
+    // Each surface's faces, the rest first and the bars after, so each
+    // run of vertices hangs on one frame.
+    for s in &mut lod.surfaces {
+        let old = s.clone();
+        let mut out = mm2_formats::slb::Surface {
+            positions: Vec::new(),
+            normals: Vec::new(),
+            uvs: Vec::new(),
+            colors: Vec::new(),
+            faces: Vec::new(),
+            materials: old.materials.clone(),
+            groups: Vec::new(),
+        };
+        let mut first_bar = 0;
+        for pass in [false, true] {
+            if pass {
+                first_bar = out.positions.len() as u32;
+            }
+            let mut moved: std::collections::HashMap<u16, u16> = std::collections::HashMap::new();
+            for f in old.faces.iter().filter(|f| is_bar(&old, f) == pass) {
+                let face = f.map(|v| {
+                    *moved.entry(v).or_insert_with(|| {
+                        let i = v as usize;
+                        out.positions.push(old.positions[i]);
+                        if let Some(n) = old.normals.get(i) {
+                            out.normals.push(*n);
+                        }
+                        if let Some(uv) = old.uvs.get(i) {
+                            out.uvs.push(*uv);
+                        }
+                        out.colors.push(old.colors.get(i).copied().unwrap_or([255; 4]));
+                        (out.positions.len() - 1) as u16
+                    })
+                });
+                out.faces.push(face);
+            }
+        }
+        out.groups = if first_bar == 0 {
+            vec![(1, 0)]
+        } else if first_bar as usize == out.positions.len() {
+            vec![(0, 0)]
+        } else {
+            vec![(0, 0), (1, first_bar)]
+        };
+        *s = out;
+    }
+    // (The pack's model has its one frame where the model is, so the
+    // hinge's place on it is the bars' own.)
+    let hinge = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, foot, bar_z, 1.0];
+    model.frames.push(mm2_formats::slb::Frame { name: "bars".into(), matrix: hinge, parent: Some(0) });
+    // Falling as a hinged bar does, faster and faster, then a little
+    // bounce off the dirt.
+    let at = |deg: f32| {
+        let (s, c) = deg.to_radians().sin_cos();
+        vec![Key { frame: 1, look: [0.0, -ahead * s, c], up: [0.0, c, ahead * s], position: [0.0, foot, bar_z] }]
+    };
+    let falling = (GATE_FALL * GATE_FPS).round() as usize;
+    let mut frames: Vec<Vec<Key>> = (0..=falling).map(|k| at(GATE_REST * (k as f32 / falling as f32).powi(2))).collect();
+    frames.extend([GATE_REST - 7.0, GATE_REST - 2.0, GATE_REST].map(at));
+    (model, vec![("Drop".into(), Motion { frames }, GATE_FPS, false)])
+}
+
+
 /// The free rider's own seated riding pose, for when the original's
 /// motions aren't there (the free graphics on their own): each of
 /// [`RIDER_FRAMES`]' look, up and position relative to its parent. Made

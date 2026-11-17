@@ -598,7 +598,10 @@ impl ObjectMesh {
                 mcf.model = shape;
                 Some(mcf)
             };
-            let Some(mcf) = find(&a.model).and_then(|b| Mcf::parse(b).ok()).or_else(free) else {
+            // The pack's start gate, made to drop (freepack::gate_drop).
+            let gate = crate::freepack::is_gate(&a.model);
+            let still_gate = || gate.then(|| Mcf { model: crate::freepack::GATE.into(), motions: Vec::new() });
+            let Some(mcf) = find(&a.model).and_then(|b| Mcf::parse(b).ok()).or_else(free).or_else(still_gate) else {
                 mesh.missing(&a.model);
                 continue;
             };
@@ -606,6 +609,7 @@ impl ObjectMesh {
                 mesh.missing(&mcf.model);
                 continue;
             };
+            let (model, gate_motions) = if gate { crate::freepack::gate_drop(model) } else { (model, Vec::new()) };
             let motions: Vec<_> = mcf
                 .motions
                 .iter()
@@ -620,6 +624,9 @@ impl ObjectMesh {
             // Without the original's motions the free rider sits on its
             // bike in a pose of the pack's own, rather than standing.
             let mut motions = motions;
+            if motions.is_empty() && gate {
+                motions = gate_motions;
+            }
             if motions.is_empty() && crate::freepack::is_rider(&a.model) {
                 motions.push(("Ride".to_string(), crate::freepack::seated_motion(), 1.0, true));
             }
