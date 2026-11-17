@@ -49,7 +49,12 @@ def base_images():
         if not m.node_tree: continue
         b = next((n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
         l = b and b.inputs["Base Color"].links
-        if l and l[0].from_node.type == "TEX_IMAGE" and l[0].from_node.image not in out: out.append(l[0].from_node.image)
+        node = l[0].from_node if l else None
+        seen = 0
+        while node is not None and node.type != "TEX_IMAGE" and seen < 6:     # through mix / multiply nodes
+            nxt = [k.from_node for i in node.inputs for k in i.links]
+            node = next((x for x in nxt if x.type == "TEX_IMAGE"), nxt[0] if nxt else None); seen += 1
+        if node is not None and node.type == "TEX_IMAGE" and node.image not in out: out.append(node.image)
     return out
 
 def pixels(im):

@@ -55,6 +55,11 @@ IMPORTS = {
     "coalcar": ("import", "hopper", ["--cap=30000"]),
     "boxcarclosed": ("import", "boxcar", ["--cap=30000"]),
     "caboose": ("import", "caboose", ["--cap=30000"]),
+    "biplane": ("import", "stearman", ["--cap=40000", "--blot=Image_10:0.049,0.357,0.131,0.44/Image_10:0.533,0.357,0.615,0.44/Image_10:0.049,0.459,0.131,0.542/Image_10:0.533,0.459,0.615,0.542"]),
+    "beech18": ("import", "beech18", ["--cap=40000"]),
+    "dc-3": ("import", "dc3", ["--cap=40000", "--blot=Image_0:0.275,0.185,0.552,0.236/Image_0:0.27,0.364,0.54,0.41/Image_0:0.705,0.185,0.815,0.222/Image_0:0.71,0.38,0.818,0.416"]),
+    "bellranger": ("import", "alouette", ["--cap=40000", "--blot=Image_25:0.785,0.452,0.86,0.509/Image_25:0.879,0.452,0.955,0.509/Image_25:0.36,0.62,0.403,0.661/Image_25:0.622,0.62,0.665,0.661"]),
+    "helinocam": ("import", "alouette", ["--cap=40000", "--blot=Image_25:0.785,0.452,0.86,0.509/Image_25:0.879,0.452,0.955,0.509/Image_25:0.36,0.62,0.403,0.661/Image_25:0.622,0.62,0.665,0.661"]),
 }
 SHELLS = ("b1b_02", "euro", "football")
 # bikes: folder -> bike_import.py arguments (model name first)
