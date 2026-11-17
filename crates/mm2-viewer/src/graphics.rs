@@ -69,6 +69,8 @@ pub struct Enhanced {
     pub round: bool,
     /// Supercross stadiums lit by their lamps from above.
     pub floodlights: bool,
+    /// At night, a stadium lit by its own lamp banks (crate::night).
+    pub night_lights: bool,
     /// Ambient occlusion worked out from the horizons round each pixel
     /// (GTAO), truer in creases and corners than the plain estimate.
     pub gtao: bool,
@@ -142,6 +144,7 @@ impl Default for Enhanced {
             wear: true,
             round: true,
             floodlights: true,
+            night_lights: true,
             gtao: true,
             contact: true,
             ssr: true,
@@ -346,6 +349,7 @@ impl Enhanced {
                 "wear" => e.wear = on,
                 "round" => e.round = on,
                 "floodlights" | "lamps" => e.floodlights = on,
+                "nightlights" => e.night_lights = on,
                 "gtao" => e.gtao = on,
                 "contact" | "contact-shadows" => e.contact = on,
                 "ssr" | "reflections" => e.ssr = on,
@@ -354,7 +358,7 @@ impl Enhanced {
                 "taa" | "temporal" => e.taa = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-gtao, no-contact, no-ssr, no-skylight, raytracing, taa, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra, resolution=1080p or 85%, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, raytracing, taa, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra, resolution=1080p or 85%, weather=rain or time=dusk"
                     ))
                 }
             }

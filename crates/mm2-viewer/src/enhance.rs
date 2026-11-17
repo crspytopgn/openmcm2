@@ -87,6 +87,18 @@ pub struct EnhGlobals {
     pub sky_light: [f32; 4],
     /// The baked map's heights: the lowest (ft) and the range over them.
     pub sky_height: [f32; 4],
+    /// A stadium's own lights at night (crate::night): x how many, y how
+    /// much they light (0 off), z the lowest lamp's height (ft), w how
+    /// many shadow groups are drawn into the cascades' layers.
+    pub stadium: [f32; 4],
+    /// From the drawing to each shadow group's map, and the ft a texel
+    /// of each spans on the floor.
+    pub stadium_views: [[[f32; 4]; 4]; crate::night::GROUPS],
+    pub stadium_texels: [f32; 4],
+    /// Each lamp: xyz where, w its power; xyz the way it points, w its
+    /// beam's edge (a cosine) plus 10 times its shadow group.
+    pub stadium_lamps: [[f32; 4]; crate::night::MOST_LAMPS],
+    pub stadium_ways: [[f32; 4]; crate::night::MOST_LAMPS],
 }
 
 /// What the shared group is made of, kept to make it again.

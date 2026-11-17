@@ -194,6 +194,20 @@ pub struct TerrainRenderer {
     sky_light: Option<[f32; 4]>,
     /// Each part of the frame timed on the GPU, when asked (gpu_time).
     gpu_timer: Option<crate::gpu_time::GpuTimer>,
+    /// A stadium's own lights at night (crate::night): those found on its
+    /// roof or ringed round it, and those its `.lights` file lists, which
+    /// light any track at night.
+    night_found: Option<crate::night::StadiumLights>,
+    night_listed: Option<crate::night::StadiumLights>,
+    /// A domed stadium's lamp banks painted on its roof (ObjectMesh::floodlights).
+    night_banks: Vec<(Vec3, f32, f32)>,
+}
+
+/// A stadium's lamps at night where its track lists none: its roof's
+/// painted banks, or a ring round the floor.
+fn found_lamps(banks: &[(Vec3, f32, f32)], floor: &crate::night::Floor) -> Option<crate::night::StadiumLights> {
+    let lamps = crate::night::from_banks(banks, floor);
+    crate::night::StadiumLights::new(if lamps.is_empty() { crate::night::ring(floor) } else { lamps }, floor)
 }
 
 /// The terrain renderer's part of the enhanced drawing.
@@ -411,6 +425,10 @@ impl TerrainRenderer {
             cache: None,
         });
         let objects_pole_lamps = objects.pole_lamps.clone();
+        // The stadium lights at night, should this be a stadium: its
+        // roof's painted lamps, or a ring round its floor.
+        let night_banks = if upgrades.is_some() { objects.floodlights(FLOODLIGHTS_ABOVE) } else { Vec::new() };
+        let night_found = upgrades.and_then(|_| found_lamps(&night_banks, &crate::night::Floor::guess(terrain)));
         let flood = upgrades.and_then(|_| crate::flood::FloodMap::new(device, terrain, &objects_pole_lamps));
         let mut rt = (upgrades.is_some() && crate::graphics::ray_traced()).then(|| {
             let geometry = objects.rt_geometry(device.limits().max_texture_array_layers);
@@ -649,7 +667,20 @@ impl TerrainRenderer {
             flood,
             sky_light,
             pole_lamps: objects_pole_lamps,
+            night_found,
+            night_listed: None,
+            night_banks,
         }
+    }
+
+    /// The track's floor and the lamps its `.lights` file lists, if any
+    /// (crate::night): at night those light it, stadium or not.
+    pub fn set_night(&mut self, listed: Option<Vec<crate::night::Lamp>>, floor: crate::night::Floor) {
+        if self.enhanced.is_none() {
+            return;
+        }
+        self.night_found = found_lamps(&self.night_banks, &floor);
+        self.night_listed = listed.and_then(|l| crate::night::StadiumLights::new(l, &floor)).map(|n| crate::night::StadiumLights { listed: true, ..n });
     }
 
     /// Lays the detail texture over the terrain (0x50b140, 0x50b990): each
@@ -999,9 +1030,27 @@ impl TerrainRenderer {
         // The enhanced drawing's hour and weather light the scene in
         // place of its own lights, and its real sky's colour is the haze's.
         let mut day = showing.map(|e| crate::enhance::daylight(&self.lights, e.time, e.weather));
-        // In a stadium at night the floodlights light the floor as the day
-        // would: the scene's own lights, under the night sky.
-        if let Some(d) = day.as_mut().filter(|d| self.stadium && d.night > 0.0) {
+        // At night a stadium's own lamps light it (crate::night), or any
+        // track's that lists them; not ray traced, where the traced
+        // floodlights do.
+        let night_lamps = match (showing, &day) {
+            (Some(e), Some(d)) if e.night_lights && d.night > 0.0 && !traced => {
+                self.night_listed.as_ref().or(self.night_found.as_ref().filter(|_| self.stadium)).cloned()
+            }
+            _ => None,
+        };
+        if let (Some(d), Some(e), true) = (day.as_mut(), showing, night_lamps.is_some()) {
+            // Under the roof no moon, and only the light thrown back off
+            // the floor and the stands round about: a little of the day's,
+            // a touch warm.
+            let lit = crate::enhance::daylight(&self.lights, None, e.weather);
+            let ambient = Vec3::from(lit.lights.ambient).max_element().max(0.25);
+            d.lights.ambient = (Vec3::new(1.0, 0.97, 0.93) * ambient * NIGHT_BOUNCE).into();
+            d.lights.sun = [0.0; 3];
+            d.lights.to_sun = Vec3::Y;
+        } else if let Some(d) = day.as_mut().filter(|d| self.stadium && d.night > 0.0) {
+            // In a stadium at night the floodlights light the floor as the
+            // day would: the scene's own lights, under the night sky.
             if let Some(e) = showing {
                 let lit = crate::enhance::daylight(&self.lights, None, e.weather);
                 d.lights = lit.lights;
@@ -1077,12 +1126,14 @@ impl TerrainRenderer {
             let enh = crate::enhance::EnhGlobals {
                 cascades: cascades.map(|c| c.to_cols_array_2d()),
                 splits: crate::enhance::splits(),
-                flags: [flag(on.lighting), flag(sun_shadows), flag(haze.is_some()), flag(on.sky)],
+                flags: [flag(on.lighting), flag(sun_shadows && night_lamps.is_none()), flag(haze.is_some()), flag(on.sky)],
                 haze: [h_start, density, far, on.detail],
                 sun: lights.globals().1,
                 to_sun: lights.globals().2,
                 fog: match (&day, real_sky) {
                     (Some(d), true) => d.horizon.extend(1.0).into(),
+                    // The haze in a dark arena is dark.
+                    _ if night_lamps.is_some() => [self.fog[0] * NIGHT_HAZE, self.fog[1] * NIGHT_HAZE, self.fog[2] * NIGHT_HAZE, 1.0],
                     _ => [self.fog[0], self.fog[1], self.fog[2], 1.0],
                 },
                 texel: [texels[0], texels[1], texels[2], flag(on.soft_shadows)],
@@ -1134,6 +1185,15 @@ impl TerrainRenderer {
                     let [.., low, range] = self.sky_light.unwrap_or([1.0, 1.0, 0.0, 1.0]);
                     [low, range, 0.0, 0.0]
                 },
+                stadium: night_lamps.as_ref().map_or([0.0; 4], |n| {
+                    let night = day.as_ref().map_or(0.0, |d| d.night);
+                    [n.lamps.len() as f32, night, n.lowest, if sun_shadows { crate::night::GROUPS as f32 } else { 0.0 }]
+                }),
+                stadium_views: night_lamps.as_ref().map_or([Mat4::IDENTITY; crate::night::GROUPS], |n| n.views).map(|m| m.to_cols_array_2d()),
+                // w: the lamps are a track's own list, their heads to glow.
+                stadium_texels: night_lamps.as_ref().map_or([1.0; 4], |n| [n.texels[0], n.texels[1], n.texels[2], flag(n.listed)]),
+                stadium_lamps: night_lamps.as_ref().map_or([[0.0; 4]; crate::night::MOST_LAMPS], |n| n.uniform().0),
+                stadium_ways: night_lamps.as_ref().map_or([[0.0; 4]; crate::night::MOST_LAMPS], |n| n.uniform().1),
             };
             queue.write_buffer(&e.shared.buffer, 0, bytemuck::bytes_of(&enh));
         }
@@ -1156,6 +1216,9 @@ impl TerrainRenderer {
                 objects.set_shadow_view(queue, shadow_view);
             }
             if sun_shadows && !traced {
+                // At night under a stadium's lamps, each layer is a group
+                // of lamps' view instead.
+                let cascades = night_lamps.as_ref().map_or(cascades, |n| n.views);
                 objects.set_cascades(queue, &cascades);
                 for (i, c) in cascades.iter().enumerate() {
                     objects.cull(1 + i, &crate::cull::Frustum::new(*c), camera.position);
@@ -1347,7 +1410,8 @@ impl TerrainRenderer {
                     depth_slice: None,
                     resolve_target: resolve,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.clear),
+                        // A night sky over an open stadium lit by its lamps.
+                        load: wgpu::LoadOp::Clear(if night_lamps.is_some() { NIGHT_SKY } else { self.clear }),
                         // Anti-aliased, only the resolved picture is read
                         // after: the samples themselves need not be kept
                         // (on a tiled GPU, such as Apple's, they then never
@@ -1760,6 +1824,11 @@ pub fn fog_range(quality: u32, visibility: f32, haziness: f32) -> (f32, f32) {
 
 /// How high a stadium's lamps hang at least, ft, to be its floodlights.
 const FLOODLIGHTS_ABOVE: f32 = 300.0;
+/// Under a stadium's lamps at night, the light thrown back round about
+/// against the day's ambient, and the haze against the day's.
+const NIGHT_BOUNCE: f32 = 0.3;
+const NIGHT_HAZE: f32 = 0.12;
+const NIGHT_SKY: wgpu::Color = wgpu::Color { r: 0.006, g: 0.008, b: 0.016, a: 1.0 };
 
 /// How strongly the ray-traced light shafts show (crate::rt).
 const SHAFT_STRENGTH: f32 = 0.6;

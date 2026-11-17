@@ -30,6 +30,7 @@ export const UPGRADES = [
   ["contact", "Contact shadows", true, "A thin, soft shadow where tyres, boots and props touch the ground."],
   ["ssr", "Reflections in puddles", true, "In the rain, puddles mirror the bikes and trees on screen. Not in a browser: too heavy."],
   ["skylight", "Sky light", true, "The sky's light worked out when a track loads: dimmer in dips and under banks."],
+  ["nightlights", "Stadium lights at night", true, "With the time of day set to Night, a stadium is lit by its own lamp banks: the floor, bikes and riders lit from above, with soft shadows from each bank."],
 ];
 
 // In a browser, Ultra draws as High does (the game caps both: see
