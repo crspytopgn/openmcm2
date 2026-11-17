@@ -135,7 +135,8 @@ fn apply_haze(c: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
 // on a surface facing `n`, y their glints off it seen from `v`, for a
 // surface `shine` 0 (matte) to 1 (gloss).
 fn lamps(n: vec3<f32>, v: vec3<f32>, shine: f32) -> vec2<f32> {
-    if (enh.surfaces.w < 0.5) {
+    // At night the stadium's own lamps light it instead (stadium_light).
+    if (enh.surfaces.w < 0.5 || enh.stadium.y > 0.0) {
         return vec2<f32>(0.0);
     }
     var soft = 0.0;
@@ -155,12 +156,14 @@ fn lamps(n: vec3<f32>, v: vec3<f32>, shine: f32) -> vec2<f32> {
 // The bikes' headlights' light at `world` facing `n`: none without ray
 // tracing (enhanced_rt.wgsl's takes its place).
 fn headlight_at(world: vec3<f32>, n: vec3<f32>, dist: f32) -> vec3<f32> {
+    // A stadium's own lamps at night, shadows and all.
+    let stadium = stadium_light(world, n);
     // Without ray tracing, only the light poles' light, baked over the
     // ground once (flood.rs): as it falls on the ground where a surface
     // faces up, and for what stands up from it, as much as reaches there,
     // less on faces turned down.
     if (enh.flood.z <= 0.0 || enh.night.x <= 0.0) {
-        return vec3<f32>(0.0);
+        return stadium;
     }
     let uv = (world.xz - enh.flood.xy) / enh.flood.zw;
     if (any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0))) {
@@ -169,7 +172,69 @@ fn headlight_at(world: vec3<f32>, n: vec3<f32>, dist: f32) -> vec3<f32> {
     let m = textureSampleLevel(flood_map, flood_sampler, uv, 0.0);
     let standing = vec3<f32>(0.95, 0.97, 1.0) / 0.97 * m.a * (0.15 + 0.3 * clamp(n.y + 0.5, 0.0, 1.0));
     let c = mix(standing, m.rgb, smoothstep(0.6, 0.9, n.y));
-    return min(c, vec3<f32>(2.5)) * enh.night.x;
+    return stadium + min(c, vec3<f32>(2.5)) * enh.night.x;
+}
+
+// The colour of a stadium's lamps: the near-white of metal halide.
+const STADIUM_LAMP: vec3<f32> = vec3<f32>(1.0, 0.97, 0.92);
+// The square distance (ft²) the lamps' strengths are given at (night.rs
+// FALLOFF).
+const STADIUM_FALLOFF: f32 = 10000.0;
+
+// How much of shadow group `g`'s lamps reach `world` (1 all), from its map
+// in the cascades' layer `g`, softly: the banks are broad, so the riders'
+// shadows have soft edges.
+fn stadium_seen(world: vec3<f32>, n: vec3<f32>, g: u32) -> f32 {
+    if (f32(g) >= enh.stadium.w) {
+        return 1.0;
+    }
+    let texel = enh.stadium_texels[g];
+    let p = enh.stadium_views[g] * vec4<f32>(world + n * (texel * 2.0 + 0.15), 1.0);
+    if (p.w <= 0.0) {
+        return 1.0;
+    }
+    let q = p.xyz / p.w;
+    let uv = vec2<f32>(q.x * 0.5 + 0.5, 0.5 - q.y * 0.5);
+    if (any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || q.z > 1.0) {
+        return 1.0;
+    }
+    let spin = fract(sin(dot(world.xz, vec2<f32>(12.9898, 78.233))) * 43758.547) * 6.2832;
+    let turn = mat2x2<f32>(cos(spin), sin(spin), -sin(spin), cos(spin));
+    // About 0.4 ft round, however fine the map.
+    let radius = clamp(0.4 / texel, 1.0, 4.0) / 2048.0;
+    var sum = 0.0;
+    for (var i = 0; i < 8; i++) {
+        sum += textureSampleCompareLevel(sun_map, sun_sampler, uv + turn * POISSON[i * 2] * radius, g, q.z);
+    }
+    return sum / 8.0;
+}
+
+// A stadium's own lamps' light on `world` facing `n` at night (night.rs):
+// each lamp's beam, fading to its edge and with the square of how far it
+// is, as squarely as it meets the surface, and only where its shadow group
+// sees the surface.
+fn stadium_light(world: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+    if (enh.stadium.y <= 0.0) {
+        return vec3<f32>(0.0);
+    }
+    let seen = vec3<f32>(stadium_seen(world, n, 0u), stadium_seen(world, n, 1u), stadium_seen(world, n, 2u));
+    var sum = 0.0;
+    for (var i = 0u; i < u32(enh.stadium.x); i++) {
+        let lamp = enh.stadium_lamps[i];
+        let way = enh.stadium_ways[i];
+        let g = u32(floor(way.w / 10.0));
+        let edge = way.w - f32(g) * 10.0;
+        let to = lamp.xyz - world;
+        let d2 = max(dot(to, to), 1.0);
+        let l = to * inverseSqrt(d2);
+        let full = 1.0 - (1.0 - edge) * 0.35;
+        let cone = smoothstep(edge, full, dot(way.xyz, -l));
+        // A little wrapped, as the light off the floor and the stands
+        // softens where it grazes.
+        let facing = clamp((dot(n, l) + 0.1) / 1.1, 0.0, 1.0);
+        sum += lamp.w * cone * facing * STADIUM_FALLOFF / (d2 + STADIUM_FALLOFF) * seen[min(g, 2u)];
+    }
+    return STADIUM_LAMP * sum * enh.stadium.y;
 }
 
 // The same, softly, for what stands by the track: here as it is (the baked

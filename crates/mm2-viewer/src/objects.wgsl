@@ -429,6 +429,10 @@ fn noise3(p: vec3<f32>) -> f32 {
     return mix(a, b, u.z);
 }
 
+// What the stands and the roof keep of their painted light at night,
+// under a stadium's own lamps, before the lamps' own on them.
+const NIGHT_PAINTED: vec3<f32> = vec3<f32>(0.2, 0.2, 0.22);
+
 @fragment
 fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(tex, tex_sampler, in.uv) * in.color;
@@ -518,6 +522,13 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         let game = min(globals.ambient.rgb + globals.sun.rgb * max(dot(n, globals.to_sun.xyz), 0.0) * lit, vec3<f32>(1.0));
         light = pow(game, vec3<f32>(2.2));
     }
+    // At night under a stadium's own lamps, what the game draws with its
+    // light painted in (the stands, the roof) is dim but for where the
+    // lamps reach it.
+    if (enh.stadium.y > 0.0 && in.mode >= UNLIT && in.moving < 0.5) {
+        let lamps = stadium_light(in.world, n) * 0.25;
+        light *= mix(vec3<f32>(1.0), NIGHT_PAINTED + lamps / (vec3<f32>(1.0) + lamps), enh.stadium.y);
+    }
     // Mud caked on as it rides: thickest low down, on the wheels, the
     // boots and the underside, in splats that spread as it gets dirtier;
     // dark and glossy when wet, pale and dusty when dry.
@@ -576,6 +587,14 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
             near *= smoothstep(lamp.y + 0.6, lamp.y - 0.8, in.world.y) * smoothstep(0.3, -0.5, n.y);
         }
         colour += vec3<f32>(1.0, 0.95, 0.85) * near * select(4.0, 6.0, pole) * (lamp.w - select(0.0, 10.0, pole));
+    }
+    // A stadium's lamps, painted near-white high under its roof, glow at
+    // night while they light the floor (night.rs).
+    if (enh.stadium.y > 0.0 && in.moving < 0.5 && in.world.y > enh.stadium.z - 30.0) {
+        let hi = max(texel.r, max(texel.g, texel.b));
+        let lo = min(texel.r, min(texel.g, texel.b));
+        let lamp = smoothstep(0.72, 0.85, hi) * smoothstep(0.35, 0.5, lo);
+        colour += texel.rgb * lamp * 2.5 * enh.stadium.y;
     }
     if (caked > 0.0 && enh.world.y > 0.3 && in.mode < UNLIT) {
         // Wet mud shines.

@@ -57,6 +57,7 @@ mod eco;
 mod enhance;
 mod rt;
 mod flood;
+mod night;
 #[cfg(test)]
 mod shader_tests;
 mod gpu_time;
@@ -918,6 +919,9 @@ pub struct Track {
     name: String,
     /// A stadium track (TERAFORM/SX).
     supercross: bool,
+    /// The lamps the track's `.lights` file lists, which light it at
+    /// night (crate::night).
+    night_lights: Option<Vec<night::Lamp>>,
     /// A desert track (TERAFORM/BAJA), where the enhanced drawing's rain
     /// is overcast instead.
     desert: bool,
@@ -966,6 +970,14 @@ pub struct Track {
 }
 
 impl Track {
+    /// The floor the course runs over, for the lights at night.
+    fn floor(&self) -> night::Floor {
+        self.course
+            .as_ref()
+            .and_then(|c| night::Floor::round_course(c.nodes.iter().flat_map(|n| n.sections.iter()).flat_map(|s| [s.center, s.edges[0], s.edges[1]]), &self.terrain))
+            .unwrap_or_else(|| night::Floor::guess(&self.terrain))
+    }
+
     /// Where a scene sound's site is at `time` on the race clock.
     fn site(&self, site: sound::Site, time: f32) -> Option<Vec3> {
         match site {
@@ -2150,6 +2162,7 @@ fn load_track(
         res,
         name,
         supercross: path.parent().and_then(|d| d.file_name()).is_some_and(|d| d.eq_ignore_ascii_case("SX")),
+        night_lights: night::read_lights(path),
         desert: path.parent().and_then(|d| d.file_name()).is_some_and(|d| d.eq_ignore_ascii_case("BAJA")),
         gates: gate_list.iter().map(gates::Gate::line).collect(),
         arches: arch_objects,
@@ -3275,6 +3288,7 @@ fn track_renderer(track: &Track, device: &wgpu::Device, queue: &wgpu::Queue, for
     renderer.set_lights(track.lights);
     renderer.set_desert(track.desert);
     renderer.set_stadium(track.supercross);
+    renderer.set_night(track.night_lights.clone(), track.floor());
     renderer.set_crowd(device, &track.spectators);
     if let Some(detail) = &track.detail {
         renderer.set_detail(device, queue, detail);
@@ -4056,6 +4070,7 @@ impl App {
         renderer.set_lights(track.lights);
         renderer.set_desert(track.desert);
     renderer.set_stadium(track.supercross);
+        renderer.set_night(track.night_lights.clone(), track.floor());
         renderer.set_crowd(&state.device, &track.spectators);
         if let Some(detail) = &track.detail {
             renderer.set_detail(&state.device, &state.queue, detail);
