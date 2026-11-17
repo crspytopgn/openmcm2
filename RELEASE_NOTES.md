@@ -16,6 +16,11 @@ it much better sound.
   slowed down. Falls, crashes, landings, the crowd and applause are real
   recordings too. All of it is CC0, from BigSoundBank (thank you, Joseph
   Sardin).
+* **Free graphics fixes:** the rider now sits on the bike, and without
+  the original game nothing goes missing in a race: HUD labels, rider
+  names and messages, the speedo, radar and score panel, dirt roost and
+  ground detail are all there, and each bike class rides with its own
+  engine instead of every bike riding as a 250.
 * **Course Builder:** renaming a track now shows what you type, and a new
   **Race** button (also *Kind of race* on the Land panel) turns a track
   into Supercross, National, Baja or Enduro, fitting its line, jumps and
