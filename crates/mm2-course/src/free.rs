@@ -664,6 +664,34 @@ impl Shape {
         }
     }
 
+    /// The same jump with faces long enough to ride like the original
+    /// game's: the takeoff's lip no steeper than an original jump of its
+    /// height (about 20 degrees at 3 ft up to 33 at 13 ft and over), and
+    /// landings and table downs at most 24 degrees. Measured along the
+    /// originals' course lines (`jump_angles` example).
+    fn tamed(self) -> Shape {
+        // The face rises as (s/up)^1.4, so its lip slope is 1.4 h / up;
+        // a smoothstep down falls at most 1.5 h / down.
+        let lip = |h: f32| ((17.0 + 1.2 * h).min(33.0)).to_radians().tan();
+        let land = 24f32.to_radians().tan();
+        let up_for = |up: f32, h: f32| up.max(1.4 * h / lip(h));
+        let down_for = |down: f32, h: f32| down.max(1.5 * h / land);
+        match self {
+            Shape::Table { up, top, down, height } => Shape::Table { up: up_for(up, height), top, down: down_for(down, height), height },
+            Shape::Step { up, top, down, height } => Shape::Step { up: up_for(up, height), top, down: down_for(down, height), height },
+            Shape::Gap { up, gap, down, height } => Shape::Gap { up: up_for(up, height), gap, down: down_for(down, height), height },
+            other => other,
+        }
+    }
+
+    /// The share of a gap that the takeoff's back and the landing's front
+    /// each take: enough that neither is a wall (about 30 degrees at most,
+    /// like the originals' doubles), leaving the pit at least 0.16 of the
+    /// gap.
+    fn gap_sides(gap: f32, height: f32) -> f32 {
+        (2.6 * height / gap.max(1.0)).clamp(0.2, 0.42)
+    }
+
     fn length(&self) -> f32 {
         match *self {
             Shape::Table { up, top, down, .. } | Shape::Step { up, top, down, .. } => up + top + down,
@@ -695,12 +723,14 @@ impl Shape {
                     0.0
                 } else if s < up {
                     height * (s / up).powf(1.4)
-                } else if s < up + gap * 0.2 {
-                    height * (1.0 - smooth((s - up) / (gap * 0.2)))
-                } else if s < up + gap * 0.8 {
+                } else if s < up + gap * Shape::gap_sides(gap, height) {
+                    let f = Shape::gap_sides(gap, height);
+                    height * (1.0 - smooth((s - up) / (gap * f)))
+                } else if s < up + gap * (1.0 - Shape::gap_sides(gap, height)) {
                     0.0
                 } else if s < up + gap {
-                    height * smooth((s - up - gap * 0.8) / (gap * 0.2))
+                    let f = Shape::gap_sides(gap, height);
+                    height * smooth((s - up - gap * (1.0 - f)) / (gap * f))
                 } else if s < up + gap + down {
                     height * (1.0 - smooth((s - up - gap) / down))
                 } else {
@@ -752,7 +782,7 @@ fn place_features(course: &Course, rng: &mut Rng, make: &mut dyn FnMut(&mut Rng)
     let mut out = Vec::new();
     let mut s = clear;
     while s < course.length - 60.0 {
-        let shape = make(rng);
+        let shape = make(rng).tamed();
         let len = shape.length() + 30.0;
         let first = (s / step) as usize;
         let last = ((s + len) / step) as usize;
@@ -1628,7 +1658,7 @@ struct Made {
 /// Picks a jump that fits in `room` feet: the biggest kinds are tried
 /// first when there is space for them, then smaller ones.
 fn pick_shape(r: &mut Rng, room: f32, menu: &[(f32, fn(&mut Rng) -> Shape)]) -> Option<Shape> {
-    let fits: Vec<(f32, Shape)> = menu.iter().map(|(w, f)| (*w, f(r))).filter(|(_, s)| s.length() <= room).collect();
+    let fits: Vec<(f32, Shape)> = menu.iter().map(|(w, f)| (*w, f(r).tamed())).filter(|(_, s)| s.length() <= room).collect();
     let total: f32 = fits.iter().map(|f| f.0).sum();
     if total <= 0.0 {
         return None;
@@ -1672,7 +1702,7 @@ const SX_JUMPS: &[(f32, fn(&mut Rng) -> Shape)] = &[
     (1.5, |r| Shape::Whoops { count: r.range(8.0, 12.99) as u32, spacing: r.range(9.5, 11.0), height: r.range(1.9, 2.5) }),
     (1.5, |r| Shape::Table { up: r.range(13.0, 15.0), top: r.range(15.0, 30.0), down: r.range(14.0, 17.0), height: r.range(6.0, 8.0) }),
     (1.0, |r| Shape::Step { up: r.range(12.0, 14.0), top: r.range(18.0, 28.0), down: r.range(18.0, 26.0), height: r.range(4.5, 6.0) }),
-    (0.8, |r| Shape::Rollers { count: 2, spacing: r.range(15.0, 18.0), height: r.range(3.0, 3.8) }),
+    (0.8, |r| Shape::Rollers { count: 2, spacing: r.range(20.0, 24.0), height: r.range(2.8, 3.4) }),
 ];
 
 /// The course's bounding box, ft.
@@ -2288,6 +2318,7 @@ fn quarry(def: &Def) -> Made {
 
 /// Adds a jump shape to the land at `at`, facing `d`, `half` ft wide.
 fn stamp(land: &mut Land, at: [f32; 2], d: [f32; 2], half: f32, shape: &Shape) {
+    let shape = &shape.tamed();
     let len = shape.length();
     let n = land.size;
     let side = [-d[1], d[0]];
