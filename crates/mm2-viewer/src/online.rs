@@ -127,6 +127,29 @@ pub fn send_saved(dir: &Path) {
     }
 }
 
+/// Sends the playtime not sent yet with the browser's beacon, which goes
+/// even as the tab closes, and counts it as sent straight away.
+#[cfg(target_arch = "wasm32")]
+pub fn send_playtime_now(dir: &Path) {
+    let Some(url) = address() else { return };
+    if !crate::tweaks::more().share_playtime {
+        return;
+    }
+    let read = |n: &str| playtime::parse(&crate::fs::read_to_string(dir.join(n)).unwrap_or_default());
+    let (now, sent) = (read(playtime::FILE), read(playtime::SENT));
+    let mut new = playtime::new_since(&now, &sent);
+    if new.is_empty() {
+        return;
+    }
+    if sent.is_empty() {
+        new.insert("players".into(), 1);
+    }
+    let Some(navigator) = web_sys::window().map(|w| w.navigator()) else { return };
+    if navigator.send_beacon_with_opt_str(&format!("{url}/playtime"), Some(&playtime::text(&new))).unwrap_or(false) {
+        let _ = crate::fs::write(&dir.join(playtime::SENT), playtime::text(&now));
+    }
+}
+
 /// Runs `then` once `reply` has come back well, on the sending thread, or
 /// in a browser when the answer arrives.
 fn after(reply: Reply, path: PathBuf, then: impl FnOnce(&Path) + Send + 'static) {

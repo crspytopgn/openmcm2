@@ -771,6 +771,17 @@ async function start(list) {
     } finally {
       setParam("course-builder", null);
     }
+    // The time played goes to the server as the tab is hidden or closed
+    // (the game sends it after each race too).
+    const flush = () => {
+      try {
+        game.flushPlaytime?.();
+      } catch (e) {
+        console.warn("playtime not sent", e);
+      }
+    };
+    addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", () => document.hidden && flush());
   } catch (err) {
     console.warn(err);
     if (stopped) return;

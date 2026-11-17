@@ -93,3 +93,10 @@ pub fn racing(on: bool) {
         js_racing(on);
     }
 }
+
+/// The page calls this as its tab is hidden or closed: the time played
+/// goes to the server now, as the tab may not come back.
+#[wasm_bindgen(js_name = flushPlaytime)]
+pub fn flush_playtime() {
+    crate::playclock::flush();
+}
