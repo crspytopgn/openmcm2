@@ -592,11 +592,13 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     }
     // A stadium's lamps, painted near-white high under its roof, glow at
     // night while they light the floor (night.rs).
+    // Added past the haze, which hides a lamp far less than what it lights.
+    var glow = vec3<f32>(0.0);
     if (enh.stadium.y > 0.0 && in.moving < 0.5 && in.world.y > enh.stadium.z - 30.0) {
         let hi = max(texel.r, max(texel.g, texel.b));
         let lo = min(texel.r, min(texel.g, texel.b));
         let lamp = smoothstep(0.72, 0.85, hi) * smoothstep(0.35, 0.5, lo);
-        colour += texel.rgb * lamp * 2.5 * enh.stadium.y;
+        glow += texel.rgb * lamp * 2.5 * enh.stadium.y;
         // A lamp the track lists (its `.lights` file) glows where its head
         // is, on the faces turned the way it shines, whatever its paint.
         if (enh.stadium_texels.w > 0.5) {
@@ -605,7 +607,7 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
                 let way = enh.stadium_ways[i].xyz;
                 let near = 1.0 - smoothstep(LAMP_HEAD * 0.5, LAMP_HEAD, length(in.world - at));
                 let facing = smoothstep(0.0, 0.4, dot(n, way));
-                colour += vec3<f32>(1.0, 0.97, 0.9) * near * facing * 3.0 * enh.stadium.y;
+                glow += vec3<f32>(1.0, 0.97, 0.9) * near * facing * 3.0 * enh.stadium.y;
             }
         }
     }
@@ -642,5 +644,6 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     if (surface.y > 0.5 && enh.night.x > 0.0) {
         colour += texel.rgb * mix(1.0, 0.4, caked) * BACKLIT * enh.night.x;
     }
-    return vec4<f32>(apply_haze(colour, in.world, dist), select(1.0, clamp(edge, 0.0, 1.0), enh.flags.x > 0.5));
+    let hazed = apply_haze(colour, in.world, dist) + glow * (1.0 - 0.6 * haze_at(dist));
+    return vec4<f32>(hazed, select(1.0, clamp(edge, 0.0, 1.0), enh.flags.x > 0.5));
 }

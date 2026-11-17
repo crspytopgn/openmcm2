@@ -121,6 +121,15 @@ fn haze_amount(dist: f32) -> f32 {
     return 1.0 - exp(-max(dist - enh.haze.x, 0.0) * enh.haze.y);
 }
 
+// How much the haze or the game's fog hides at `dist`, 0 to 1.
+fn haze_at(dist: f32) -> f32 {
+    if (enh.flags.z > 0.5) {
+        return haze_amount(dist);
+    }
+    let range = max(globals.fog_range.y - globals.fog_range.x, 1.0);
+    return clamp((dist - globals.fog_range.x) / range, 0.0, 1.0);
+}
+
 fn apply_haze(c: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
     if (enh.flags.z > 0.5) {
         return mix(c, enh.fog.rgb, haze_amount(dist));
