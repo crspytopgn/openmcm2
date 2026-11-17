@@ -116,5 +116,6 @@ These models were refitted to the game's bike and rider frames, recoloured and g
 | engine | [Diesel train engine](https://sketchfab.com/3d-models/1e1d6f173d1e48e593fa270fb1b5f5a8) | Leaf_dev |
 | coalcar | [Coal Hopper Railway Wagon](https://sketchfab.com/3d-models/287266d5edf749318cb9869fe583e0ae) | saadthedesigner314 |
 | boxcarclosed | [Railway Boxcar Freight Wagon](https://sketchfab.com/3d-models/6cede42e50cc4042addfbedac1311551) | saadthedesigner314 |
+| caboose | [train_caboose](https://sketchfab.com/3d-models/6ae06e8e67964cdea60009b86c3ee747) | tonmoydeyrick |
 
 Licence: [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/). Changes: bikes and rider cut into rigid parts, scaled and posed, materials and textures replaced; props thinned, scaled to fit, maker decals painted out and paint recoloured.

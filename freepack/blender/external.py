@@ -54,6 +54,7 @@ IMPORTS = {
     "engine": ("import", "diesel", ["--cap=30000"]),
     "coalcar": ("import", "hopper", ["--cap=30000"]),
     "boxcarclosed": ("import", "boxcar", ["--cap=30000"]),
+    "caboose": ("import", "caboose", ["--cap=30000"]),
 }
 SHELLS = ("b1b_02", "euro", "football")
 # bikes: folder -> bike_import.py arguments (model name first)

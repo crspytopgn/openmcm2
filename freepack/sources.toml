@@ -75,3 +75,4 @@ polyhaven = [
 "1e1d6f173d1e48e593fa270fb1b5f5a8" = ["Diesel train engine", "Leaf_dev", "objects/engine"]
 "287266d5edf749318cb9869fe583e0ae" = ["Coal Hopper Railway Wagon", "saadthedesigner314", "objects/coalcar"]
 "6cede42e50cc4042addfbedac1311551" = ["Railway Boxcar Freight Wagon", "saadthedesigner314", "objects/boxcarclosed"]
+"6ae06e8e67964cdea60009b86c3ee747" = ["train_caboose", "tonmoydeyrick", "objects/caboose.glb"]
