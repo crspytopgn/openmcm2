@@ -16,6 +16,7 @@ pub mod auto;
 pub mod bake;
 pub mod copy;
 pub mod env;
+pub mod free;
 pub mod kit;
 pub mod land;
 pub mod path;
