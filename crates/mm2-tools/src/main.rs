@@ -23,6 +23,7 @@ usage:
   mm2-tools textures <GAME-dir> <out-dir>  export every texture as PNG for upscaling
   mm2-tools freetrack <out.env> [seed]      make a new free test track from scratch
   mm2-tools freetracks <GAME-dir> [ground-dir] [only]  make the free pack's tracks (only: a file or event folder)
+  mm2-tools preview <track.env> <out.png>  draw a track's preview picture from its ground
   mm2-tools course <in.course|mode|track.env> <out.env>  bake a Course Builder track (mode: sx, national, baja, enduro; an .env: a copy of it)";
 
 fn main() -> ExitCode {
@@ -45,6 +46,8 @@ fn main() -> ExitCode {
         ["freetracks", game, ground, only] => freetracks::build(Path::new(game), Some(Path::new(ground)).filter(|g| g.as_os_str() != "-"), Some(only)).map_err(|e| e.to_string().into()),
         ["dialog", file, out] => dialog(file, Some(out)),
         ["course", from, out] => course(from, Path::new(out)),
+        ["preview", env, out] => preview(env, out),
+        ["free-menus", ui, text, out] => free_menus(Path::new(ui), Path::new(text), Path::new(out)),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
@@ -366,6 +369,25 @@ fn dialog(path: &str, out: Option<&str>) -> BoxResult {
     Ok(())
 }
 
+/// Draws a track's preview picture from its ground, as the builder does.
+fn preview(env: &str, out: &str) -> BoxResult {
+    let raw = read(env)?;
+    let name = Path::new(env).file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    let bytes = if raw.starts_with(b"RS2") || raw.starts_with(b"rs2") { raw } else { mm2_formats::faoe::decode(&raw, name).unwrap_or(raw) };
+    let ar = mm2_formats::rs2::Archive::parse(&bytes)?;
+    let files: Vec<(String, Vec<u8>)> = ar.entries().iter().map(|e| (e.name.clone(), ar.data(e).to_vec())).collect();
+    let stem = Path::new(name).file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+    let size = mm2_course::preview::LARGE;
+    let rgb = mm2_course::preview::picture(stem, &files, size).ok_or("no terrain")?;
+    let file = std::fs::File::create(out)?;
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), size.0 as u32, size.1 as u32);
+    enc.set_color(png::ColorType::Rgb);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header()?.write_image_data(&rgb)?;
+    println!("wrote {out}");
+    Ok(())
+}
+
 fn overlay(path: &str, out: &str) -> BoxResult {
     let img = mm2_formats::texture::parse_overlay(&read(path)?)?;
     let file = std::fs::File::create(out)?;
@@ -385,4 +407,174 @@ fn strings(path: &str) -> BoxResult {
         println!("{id:>6}  {:?}", table[&id]);
     }
     Ok(())
+}
+
+/// The Free Pack's menus (`menus/` in the pack): each dialog's layout from
+/// the player's `UI/*.DAT`, kept to where things sit and what they do
+/// (control names, places, picture and sound names, text ids), with the
+/// game's own wording taken out and ours put in from `text` (lines of
+/// `ui.<id><TAB>text` for the menus' strings, `lang.<id><TAB>text` for the
+/// game's, and `tip.<DIALOG>.<Control><TAB>tooltip`; `#` comments). Writes
+/// `<DIALOG>.dtm` for each, `strings.txt` and `lang.txt`.
+fn free_menus(ui: &Path, text: &Path, out: &Path) -> BoxResult {
+    let words = std::fs::read_to_string(text)?;
+    let mut tips = std::collections::HashMap::new();
+    let mut ids = std::collections::HashMap::new();
+    let mut strings = String::new();
+    let mut lang = String::new();
+    for line in words.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        let Some((key, value)) = line.split_once('\t') else { continue };
+        if let Some(id) = key.strip_prefix("ui.") {
+            strings.push_str(&format!("{id}\t{}\n", value.trim()));
+            ids.insert(id.trim().to_string(), value.trim().to_string());
+        } else if let Some(id) = key.strip_prefix("lang.") {
+            lang.push_str(&format!("{id}\t{}\n", value.trim()));
+        } else if let Some(at) = key.strip_prefix("tip.") {
+            tips.insert(at.to_ascii_uppercase(), value.trim().to_string());
+        }
+    }
+    std::fs::create_dir_all(out)?;
+    std::fs::write(out.join("strings.txt"), strings)?;
+    std::fs::write(out.join("lang.txt"), lang)?;
+    // The Pro Circuit's money, series and rival names, beside the text.
+    if let Some(dir) = text.parent() {
+        for name in ["pc-tables.txt", "pc-schedule.txt", "pc-names.txt"] {
+            if let Ok(b) = std::fs::read(dir.join(name)) {
+                std::fs::write(out.join(name), b)?;
+            }
+        }
+    }
+    let mut dats: Vec<_> = std::fs::read_dir(ui)?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("dat")))
+        .collect();
+    dats.sort();
+    let (mut written, mut missing) = (0, Vec::new());
+    for path in dats {
+        let stem = path.file_stem().unwrap().to_string_lossy().to_ascii_uppercase();
+        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let Ok(ar) = rs2::Archive::parse(&bytes) else { continue };
+        let Some(entry) = ar.entries().iter().find(|e| e.name.to_ascii_lowercase().ends_with(".dtm")) else { continue };
+        let source: String = ar.data(entry).iter().map(|&b| b as char).collect();
+        let mut dtm = String::new();
+        for line in source.lines() {
+            let key = line.split_once('=').map(|(k, _)| k.trim().to_ascii_lowercase());
+            if matches!(key.as_deref(), Some("tooltiptext" | "text" | "datarootdir")) {
+                continue;
+            }
+            dtm.push_str(line.trim_end());
+            dtm.push_str("\r\n");
+            if let Some(name) = line.trim().strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+                let had = source_has_tip(&source, name);
+                // The control's tooltip string id, as the game's own text has it.
+                let by_id = section_value(&source, name, "LocalToolTipId").and_then(|id| ids.get(id.trim()));
+                if let Some(tip) = by_id.or_else(|| tips.get(&format!("{stem}.{}", name.trim().to_ascii_uppercase()))) {
+                    dtm.push_str(&format!("ToolTipText = \"{}\"\r\n", tip.replace('"', "'")));
+                } else if had {
+                    missing.push(format!("{stem}.{}", name.trim()));
+                }
+            }
+        }
+        std::fs::write(out.join(format!("{stem}.dtm")), dtm)?;
+        written += 1;
+    }
+    // The credits, scrolled when there's no credits movie.
+    let credits_md = text.parent().and_then(Path::parent).map(|d| d.join("CREDITS.md"));
+    let md = credits_md.and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    std::fs::write(out.join("credits.txt"), credits_text(&md))?;
+    println!("{written} dialogs written to {}", out.display());
+    if !missing.is_empty() {
+        println!("{} tooltips with no wording of ours yet:", missing.len());
+        for m in missing {
+            println!("  tip.{m}");
+        }
+    }
+    Ok(())
+}
+
+/// A key's value in the section `name` of a `.dtm`.
+fn section_value(source: &str, name: &str, key: &str) -> Option<String> {
+    let mut inside = false;
+    for line in source.lines() {
+        let line = line.trim();
+        if let Some(n) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            inside = n.trim() == name.trim();
+        } else if inside {
+            if let Some((k, v)) = line.split_once('=').filter(|(k, _)| k.trim().eq_ignore_ascii_case(key)) {
+                let _ = k;
+                return Some(v.split('\'').next().unwrap_or("").trim().trim_matches('"').to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Whether the section `name` in a `.dtm` has a tooltip.
+fn source_has_tip(source: &str, name: &str) -> bool {
+    let mut inside = false;
+    for line in source.lines() {
+        let line = line.trim();
+        if let Some(n) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            inside = n.trim() == name.trim();
+        } else if inside && line.split_once('=').is_some_and(|(k, v)| k.trim().eq_ignore_ascii_case("ToolTipText") && !v.trim().trim_matches('"').is_empty()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// The credits to scroll: OpenMCM2's, then each Free Pack source with the
+/// people whose work it is (the last column of `CREDITS.md`'s tables).
+fn credits_text(md: &str) -> String {
+    let mut out = String::from(
+        "# OpenMCM2\n\nOpen source motocross, free for everyone\n\n\
+         # Made by\nMichael and the OpenMCM2 contributors\n\n\
+         # Thanks to\nDaniel (dwolp/MCM2) for many fixes and extras\n\
+         MDX Racing and every player who makes tracks\nEveryone who plays, reports bugs and donates\n\n\
+         # Free Pack\nArt and sound made for OpenMCM2, and from these people:\n\n",
+    );
+    let mut people_col = None;
+    let mut names: Vec<String> = Vec::new();
+    let flush = |names: &mut Vec<String>, out: &mut String| {
+        let mut seen = std::collections::BTreeSet::new();
+        for n in names.drain(..) {
+            for one in n.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                if seen.insert(one.to_string()) {
+                    out.push_str(one);
+                    out.push('\n');
+                }
+            }
+        }
+        out.push('\n');
+    };
+    for line in md.lines() {
+        if let Some(h) = line.strip_prefix("## ") {
+            if !names.is_empty() {
+                flush(&mut names, &mut out);
+            } else if out.ends_with(")\n") {
+                out.push('\n');
+            }
+            out.push_str(&format!("# {}\n", h.trim()));
+            people_col = None;
+        } else if line.starts_with('|') {
+            let cells: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
+            if cells.iter().all(|c| c.chars().all(|ch| ch == '-' || ch == ' ' || ch == ':')) {
+                continue;
+            }
+            match people_col {
+                None => people_col = cells.iter().position(|c| c.to_ascii_lowercase().starts_with("author")).or(Some(usize::MAX)),
+                Some(i) if i != usize::MAX => {
+                    if let Some(c) = cells.get(i) {
+                        names.push(c.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    if !names.is_empty() {
+        flush(&mut names, &mut out);
+    }
+    out
 }

@@ -1,0 +1,705 @@
+# The menus' text in our own words, by the menus' string ids (ui.<id>),
+# and tooltips for controls that have no string id (tip.<DIALOG>.<Control>).
+# Read by `mm2-tools free-menus` to make the Free Pack's menus/.
+
+ui.1000	Track
+ui.1001	Rider
+ui.1002	Laps
+ui.1003	Length
+ui.1004	Description
+ui.1005	Saved ghost races
+ui.1006	Description...
+ui.1007	Delete
+ui.1008	User Settings
+ui.1009	Cancel
+ui.1010	Ok
+ui.1011	Reset to Defaults
+ui.1012	Copy settings from:
+ui.1013	Single Stunt
+ui.1014	Stunt Quarry
+ui.1015	Moto-Tag
+ui.1016	Supercross
+ui.1017	Nationals
+ui.1018	Baja
+ui.1019	Enduro
+ui.1020	Host
+ui.1021	Join
+ui.1022	Host or join a race
+ui.1023	Load
+ui.1024	Close
+ui.1025	New...
+ui.1026	Remove
+ui.1027	User Profiles
+ui.1028	BAJA
+ui.1029	STUNTS
+ui.1030	ENDURO
+ui.1031	NATIONAL
+ui.1032	SUPERCROSS
+ui.1033	PRO-CIRCUIT
+ui.1034	OK
+ui.1035	Yes
+ui.1036	No
+ui.1037	Send
+ui.1038	Largest Engine Allowed
+ui.1039	Custom Engine Size
+ui.1040	Bike Plate #
+ui.1041	Races
+ui.1042	Event Type
+ui.1043	Race Mode
+ui.1044	Computer Riders
+ui.1045	Tag Ball
+ui.1046	Stunt Mode
+ui.1047	Vegetation collision
+ui.1048	Record race
+ui.1049	Most computer bikes run here
+ui.1050	Fast Finishes
+ui.1051	Player collision
+ui.1052	Host's settings:
+ui.1053	This computer's settings:
+ui.1054	Difficulty Level:
+ui.1055	Easy
+ui.1056	Normal
+ui.1057	Hard
+ui.1058	Last Race Information
+ui.1059	Visibility
+ui.1060	-
+ui.1061	+
+ui.1062	Terrain
+ui.1063	Objects
+ui.1064	Ecosystem
+ui.1065	Graphics Quality
+ui.1066	Current 3-D Renderer Selection
+ui.1067	Ask for the 3-D renderer at start
+ui.1068	Keep textures within video memory
+ui.1069	Advanced Options
+ui.1070	Terrain Detail:
+ui.1071	Single pass
+ui.1072	Dual pass
+ui.1073	None
+ui.1074	Fixes for trouble:
+ui.1075	Filter joystick input
+ui.1076	Ask for the controller at start
+ui.1077	Restore...
+ui.1078	Garage
+ui.1079	Messages
+ui.1080	Controls
+ui.1081	Sound
+ui.1082	Graphics
+ui.1083	GameSettings
+ui.1084	Advanced...
+ui.1085	Enable Force Feedback
+ui.1086	Controls (click one to change it)
+ui.1087	Current Assignment
+ui.1088	Control Sensitivity
+ui.1089	Press Sensitivity
+ui.1090	Release Sensitivity
+ui.1091	Steering
+ui.1092	Cross-up
+ui.1093	Pitch
+ui.1094	Throttle
+ui.1095	Brakes
+ui.1096	Slow
+ui.1097	Fast
+ui.1098	Less
+ui.1099	More
+ui.1100	Weaker
+ui.1101	Stronger
+ui.1102	Presets:
+ui.1103	Gas Gyro Effect
+ui.1104	Brake Gyro Effect
+ui.1105	Analog Axes
+ui.1106	Overlays
+ui.1107	Rider Position
+ui.1108	Rider Names
+ui.1109	Overview Map/Radar
+ui.1110	Gauges
+ui.1111	Race Statistics
+ui.1112	Chat Box Mode
+ui.1113	Multi-Player Settings
+ui.1114	End of Race Animations
+ui.1115	Miscellaneous Settings
+ui.1116	UI Animations
+ui.1117	Show Intro Movie
+ui.1118	Player Indicator
+ui.1119	Show Tool Tips
+ui.1120	Practice: Reset on Track
+ui.1121	Front Suspension
+ui.1122	Rear Suspension
+ui.1123	Fully Compressed
+ui.1124	Decompressed
+ui.1125	Damping
+ui.1126	RPM
+ui.1127	Unused Power
+ui.1128	HP
+ui.1129	Display Resolution
+ui.1130	Overall Graphics Quality
+ui.1131	Graphic Features
+ui.1132	Sky
+ui.1133	Particle Systems
+ui.1134	Shadows
+ui.1135	Ctrl + 1:
+ui.1136	Ctrl + 0:
+ui.1137	Ctrl + 9:
+ui.1138	Ctrl + 8:
+ui.1139	Ctrl + 7:
+ui.1140	Ctrl + 6:
+ui.1141	Ctrl + 5:
+ui.1142	Ctrl + 4:
+ui.1143	Ctrl + 3:
+ui.1144	Ctrl + 2:
+ui.1145	Change any of these quick messages to your own.
+ui.1146	Use 3-D Sound Hardware
+ui.1147	In-game Sound Effects
+ui.1148	User Interface sounds
+ui.1149	Sound Options
+ui.1150	Use EAX Extensions
+ui.1151	Waypoint Confirmation
+ui.1152	In-game Volume
+ui.1153	User Interface Volume
+ui.1154	Sound Settings
+ui.1155	8-bit
+ui.1156	16-bit
+ui.1157	Quality
+ui.1158	Auto Rotate
+ui.1159	Announcements:
+ui.1160	Financial Status:
+ui.1161	Medical:
+ui.1162	Repairs:
+ui.1163	Fees:
+ui.1164	Expenses to-date:
+ui.1165	Cash:
+ui.1166	Event Race:
+ui.1167	Event Type:
+ui.1168	Track Name:
+ui.1169	Purse:
+ui.1170	Entry Fee:
+ui.1171	Race Information:
+ui.1172	Bike
+ui.1173	Expenses
+ui.1174	Winnings
+ui.1175	Cash
+ui.1176	Points
+ui.1177	Name
+ui.1178	Rank
+ui.1179	Decline
+ui.1180	Accept
+ui.1181	Medical
+ui.1182	Repairs
+ui.1183	Final Pro-Circuit Standings
+ui.1184	Last Race Results
+ui.1185	Start a new Pro Circuit:
+ui.1186	125
+ui.1187	250
+ui.1188	Open
+ui.1189	Bike Class:
+ui.1190	Name:
+ui.1191	Opponents:
+ui.1192	New Circuit...
+ui.1193	Continue
+ui.1194	Inactive:
+ui.1195	Active:
+ui.1196	Pro-Circuit
+ui.1197	Race for prize money and points, and build a career as a pro.
+ui.1198	Class
+ui.1199	Status
+ui.1200	Difficulty
+ui.1201	Saved Replay File List
+ui.1202	Serial Port Settings
+ui.1203	Port
+ui.1204	Baud Rate
+ui.1205	Stop Bits
+ui.1206	Parity
+ui.1207	Flow
+ui.1208	# of Gates
+ui.1209	Random Gate #
+ui.1210	Opponents
+ui.1211	Vegetation Collision
+ui.1212	View Replay
+ui.1213	00:00:00.00
+ui.10000	Return To Previous Screen
+ui.10001	Open the help
+ui.10002	Other game settings
+ui.10003	Races open to join right now.
+ui.10004	The host picks the riders, events and modes. The fastest computer makes the best host.
+ui.10005	Connect to a race someone is hosting, then wait for them to start it.
+ui.10006	Race on your own against computer riders
+ui.10007	Race against other people
+ui.10008	Options
+ui.10009	Make a new rider profile or load one you have
+ui.10010	High Scores
+ui.10011	Help
+ui.10012	Quit OpenMCM2
+ui.10013	Who made it
+ui.10014	Watch saved replays and race your ghosts
+ui.10015	Race up to 7 others on your local network
+ui.10016	Race people online through the server list
+ui.10017	Link two computers with a serial cable
+ui.10018	Race one other player over a modem
+ui.10019	Race up to 7 others over the internet by IP address
+ui.10020	Chase the arrow across wide, open country
+ui.10021	Score stunt points against the clock
+ui.10022	Ride laps through big, open country
+ui.10023	Race outdoor motocross tracks
+ui.10024	Race tight indoor stadium tracks
+ui.10025	Race for money and points and build a pro career
+ui.10026	Click when you're ready to race. The host clicks the flag to start.
+ui.10027	Host only: take this player out of the race.
+ui.10028	Set up and fine-tune your controller
+ui.10029	Start race!
+ui.10030	Back to the last screen
+ui.10031	Results for every rider in the last race
+ui.10032	Pick your gear and your bike
+ui.10033	Set up your next race: the event, the track and how many laps
+ui.10034	Click the arrows to change your gear's colours
+ui.10035	Click the arrows to change bikes
+ui.10036	Open the Garage to tune your engine and suspension
+ui.10037	Click and type your plate number, from 101 to 999
+ui.10038	How many races the series has
+ui.10039	How many laps, or minutes for timed events
+ui.10040	How many computer riders race against you
+ui.10041	Click the arrow to see every event
+ui.10042	Click the arrow to see every race mode
+ui.10043	Hold the ball to score, and do stunts while you're It for more. Touch a rider to take it!
+ui.10044	Score for holding the ball and for stunts
+ui.10045	Tick to make trees, bushes and plants solid
+ui.10046	Tick to save the race as a replay
+ui.10047	The most computer bikes this computer runs in a multiplayer race
+ui.10048	Tick to end the race 30 seconds after the winner crosses the line.
+ui.10049	Tick to let riders hit each other, which can cause crashes.
+ui.10050	How hard the computer riders are to beat
+ui.10051	Every rider's results from the last race, with best laps and total times
+ui.10052	How far ahead you can see while riding.
+ui.10053	How detailed the ground looks.
+ui.10054	How detailed buildings, fences, trains and cars look.
+ui.10055	How detailed trees, bushes and plants look.
+ui.10056	Shows the renderer choice when the game starts.
+ui.10057	The device drawing the 3-D graphics.
+ui.10058	Faster, but doesn't look as good
+ui.10059	Turn off if the ground's detail looks wrong
+ui.10060	Try this if the ground looks wrong with Single pass.
+ui.10061	Smooths a jittery controller, but can soften steering.
+ui.10062	Shows the controller choice when the game starts.
+ui.10063	Put every setting back as it came
+ui.10064	Bike Settings
+ui.10065	Hot Key Message Setup
+ui.10066	Controller Options
+ui.10067	Sound Options
+ui.10068	Graphics and advanced graphics
+ui.10069	Advanced options and fixes for trouble
+ui.10070	Click the arrow to see every kind of controller
+ui.10071	How far the bars turn and how quickly the bike turns
+ui.10072	How quickly the bike rolls side to side in the air
+ui.10073	How quickly the bike tips nose up and down in the air
+ui.10074	How quickly full throttle comes in when you press gas
+ui.10075	How quickly full braking comes in when you press brake
+ui.10076	How quickly the bike reacts when you let go of the gas
+ui.10077	How quickly the bike reacts when you let go of the brake
+ui.10078	Gas in the air spins the back wheel and pulls the tail down
+ui.10079	Brake in the air stops the back wheel and dips the nose
+ui.10080	Shows each rider's place above them
+ui.10081	Shows each rider's name above them
+ui.10082	Shows the map in the top right corner
+ui.10083	Shows the speedometer in the bottom right corner
+ui.10084	Shows your place, lap and more in the top left corner
+ui.10085	When the chat box shows in multiplayer races
+ui.10086	Shows the podium after each race
+ui.10087	Moving menus and buttons
+ui.10088	Shows a small marker above your own rider
+ui.10089	Shows a note like this one when the pointer rests on something
+ui.10090	Front suspension at full squash. Stronger means less bounce.
+ui.10091	Front suspension as it springs back. Stronger means less bounce.
+ui.10092	Rear suspension at full squash. Stronger means less bounce.
+ui.10093	Rear suspension as it springs back. Stronger means less bounce.
+ui.10094	How much the rear bounces on landing. Stronger means less bounce.
+ui.10095	How much the front bounces on landing. Stronger means less bounce.
+ui.10096	The engine's power at each RPM: its power curve
+ui.10097	Stock and custom power curves for each engine size
+ui.10098	Power left to spread across the RPM range for a custom curve
+ui.10099	Higher looks better; lower runs faster
+ui.10100	Left runs faster, right looks better
+ui.10101	Moving clouds and the time of day. Turn off to run faster
+ui.10102	Dust, dirt and smoke from the bikes. Turn off to run faster
+ui.10103	Shadows from everything around. Turn off to run faster
+ui.10104	Hold these keys to send a message to the other riders
+ui.10105	Tick to use your sound card's 3-D sound. Turn off if sound misbehaves.
+ui.10106	Tick to hear the race's sounds
+ui.10107	Tick to hear the menus' sounds
+ui.10108	Tick for EAX: echoes and muffling around things
+ui.10109	Tick to hear a sound as you clear each gate
+ui.10110	Left is quieter and right is louder for engines and the world around you
+ui.10111	Left is quieter and right is louder for the menus' sounds
+ui.10112	Lower quality sound, faster game
+ui.10113	Better sound, slower game
+ui.10114	Ride on your own for practice
+ui.10115	Tick to spin the bike and rider
+ui.10116	Everyone rides 125s: lighter and quicker to turn than 250s
+ui.10117	Everyone rides 250 two-strokes or 400 four-strokes: more power than 125s
+ui.10118	Riders can pick any class
+ui.10119	How many opponents (10 at most)
+ui.10120	Delete the Pro Circuit career in use
+ui.10121	Start a new Pro Circuit career
+ui.10122	Get ready for the next race of your career
+ui.10123	Return to main menu
+ui.10124	Careers finished or lost
+ui.10125	Your Pro Circuit careers so far. Click Continue to carry on with one
+ui.10126	Delete this finished Pro Circuit career
+ui.10127	These need to match the computer you're connecting to.
+ui.10128	How many gates, from 10 to 30
+ui.10129	This race's number. Type it in later to ride the same race again
+ui.10130	Tick to put the gates in random places
+ui.10131	How many opponents (10 at most)
+ui.10132	Rewind quickly to the start and play from there.
+ui.10133	Fast forward to the end.
+ui.10134	Save this as a replay.
+ui.10135	Next camera
+ui.10136	Watch the previous rider.
+ui.10137	Watch the next rider.
+ui.10138	Back to the main menu
+ui.10139	Step one frame at a time
+ui.10140	Play at normal speed. Click again to pause.
+ui.10141	Pause. Click again to carry on.
+ui.10142	Rewind at triple speed.
+ui.10143	Fast forward at double speed.
+ui.10144	Fast forward at triple speed.
+
+# Game text (LANG.DLL ids).
+lang.402	Steer Left
+lang.403	Steer Right
+lang.404	Lean Forward
+lang.405	Lean Back
+lang.406	Accelerate
+lang.407	Brake
+lang.408	Stunts (1-8)
+lang.409	Stunts (9-16)
+lang.410	Big Air Dumpster
+lang.411	Taunting
+lang.412	Thrill Cam
+lang.413	Reverse Cam
+lang.414	Clutch
+lang.415	Back Up
+lang.450	Press Any Key (ESC to exit)
+lang.460	2 Axis, 2 Button Joystick
+lang.461	2 Axis, 4+ Button Joystick
+lang.462	3+ Axis, 4+ Button Joystick
+lang.463	Standard Game Pad
+lang.464	Steering Wheel
+lang.465	Dual Analog Game Pad
+lang.466	Keyboard
+lang.467	Mouse
+lang.1552	Ready
+lang.1553	Disconnect
+lang.2100	Score:
+lang.2101	Position:
+lang.2102	Lap:
+lang.2103	Lap Time:
+lang.2104	Best Lap:
+lang.2105	TBL:
+lang.2200	TCP/IP Settings
+lang.2201	Type the host's IP address or computer name.
+lang.2303	Game Paused
+lang.2320	File Not Present
+lang.2321	Enter Session Name
+lang.2322	Type a name for the race below
+lang.2323	Final Lap
+lang.2324	Event
+lang.2325	Send
+lang.2326	Continue
+lang.2337	Arcade
+lang.2338	Simulation
+lang.2339	Select Profile
+lang.2340	Create
+lang.2341	Remove
+lang.2342	Create New Profile
+lang.2345	Laps
+lang.2346	Races
+lang.2347	Race
+lang.2351	Duration
+lang.2356	Name
+lang.2357	Place
+lang.2358	Best Lap Time
+lang.2359	Score
+lang.2360	Win Points
+lang.2361	Total It Time
+lang.2362	Tournament Results
+lang.2363	Tournament Standings
+lang.2370	Highest Score: 
+lang.2371	Time Remaining: 
+lang.2384	Wait
+lang.2385	Call
+lang.2386	Modem Play
+lang.2392	Track Records
+lang.3000	This needs a newer operating system.
+lang.3001	This needs newer graphics drivers. Please reinstall them.
+lang.3002	No 3-D graphics card was found. Check that it's set up properly.
+lang.3003	No 3-D driver was found. Reinstall your graphics card's driver.
+lang.3004	OpenMCM2
+lang.3005	OpenMCM2
+lang.3012	Name
+lang.3013	Record
+lang.3014	Event
+lang.3018	No 3-D Accelerator Selected
+lang.3029	has left the race
+lang.3030	has disconnected
+lang.3031	No Name
+lang.3032	No Name Session
+lang.4065	Mouse X Axis
+lang.4066	Mouse Y Axis
+lang.4067	Mouse Button
+lang.4068	Joy X Axis
+lang.4069	Joy Y Axis
+lang.4070	Joy Z Axis
+lang.4071	Joy RX Axis
+lang.4072	Joy RY Axis
+lang.4073	Joy RZ Axis
+lang.4074	Joy Button
+lang.4075	Please choose a 3-D card:
+lang.4077	0
+lang.4079	Remove Profile?
+lang.4080	incomplete
+lang.4082	NONE
+lang.5036	Week
+lang.5037	Gate: 
+lang.5038	Type a name below to make a rider profile. Your profile keeps your settings for next time.
+lang.5043	Something is missing from the install. Please reinstall OpenMCM2.
+lang.5044	This copy has run out.
+lang.5045	Please add your game files.
+lang.5046	Visual Cues
+lang.5047	PID
+lang.5048	TRT
+lang.5049	Chase Cam
+lang.5050	Slot Cam
+lang.5051	Sky Cam
+lang.5052	Rider Cam
+lang.5053	User Cam
+lang.5054	Bird's-Eye Cam
+lang.5058	Connection Error
+lang.5059	Keyboard Left ALT
+lang.5060	Keyboard Right ALT
+lang.5061	Keyboard Left SHIFT
+lang.5062	Keyboard Right SHIFT
+lang.5063	Keyboard Left CTRL
+lang.5064	Keyboard Right CTRL
+lang.5065	Invalid IP address or host name.
+lang.5071	already exists.
+lang.5072	Replace file?
+lang.5073	The host has removed you.
+lang.5075	The sound device is busy. Close whatever is using it and start OpenMCM2 again.
+lang.5078	The online race list couldn't be reached.
+lang.5079	timed out
+lang.5080	Your graphics have changed since last time, so OpenMCM2 will check them again.
+lang.5081	In-Game Options
+lang.5082	Restart Race
+lang.5083	Quit Event
+lang.5084	Cancel
+lang.5085	Game
+lang.5086	Graphics
+lang.5087	Sound
+lang.5088	Controls
+lang.5089	Messages
+lang.5090	Garage
+lang.5091	Event
+lang.5092	Bike & Rider
+lang.5093	Race Info
+lang.5094	Internet
+lang.5095	LAN
+lang.5096	Choose type of TCP/IP connection:
+lang.5097	OK
+lang.5098	New User Information
+lang.5099	New...
+lang.5100	Load It
+lang.5101	Baja Race
+lang.5102	Stunt Event
+lang.5103	Nationals Race
+lang.5104	Enduro Race
+lang.5105	Moto-Tag Event
+lang.5106	Supercross Race
+lang.5107	Practice
+lang.5108	Single Event
+lang.5109	Tournament
+lang.5110	Ghost Race
+lang.5111	Show All Manufacturers
+lang.5112	View Replay
+lang.5113	Up to 125cc
+lang.5114	Up to 250cc
+lang.5115	Up to 350cc
+lang.5116	Up to 500cc
+lang.5117	Up to 600cc
+lang.5118	Local network or internet address
+lang.5120	Change your bike or rider on the Bike & Rider tab. Click OK to go there now.
+lang.5123	Would you like to:\n  load this profile, or\n  make a new one?
+lang.5126	Keyboard
+lang.5127	ON
+lang.5128	OFF
+lang.5130	Always On
+lang.5131	Normal
+lang.5132	Always Off
+lang.5133	Gas Gyro
+lang.5134	Quit
+lang.5135	Particles
+lang.5136	Shadows
+lang.5137	Sky
+lang.5138	Names
+lang.5139	Positions
+lang.5140	Names and Positions
+lang.5141	Stats
+lang.5142	Instruments
+lang.5143	Follow Me...
+lang.5144	You Stink!
+lang.5145	Hahahaha!
+lang.5146	Watch this...
+lang.5147	I'll be back
+lang.5148	Losing? Try holding on next time!
+lang.5149	Did you see how high that was?
+lang.5150	Somebody get that flagger a raise!
+lang.5151	That 30 second board never lies!
+lang.5152	See you at the finish line. If I'm not already there.
+lang.5153	Baja
+lang.5154	Enduro
+lang.5155	Stunts
+lang.5156	Supercross
+lang.5157	Nationals
+lang.5158	Moto-Tag
+lang.5159	Fastest Lap
+lang.5160	ChatBox
+lang.5161	Sounds
+lang.5162	Single Stunt
+lang.5163	Best It Time
+lang.5165	Brake Gyro
+lang.5166	(No Records)
+lang.5167	%d Lap Race
+lang.5168	%d Minute Event
+lang.5169	Quit, No Save
+lang.5170	Save
+lang.5171	Save Replay?
+lang.5173	This quits the race.
+lang.5174	Carry on?
+lang.5175	No Description
+lang.5176	0
+lang.5177	Saved Replay Files
+lang.5178	Saved Ghost Race Files
+lang.5179	Not Available
+lang.5181	No
+lang.5182	Yes
+lang.5183	Enter a description for this item:
+lang.5185	Radar Overlay
+lang.5186	Failed
+lang.5187	Complete
+lang.5188	In Progress
+lang.5190	Next Race
+lang.5191	Bike & Rider
+lang.5192	Standings
+lang.5193	You gave it everything, but it wasn't enough this time. Plenty of riders will charge the corners harder and fly further, and the money ran out before the results came. Your career is over, for now. Dust off your gear and try again.
+lang.5194	Bailout Offer!
+lang.5195	Your Balance:
+lang.5196	Cash Offered:
+lang.5197	Next Race Fee:
+lang.5198	Results...
+lang.5199	Signing Bonus:
+lang.5200	Mascot Bonus Per Race:
+lang.5201	Back to the day job for you. The bike's sold, the trailer's gone, and your mates will never stop asking about it. Give it time, then come back and show them what you've learned.
+lang.5202	Advertising Offer!
+lang.5203	Debts
+lang.5204	Not bad at all. You've shown you can ride. Baja is next: five races across open country, where you'll need to keep your head and your bike in one piece.
+lang.5205	Nationals! Anyone can ride the back field, but tight, technical tracks need real skill and timing. Get this right and the big leagues are next.
+lang.5206	From local rider to the big time. It wasn't luck: you've got the skill, the speed and the nerve. Supercross is calling.
+lang.5207	Well done! A bonus Nationals track is now open to you.
+lang.5208	Well done! A bonus Supercross track is now open to you.
+lang.5209	You can race the new track for cash now, with no entry fee or costs. Race the bonus track now?
+lang.5210	You can race the new track for cash now, with no entry fee or costs. Race the bonus track now?
+lang.5211	Bonus Cash:
+lang.5212	New bikes and riding gear are ready! Take a look on the Bike & Rider tab.
+lang.5213	You've Successfully Completed the Pro-Circuit!
+lang.5214	Amazing! The chequered flags are out and you've won the Pro Circuit series, the very top of the sport. Everyone will want to talk to you now. Enjoy it, champion.
+lang.5215	You finished your career on top! A special bike is now yours in every Bike & Rider screen. Well ridden!
+lang.5216	Watch a short overview?
+lang.5217	Overview Movie
+lang.5219	Software Rasterization
+lang.5220	It's over for this career: bent metal, tyre marks and not much else. But every champion has a season like this. Start a new career and show them what you can do.
+lang.5221	Ready to race with the pros? It's a long way to the top, and all you start with is a bike, some gear and a little cash. Spend it wisely, ride hard, and stay on the bike.
+lang.5222	Current Profile:
+lang.5223	Pro-Circuit
+lang.5224	Options
+lang.5225	0
+lang.5226	%d Series
+lang.5227	Power Curve - Preset
+lang.5228	Power Curve - Custom
+lang.5229	Warning
+lang.5230	You can't delete the profile you're using.
+lang.5231	No Parity
+lang.5232	Even Parity
+lang.5233	Odd Parity
+lang.5234	Mark Parity
+lang.5235	Xon/Xoff
+lang.5236	None
+lang.5237	RTS/DTR
+lang.5238	RTS
+lang.5239	DTR
+lang.5240	1 bit
+lang.5241	1.5 bit
+lang.5242	2 bit
+lang.5243	COM1
+lang.5244	COM2
+lang.5245	COM3
+lang.5246	COM4
+lang.5247	Race people on your local network
+lang.5248	Race people over the internet by IP address
+lang.5249	Well done! You won!
+lang.5250	You finished 2nd
+lang.5251	You finished 3rd
+lang.5252	You finished 4th
+lang.5253	You finished 5th
+lang.5254	You finished 6th
+lang.5255	You finished 7th
+lang.5256	You finished 8th
+lang.5257	You finished 9th
+lang.5258	You finished 10th
+lang.5259	You finished 11th
+lang.5260	Keep trying
+lang.5261	0
+lang.5303	FREE BALL!
+lang.5304	is IT!
+lang.5305	Your IP address is
+lang.5306	System
+lang.5307	This computer is low on memory. Carry on anyway?
+lang.5308	Welcome to your Pro Circuit career! Ride smart and remember:
+lang.5309	1. Keep money in the bank. You need it for entry fees, doctors and mechanics!
+lang.5310	2. Earn cash by making the podium and doing stunts.
+lang.5311	3. Watch out for sponsors and the new gear they bring!
+lang.5312	Crowd Sounds Reduced
+lang.5313	Crowd Sounds On
+lang.5314	Crowd Sounds Off
+lang.5315	Reverb
+lang.5316	Overall Graphic Quality
+lang.5317	Please choose a game controller:
+lang.5319	Record a new ghost race
+lang.5320	Ghost Race
+lang.5321	Restore Settings?
+lang.5322	This puts every setting back as it came. Are you sure?
+lang.5323	Easy
+lang.5324	Normal
+lang.5325	Hard
+lang.5326	Auto
+lang.5327	Open
+lang.5328	(Re-enable this dialog in Advanced Options)
+lang.5329	The host allows engines up to %s. Please pick a smaller one.
+lang.5330	You don't have this track, so you can't get ready.
+lang.5331	%s is Ready
+lang.5333	%s selected %d cc.
+lang.5334	Take a warm-up lap
+lang.5335	Begin ghost racing!
+lang.5336	$
+lang.5338	Current track is illegal
+lang.5339	%s is using an illegal track
+lang.5340	This needs administrator rights on this computer.
+lang.5341	Recording time limit has been reached
+lang.5343	https://crspytopgn.github.io/openmcm2/
+lang.5344	Player Removed
+lang.5345	You finished the race
+lang.5172	Type a note for this replay
+lang.5180	Delete this for good?
+lang.5184	Save this ghost lap?
+lang.5189	Type a name for this new Pro Circuit career:
+lang.5318	Don't show this again
+lang.5332	%s doesn't have this track!
+lang.5337	That's the most stunt money there is ($
+lang.5342	The ghost lap is as long as it can be

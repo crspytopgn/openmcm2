@@ -92,6 +92,12 @@ def icon(kind, sz, col):
         r = sz * 0.2; d.ellipse([sz * 0.5 - 2 * r, sz * 0.3 - r * 0.2, sz * 0.5, sz * 0.3 + r * 1.8], fill=c)
         d.ellipse([sz * 0.5, sz * 0.3 - r * 0.2, sz * 0.5 + 2 * r, sz * 0.3 + r * 1.8], fill=c)
         d.polygon([(sz * 0.5 - 2 * r + 1, sz * 0.3 + r * 1.05), (sz * 0.5 + 2 * r - 1, sz * 0.3 + r * 1.05), (sz * 0.5, b)], fill=c)
+    elif kind == "shovel":
+        # A ramp with a shovel stuck in the dirt: the Course Builder.
+        d.polygon([(a, b), (b - sz * 0.05, b), (b - sz * 0.05, sz * 0.62)], fill=c)
+        d.line([sz * 0.3, a, sz * 0.46, sz * 0.58], fill=c, width=w)
+        d.line([sz * 0.22, a + sz * 0.04, sz * 0.38, a - sz * 0.04], fill=c, width=w)
+        d.polygon([(sz * 0.36, sz * 0.52), (sz * 0.56, sz * 0.44), (sz * 0.62, sz * 0.7), (sz * 0.48, sz * 0.78)], fill=c)
     elif kind == "star":
         import math
         pts = [(sz / 2 + (sz * 0.42 if i % 2 == 0 else sz * 0.18) * math.sin(i * math.pi / 5), sz / 2 - (sz * 0.42 if i % 2 == 0 else sz * 0.18) * math.cos(i * math.pi / 5)) for i in range(10)]

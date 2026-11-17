@@ -137,7 +137,7 @@ impl Data {
                 .get(name)
                 .map(|b| String::from_utf8_lossy(b).into_owned())
         };
-        let names = crate::fs::read(game.join("UI").join("PCNAMES.TXT"))
+        let names: Vec<String> = crate::fs::read(game.join("UI").join("PCNAMES.TXT"))
             .map(|b| {
                 String::from_utf8_lossy(&b)
                     .lines()
@@ -146,17 +146,36 @@ impl Data {
                     .collect()
             })
             .unwrap_or_default();
+        // Without the game's files, the free menus' own: their money and
+        // series on the free tracks, rival names, and the free bikes and
+        // outfits.
+        let free = crate::freepack::menu_file;
+        let names = if names.is_empty() {
+            free("pc-names.txt").map(|t| t.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect()).unwrap_or_default()
+        } else {
+            names
+        };
+        let mut bikes_list = text("bikes.pb").map(|t| bikes(&t)).unwrap_or_default();
+        let mut outfit_list = text("riders.pb").map(|t| outfits(&t)).unwrap_or_default();
+        if bikes_list.is_empty() {
+            bikes_list = free_bikes();
+        }
+        if outfit_list.is_empty() {
+            outfit_list = free_outfits();
+        }
         Data {
             tables: text("PCTables.pb")
+                .or_else(|| free("pc-tables.txt"))
                 .map(|t| parse_tables(&t))
                 .unwrap_or_default(),
             schedule: text("PCSched.pb")
+                .or_else(|| free("pc-schedule.txt"))
                 .map(|t| Schedule::parse(&t))
                 .unwrap_or_default(),
             names,
-            bikes: text("bikes.pb").map(|t| bikes(&t)).unwrap_or_default(),
+            bikes: bikes_list,
             outfits: {
-                let mut o = text("riders.pb").map(|t| outfits(&t)).unwrap_or_default();
+                let mut o = outfit_list;
                 // The RIDERS folder's outfits, at every level.
                 o.extend(crate::roster::own_files(game, "RIDERS").into_iter().map(|(file, name)| Item {
                     maker: String::new(),
@@ -201,6 +220,40 @@ impl Data {
             .filter(|o| o.availability <= level)
             .collect()
     }
+}
+
+/// The Free Pack's bikes for a career, all on offer from the start.
+fn free_bikes() -> Vec<Item> {
+    crate::freepack::bikes()
+        .iter()
+        .map(|b| Item {
+            maker: crate::roster::FREE_MAKER.into(),
+            name: b.name.clone(),
+            file: b.livery.clone(),
+            model: format!("{}.mcf", b.shape),
+            ui_model: format!("ui{}.mcf", b.shape),
+            cc: b.cc,
+            four_stroke: b.four_stroke,
+            availability: 1,
+        })
+        .collect()
+}
+
+/// The Free Pack's outfits for a career, all on offer from the start.
+fn free_outfits() -> Vec<Item> {
+    crate::freepack::outfits()
+        .iter()
+        .map(|o| Item {
+            maker: String::new(),
+            name: o.name.clone(),
+            file: o.outfit.clone(),
+            model: String::new(),
+            ui_model: String::new(),
+            cc: 0,
+            four_stroke: false,
+            availability: 1,
+        })
+        .collect()
 }
 
 fn bikes(text: &str) -> Vec<Item> {

@@ -187,6 +187,14 @@ fn main() -> Result<(), BoxError> {
     if let Some(dir) = flag("--freepack").map(String::as_str).or_else(|| args.iter().find_map(|a| a.strip_prefix("--freepack="))) {
         freepack::set_root(PathBuf::from(dir));
     }
+    // The menus' look: the new one (`--new-menus`, or `--new-menus=DIR`
+    // for the pack's menus over the original graphics) or the original's.
+    if let Some(arg) = args.iter().find(|a| *a == "--new-menus" || a.starts_with("--new-menus=")) {
+        let dir = arg.strip_prefix("--new-menus=").filter(|d| !d.is_empty()).map(PathBuf::from);
+        freepack::set_menus(true, dir);
+    } else if args.iter().any(|a| a == "--original-menus") {
+        freepack::set_menus(false, None);
+    }
     let args: Vec<String> = {
         // The pack's folder isn't the game's.
         let at = args.iter().position(|a| a == "--freepack");
@@ -222,7 +230,12 @@ fn main() -> Result<(), BoxError> {
     // its own): the builder by itself, riding straight from it.
     // With the free pack and no game folder to show menus from, the
     // builder is what opens: the pack has no menus of its own yet.
-    let free_only = freepack::chosen() && path.is_none();
+    // With no game files there are no original menus to pick.
+    let game_menus = path.is_none() && find_game().is_some_and(|g| fs::is_file(g.join("UI").join("MAINMENU.DAT")));
+    if freepack::chosen() && path.is_none() && !freepack::new_menus() && !game_menus {
+        freepack::set_menus(true, None);
+    }
+    let free_only = freepack::chosen() && path.is_none() && !freepack::has_menus() && !game_menus;
     if !is_track && (free_only || args.iter().any(|a| a == "--course-builder")) {
         let has_menus = |g: &Path| fs::is_file(g.join("UI").join("MAINMENU.DAT"));
         let given = path.map(Path::to_path_buf);
@@ -237,11 +250,14 @@ fn main() -> Result<(), BoxError> {
         }
     }
     if !is_track {
-        let Some(game) = path
-            .map(Path::to_path_buf)
-            .or_else(find_game)
-            .filter(|g| fs::is_file(g.join("UI").join("MAINMENU.DAT")))
-        else {
+        // The free graphics with no game files: the pack's own menus, with
+        // the pack's folder standing in for the game's.
+        let free_menus = (freepack::chosen() && path.is_none() && freepack::has_menus()).then(freepack::root).flatten();
+        let Some(game) = free_menus.or_else(|| {
+            path.map(Path::to_path_buf)
+                .or_else(find_game)
+                .filter(|g| fs::is_file(g.join("UI").join("MAINMENU.DAT")))
+        }) else {
             eprintln!(
                 "usage: mm2-viewer [GAME folder] | <TRACK.ENV> [--screenshot out.png] [--size WxH] [--camera x,y,z,yaw,pitch]"
             );
@@ -3288,7 +3304,7 @@ fn file_name(path: &Path) -> String {
 fn read_archive(path: &Path) -> Result<Vec<u8>, BoxError> {
     // The free pack has none of the original's archives: each one it
     // lacks reads as empty, and its stand-ins fill in.
-    if freepack::root().is_some_and(|root| path.parent() == Some(root.as_path())) && !fs::is_file(path) {
+    if freepack::root().is_some_and(|root| path.starts_with(&root)) && !fs::is_file(path) {
         return Ok(rs2::build(&[]));
     }
     let raw = crate::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;

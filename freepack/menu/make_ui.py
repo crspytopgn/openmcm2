@@ -225,13 +225,14 @@ def main_menu(photo):
         rects[ctl] = [x, y, w, h]
         sticker_set(dat, None, "01_Main\\" + stem + "{s}.tga", w * X, h * X, text, b, f, ico, sub, float(r.uniform(-3, 3)), seed=i)
     for j, (ctl, stem, text, ico, b, f) in enumerate(SIDE_BUTTONS):
-        x, y, w, h = 452, 322 + j * 66, 160, 56
+        x, y, w, h = 452, 338 + j * 58, 160, 54
         rects[ctl] = [x, y, w, h]
         sticker_set(dat, None, "01_Main\\" + stem + "{s}.tga", w * X, h * X, text, b, f, ico, None, float(r.uniform(-3, 3)), seed=10 + j)
     # Free Pack's own Donate button (a new control: the loader adds it from the layout file)
-    x, y, w, h = 452, 256, 160, 56
+    x, y, w, h = 452, 280, 160, 54
     rects["FreeDonate"] = [x, y, w, h]
     sticker_set(dat, None, "01_Main\\FreeDonate{s}.tga", w * X, h * X, "DONATE", RUST_SOFT, BONE, "heart", "KEEP IT FREE", float(r.uniform(-3, 3)), seed=12)
+    builder_button(rects)
     # generic blank buttons (text drawn by the game)
     for k, (b, f) in enumerate(((INK, BONE), (BONE, INK)), 1):
         sticker_set(dat, None, "01_Main\\Button{s}0%d_18.tga" % k, 116 * X, 33 * X, "", b, f, seed=30 + k)
@@ -255,6 +256,13 @@ def main_menu(photo):
     rects["MenuMultiAnimation"] = [205, 128, 383, 274]
     rects["MenuUserAnimation"] = [204, 152, 434, 328]
     write_layout(dat, rects)
+
+def builder_button(rects):
+    """The Course Builder's button on the main menu, above Donate (a new
+    control, as Donate is)."""
+    x, y, w, h = 452, 222, 160, 54
+    rects["FreeBuilder"] = [x, y, w, h]
+    sticker_set("MAINMENU", None, "01_Main\\FreeBuilder{s}.tga", w * X, h * X, "BUILDER", LIME, INK, "shovel", "MAKE A TRACK", 2.0, seed=13)
 
 def pulldowns():
     dat = "GLOBAL"
@@ -378,6 +386,8 @@ def write_layout(dat, rects):
             f.write('\n[controls.%s]\nrect = [%s]\n' % (k, ", ".join(map(str, v))))
             if k == "FreeDonate":
                 f.write('new = true  # not in the stock dialog: a button the Free Pack adds\nkind = "button"\nimages = { up = "01_Main/FreeDonateUp.png", lit = "01_Main/FreeDonateLit.png", down = "01_Main/FreeDonateDown.png", grey = "01_Main/FreeDonateGrey.png" }\ntip = "Support OpenMCM2: opens the donate page"\naction = "open_url:https://github.com/sponsors/crspytopgn"\n')
+            if k == "FreeBuilder":
+                f.write('new = true  # not in the stock dialog: a button the Free Pack adds\nkind = "button"\nimages = { up = "01_Main/FreeBuilderUp.png", lit = "01_Main/FreeBuilderLit.png", down = "01_Main/FreeBuilderDown.png", grey = "01_Main/FreeBuilderGrey.png" }\ntip = "Course Builder: make your own track and ride it"\naction = "course_builder"\n')
     written.append(p)
 
 if __name__ == "__main__":

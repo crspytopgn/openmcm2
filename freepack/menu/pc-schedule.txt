@@ -1,0 +1,39 @@
+; The Pro Circuit's series on the Free Pack's tracks.
+[Enduro]
+NumberOfTracks = 4
+Laps = 3
+Track_1 = FPEND01
+Track_2 = FPEND02
+Track_3 = FPEND03
+Track_4 = FPEND04
+
+[Baja]
+NumberOfTracks = 4
+Laps = 3
+Track_1 = FPBAJA01
+Track_2 = FPBAJA02
+Track_3 = FPBAJA03
+Track_4 = FPBAJA04
+
+[Nationals]
+NumberOfTracks = 7
+BonusTrack = 7
+Laps = 6
+Track_1 = FPNAT01
+Track_2 = FPNAT02
+Track_3 = FPNAT03
+Track_4 = FPNAT04
+Track_5 = FPNAT05
+Track_6 = FPNAT06
+Track_7 = FPNAT07
+
+[Supercross]
+NumberOfTracks = 6
+BonusTrack = 6
+Laps = 8
+Track_1 = FPSX01
+Track_2 = FPSX02
+Track_3 = FPSX03
+Track_4 = FPSX04
+Track_5 = FPSX05
+Track_6 = FPSX06

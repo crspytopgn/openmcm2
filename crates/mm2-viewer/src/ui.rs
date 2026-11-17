@@ -83,6 +83,14 @@ struct Pack {
 
 impl Pack {
     fn load(path: &Path) -> Option<Pack> {
+        // Without the game's own, the Free Pack's layout of the dialog
+        // (`menus/<NAME>.dtm`), its pictures coming from the pack too.
+        if !crate::fs::is_file(path) {
+            let stem = path.file_stem()?.to_string_lossy().to_ascii_uppercase();
+            if let Some(dtm) = crate::freepack::menu_layout(&stem) {
+                return Some(Pack { bytes: Vec::new(), dialog: dtm::parse(&dtm) });
+            }
+        }
         let bytes = crate::fs::read(path)
             .map_err(|e| eprintln!("{}: {e}", path.display()))
             .ok()?;
@@ -407,6 +415,15 @@ impl Ui {
                 .and_then(|b| mm2_formats::pe::strings(&b).ok())
                 .unwrap_or_default()
         };
+        // Without the game's text, the Free Pack's own words.
+        let mut menu_strings = strings("UILANG.DLL");
+        if menu_strings.is_empty() {
+            menu_strings = crate::freepack::menu_strings();
+        }
+        let mut lang = strings("LANG.DLL");
+        if lang.is_empty() {
+            lang = crate::freepack::game_strings();
+        }
         Ui {
             global: Pack::load(&dir.join("GLOBAL.DAT")),
             dir,
@@ -416,8 +433,8 @@ impl Ui {
             texts: HashMap::new(),
             text_scale: 1.0,
             tips: HashMap::new(),
-            strings: strings("UILANG.DLL"),
-            lang: strings("LANG.DLL"),
+            strings: menu_strings,
+            lang,
             fonts: Fonts::load(),
             white: None,
             soft: None,
@@ -720,6 +737,8 @@ impl Ui {
             .and_then(|p| p.file(&file))
             .or_else(|| self.global.as_ref()?.file(&file))
             .and_then(|b| wav::parse(b).ok())
+            // Without the game's menus, the Free Pack's own.
+            .or_else(|| crate::freepack::ui_sound(&file).and_then(|b| wav::parse(&b).ok()))
             .map(Arc::new);
         self.sounds.insert(key, sound.clone());
         sound
@@ -982,6 +1001,10 @@ impl Dlg {
         }
         // And may add buttons of its own (a Donate button on the main menu).
         for n in crate::freepack::ui_added(pack) {
+            // The Course Builder's button goes with its switch (Extras).
+            if n.action.as_deref() == Some("course_builder") && !crate::tweaks::more().builder_menu {
+                continue;
+            }
             let mut props = Vec::new();
             for (key, image) in ["AnimNorm", "AnimFocus", "AnimPush", "AnimDisable"].iter().zip(&n.images) {
                 if let Some(image) = image {
@@ -991,7 +1014,8 @@ impl Dlg {
             if let Some(tip) = &n.tip {
                 props.push(("ToolTipText".to_string(), tip.clone()));
             }
-            dialog.controls.push(Control {
+            // First, so the pull-downs open over it.
+            dialog.controls.insert(0, Control {
                 name: n.name.clone(),
                 kind: Kind::Button,
                 rect: n.rect,
@@ -1000,8 +1024,9 @@ impl Dlg {
             });
         }
         // The Course Builder's link on the main menu's chain.
-        if crate::menu_link::wanted(pack, dialog.background()) {
-            dialog.controls.push(crate::menu_link::control());
+        let background = dialog.background().map(|bg| dialog.anim(bg).and_then(|a| a.frames.first().cloned()).unwrap_or_else(|| format!("{bg}.tga")));
+        if crate::menu_link::wanted(pack, background.as_deref()) {
+            dialog.controls.insert(0, crate::menu_link::control());
         }
         let ctls = dialog
             .controls
@@ -1011,12 +1036,12 @@ impl Dlg {
                 visible: c.props.flag("Show").unwrap_or(true) && c.get("FX").is_none(),
                 enabled: true,
                 on: false,
-                text: c
-                    .props
-                    .int("LocalTextId")
+                text: (!crate::freepack::ui_no_text(pack, &c.name))
+                    .then_some(())
+                    .and(c.props.int("LocalTextId"))
                     .and_then(|id| ui.string(id as u32))
                     .map(str::to_string)
-                    .or_else(|| c.get("Text").map(str::to_string)),
+                    .or_else(|| c.get("Text").filter(|_| !crate::freepack::ui_no_text(pack, &c.name)).map(str::to_string)),
                 items: Vec::new(),
                 selected: 0,
                 scroll: 0,
@@ -1090,6 +1115,10 @@ impl Dlg {
     }
 
     pub fn set_text(&mut self, name: &str, text: impl Into<String>) {
+        // Not over a free pack picture that shows the label already.
+        if crate::freepack::ui_no_text(&self.pack, name) {
+            return;
+        }
         if let Some(c) = self.ctl(name) {
             c.text = Some(text.into());
         }

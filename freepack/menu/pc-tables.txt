@@ -1,0 +1,20 @@
+; The Pro Circuit's money, for the free menus (our own numbers).
+[ProCircuit]
+StartingCapital = 40000
+EnduroFee = 2500
+BajaFee = 5000
+NationalsFee = 12000
+SupercrossFee = 20000
+PurseMultiplier = 16
+RepairCapPct = 0.08
+MedicalCapPct = 0.04
+StuntCapPct = 0.08
+1_PlacePct = 0.32
+2_PlacePct = 0.22
+3_PlacePct = 0.15
+4_PlacePct = 0.10
+5_PlacePct = 0.07
+6_PlacePct = 0.05
+7_PlacePct = 0.04
+8_PlacePct = 0.03
+9_PlacePct = 0.02

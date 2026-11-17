@@ -185,6 +185,7 @@ pub fn write_with(course: &Course, pictures: &Pictures) -> Baked {
         let made = crate::copy::files(course, src, &field, &ready, &added, || tdf(course, &field, &path), || wpt(&gates), st);
         if let Ok(mut files) = made {
             files.push((format!("{stem}.course"), course.to_json().into_bytes()));
+            crate::preview::add(&stem, &mut files);
             let refs: Vec<(&str, &[u8])> = files.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
             let env = rs2::build(&refs);
             return Baked { field, path, gates, env };
@@ -219,6 +220,8 @@ pub fn write_with(course: &Course, pictures: &Pictures) -> Baked {
     // The builder's own file rides along, so a shared track can be opened
     // and changed again.
     files.push((format!("{stem}.course"), course.to_json().into_bytes()));
+    // Pictures for the event page, as the game's own tracks carry.
+    crate::preview::add(&stem, &mut files);
     let refs: Vec<(&str, &[u8])> = files
         .iter()
         .map(|(n, b)| (n.as_str(), b.as_slice()))

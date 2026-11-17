@@ -49,6 +49,36 @@ pub fn chosen() -> bool {
     GIVEN.get().is_some()
 }
 
+/// Which menus the player picked: the new look (the pack's art), or the
+/// original's. 0: not said (the new look goes with the free graphics).
+static MENUS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// The pack the new menus come from with the original graphics.
+static MENUS_FROM: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Picks the menus: the new look (`--new-menus[=DIR]`, from the pack in
+/// `dir` or the free graphics' own), or the original's
+/// (`--original-menus`, which needs the game's files).
+pub fn set_menus(new: bool, dir: Option<PathBuf>) {
+    MENUS.store(if new { 1 } else { 2 }, std::sync::atomic::Ordering::Relaxed);
+    if let Some(dir) = dir {
+        let _ = MENUS_FROM.set(dir);
+    }
+}
+
+/// Whether the menus wear the new look.
+pub fn new_menus() -> bool {
+    ui_root().is_some()
+}
+
+/// The pack the menus' art, layout, words and sounds come from, when the
+/// menus wear the new look.
+pub fn ui_root() -> Option<PathBuf> {
+    match MENUS.load(std::sync::atomic::Ordering::Relaxed) {
+        2 => None,
+        _ => MENUS_FROM.get().cloned().filter(|d| crate::fs::is_dir(d)).or_else(root),
+    }
+}
+
 /// The free pack's folder, when one is in use.
 pub fn root() -> Option<PathBuf> {
     let dir = match GIVEN.get() {
@@ -599,6 +629,9 @@ fn image(w: u32, h: u32, rgba: &[u8]) -> crate::hires::Image {
 struct UiArt {
     files: std::collections::HashMap<String, PathBuf>,
     rects: std::collections::HashMap<(String, String), [i32; 4]>,
+    /// Controls whose label the pack's picture already shows
+    /// (`text = false`): the game's text isn't drawn over it.
+    no_text: std::collections::HashSet<(String, String)>,
     sizes: std::collections::HashMap<String, (u32, u32)>,
     /// Controls the pack adds, by dialog.
     added: std::collections::HashMap<String, Vec<NewControl>>,
@@ -620,8 +653,8 @@ pub struct NewControl {
 fn ui_art() -> Option<&'static UiArt> {
     static ART: std::sync::OnceLock<Option<UiArt>> = std::sync::OnceLock::new();
     ART.get_or_init(|| {
-        let dir = root()?.join("ui");
-        let mut art = UiArt { files: Default::default(), rects: Default::default(), sizes: Default::default(), added: Default::default() };
+        let dir = ui_root()?.join("ui");
+        let mut art = UiArt { files: Default::default(), rects: Default::default(), no_text: Default::default(), sizes: Default::default(), added: Default::default() };
         let mut stack = vec![dir.clone()];
         while let Some(d) = stack.pop() {
             for e in crate::fs::read_dir(&d).into_iter().flatten().flatten() {
@@ -642,6 +675,7 @@ fn ui_art() -> Option<&'static UiArt> {
                         art.added.insert(stem.to_string(), added);
                     }
                     art.rects.extend(rects.into_iter().map(|(name, r)| ((stem.to_string(), name), r)));
+                    art.no_text.extend(parse_no_text(&text).into_iter().map(|name| (stem.to_string(), name)));
                     art.sizes.extend(sizes.into_iter().map(|(path, size)| (format!("{stem}/{path}"), size)));
                 }
             }
@@ -681,6 +715,26 @@ fn parse_layout(text: &str) -> (Vec<(String, [i32; 4])>, Vec<(String, (u32, u32)
         }
     }
     (rects, sizes)
+}
+
+/// The controls a layout file marks `text = false`.
+fn parse_no_text(text: &str) -> Vec<String> {
+    let mut section = String::new();
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = without_comment(line).trim();
+        if line.starts_with('[') {
+            section = line.trim_matches(['[', ']']).trim().to_string();
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else { continue };
+        if let Some(name) = section.strip_prefix("controls.") {
+            if key.trim() == "text" && value.trim() == "false" {
+                out.push(name.trim_matches('"').to_ascii_lowercase());
+            }
+        }
+    }
+    out
 }
 
 /// A TOML line without its `#` comment (a `#` inside quotes stays).
@@ -806,6 +860,11 @@ const DETAIL_GREY: f32 = 83.0;
 const DETAIL_GAIN: f32 = 1.53;
 
 /// The pack's place for control `name` of dialog `stem`.
+/// Whether the pack's picture for control `name` already shows its label.
+pub fn ui_no_text(stem: &str, name: &str) -> bool {
+    ui_art().is_some_and(|a| a.no_text.contains(&(stem.to_ascii_lowercase(), name.to_ascii_lowercase())))
+}
+
 pub fn ui_rect(stem: &str, name: &str) -> Option<[i32; 4]> {
     ui_art()?.rects.get(&(stem.to_ascii_lowercase(), name.to_ascii_lowercase())).copied()
 }
@@ -865,4 +924,61 @@ mod tests {
         assert_eq!(rects, vec![("singlebtn".to_string(), [10, 20, 200, 48])]);
         assert_eq!(sizes, vec![("01_main/singleup.png".to_string(), (200, 48))]);
     }
+}
+
+/// The pack's own layout of the front-end dialog `name` (`MAINMENU`), from
+/// `menus/<NAME>.dtm`: the menus with no game files.
+pub fn menu_layout(name: &str) -> Option<Vec<u8>> {
+    let dir = ui_root()?.join("menus");
+    let want = format!("{name}.dtm");
+    crate::fs::read(dir.join(&want)).ok().or_else(|| {
+        // Any case.
+        let found = crate::fs::read_dir(&dir).ok()?.flatten().find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(&want))?;
+        crate::fs::read(found.path()).ok()
+    })
+}
+
+/// The Free Pack's own menu sound `file` (`Beep13.wav`), from `sound/ui`.
+pub fn ui_sound(file: &str) -> Option<Vec<u8>> {
+    let dir = ui_root()?.join("sound").join("ui");
+    crate::fs::read(dir.join(file)).ok()
+}
+
+/// Whether the pack has menus of its own.
+pub fn has_menus() -> bool {
+    menu_layout("MAINMENU").is_some()
+}
+
+/// The menus' text in the pack's own words (`menus/strings.txt`: lines of
+/// `id<TAB>text`, `\n` for a new line), standing in for `UILANG.DLL`.
+pub fn menu_strings() -> std::collections::HashMap<u32, String> {
+    menu_text("strings.txt")
+}
+
+/// The game's own text in the pack's words (`menus/lang.txt`), standing
+/// in for `LANG.DLL`.
+pub fn game_strings() -> std::collections::HashMap<u32, String> {
+    menu_text("lang.txt")
+}
+
+fn menu_text(name: &str) -> std::collections::HashMap<u32, String> {
+    let Some(root) = ui_root() else { return Default::default() };
+    let text = crate::fs::read_to_string(root.join("menus").join(name)).unwrap_or_default();
+    text.lines()
+        .filter_map(|l| {
+            let (id, s) = l.split_once('\t')?;
+            Some((id.trim().parse().ok()?, s.replace("\\n", "\n")))
+        })
+        .collect()
+}
+
+/// One of the free menus' own files (`menus/pc-schedule.txt`), as text.
+pub fn menu_file(name: &str) -> Option<String> {
+    crate::fs::read_to_string(ui_root()?.join("menus").join(name)).ok()
+}
+
+/// The credits to roll with no credits movie (`menus/credits.txt`).
+pub fn credits() -> Option<Vec<String>> {
+    let text = crate::fs::read_to_string(ui_root()?.join("menus").join("credits.txt")).ok()?;
+    Some(text.lines().map(str::to_string).collect())
 }

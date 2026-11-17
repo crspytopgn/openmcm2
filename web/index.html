@@ -74,6 +74,9 @@
   button.choice { display: flex; flex-direction: column; gap: .3rem; text-align: left; background: #1a1917;
     color: var(--fg); border: 1px solid #34322c; border-radius: 10px; padding: .8rem .9rem; font-weight: 400; }
   button.choice:hover { border-color: #55524a; }
+  button.choice[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+  button.choice[aria-disabled="true"]:hover { border-color: inherit; }
+  h2.ask.sub { font-size: 1rem; margin-top: 1rem; }
   button.choice b { font-size: 1.05rem; letter-spacing: .03em; text-transform: uppercase; display: flex; gap: .5rem; align-items: center; }
   button.choice b::before { content: ""; width: .8rem; height: .8rem; border-radius: 50%; border: 2px solid var(--dim); flex: none; }
   button.choice span { color: var(--dim); font-size: .88rem; line-height: 1.4; }
@@ -148,10 +151,25 @@
       <em id="mm2state">Needs your MM2 files</em>
     </button>
     <button type="button" class="choice" id="pickfree" role="radio" aria-checked="false"
-      title="Plays with the Free Pack instead of the original's files: new bikes, riders, ground, trees, stadium and engine sounds, all openly licensed. Races and menus with the free art are still being made, so for now Play opens the Course Builder.">
+      title="Plays with the Free Pack instead of the original's files: new bikes, riders, ground, trees, stadium and engine sounds, all openly licensed. Every menu works as in the original; only what's in them changes.">
       <b>Free graphics</b>
-      <span>New art and sound made for OpenMCM2, free for anyone. No MM2 files needed. Early days: for now it opens the Course Builder, where you make a track and ride it.</span>
+      <span>New art and sound made for OpenMCM2, free for anyone. No MM2 files needed: the full menus, free bikes and riders, and the Course Builder.</span>
       <em id="freestate">Free Pack not added yet</em>
+    </button>
+  </div>
+  <h2 class="ask sub">Menus</h2>
+  <div class="choices" role="radiogroup" aria-label="Menus">
+    <button type="button" class="choice" id="picknewmenus" role="radio" aria-checked="false"
+      title="Every menu and button from the original, laid out the same and working the same, drawn in a new style. Works with either graphics. Comes with the Free Pack (only the menus' part downloads with MM2 graphics).">
+      <b>New look</b>
+      <span>Menus redrawn for OpenMCM2: the same buttons and screens as the original, in a fresh workshop style.</span>
+      <em id="newmenustate">Comes with the Free Pack</em>
+    </button>
+    <button type="button" class="choice" id="pickoldmenus" role="radio" aria-checked="true"
+      title="The original game's own menus, art and sounds. Needs your Motocross Madness 2 files, as they come from your copy of the game.">
+      <b>Original menus</b>
+      <span>The menus exactly as Motocross Madness 2 had them, chain and all.</span>
+      <em id="oldmenustate">Needs your MM2 files</em>
     </button>
   </div>
   <div id="mm2side">
@@ -183,7 +201,7 @@
       <p><label><input id="keeppack" type="checkbox" checked title="Keeps a picked .zip in this browser, so next time Play starts it straight away."> Remember a picked .zip in this browser</label></p>
     </div>
     <div id="freekept" hidden>
-      <button id="playfree" title="Starts with the Free Pack, fetching any update first. For now that opens the Course Builder.">Play</button>
+      <button id="playfree" title="Starts with the Free Pack, fetching any update first.">Play</button>
       <button id="forgetpack" class="plain" title="Forgets the Free Pack this browser kept.">Use another Free Pack</button>
     </div>
   </div>
@@ -1047,6 +1065,35 @@ for (const [id, f] of [["pickmm2", false], ["pickfree", true]]) {
 }
 showChoice();
 
+// ---- The menus: the new look or the original's ----
+// Kept in this browser: the original's unless picked; the original's
+// need the MM2 files, so without them the new look it is.
+let newMenus = false;
+try {
+  newMenus = localStorage.getItem("mm2menus") === "new";
+} catch {}
+let haveGame = false;
+const menusNew = () => newMenus || !haveGame;
+function showMenus() {
+  $("picknewmenus").setAttribute("aria-checked", String(menusNew()));
+  $("pickoldmenus").setAttribute("aria-checked", String(!menusNew()));
+  $("pickoldmenus").setAttribute("aria-disabled", String(!haveGame));
+}
+for (const [id, n] of [["picknewmenus", true], ["pickoldmenus", false]]) {
+  $(id).addEventListener("click", () => {
+    if (!n && !haveGame) {
+      $("why").textContent = "The original menus come from your MM2 files: pick them under MM2 graphics first.";
+      return;
+    }
+    newMenus = n;
+    try {
+      localStorage.setItem("mm2menus", n ? "new" : "original");
+    } catch {}
+    showMenus();
+  });
+}
+showMenus();
+
 // An option in the page's address, which the game reads: set (to
 // `value`, or bare when "") or taken out (null).
 function setParam(name, value) {
@@ -1058,10 +1105,32 @@ function setParam(name, value) {
   history.replaceState(null, "", location.pathname + (q.length ? "?" + q.join("&") : "") + location.hash);
 }
 
-// Starts the game with the original's files, or with the Free Pack.
-function go(list, withPack) {
+// Starts the game with the original's files, or with the Free Pack, and
+// the menus picked: the new look's from the pack (with MM2 graphics, only
+// the menus' part of it), the original's from the MM2 files.
+async function go(list, withPack) {
+  let files = list;
+  let newLook = menusNew();
+  if (withPack && !newLook) files = list.concat(kept);
+  if (!withPack && newLook) {
+    const menus = await menuPack().catch((err) => {
+      console.warn("new menus not fetched", err);
+      return null;
+    });
+    if (menus) files = list.concat(menus);
+    else newLook = false;
+  }
   setParam("freepack", withPack ? "/freepack" : null);
-  start(list);
+  setParam("new-menus", newLook ? (withPack ? "" : "/freepack") : null);
+  setParam("original-menus", newLook ? null : "");
+  start(files);
+}
+
+// Only the Free Pack's menus: their art, layout, words and sounds.
+const isMenuFile = (path) => /^(ui|menus|sound\/ui)\//i.test(path);
+async function menuPack() {
+  if (keptPack) return keptPack.filter(([p]) => isMenuFile(p.slice("/freepack/".length)));
+  return syncPack(true, isMenuFile);
 }
 
 // The Free Pack's files in its zip, under /freepack: the folder that
@@ -1106,8 +1175,12 @@ async function sha256(buffer) {
 // stay out for now: nothing in the browser opens them yet (without MM2
 // the free graphics open the Course Builder), so they'd only take space.
 const wanted = (m) => m.files.filter((f) => !/^TERAFORM\//i.test(f.path));
-async function syncPack(fetchNew) {
-  let manifest = await fs.packGet("manifest").catch(() => null);
+// With `pick`, only the files whose path it takes (the menus alone).
+async function syncPack(fetchNew, pick) {
+  const key = pick ? "menusmanifest" : "manifest";
+  const want = (m) => wanted(m).filter((f) => !pick || pick(f.path));
+  let manifest =
+    (await fs.packGet(key).catch(() => null)) || (pick ? await fs.packGet("manifest").catch(() => null) : null);
   if (fetchNew) {
     try {
       loader.step("packcheck");
@@ -1116,10 +1189,10 @@ async function syncPack(fetchNew) {
       const latest = await r.json();
       if (latest.format !== 1) throw new Error("this Free Pack needs a newer OpenMCM2: reload the page");
       const have = await fs.packStored();
-      const missing = [...new Map(wanted(latest).filter((f) => !have.has(f.sha256)).map((f) => [f.sha256, f])).values()];
+      const missing = [...new Map(want(latest).filter((f) => !have.has(f.sha256)).map((f) => [f.sha256, f])).values()];
       const total = missing.reduce((n, f) => n + f.size, 0);
       let fetched = 0;
-      const all = wanted(latest).reduce((n, f) => n + f.size, 0);
+      const all = want(latest).reduce((n, f) => n + f.size, 0);
       loader.step(
         "pack",
         missing.length
@@ -1158,10 +1231,12 @@ async function syncPack(fetchNew) {
       };
       navigator.storage?.persist?.();
       await Promise.all(Array.from({ length: 6 }, worker));
-      await fs.packPut("manifest", latest);
-      // Files no version needs any more.
-      const used = new Set(wanted(latest).map((f) => f.sha256));
-      await fs.packDelete([...have].filter((k) => k !== "manifest" && !used.has(k)));
+      await fs.packPut(key, latest);
+      // Files no version needs any more (after a whole pack's update).
+      if (!pick) {
+        const used = new Set(want(latest).map((f) => f.sha256));
+        await fs.packDelete([...have].filter((k) => k !== "manifest" && k !== "menusmanifest" && !used.has(k)));
+      }
       manifest = latest;
     } catch (err) {
       // Offline or the download is down: the pack already here still plays.
@@ -1171,7 +1246,7 @@ async function syncPack(fetchNew) {
   }
   if (!manifest) return null;
   const list = [];
-  for (const f of wanted(manifest)) {
+  for (const f of want(manifest)) {
     const blob = await fs.packGet(f.sha256);
     if (!blob) return null;
     list.push(["/freepack/" + f.path, blob]);
@@ -1217,6 +1292,12 @@ let keptPack = keptPackFile ? await packFrom(keptPackFile).catch(() => null) : n
 let downloaded = !keptPack && (await fs.packGet("manifest").catch(() => null));
 
 function showReady() {
+  haveGame = !!kept;
+  showMenus();
+  $("oldmenustate").textContent = kept ? "Your MM2 files are here" : "Needs your MM2 files";
+  $("oldmenustate").classList.toggle("ready", !!kept);
+  $("newmenustate").textContent = keptPack || downloaded ? "Free Pack kept in this browser" : "Comes with the Free Pack";
+  $("newmenustate").classList.toggle("ready", !!(keptPack || downloaded));
   $("mm2state").textContent = kept ? "Remembered in this browser" : "Needs your MM2 files";
   $("mm2state").classList.toggle("ready", !!kept);
   const has = keptPack || downloaded;

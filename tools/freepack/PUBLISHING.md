@@ -9,7 +9,13 @@ Both places hold the same `freepack.json`. That file lists every file in the pac
 
 ## 1. Pack it
 
-Run this on the finished pack folder, after `share_textures.py`:
+First give the pack its menus, so it plays with no MM2 files. Their layout comes from a copy of the game's `UI` folder; the words and the Pro Circuit's files are ours, in `freepack/menu/`:
+
+    cargo run --release -p mm2-tools -- free-menus <MM2>/UI freepack/menu/text.txt <pack folder>/menus
+    python3 freepack/menu/no_text.py <pack folder>
+    python3 tools/freepack/make_ui_sounds.py <pack folder>
+
+Then run this on the finished pack folder, after `share_textures.py`:
 
     python3 tools/freepack/pack.py <pack folder> out 2026.11.20
 

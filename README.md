@@ -41,8 +41,11 @@ can download it and ride. The launcher and the browser page both ask
 **MM2 graphics or free graphics?** when you play, and fetch the pack for you,
 downloading only what changed when it updates.
 
-Early days: without MM2 files the free graphics open in the Course Builder
-for now, where you build a track and ride it. Full races and menus with the free art are on the way.
+With no MM2 files at all you still get the whole game: every menu, single
+races on the free tracks, a Pro Circuit career, and the Course Builder. The
+menus wear a **new look**: the same screens and buttons as the original,
+redrawn. Own the game? Pick **New look** or **Original menus** beside the
+graphics choice.
 
 [![OpenMCM2 showcase video](https://img.youtube.com/vi/rP0TEnWLzNo/maxresdefault.jpg)](https://youtu.be/rP0TEnWLzNo)
 

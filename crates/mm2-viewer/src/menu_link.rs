@@ -23,12 +23,13 @@ const LIT: &[u8] = include_bytes!("../assets/menu/builder_lit.png");
 const GREY: &[u8] = include_bytes!("../assets/menu/builder_grey.png");
 
 /// Whether menu `pack` gets the link: the main menu, with the extra on,
-/// and the game's own art behind it (a free pack's menu picture has its
-/// rollers elsewhere).
+/// and the game's own art behind it (`background`, its picture's file):
+/// a free pack's menu picture has its rollers elsewhere, and the pack
+/// adds a button of its own.
 pub fn wanted(pack: &str, background: Option<&str>) -> bool {
     pack.eq_ignore_ascii_case("MAINMENU")
         && crate::tweaks::more().builder_menu
-        && background.is_none_or(|bg| crate::freepack::ui_image(pack, &format!("{bg}.tga")).is_none())
+        && background.is_none_or(|bg| crate::freepack::ui_image(pack, bg).is_none())
 }
 
 /// The button, as the dialog's own are.
