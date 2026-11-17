@@ -1914,8 +1914,17 @@ fn load_track(
                             .get(&format!("{stem}.col"))
                             .or_else(|| ar.get("honda.col"))
                             .and_then(|d| mm2_formats::col::parse(d).ok());
-                        if let Some(col) = col {
-                            race::set_hull(mm2_physics::bike::Hull::new(&col));
+                        match col {
+                            Some(col) => race::set_hull(mm2_physics::bike::Hull::new(&col)),
+                            // The pack's own bikes have none: one round the model
+                            // (the grid's first free bike's when riding the stock
+                            // grid's, as the game shares one hull among all).
+                            None => {
+                                let first = || freepack::bikes().first().and_then(|b| freepack::bike_hull(&b.shape));
+                                if let Some(hull) = freepack::bike_hull(bike).or_else(first) {
+                                    race::set_hull(hull);
+                                }
+                            }
                         }
                         if let Some(col) = ar.get("Rider.col").and_then(|d| mm2_formats::col::parse(d).ok()) {
                             let parts = col

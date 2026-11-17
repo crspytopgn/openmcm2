@@ -161,11 +161,17 @@ pub fn solids(
         let i = match cache.iter().position(|(n, _)| *n == stem) {
             Some(i) => i,
             None => {
-                let model = models
+                let original = models
                     .iter()
                     .find_map(|m| m.get(&format!("{stem}.slb")))
                     .and_then(|data| slb::parse(data).ok());
-                let parsed = model.filter(|m| m.frames.len() == 1).and_then(|model| {
+                // Without the game's models (the Free Pack alone), the
+                // pack's stand-in is solid in their place, by its faces.
+                let model = match original {
+                    Some(m) => Some(m),
+                    None => crate::freepack::model_shape(&stem),
+                };
+                let parsed = model.filter(|m| m.frames.len() <= 1).and_then(|model| {
                     let name = format!("{stem}.col");
                     colseg
                         .entries()

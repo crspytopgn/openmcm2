@@ -254,6 +254,102 @@ impl Hull {
     }
 }
 
+impl Hull {
+    /// A hull for a bike without a `.col` (the Free Pack's own bikes): a
+    /// convex shell round each part's points, the frame's in model space
+    /// and each wheel's about its axle, rounded off by taking the farthest
+    /// point along 98 even directions.
+    pub fn from_points(body: &[Vec3], wheels: [&[Vec3]; 2]) -> Self {
+        let parts = [(1, body), (7, wheels[0]), (8, wheels[1])];
+        let col = mm2_formats::col::Collision {
+            parts: parts
+                .into_iter()
+                .filter(|(_, points)| points.len() >= 4)
+                .map(|(frame, points)| mm2_formats::col::Part {
+                    frame: Some(frame),
+                    body: shell(points),
+                })
+                .collect(),
+        };
+        Hull::new(&col)
+    }
+}
+
+/// The convex shell of `points`' extremes as a collision body: its corners
+/// as the points, and its faces (outward) as the triangle tree.
+fn shell(points: &[Vec3]) -> mm2_formats::col::Body {
+    use mm2_formats::col::{Body, Bounds, Node, Triangle};
+    let mut corners: Vec<Vec3> = Vec::new();
+    for x in -2i32..=2 {
+        for y in -2i32..=2 {
+            for z in -2i32..=2 {
+                if x.abs().max(y.abs()).max(z.abs()) < 2 {
+                    continue; // only the outer shell of the grid: 98 directions
+                }
+                let d = Vec3::new(x as f32, y as f32, z as f32).normalize();
+                let far = points.iter().copied().max_by(|a, b| a.dot(d).total_cmp(&b.dot(d)));
+                if let Some(p) = far.filter(|p| !corners.iter().any(|q| q.distance(*p) < 1e-3)) {
+                    corners.push(p);
+                }
+            }
+        }
+    }
+    let n = corners.len();
+    let centre = corners.iter().copied().sum::<Vec3>() / n.max(1) as f32;
+    let mut faces: Vec<Triangle> = Vec::new();
+    for i in 0..n {
+        for j in i + 1..n {
+            for k in j + 1..n {
+                let (a, b, c) = (corners[i], corners[j], corners[k]);
+                let normal = (b - a).cross(c - a);
+                if normal.length() < 1e-6 {
+                    continue;
+                }
+                let mut normal = normal.normalize();
+                let mut tri = [i as u16, j as u16, k as u16];
+                if (a - centre).dot(normal) < 0.0 {
+                    normal = -normal;
+                    tri.swap(1, 2);
+                }
+                if corners.iter().all(|p| (*p - a).dot(normal) <= 1e-3) {
+                    faces.push(Triangle { normal: normal.into(), d: -normal.dot(a), vertices: tri });
+                }
+            }
+        }
+    }
+    // The faces as a tree: each inner node bounds the ones under it.
+    fn tree(faces: &[Triangle], corners: &[Vec3], out: &mut Vec<Node<Triangle>>) {
+        if let [one] = faces {
+            out.push(Node::Leaf(*one));
+            return;
+        }
+        let (lo, hi) = faces.iter().flat_map(|t| t.vertices).fold(
+            (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+            |(lo, hi), v| (lo.min(corners[v as usize]), hi.max(corners[v as usize])),
+        );
+        let at = out.len();
+        out.push(Node::Inner { bounds: Bounds { center: ((lo + hi) / 2.0).into(), half: ((hi - lo) / 2.0).into() }, right: 0 });
+        let (left, right) = faces.split_at(faces.len() / 2);
+        tree(left, corners, out);
+        let r = out.len() as u32;
+        if let Node::Inner { right: slot, .. } = &mut out[at] {
+            *slot = r;
+        }
+        tree(right, corners, out);
+    }
+    let mut triangles = Vec::new();
+    if !faces.is_empty() {
+        tree(&faces, &corners, &mut triangles);
+    }
+    Body {
+        matrix: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+        flags: 0,
+        vertices: corners.iter().map(|&p| p.into()).collect(),
+        triangles,
+        points: corners.iter().map(|&p| Node::Leaf(p.into())).collect(),
+    }
+}
+
 /// What the rider is asking for this frame.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Controls {
@@ -2271,6 +2367,26 @@ fn sag(i: usize, load: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shell_round_points_is_closed_and_outward() {
+        let mut cube = Vec::new();
+        for x in [-1.0, 1.0] {
+            for y in [0.0, 2.0] {
+                for z in [-3.0, 3.0] {
+                    cube.push(Vec3::new(x, y, z));
+                }
+            }
+        }
+        cube.push(Vec3::new(0.0, 1.0, 0.0)); // inside: no corner
+        let hull = Hull::from_points(&cube, [&cube[..], &[]]);
+        assert_eq!(hull.body.len(), 8);
+        assert!(hull.wheels[1].is_empty());
+        let (_, body) = &hull.meshes[0];
+        let solid = crate::collision::Solid::new(body, Mat3::IDENTITY, Vec3::ZERO);
+        let hit = solid.crossing(Vec3::new(3.0, 1.0, 0.0), Vec3::new(0.5, 1.0, 0.0)).expect("goes in");
+        assert!((hit.normal - Vec3::X).length() < 1e-4 && (hit.depth - 0.5).abs() < 1e-4);
+    }
+
     use super::*;
     use crate::Flat;
 
