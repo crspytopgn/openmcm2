@@ -29,7 +29,7 @@ ambientcg = [
   "Concrete034", "Plastic010", "Wood049", "Fabric030", "MetalPlates006",
   "ThatchedRoof001A", "ThatchedRoof002A", "Rubber004", "Fence007A",
   "CorrugatedSteel007A", "Wood087", "PaintedMetal004",
-  "Ground082S", "Ground079S", "Ground078", "Ground072", "Gravel022", "Rocks011",
+  "Ground082S", "Ground079S", "Ground078", "Ground072", "Gravel022", "Rocks011", "Ground103", "Ground049A",
 ]
 
 [models]
@@ -46,7 +46,7 @@ polyhaven = [
 # uid = [name, author, used as]
 "5bb654aed341477b8878f1e2ffd6fcd2" = ["Enduro bike", "Zaborchik", "bikes/fp_bike_enduro.glb (400F, 600F)"]
 "315a4d6dfc054b299f715270dbcf2222" = ["Dirtbike Model", "sonniesilva", "bikes/fp_bike_mx2.glb (125, 250, 500)"]
-"10cbeabee635483fae932f9e49f3cf7b" = ["Hight Quality Realistic Man Character", "hammer.gamedev", "riders/fp_rider.glb (base body)"]
+"10cbeabee635483fae932f9e49f3cf7b" = ["Hight Quality Realistic Man Character", "hammer.gamedev", "riders/fp_rider.glb (base body), tex/fp_crowd2_* (rendered crowd)"]
 "d1b7c5cba07a4f278267fca69c821cb7" = ["Skid Steer Digger", "MitchellBr", "objects/bobcat.glb (S130 decals painted out)"]
 "e9e844f2f9364044a181ce8f38a83dc3" = ["Tractor", "sheldon.bean", "objects/tractor.glb (recoloured red)"]
 "d891c103cddd44b69d1357c832d9ad56" = ["Weathered Tractor", "ArtDmitriyK", "objects/tractor_old.glb"]

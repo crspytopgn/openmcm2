@@ -87,7 +87,7 @@ These models were refitted to the game's bike and rider frames, recoloured and g
 | --- | --- | --- |
 | Enduro four-stroke (400F, 600F) | [Enduro bike](https://sketchfab.com/3d-models/5bb654aed341477b8878f1e2ffd6fcd2) | Zaborchik |
 | MX two-stroke (125, 250, 500) | [Dirtbike Model](https://sketchfab.com/3d-models/315a4d6dfc054b299f715270dbcf2222) | sonniesilva |
-| Rider and track-side people base body | [Hight Quality Realistic Man Character](https://sketchfab.com/3d-models/10cbeabee635483fae932f9e49f3cf7b) | hammer.gamedev |
+| Rider, track-side people and stadium crowd base body | [Hight Quality Realistic Man Character](https://sketchfab.com/3d-models/10cbeabee635483fae932f9e49f3cf7b) | hammer.gamedev |
 | Skid steer (bobcat) | [Skid Steer Digger](https://sketchfab.com/3d-models/d1b7c5cba07a4f278267fca69c821cb7) | MitchellBr |
 | Tractor | [Tractor](https://sketchfab.com/3d-models/e9e844f2f9364044a181ce8f38a83dc3) | sheldon.bean |
 | Old tractor | [Weathered Tractor](https://sketchfab.com/3d-models/d891c103cddd44b69d1357c832d9ad56) | ArtDmitriyK |

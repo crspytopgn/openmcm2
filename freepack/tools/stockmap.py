@@ -42,12 +42,14 @@ LINEUP = {"mx2": ((125, False), (250, False), (500, False)), "enduro": ((400, Tr
 for m, classes in LINEUP.items():
     if not os.path.exists(os.path.join(B, "bikes", f"fp_bike_{m}.glb")): continue
     for cc, four in classes:
-        for lv in sorted(glob.glob(os.path.join(B, "bikes", "fp_livery_*.png"))):
+        for lv in sorted(p for p in glob.glob(os.path.join(B, "bikes", "fp_livery_*.png")) if not p.endswith(".src.png")):
             n = os.path.basename(lv)[len("fp_livery_"):-4]
-            L.append(f'fp_bike_{m}{cc}_{n} = {{ model = "bikes/fp_bike_{m}.glb", livery = "bikes/fp_livery_{n}.png", cc = {cc}, four_stroke = {str(four).lower()}, name = "{n.title()} {cc}{"F" if four else ""}" }}')
+            baked = os.path.exists(os.path.join(B, "bikes", m, f"fp_livery_{m}_{n}.png"))
+            pic = f"bikes/{m}/fp_livery_{m}_{n}.png" if baked else f"bikes/fp_livery_{n}.png"
+            L.append(f'fp_bike_{m}{cc}_{n} = {{ model = "bikes/fp_bike_{m}.glb", livery = "{pic}", cc = {cc}, four_stroke = {str(four).lower()}, name = "{n.title()} {cc}{"F" if four else ""}" }}')
 L += ["", "[riders]"]
 if os.path.exists(os.path.join(B, "riders", "fp_rider.glb")):
-    for o in sorted(glob.glob(os.path.join(B, "riders", "fp_rider_*.png"))):
+    for o in sorted(p for p in glob.glob(os.path.join(B, "riders", "fp_rider_*.png")) if not p.endswith(".src.png")):
         n = os.path.basename(o)[9:-4]
         L.append(f'fp_rider_{n} = {{ model = "riders/fp_rider.glb", outfit = "riders/fp_rider_{n}.png", name = "{n.title()}" }}')
 L += ["", "# Stock models with no stand-in yet (large buildings, vehicles, stadium shells):",
