@@ -200,9 +200,10 @@ function kind(path) {
 
 function write(path, data) {
   path = norm(path);
-  // The Course Builder's tracks join the game's track folders for this
-  // visit; the builder keeps them among the saves too (/user/Tracks).
-  if (/^\/game\/teraform\/[^/]+\/[^/]+\.(env|lights)$/i.test(path)) {
+  // The Course Builder's tracks and the Free Pack's built tracks join the
+  // track folders (the game's, or the pack's without it) for this visit;
+  // both are kept among the saves too (/user/Tracks, /user/FreeTracks).
+  if (/^\/(game|freepack)\/teraform\/[^/]+\/[^/]+\.(env|lights|made)$/i.test(path)) {
     const old = files.get(path.toLowerCase());
     put(old ? old.path : path, new Uint8Array(data));
     return true;
