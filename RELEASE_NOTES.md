@@ -20,10 +20,11 @@ the original game.
   free graphics?** and download the pack for you. Updates fetch only the
   parts that changed. Early days: without MM2 files, the free graphics
   open in the Course Builder for now. Full races and menus with the free
-  art are on the way. The pack's own engine recordings (a different sound
-  for each class) arrive in a pack update soon: until then the free
-  graphics use the original game's sounds if you have it, and are silent
-  without it.
+  art are on the way. Sound: with MM2 installed you hear the original
+  game's sounds. Without it, the pack has a temporary set made in code (an
+  engine for each class that follows your revs, plus landings, crashes and
+  the crowd). Real engine recordings for each class replace them in a pack
+  update soon, and only those files download.
 * **Night races under stadium lights:** pick Night as the time of day and
   supercross stadiums are lit by their own lamp banks, with soft shadows
   from each bank (Enhanced switch "Stadium lights at night").
