@@ -74,8 +74,13 @@ def locals_(W):
         out[n] = dict(look=Rl[:, 2].round(5).tolist(), up=Rl[:, 1].round(5).tolist(), position=tl.round(5).tolist())
     return out
 
+# Fitted so the legs clear every free bike's shrouds, side panels and engine
+# (the OpenMX bikes' shrouds are the widest, the enduro's engine and pipe the
+# lowest): boots out to 0.78 on the pegs, knees turned out against the
+# shrouds. `knee_clear` is the least knee x (game units) any pose should keep,
+# for poses that turn the bars or lean, where the inside knee comes in.
 SEATED = dict(pelvis=(0, 3.62, -1.02), pelvis_pitch=14, lower_pitch=12, upper_pitch=16, head_pitch=-6,
-              ankle=(0.66, 1.64, -0.80), knee_out=0.55, foot_yaw=6, foot_pitch=-8,
+              ankle=(0.78, 1.64, -0.80), knee_out=0.8, knee_clear=0.95, foot_yaw=6, foot_pitch=-8,
               grip=(1.10, 3.89, 0.70), wrist_from_grip=(0.0, 0.10, -0.30), elbow_out=1.0, hand_roll=0)
 if __name__ == '__main__':
     W = solve(SEATED); L = locals_(W)

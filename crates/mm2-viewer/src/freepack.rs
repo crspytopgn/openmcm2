@@ -467,8 +467,8 @@ fn read_own(data: &[u8]) -> Option<Vec<OwnMotion>> {
 }
 
 /// The tricks for the pack's own riders, as the race reads them: each
-/// trick's own motion with its frames a second and length (no bike
-/// motion: the bike holds still under the rider).
+/// trick's own rider motion with its frames a second and length, and the
+/// bike's (`b<trick>`, as the game names them) where the pack has one.
 pub fn own_tricks() -> Vec<Option<crate::race::TrickMotion>> {
     let names = mm2_physics::stunt::TRICKS
         .iter()
@@ -477,9 +477,14 @@ pub fn own_tricks() -> Vec<Option<crate::race::TrickMotion>> {
     names
         .map(|name| {
             let m = own_table().iter().find(|m| m.rider && m.name.eq_ignore_ascii_case(&name))?;
+            let bike = format!("b{name}");
+            let bike = own_table()
+                .iter()
+                .find(|b| !b.rider && b.name.eq_ignore_ascii_case(&bike))
+                .map_or(String::new(), |b| b.name.clone());
             Some(crate::race::TrickMotion {
                 rider: m.name.clone(),
-                bike: String::new(),
+                bike,
                 fps: m.fps,
                 frames: m.motion.frames.len() as i32,
             })
@@ -491,8 +496,8 @@ pub fn own_tricks() -> Vec<Option<crate::race::TrickMotion>> {
 /// riders (`Some(true)`) or bikes (`Some(false)`), as the game drives them.
 pub fn ridden(name: &str) -> Option<bool> {
     match animated(name)?.0 {
-        "Rider.mcf" | crate::podium::WINNER => Some(true),
-        "Bike.mcf" => Some(false),
+        "Rider.mcf" | "UIRider.mcf" | crate::podium::WINNER => Some(true),
+        "Bike.mcf" | "UIHonda.mcf" => Some(false),
         _ => None,
     }
 }
@@ -577,6 +582,29 @@ pub fn bike_hull(name: &str) -> Option<mm2_physics::bike::Hull> {
     Some(mm2_physics::bike::Hull::from_points(frame, [a, b]))
 }
 
+/// The race markers drawn over the riders and the course: the sign over
+/// the player's bike, Moto-Tag's IT sign, the runway pointer, the Visual
+/// Cue arrow and the countdown's figures.
+const MARKERS: [&str; 11] =
+    ["youind", "itind", "pointer", "viscue", "one", "two", "three", "four", "five", "x", "decimalpoint"];
+
+/// The most a marker's material glows (linear, per channel). The pack's
+/// first markers glowed at three times white, which the enhanced
+/// lighting's bloom blew up into a blaze over the rider; at this they
+/// still read in shade and stay under the bloom's white.
+const MARKER_GLOW: f32 = 0.3;
+
+fn soften_glow(materials: &mut [mm2_formats::slb::Material]) {
+    for m in materials {
+        if let Some(p) = m.pbr.as_mut() {
+            let most = p.emissive_factor.iter().copied().fold(0.0f32, f32::max);
+            if most > MARKER_GLOW {
+                p.emissive_factor = p.emissive_factor.map(|e| e * MARKER_GLOW / most);
+            }
+        }
+    }
+}
+
 /// The pack's stand-in for the model `stem` (bare, no extension), and the
 /// images its materials name.
 pub fn model(stem: &str) -> Option<(mm2_formats::slb::Model, Vec<(String, crate::hires::Image)>)> {
@@ -586,9 +614,12 @@ pub fn model(stem: &str) -> Option<(mm2_formats::slb::Model, Vec<(String, crate:
         None => {
             let path = stockmap().get(&stem)?.path.clone();
             let data = crate::fs::read(&path).map_err(|e| eprintln!("{}: {e}", path.display())).ok()?;
-            let (model, images) = mm2_formats::glb::parse(&data, &format!("fp:{stem}:"))
+            let (mut model, images) = mm2_formats::glb::parse(&data, &format!("fp:{stem}:"))
                 .map_err(|e| eprintln!("{}: {e}", path.display()))
                 .ok()?;
+            if MARKERS.contains(&stem.as_str()) {
+                soften_glow(&mut model.materials);
+            }
             (model, images, path)
         }
     };
@@ -930,9 +961,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn markers_glow_softly() {
+        let glowing = |e: [f32; 3]| mm2_formats::slb::Material {
+            texture: String::new(),
+            pbr: Some(mm2_formats::slb::Pbr { emissive_factor: e, ..Default::default() }),
+        };
+        let mut m = [glowing([3.0, 2.46, 0.36]), glowing([0.1, 0.0, 0.0])];
+        soften_glow(&mut m);
+        let e = m[0].pbr.as_ref().unwrap().emissive_factor;
+        assert!((e[0] - MARKER_GLOW).abs() < 1e-6 && (e[1] - 0.246).abs() < 1e-4, "{e:?}");
+        assert_eq!(m[1].pbr.as_ref().unwrap().emissive_factor, [0.1, 0.0, 0.0]);
+    }
+
+    #[test]
     fn own_motions_cover_riding_crashes_and_tricks() {
         let rider = own_motions(true);
-        for name in ["LeanR02", "Turn2D", "CrosOv2", "Endo", "Kahuna", "Fall01", "HeadHit", "SuperMan", "BarKneelAlt", "Podium3_02", "Podium4_01", "Podium5_03"] {
+        for name in ["LeanR02", "Turn2D", "CrosOv2", "Endo", "Kahuna", "Fall01", "HeadHit", "SuperMan", "BarKneelAlt", "Victory", "WaitR", "StretchR", "Podium3_02", "Podium4_01", "Podium5_03"] {
             assert!(rider.iter().any(|m| m.0 == name), "{name}");
         }
         assert!(rider.iter().filter(|m| m.0 != "BackUpBottom").all(|m| m.1.frames.iter().all(|f| f.len() == 16)));
@@ -942,6 +986,7 @@ mod tests {
         assert_eq!(tricks.iter().flatten().count(), 22);
         let kneel = tricks[0].as_ref().unwrap();
         assert_eq!((kneel.fps, kneel.frames), (18.0, 30));
+        assert_eq!(kneel.bike, "bBarKneel");
     }
 
     #[test]

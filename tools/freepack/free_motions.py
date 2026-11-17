@@ -51,12 +51,19 @@ ROWS = [
 STAND = dict(pelvis=(0, 4.55, -0.55), pelvis_pitch=30, lower_pitch=8, upper_pitch=6, head_pitch=-16, knee_out=0.35,
              elbow_out=1.5)
 
-def pose(base=None, steer=0.0, bars=0.0, roll=0.0, head_yaw=0.0, torso_yaw=0.0, foot_out=0.0, body=None, **over):
+def pose(base=None, steer=0.0, bars=0.0, roll=0.0, head_yaw=0.0, torso_yaw=0.0, foot_out=0.0, body=None,
+         leg_out=None, slide=None, **over):
     """World pose: `steer` right -1..1 turns the bars by `bars` degrees and
     leans the torso `roll` degrees into the turn; `foot_out` puts the inside
-    foot out forward (slow corners); `body` (R) turns the whole rider and
-    bike about BODY_PIVOT (cross-ups)."""
+    foot out forward (slow corners); `leg_out` (dx out, dy up, dz forward,
+    ft at full steer) puts the inside leg out forward as the game's Turn
+    motions do, coming in late (by the steer cubed); `slide` (dx in, dy,
+    dz forward) moves the seat with it; `body` (R) turns the whole rider
+    and bike about BODY_PIVOT (cross-ups)."""
     P = dict(SEATED); P.update(base or {}); P.update(over)
+    if slide is not None:
+        k = abs(steer) ** 1.5; sx = 1 if steer > 0 else -1
+        P['pelvis'] = tuple(np.array(P['pelvis'], float) + np.array([sx * slide[0], slide[1], slide[2]]) * k)
     P['roll'] = -roll * steer; P['head_yaw'] = head_yaw; P['torso_yaw'] = torso_yaw
     turn = axis_angle(STEER_AXIS, bars * steer)
     grips = {}
@@ -70,6 +77,9 @@ def pose(base=None, steer=0.0, bars=0.0, roll=0.0, head_yaw=0.0, torso_yaw=0.0, 
     if foot_out:
         inside = 'R' if steer > 0 else 'L'; sx = 1 if inside == 'R' else -1; k = abs(steer) * foot_out
         ankles[inside] = ankles[inside] + np.array([sx * 0.75, 0.55, 2.0]) * k
+    if leg_out is not None and steer:
+        inside = 'R' if steer > 0 else 'L'; sx = 1 if inside == 'R' else -1; k = abs(steer) ** 3
+        ankles[inside] = ankles[inside] + np.array([sx * leg_out[0], leg_out[1], leg_out[2]]) * k
     B = body if body is not None else np.eye(3)
     move = lambda v: B @ (v - BODY_PIVOT) + BODY_PIVOT
     for side in 'LR':
@@ -139,13 +149,23 @@ rider, bike = {}, {}
 # the rest by phase.
 TIMING = {}
 # Steer motions: slow (LeanR, bars far round, inside foot out) and at speed
-# (Turn, bars a little, leaning in).
+# (Turn, bars a little, leaning in, the inside leg out forward and the seat
+# slid up to the tank in a hard turn, as the game's Turn1D-3D do: their
+# inside foot goes 0.9 ft out, 0.2 up and 2.3 forward of the peg at full
+# steer (Turn3D, sat back: 0.7, 0.5, 1.7), the hips 0.75 forward and, from the half-standing row, sat down). More
+# phases than the other motions, so the late leg doesn't cut corners.
+# The bars' full turn about the steering axis, degrees: slow (LeanR) and
+# at speed (Turn), as far round as the game's bike turns them.
+LEAN_BARS, TURN_BARS = 46, 19
+LEG_OUT = [(0.85, 0.2, 2.1), (0.85, 0.2, 2.1), (0.65, 0.45, 1.55)]
+SLIDE = [(0.12, -0.5, 0.35), (0.15, -0.05, 0.5), (0.12, 0.0, 0.3)]
 for r in range(3):
-    rider[f"LeanR0{r+1}"] = [keys(pose(ROWS[r], steer_of(p), bars=24, roll=8, head_yaw=-14 * steer_of(p), foot_out=0.85)) for p in phases()]
+    rider[f"LeanR0{r+1}"] = [keys(pose(ROWS[r], steer_of(p), bars=LEAN_BARS, roll=8, head_yaw=-14 * steer_of(p), foot_out=0.85)) for p in phases()]
     for kind, base in (("D", ROWS[r]), ("U", dict(ROWS[r], **STAND))):
-        rider[f"Turn{r+1}{kind}"] = [keys(pose(base, steer_of(p), bars=9, roll=10, head_yaw=-10 * steer_of(p))) for p in phases()]
-bike["BLeanR02"] = [bike_keys(bars=24 * steer_of(p)) for p in phases()]
-bike["BTurn2D"] = [bike_keys(bars=9 * steer_of(p)) for p in phases()]
+        rider[f"Turn{r+1}{kind}"] = [keys(pose(base, steer_of(p), bars=TURN_BARS, roll=10, head_yaw=-10 * steer_of(p),
+                                               leg_out=LEG_OUT[r], slide=SLIDE[r])) for p in phases(17)]
+bike["BLeanR02"] = [bike_keys(bars=LEAN_BARS * steer_of(p)) for p in phases()]
+bike["BTurn2D"] = [bike_keys(bars=TURN_BARS * steer_of(p)) for p in phases()]
 bike["BTurn2U"] = bike["BTurn2D"]
 # Wheelie: sat back, arms long.
 rider["Wheelie"] = [keys(pose(ROWS[2], pelvis=(0, 3.55, -1.5), pelvis_pitch=-4, upper_pitch=4, head_pitch=6,
@@ -385,5 +405,9 @@ def pack(tables):
     return bytes(out)
 
 if __name__ == '__main__':
+    if '--match' in sys.argv:
+        # Matched to the original's motions (match_motions.py).
+        import match_motions
+        match_motions.match(rider, bike, TIMING, sys.argv[sys.argv.index('--match') + 1])
     open(sys.argv[1], 'wb').write(pack((rider, bike)))
     print("rider", len(rider), "bike", len(bike), "bytes", os.path.getsize(sys.argv[1]))

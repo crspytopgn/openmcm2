@@ -1477,6 +1477,11 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
         for (frame, (angle, _)) in ["TireFront", "TireRear"].into_iter().zip(r.wheels) {
             renderer.set_spin(r.object, frame, angle);
         }
+        // The fork slides up its stroke and the swingarm swings up as the
+        // shocks take the bumps (0x4ff100, 0x4ff950 move the frames).
+        let (fork, swing) = r.bike.suspension_frames();
+        renderer.set_slide(r.object, "Shocks", fork);
+        renderer.set_spin(r.object, "SwingArm", swing);
         // In a crash the rider is thrown off and plays the fall.
         let wreck = r.bike.wreck();
         let (rider, motion) = wreck.unwrap_or((place, RIDING));
