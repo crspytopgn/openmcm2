@@ -97,5 +97,24 @@ These models were refitted to the game's bike and rider frames, recoloured and g
 | Wind turbine | [Wind Turbine](https://sketchfab.com/3d-models/4feb15af7b554c16b88bf9cbe179558b) | skettch |
 | Excavator (shovel) | [Excavator digger 3d model](https://sketchfab.com/3d-models/88b3ca0e6bac44ce8cef9865288d2ee0) | Arts7789 |
 | Power pylons | [Pylon](https://sketchfab.com/3d-models/5bc9e49be13b4803aed3c25e87bb4486) | rhcreations |
+| 300zx | [Kiri '86 - Low poly model](https://sketchfab.com/3d-models/5c17c582ef9549798f694b660feea42a) | DanielZhabotinsky |
+| 4runner_blue, 4runner_brown, 4runner_green, 4runner_white | [Bokaroo '67 - Low poly model](https://sketchfab.com/3d-models/22015d1863d6455aa31cfd738b972c50) | DanielZhabotinsky |
+| chevellered, chevelleblue | [Fairheaven LT '80 - Low poly model](https://sketchfab.com/3d-models/e2678da920cc4be68dbc193727919ffb) | DanielZhabotinsky |
+| cop | [Chapman '73 Cop cruiser - Low poly model](https://sketchfab.com/3d-models/b71558486d024ecc8dc4abbb1263f022) | DanielZhabotinsky |
+| cop_navy | [Negotiator '80 Cop Cruiser - Low poly model](https://sketchfab.com/3d-models/945fd09f513f4d1ab19b6388a7ea7323) | DanielZhabotinsky |
+| companytruck | [Conquer '89 Pickup - Low poly model](https://sketchfab.com/3d-models/6c48c94be8974dc7a5932f697c0ba68f) | DanielZhabotinsky |
+| feduptruck | [LCT 3000 '95 - Low poly model](https://sketchfab.com/3d-models/663a0953c038434a918cb85725c88ffa) | DanielZhabotinsky |
+| famtrkstr | [Shvan '92 - Low poly model](https://sketchfab.com/3d-models/09d718c9cf72401b8534d265a06a803f) | DanielZhabotinsky |
+| mx3, mx3_brown | [Urban '10 - Low poly model](https://sketchfab.com/3d-models/2866efdfa943484391ef8313768e074d) | DanielZhabotinsky |
+| sts, sts_red | [Fairheaven SW '84 - Low poly model](https://sketchfab.com/3d-models/aa0becb6e854422596cac6b21bf79787) | DanielZhabotinsky |
+| jeep, jeep_green, jeep_grey | [Lightbody Lifted '85 - Low poly model](https://sketchfab.com/3d-models/67beae18c3d24be68f9c8f0ec382d8e3) | DanielZhabotinsky |
+| firetruck, schoolbus, greyhound | [Generic civil service vehicles pack](https://sketchfab.com/3d-models/8ff2a13f30914932a70c7950cfa58465) | comrade1280 |
+| semicab | [Semi Truck Baked](https://sketchfab.com/3d-models/3e8c5275aeab487fa37d227ce0bd1a9a) | 3DE_Study |
+| dumptruck | [No-Brand Dump Truck](https://sketchfab.com/3d-models/48c77f54fa4d4b8c97749532a9d0fb52) | nguyenhoanglam20100609 |
+| tanker, watertruck | [Tanker Truck](https://sketchfab.com/3d-models/0bfeafdb2eb94612ad89ea2e794cf249) | ezbreneman |
+| supercub | [Piper Pa 18](https://sketchfab.com/3d-models/413e3f81b0db4e0ebba0f27490732770) | helijah |
+| engine | [Diesel train engine](https://sketchfab.com/3d-models/1e1d6f173d1e48e593fa270fb1b5f5a8) | Leaf_dev |
+| coalcar | [Coal Hopper Railway Wagon](https://sketchfab.com/3d-models/287266d5edf749318cb9869fe583e0ae) | saadthedesigner314 |
+| boxcarclosed | [Railway Boxcar Freight Wagon](https://sketchfab.com/3d-models/6cede42e50cc4042addfbedac1311551) | saadthedesigner314 |
 
 Licence: [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/). Changes: bikes and rider cut into rigid parts, scaled and posed, materials and textures replaced; props thinned, scaled to fit, maker decals painted out and paint recoloured.

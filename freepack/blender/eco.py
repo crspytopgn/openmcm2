@@ -70,40 +70,76 @@ def mat_rgb(name, rgb, rough=0.8):
     return flat(name, rgb, rough)
 
 def _cactus_mat():
+    """Saguaro skin: dark in the rib valleys, lighter waxy ridges, tan spine
+    clusters dotted along each ridge (the "ridge" attribute is set per vertex)."""
     m = bpy.data.materials.new("cactus"); m.use_nodes = True; nt = m.node_tree; P = nt.nodes["Principled BSDF"]
-    tc = nt.nodes.new("ShaderNodeTexCoord"); n = nt.nodes.new("ShaderNodeTexNoise"); n.inputs["Scale"].default_value = 40.0; n.inputs["Detail"].default_value = 8
-    ramp = nt.nodes.new("ShaderNodeValToRGB"); ramp.color_ramp.elements[0].color = (0.10, 0.14, 0.07, 1); ramp.color_ramp.elements[1].color = (0.24, 0.30, 0.17, 1)
-    nt.links.new(tc.outputs["Object"], n.inputs["Vector"]); nt.links.new(n.outputs["Fac"], ramp.inputs["Fac"]); nt.links.new(ramp.outputs["Color"], P.inputs["Base Color"])
-    b = nt.nodes.new("ShaderNodeBump"); b.inputs["Strength"].default_value = 0.3; nt.links.new(n.outputs["Fac"], b.inputs["Height"]); nt.links.new(b.outputs["Normal"], P.inputs["Normal"])
-    P.inputs["Roughness"].default_value = 0.75; return m
+    at = nt.nodes.new("ShaderNodeAttribute"); at.attribute_name = "ridge"
+    tc = nt.nodes.new("ShaderNodeTexCoord"); n = nt.nodes.new("ShaderNodeTexNoise"); n.inputs["Scale"].default_value = 60.0; n.inputs["Detail"].default_value = 6
+    nt.links.new(tc.outputs["Object"], n.inputs["Vector"])
+    skin = nt.nodes.new("ShaderNodeValToRGB"); e = skin.color_ramp.elements
+    e[0].position = 0.0; e[0].color = (0.035, 0.06, 0.03, 1); e[1].position = 1.0; e[1].color = (0.2, 0.26, 0.14, 1)
+    mixf = nt.nodes.new("ShaderNodeMath"); mixf.operation = "MULTIPLY_ADD"
+    nt.links.new(at.outputs["Fac"], mixf.inputs[0]); mixf.inputs[1].default_value = 0.85; nt.links.new(n.outputs["Fac"], mixf.inputs[2])
+    nt.links.new(mixf.outputs["Value"], skin.inputs["Fac"])
+    # spines: fine dots, only on the ridges
+    sp = nt.nodes.new("ShaderNodeTexVoronoi"); sp.inputs["Scale"].default_value = 220.0; nt.links.new(tc.outputs["Object"], sp.inputs["Vector"])
+    dot = nt.nodes.new("ShaderNodeMath"); dot.operation = "LESS_THAN"; dot.inputs[1].default_value = 0.12; nt.links.new(sp.outputs["Distance"], dot.inputs[0])
+    rg = nt.nodes.new("ShaderNodeMath"); rg.operation = "GREATER_THAN"; rg.inputs[1].default_value = 0.8; nt.links.new(at.outputs["Fac"], rg.inputs[0])
+    both = nt.nodes.new("ShaderNodeMath"); both.operation = "MULTIPLY"; nt.links.new(dot.outputs["Value"], both.inputs[0]); nt.links.new(rg.outputs["Value"], both.inputs[1])
+    mx = nt.nodes.new("ShaderNodeMix"); mx.data_type = "RGBA"; nt.links.new(both.outputs["Value"], mx.inputs["Factor"])
+    nt.links.new(skin.outputs["Color"], mx.inputs[6]); mx.inputs[7].default_value = (0.55, 0.5, 0.36, 1)
+    nt.links.new(mx.outputs[2], P.inputs["Base Color"])
+    b = nt.nodes.new("ShaderNodeBump"); b.inputs["Strength"].default_value = 0.25; nt.links.new(n.outputs["Fac"], b.inputs["Height"]); nt.links.new(b.outputs["Normal"], P.inputs["Normal"])
+    P.inputs["Roughness"].default_value = 0.6; return m
 
 def proc_saguaro(v):
-    rnd = random.Random(v); g = _cactus_mat()
-    def ribbed(a, b, r):
-        o = cyl(a, b, r, g, 56, r2=r * 0.9)
-        me = o.data; bm = bmesh.new(); bm.from_mesh(me)
-        cx, cy = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
-        for vt in bm.verts:
-            vt.co.x -= cx; vt.co.y -= cy
-            ang = math.atan2(vt.co.y - cy, vt.co.x - cx); k = 1 + 0.13 * abs(math.cos(ang * 7)) ** 0.5 - 0.06
-            vt.co.x = vt.co.x * k + cx; vt.co.y = vt.co.y * k + cy
-        bm.to_mesh(me); bm.free()
+    rnd = random.Random(v); g = _cactus_mat(); RIBS = 12
+    def ribbed(pts, r0, r1):
+        """A ribbed stem along a polyline, rounded off at the top."""
+        bm = bmesh.new(); ridge = bm.verts.layers.float.new("ridge"); rings = []; seg = RIBS * 6
+        n = len(pts); ax = None
+        for i, c in enumerate(pts):
+            c = Vector(c); d = (Vector(pts[min(i + 1, n - 1)]) - Vector(pts[max(i - 1, 0)])).normalized()
+            if ax is None: ax = d.cross(Vector((0, 0, 1)) if abs(d.z) < 0.9 else Vector((1, 0, 0))).normalized()
+            else: ax = (ax - d * ax.dot(d)).normalized()   # carry the frame along so rings don't twist
+            ay = d.cross(ax)
+            t = i / (n - 1); r = r0 + (r1 - r0) * t
+            if t > 0.85: r *= math.sqrt(max(0.0, 1 - ((t - 0.85) / 0.15) ** 2)) * 0.9 + 0.1
+            ring = []
+            for j in range(seg):
+                a = 2 * math.pi * j / seg; k = abs(math.cos(a * RIBS / 2)) ** 0.6
+                vt = bm.verts.new(c + (ax * math.cos(a) + ay * math.sin(a)) * r * (0.86 + 0.14 * k)); vt[ridge] = k; ring.append(vt)
+            rings.append(ring)
+        for i in range(n - 1):
+            for j in range(seg): bm.faces.new((rings[i][j], rings[i][(j + 1) % seg], rings[i + 1][(j + 1) % seg], rings[i + 1][j]))
+        bm.faces.new(list(reversed(rings[-1])))
+        me = bpy.data.meshes.new("saguaro"); bm.to_mesh(me); bm.free()
+        attr = me.attributes.get("ridge")
+        if attr is None or attr.domain != "POINT":   # bmesh float layers come through as point attributes
+            pass
         for p in me.polygons: p.use_smooth = True
-    H = 1.0; ribbed((0, 0, 0), (0, 0, H), 0.09); bpy.ops.mesh.primitive_uv_sphere_add(radius=0.088, location=(0, 0, H)); bpy.context.object.data.materials.append(g)
+        o = bpy.data.objects.new("saguaro", me); bpy.context.scene.collection.objects.link(o); me.materials.append(g); return o
+    H = 1.0; ribbed([(0, 0, H * i / 12) for i in range(13)], 0.09, 0.085)
     for i in range(rnd.randint(1, 3)):
-        side = rnd.choice((-1, 1)); z = rnd.uniform(0.35, 0.6); out = rnd.uniform(0.16, 0.24); top = z + rnd.uniform(0.2, 0.35)
-        ang = rnd.uniform(0, math.pi)
-        dx, dy = math.cos(ang) * side, math.sin(ang) * side
-        ribbed((0, 0, z), (dx * out, dy * out, z + 0.03), 0.06)
-        ribbed((dx * out, dy * out, z), (dx * out, dy * out, top), 0.06)
-        bpy.ops.mesh.primitive_uv_sphere_add(radius=0.058, location=(dx * out, dy * out, top)); bpy.context.object.data.materials.append(g)
+        z = rnd.uniform(0.3, 0.55); out = rnd.uniform(0.12, 0.18); top = z + rnd.uniform(0.38, 0.58); ang = rnd.uniform(0, 2 * math.pi)
+        dx, dy = math.cos(ang), math.sin(ang); pts = []
+        for k in range(7):   # out from the trunk, a quarter-circle elbow, then straight up
+            t = k / 6 * math.pi / 2; pts.append((dx * (0.05 + out * math.sin(t)), dy * (0.05 + out * math.sin(t)), z + out * (1 - math.cos(t))))
+        e = z + out
+        for k in range(1, 6): pts.append((dx * (0.05 + out), dy * (0.05 + out), e + (top - e) * k / 5 if top > e else e + 0.08 * k))
+        ribbed(pts, 0.06, 0.056)
 
 def proc_ocotillo(v):
     rnd = random.Random(v); g = mat_rgb("ocotillo", (0.2, 0.18, 0.12))
+    leaf = mat_rgb("ocotillo_leaf", (0.2, 0.32, 0.1)); flower = mat_rgb("ocotillo_flower", (0.75, 0.12, 0.05), 0.6)
     for i in range(22):
         a = rnd.uniform(0, 2 * math.pi); lean = rnd.uniform(0.15, 0.4); L = rnd.uniform(0.7, 1.0)
-        tip = (math.cos(a) * lean * L, math.sin(a) * lean * L, L)
+        tip = Vector((math.cos(a) * lean * L, math.sin(a) * lean * L, L))
         cyl((0, 0, 0), tip, 0.012, g, 6, r2=0.005)
+        for k in range(10):   # little leaf clusters up the cane, a red flower spike at the tip
+            p = tip * rnd.uniform(0.15, 0.85)
+            bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.014, location=p); o = bpy.context.object; o.scale = (1, 1, 0.5); o.data.materials.append(leaf)
+        if rnd.random() < 0.7: cyl(tip, tip + (tip.normalized() * 0.035), 0.008, flower, 6, r2=0.002)
 
 def _frond_texture():
     from PIL import Image, ImageDraw

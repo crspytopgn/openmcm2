@@ -1,7 +1,7 @@
 """Fit a third-party CC0/CC-BY model into a stock object's bounds.
 
     python blender/fit_import.py SRC.glb STOCKNAME [--rot=DEG] [--cap=FACES] [--tex=1024] [--stretch]
-                                 [--by=x|y|z] [--hue=LO:HI:TO[:SAT]/...] [--blot=IMG:X0,Y0,X1,Y1/...] [--keep-alpha]
+                                 [--by=x|y|z] [--pick=NODE] [--rx=DEG] [--hue=LO:HI:TO[:SAT]/...] [--blot=IMG:X0,Y0,X1,Y1/...] [--keep-alpha]
 
 Joins the model, optionally thins it to FACES, turns it DEG about the vertical
 (by default its long side follows the bounds' long side), scales it to sit in
@@ -32,10 +32,15 @@ def opaque():
     """Imports often flag solid parts as alpha-hashed; the game draws them solid."""
     for m in bpy.data.materials:
         if not m.node_tree: continue
+        glass = any(k in m.name.lower() for k in ("glass", "transp", "window"))
         for n in m.node_tree.nodes:
             if n.type == "BSDF_PRINCIPLED":
                 for l in list(n.inputs["Alpha"].links): m.node_tree.links.remove(l)
                 n.inputs["Alpha"].default_value = 1.0
+                if glass:   # see-through glass becomes dark tinted glass, drawn solid
+                    for l in list(n.inputs["Base Color"].links): m.node_tree.links.remove(l)
+                    n.inputs["Base Color"].default_value = (0.03, 0.035, 0.04, 1); n.inputs["Roughness"].default_value = 0.08
+                    n.inputs["Metallic"].default_value = 0.0
         if hasattr(m, "blend_method"): m.blend_method = "OPAQUE"
 
 def base_images():
@@ -60,6 +65,13 @@ def recolor(spec):
     saturation by SAT), to take a real maker's paint scheme off a model."""
     import numpy as np, colorsys
     rules = [list(map(float, r.split(":"))) for r in spec.split("/")]
+    for m in bpy.data.materials:   # plain paint colours (no texture on Base Color)
+        b = m.node_tree and next((n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if not b or b.inputs["Base Color"].links: continue
+        r, g, bl, a = b.inputs["Base Color"].default_value; h, sat, v = colorsys.rgb_to_hsv(r, g, bl); h *= 360
+        for lo, hi, to, *k in rules:
+            if lo <= h <= hi and sat > 0.15: h = to; sat = min(1, sat * (k[0] if k else 1)); break
+        b.inputs["Base Color"].default_value = (*colorsys.hsv_to_rgb(h / 360, sat, v), a)
     for im in base_images():
         a = pixels(im); rgb = a[..., :3]
         mx = rgb.max(-1); mn = rgb.min(-1); d = mx - mn + 1e-6
@@ -96,6 +108,12 @@ def blot(spec):
 def main(src, name):
     lo, hi = stock_bounds(name)
     reset(); bpy.ops.import_scene.gltf(filepath=src)
+    if opt("pick"):   # a pack of models: keep the one under the node named PICK
+        root = next(o for o in bpy.context.scene.objects if o.name == opt("pick") or o.name.startswith(opt("pick") + "."))
+        keep = {root, *root.children_recursive}
+        for o in [o for o in bpy.context.scene.objects if o.type == "MESH" and o not in keep]: bpy.data.objects.remove(o)
+    for o in [o for o in bpy.context.scene.objects if o.type == "MESH" and any(k in o.name.lower() for k in ("shadow", "flare"))]:
+        bpy.data.objects.remove(o)   # baked ground shadows and light flares are display tricks, not parts
     ms = [o for o in bpy.context.scene.objects if o.type == "MESH"]
     bpy.ops.object.select_all(action="DESELECT")
     for o in ms: o.select_set(True)
@@ -109,6 +127,7 @@ def main(src, name):
     if cap and len(o.data.polygons) > cap:
         d = o.modifiers.new("d", "DECIMATE"); d.ratio = cap / len(o.data.polygons); bpy.ops.object.modifier_apply(modifier="d")
     me = o.data
+    if opt("rx"): me.transform(Matrix.Rotation(math.radians(float(opt("rx"))), 4, "X"))   # a model stood on its end
     vs = [v.co for v in me.vertices]; a = Vector(map(min, *vs)); b = Vector(map(max, *vs)); size = b - a
     rot = opt("rot")
     if rot is None:   # long side to long side
