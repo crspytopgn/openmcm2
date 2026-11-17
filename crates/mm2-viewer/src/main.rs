@@ -51,6 +51,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod free_text;
+mod free_motions;
 mod addons;
 mod ibl;
 mod pace;
