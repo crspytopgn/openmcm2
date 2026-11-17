@@ -458,6 +458,39 @@ fn shape(stem: &str) -> Option<(mm2_formats::slb::Model, Vec<mm2_formats::glb::I
     Some((model, images, path))
 }
 
+/// The collision hull of the pack's bike `name` (it has no `.col`): the
+/// frame's shell round every part but the wheels, in model space, and
+/// each wheel's round its own centre.
+pub fn bike_hull(name: &str) -> Option<mm2_physics::bike::Hull> {
+    let stem = stem_of(name);
+    if rides().shapes.get(&stem)?.1 {
+        return None;
+    }
+    let (model, _, _) = shape(&stem)?;
+    let world = model.world_matrices();
+    let wheel = |name: &str| BIKE_FRAMES.iter().position(|f| *f == name);
+    let (front, rear) = (wheel("TireFront")?, wheel("TireRear")?);
+    let (body, bars) = (wheel("Bike")?, wheel("HandleBars")?);
+    let mut parts: [Vec<glam::Vec3>; 3] = Default::default();
+    for s in model.lods.first()?.surfaces.iter() {
+        for (v, p) in s.positions.iter().enumerate() {
+            let frame = s.frame_of(v);
+            let p = glam::Vec3::from(*p);
+            let (list, centre) = match frame {
+                f if f == front => (1, world[f]),
+                f if f == rear => (2, world[f]),
+                // The swingarm, shocks and kickstart hang below the frame
+                // and move: the game's hull leaves them out too.
+                f if f == body || f == bars => (0, [0.0; 16]),
+                _ => continue,
+            };
+            parts[list].push(p - glam::Vec3::new(centre[12], centre[13], centre[14]));
+        }
+    }
+    let [frame, a, b] = &parts;
+    Some(mm2_physics::bike::Hull::from_points(frame, [a, b]))
+}
+
 /// The pack's stand-in for the model `stem` (bare, no extension), and the
 /// images its materials name.
 pub fn model(stem: &str) -> Option<(mm2_formats::slb::Model, Vec<(String, crate::hires::Image)>)> {
@@ -493,6 +526,18 @@ pub fn model(stem: &str) -> Option<(mm2_formats::slb::Model, Vec<(String, crate:
         })
         .collect();
     Some((model, images))
+}
+
+/// The pack's stand-in for the model `stem`, without its pictures (for
+/// its shape alone, as a solid object's collision).
+pub fn model_shape(stem: &str) -> Option<mm2_formats::slb::Model> {
+    let stem = stem.trim().to_ascii_lowercase();
+    if let Some((model, _, _)) = shape(&stem) {
+        return Some(model);
+    }
+    let path = stockmap().get(&stem)?.path.clone();
+    let data = crate::fs::read(&path).map_err(|e| eprintln!("{}: {e}", path.display())).ok()?;
+    mm2_formats::glb::parse(&data, &format!("fp:{stem}:")).ok().map(|(model, _)| model)
 }
 
 /// `uri` (a glTF image path, `/`-separated) from the folder `model` is in,
