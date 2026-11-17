@@ -295,7 +295,7 @@ TRICKS = {  # name: (frames a second, frames, hold frame, peak)
     "SeatGrab": (15, 28, 17, dict(pelvis=(0, 4.9, -2.0), pelvis_pitch=55, grip_l=SEAT_BACK, ankle_l=(-0.8, 4.6, -5.0), ankle_r=(0.8, 4.4, -5.0))),
     "SaranWrap": (17, 31, 15, dict(pelvis=(0.3, 4.6, -0.8), pelvis_pitch=15, torso_yaw=15, ankle_l=(0.2, 4.7, 2.4), grip_l=(-1.6, 6.2, 0.4), knee_out=0.2)),
     "CliffHanger": (15, 36, 18, dict(pelvis=(0, 6.6, -0.6), pelvis_pitch=-10, upper_pitch=-8, head_pitch=-10, ankle_l=(-0.5, 3.6, 1.2), ankle_r=(0.5, 3.6, 1.2), grip_l=(-1.8, 9.0, -0.6), grip_r=(1.8, 9.0, -0.6))),
-    "HeartAttack": (15, 33, 15, dict(pelvis=(0, 5.6, -1.0), pelvis_pitch=-45, upper_pitch=10, ankle_l=(-0.6, 8.4, -1.6), ankle_r=(0.6, 8.2, -1.2), grip_r=SEAT_BACK, knee_out=0.2)),
+    "HeartAttack": (15, 33, 15, dict(pelvis=(0, 6.9, -0.9), pelvis_pitch=165, lower_pitch=0, upper_pitch=0, head_pitch=-60, ankle_l=(-0.7, 10.1, -1.8), ankle_r=(0.7, 9.9, -1.4), grip_r=(0.5, 4.0, -1.6), knee_out=0.2)),
     "TailGrab": (15, 33, 15, dict(pelvis=(0, 4.6, -2.2), pelvis_pitch=50, torso_yaw=20, grip_r=(1.0, 3.4, -4.2), ankle_l=(-1.0, 3.8, -4.4), ankle_r=(0.9, 3.0, -4.6))),
     "LazyBoy": (16, 32, 17, dict(pelvis=(0, 4.0, -1.4), pelvis_pitch=-70, upper_pitch=-10, head_pitch=30, ankle_l=(-0.4, 4.6, 2.8), ankle_r=(0.4, 4.6, 2.8), grip_l=(-0.6, 5.4, -3.4), grip_r=(0.6, 5.4, -3.4))),
     "DCanCan": (18, 33, 16, dict(pelvis=(-0.3, 4.6, -0.9), pelvis_pitch=20, torso_yaw=10, ankle_l=(-2.6, 3.4, 0.6), ankle_r=(-2.0, 3.0, 0.9), knee_out=0.2)),
