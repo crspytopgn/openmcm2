@@ -182,6 +182,7 @@ def startgate():
     pa = pa * (1 - m_) + DIRT * 0.75 * m_
     pa[:, ::int(2048 / N)] *= 0.5
     pad = tex_mat("fp_startgate_pad", pa)
+    white = tex_mat("fp_startgate_lamp_w", np.ones((8, 8, 3))); red = tex_mat("fp_startgate_lamp_r", np.ones((8, 8, 3)) * np.array([1.0, 0.05, 0.03]))
     m = Mesh("fp_startgate")
     m.quad([(-L / 2 - 4, 0.6, 0.0), (L / 2 + 4, 0.6, 0.0), (L / 2 + 4, 14.0, 0.0), (-L / 2 - 4, 14.0, 0.0)], pad)                               # pad, gate line to 14 ft back
     m.box((-L / 2 - 1, -0.6, 0), (L / 2 + 1, 0.6, 0.45), steel, s=4)           # base beam with the hinge line
@@ -195,6 +196,8 @@ def startgate():
     for k in range(0, N + 1, 5):                                          # hydraulic stands
         x = -L / 2 + k * P
         m.box((x - 0.35, 0.6, 0), (x + 0.35, 1.6, 0.9), galv, s=2)
+        lamp = white if k % 10 else red                                   # start lamps (glow at night)
+        m.box((x - 0.2, 0.95, 0.9), (x + 0.2, 1.25, 1.2), lamp, s=1)
     m.done()
     for k in range(0, N + 1, 5):
         x = -L / 2 + k * P; cyl((x, 1.1, 0.9), (x, -0.1, 0.4), 0.12, steel, 8)
@@ -324,7 +327,7 @@ def lightrig():
     """Portable light tower: trailer, mast and 4 lamp heads."""
     reset(); y_ = steel_tex("fp_lightrig_body", (0.45, 0.34, 0.02), (0.75, 0.6, 0.08), rust=0.1)
     galv = steel_tex("fp_lightrig_mast", (0.3, 0.31, 0.32), (0.58, 0.59, 0.6))
-    lamp = Image.new("RGB", (128, 128), (255, 250, 235)); d = ImageDraw.Draw(lamp); d.rectangle([0, 0, 127, 127], outline=(40, 40, 40), width=10)
+    lamp = Image.new("RGB", (128, 128), (255, 255, 255)); d = ImageDraw.Draw(lamp); d.rectangle([0, 0, 127, 127], outline=(40, 40, 40), width=6)
     lm = tex_mat("fp_lightrig_lamp", lin(lamp))
     m = Mesh("fp_lightrig"); m.box((-3, -2, 1.2), (3, 2, 4.2), y_, s=3)
     for k, (dx, dz) in enumerate(((-1.6, 0), (1.6, 0), (-1.6, 2.2), (1.6, 2.2))):

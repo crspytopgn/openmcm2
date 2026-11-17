@@ -39,7 +39,8 @@ def screen_png(path):
     d.text((1300, 260), "48.213", font=f(170), fill=(255, 255, 255)); d.text((1300, 470), "D. OKAFOR  #27", font=f(64, True), fill=(200, 210, 230))
     d.text((1300, 620), "RACE TIME", font=f(56), fill=(255, 220, 90)); d.text((1300, 700), "10:41", font=f(170), fill=(255, 255, 255))
     a = np.asarray(im).astype(np.float32) / 255
-    yy, xx = np.mgrid[0:H, 0:W]; a *= (0.8 + 0.2 * ((xx % 3 < 2) & (yy % 3 < 2)))[..., None]
+    yy, xx = np.mgrid[0:H, 0:W]; hot = (a.min(2) > 0.92)[..., None]   # white text stays full white (glows at night)
+    a = np.where(hot, a, a * (0.8 + 0.2 * ((xx % 3 < 2) & (yy % 3 < 2)))[..., None])
     Image.fromarray((np.clip(a, 0, 1) * 255).astype(np.uint8)).save(path)
 
 def screen_face(bm, uvl, c, right, up, w, h, mi):

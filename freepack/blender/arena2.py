@@ -41,11 +41,16 @@ def led_png(path, seed):
         bg = r.choice([(10, 12, 18), (170, 20, 24), (14, 40, 110), (230, 230, 225), (20, 20, 22), (240, 160, 20)])
         d.rectangle([x, 0, x + w - 1, H], fill=bg)
         b = Image.open(os.path.join(bdir, r.choice(brands))).convert("RGB"); b.thumbnail((w - 60, H - 30))
-        im.paste(b, (x + (w - b.width) // 2, (H - b.height) // 2)); x += w
+        im.paste(b, (x + (w - b.width) // 2, (H - b.height) // 2))
+        # white LED accents that light up at night: a thin rule and a chevron per panel
+        d.rectangle([x + 12, H - 14, x + w - 12, H - 10], fill=(255, 255, 255))
+        if r.random() < 0.5: d.polygon([(x + 14, 30), (x + 34, H // 2), (x + 14, H - 30), (x + 24, H // 2)], fill=(255, 255, 255))
+        x += w
     a = np.asarray(im).astype(np.float32) / 255
     # LED pixel pitch and a soft bloom-free glow: rows of dots
     yy, xx = np.mgrid[0:H, 0:W]; dots = 0.82 + 0.18 * ((xx % 4 < 3) & (yy % 4 < 3))
-    a = a * dots[..., None]
+    hot = (a.min(2) > 0.92)[..., None]                     # keep pure-white LEDs at full white
+    a = np.where(hot, a, a * dots[..., None])
     Image.fromarray((np.clip(a, 0, 1) * 255).astype(np.uint8)).save(path)
 
 def suites_png(path, seed=7):
@@ -55,12 +60,12 @@ def suites_png(path, seed=7):
     bw = W // 4
     for i in range(4):
         x0 = i * bw
-        lit = r.random() < 0.85
-        top = (150, 120, 85) if lit else (40, 42, 46); bot = (70, 52, 36) if lit else (22, 23, 26)
+        lit = r.random() < 0.85; bright = lit and r.random() < 0.3      # some suites with bright white lights
+        top = (255, 255, 255) if bright else (150, 120, 85) if lit else (40, 42, 46); bot = (70, 52, 36) if lit else (22, 23, 26)
         for y in range(20, H - 30):
             t = (y - 20) / (H - 50); c = tuple(int(top[k] * (1 - t) + bot[k] * t) for k in range(3)); d.line([(x0 + 8, y), (x0 + bw - 8, y)], fill=c)
         if lit:   # ceiling lights, back wall TV, people
-            for k in range(5): d.ellipse([x0 + 30 + k * 95, 26, x0 + 60 + k * 95, 36], fill=(255, 235, 200))
+            for k in range(5): d.ellipse([x0 + 30 + k * 95, 26, x0 + 60 + k * 95, 36], fill=(255, 255, 255))
             d.rectangle([x0 + bw // 2 - 60, 110, x0 + bw // 2 + 60, 180], fill=(50, 90, 120))
             for k in range(r.randint(2, 7)):
                 px = x0 + r.randint(30, bw - 40); ph = r.randint(150, 210)
@@ -74,7 +79,8 @@ def suites_png(path, seed=7):
         d.rectangle([x0, 0, x0 + bw, 18], fill=(60, 62, 66)); d.rectangle([x0, H - 30, x0 + bw, H], fill=(48, 49, 52))
     a = np.asarray(im).astype(np.float32) / 255
     yy, xx = np.mgrid[0:H, 0:W]; sheen = np.clip(1 - np.abs(((xx + yy * 1.3) % 700) - 200) / 120, 0, 1) * 0.06
-    a = np.clip(a * 0.92 + sheen[..., None], 0, 1)
+    hot = (a.min(2) > 0.92)[..., None]
+    a = np.where(hot, a, np.clip(a * 0.92 + sheen[..., None], 0, 1))
     Image.fromarray((grime(a, seed, 0.04) * 255).astype(np.uint8)).save(path)
 
 def roof_png(path):
@@ -98,7 +104,7 @@ def tunnel_png(path):
     yy, xx = np.mgrid[0:H, 0:W]; depth = np.clip(1 - (np.abs(xx - W / 2) / (W / 2)) * 0.2 - yy / H * 0.1, 0, 1)
     a[:] = (0.05 + 0.08 * (1 - depth))[..., None]
     a[(yy % 64) < 3] *= 0.6
-    for k in range(3): a[20:26, 60 + k * 160:120 + k * 160] = 0.95                     # ceiling lights deep inside
+    for k in range(3): a[20:26, 60 + k * 160:120 + k * 160] = 1.0                      # ceiling lights deep inside (glow at night)
     Image.fromarray((np.clip(a, 0, 1) * 255).astype(np.uint8)).save(path)
 
 def stairs_png(path):
