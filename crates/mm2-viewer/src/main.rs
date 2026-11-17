@@ -1925,6 +1925,11 @@ fn load_track(
                     tricks = rs2::Archive::parse(&bytes)
                         .map(|ar| trick_motions(&ar, bike))
                         .unwrap_or_default();
+                    // Without the game's motions (the Free Pack alone), the
+                    // pack's riders do tricks of their own.
+                    if tricks.iter().all(Option::is_none) {
+                        tricks = freepack::own_tricks();
+                    }
                     // The player's collision points, from the bike's `.col`.
                     if let Ok(ar) = rs2::Archive::parse(&bytes) {
                         let stem = bike.rsplit_once('.').map_or(bike, |(s, _)| s);
@@ -2023,8 +2028,11 @@ fn load_track(
                 .iter()
                 .map(|&bike| {
                     let outfit = skins[bike + 1].clone();
+                    // A rider of the pack's stands up there as itself.
+                    let model = freepack::winner_model(&animations[bike + 1].model)
+                        .unwrap_or_else(|| podium::WINNER.into());
                     animations.push(scn::Animation {
-                        model: podium::WINNER.into(),
+                        model,
                         offset: [0.0; 3],
                         look: [0.0, 0.0, 1.0],
                         up: [0.0, 1.0, 0.0],

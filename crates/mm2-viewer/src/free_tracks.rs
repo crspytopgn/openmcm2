@@ -44,23 +44,29 @@ pub fn courses(def: &Def) -> Vec<String> {
 /// Builds the free track `path` names if it isn't there yet. Anything
 /// else is left alone.
 pub fn ensure(path: &Path) -> Result<(), String> {
-    if crate::fs::is_file(path) {
-        return Ok(());
-    }
     let Some(def) = path.file_stem().and_then(|s| s.to_str()).and_then(free::find) else {
         return Ok(());
     };
     let Some(dir) = path.parent() else { return Ok(()) };
+    // Built, and by this making of the recipes (an older one's is built
+    // again, so a fix to a track reaches it).
+    let current = |dir: &Path| {
+        crate::fs::is_file(&dir.join(format!("{}.ENV", def.file)))
+            && crate::fs::read(dir.join(format!("{}.made", def.file))).is_ok_and(|m| m == free::MADE.as_bytes())
+    };
+    if current(dir) {
+        return Ok(());
+    }
     #[cfg(target_arch = "wasm32")]
     let kept = PathBuf::from("/user/FreeTracks").join(def.kind.folder());
     #[cfg(target_arch = "wasm32")]
-    if crate::fs::is_file(kept.join(format!("{}.ENV", def.file))) {
-        for name in [format!("{}.ENV", def.file), format!("{}.lights", def.file)] {
+    if current(&kept) {
+        for name in [format!("{}.ENV", def.file), format!("{}.lights", def.file), format!("{}.made", def.file)] {
             if let Ok(bytes) = crate::fs::read(kept.join(&name)) {
                 let _ = crate::fs::write(dir.join(&name), bytes);
             }
         }
-        if crate::fs::is_file(path) {
+        if current(dir) {
             return Ok(());
         }
     }

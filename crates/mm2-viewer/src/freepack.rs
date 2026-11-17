@@ -361,6 +361,15 @@ pub fn outfits() -> &'static [Outfit] {
 }
 
 /// The rider model (`fp_rider.mcf`) an outfit of the pack goes on.
+/// The podium's stand-in for the game's `Winner.mcf` when the rider on
+/// the grid is one of the pack's (`fp_rider.mcf` stands as
+/// `winfp_rider.mcf`): the same rider, playing the podium's motions (the
+/// game's when it is there, else the pack's own).
+pub fn winner_model(rider: &str) -> Option<String> {
+    let (template, shape) = animated(rider)?;
+    (template == "Rider.mcf").then(|| format!("win{shape}.mcf"))
+}
+
 pub fn outfit_model(outfit: &str) -> Option<String> {
     let outfit = outfit.trim().to_ascii_lowercase();
     rides().outfits.iter().find(|o| o.outfit == outfit).map(|o| format!("{}.mcf", o.shape))
@@ -371,74 +380,121 @@ pub fn outfit_model(outfit: &str) -> Option<String> {
 /// the original's `.mcf` whose motions it plays, and the shape to load.
 pub fn animated(name: &str) -> Option<(&'static str, String)> {
     let stem = stem_of(name);
-    let (ui, shape) = match stem.strip_prefix("ui") {
-        Some(rest) if rides().shapes.contains_key(rest) => (true, rest.to_string()),
-        _ => (false, stem),
+    // `ui…` for the menus' turning one, `win…` for a rider on the podium.
+    let (kind, shape) = match (stem.strip_prefix("ui"), stem.strip_prefix("win")) {
+        (Some(rest), _) if rides().shapes.contains_key(rest) => (1, rest.to_string()),
+        (_, Some(rest)) if rides().shapes.contains_key(rest) => (2, rest.to_string()),
+        _ => (0, stem),
     };
     let &(_, rider) = rides().shapes.get(&shape)?;
-    let template = match (ui, rider) {
-        (false, false) => "Bike.mcf",
-        (false, true) => "Rider.mcf",
-        (true, false) => "UIHonda.mcf",
-        (true, true) => "UIRider.mcf",
+    let template = match (kind, rider) {
+        (0, false) => "Bike.mcf",
+        (0, true) => "Rider.mcf",
+        (1, false) => "UIHonda.mcf",
+        (1, true) => "UIRider.mcf",
+        (_, true) => crate::podium::WINNER,
+        (_, false) => return None,
     };
     Some((template, shape))
 }
 
-/// The free rider's own seated riding pose, for when the original's
-/// motions aren't there (the free graphics on their own): each of
-/// [`RIDER_FRAMES`]' look, up and position relative to its parent. Made
-/// for the pack (hips on the seat, feet on the pegs, hands on the grips,
-/// worked out from the free bikes' seat, pegs and bars), not taken from
-/// the game's motions.
-const SEATED: [([f32; 3], [f32; 3], [f32; 3]); 16] = [
-    // Pelvis
-    ([0.0000, -0.2419, 0.9703], [0.0000, 0.9703, 0.2419], [0.0000, 3.6200, -1.0200]),
-    // LwrTorso
-    ([0.0000, -0.2079, 0.9781], [0.0000, 0.9781, 0.2079], [0.0000, 0.1780, -0.1470]),
-    // UprLegL
-    ([-0.2565, 0.8730, 0.4148], [0.4396, 0.4875, -0.7544], [-0.2760, 0.0000, 0.0000]),
-    // UprLegR
-    ([0.2565, 0.8730, 0.4148], [-0.4396, 0.4875, -0.7544], [0.2760, 0.0000, 0.0000]),
-    // UprTorso
-    ([0.0000, -0.2756, 0.9613], [0.0000, 0.9613, 0.2756], [0.0000, 0.6210, 0.0000]),
-    // Head
-    ([0.0000, 0.7431, 0.6691], [0.0000, 0.6691, -0.7431], [0.0000, 1.2170, 0.0000]),
-    // UprArmL
-    ([0.3310, 0.1371, 0.9336], [0.6679, 0.6649, -0.3344], [-0.6500, 0.9250, 0.0620]),
-    // UprArmR
-    ([-0.3310, 0.1371, 0.9336], [-0.6679, 0.6649, -0.3344], [0.6500, 0.9250, 0.0620]),
-    // LwrArmL
-    ([0.1848, 0.9773, -0.1034], [-0.1877, -0.0682, -0.9799], [-0.1910, -1.0890, -0.0100]),
-    // HandL
-    ([-0.7064, 0.3086, 0.6370], [0.5442, 0.8123, 0.2099], [-0.1510, -0.8620, 0.0670]),
-    // LwrArmR
-    ([-0.1848, 0.9773, -0.1034], [0.1877, -0.0682, -0.9799], [0.1910, -1.0890, -0.0100]),
-    // HandR
-    ([0.7064, 0.3086, 0.6370], [-0.5442, 0.8123, 0.2099], [0.1510, -0.8620, 0.0670]),
-    // LwrLegL
-    ([0.0008, -0.9803, 0.1976], [0.0006, 0.1976, 0.9803], [0.0010, -1.4700, 0.1330]),
-    // FootL
-    ([0.5616, 0.5762, 0.5938], [-0.1925, 0.7890, -0.5835], [0.0010, -1.3770, -0.1430]),
-    // LwrLegR
-    ([-0.0008, -0.9803, 0.1976], [-0.0006, 0.1976, 0.9803], [-0.0010, -1.4700, 0.1330]),
-    // FootR
-    ([-0.5616, 0.5762, 0.5938], [0.1925, 0.7890, -0.5835], [-0.0010, -1.3770, -0.1430]),
-];
-
-/// The free rider's seated pose as a one-frame motion (see [`SEATED`]).
-pub fn seated_motion() -> mm2_formats::anim::Motion {
-    let keys = SEATED
-        .iter()
-        .enumerate()
-        .map(|(frame, &(look, up, position))| mm2_formats::anim::Key { frame, look, up, position })
-        .collect();
-    mm2_formats::anim::Motion { frames: vec![keys] }
+/// The free rider's or bike's own riding motions, for when the original's
+/// aren't there (the free graphics on their own): the same names and
+/// phases as the game's (lean, turn, wheelie, cross-ups, looking back,
+/// backing up, the crash's bails, falls and landings, and the tricks), so
+/// the riding mix, the wreck and the stunts drive them as they do the
+/// game's. Made
+/// for the pack by IK onto the free bikes' seat, pegs and bars
+/// (`tools/freepack/free_motions.py`), not taken from the game.
+pub fn own_motions(rider: bool) -> Vec<(String, mm2_formats::anim::Motion, f32, bool)> {
+    own_table().iter().filter(|m| m.rider == rider).map(|m| (m.name.clone(), m.motion.clone(), m.fps, m.looping)).collect()
 }
 
-/// Whether `name` (an animated model's `.mcf`) is one of the pack's riders.
-pub fn is_rider(name: &str) -> bool {
-    animated(name).is_some_and(|(template, _)| template.ends_with("Rider.mcf"))
+/// One of the pack's own motions.
+struct OwnMotion {
+    name: String,
+    fps: f32,
+    looping: bool,
+    rider: bool,
+    motion: mm2_formats::anim::Motion,
+}
+
+/// The pack's own motions, read once from `free_motions.bin` (made by
+/// `tools/freepack/free_motions.py`; see there for the layout).
+fn own_table() -> &'static [OwnMotion] {
+    static TABLE: std::sync::OnceLock<Vec<OwnMotion>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| read_own(include_bytes!("free_motions.bin")).unwrap_or_default())
+}
+
+fn read_own(data: &[u8]) -> Option<Vec<OwnMotion>> {
+    if data.get(..4)? != b"FPMO" {
+        return None;
+    }
+    let mut at = 4usize;
+    let mut take = |n: usize| -> Option<&[u8]> {
+        let b = data.get(at..at + n)?;
+        at += n;
+        Some(b)
+    };
+    let count = u16::from_le_bytes(take(2)?.try_into().ok()?);
+    let mut out = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        let len = take(1)?[0] as usize;
+        let name = String::from_utf8(take(len)?.to_vec()).ok()?;
+        let fps = f32::from_le_bytes(take(4)?.try_into().ok()?);
+        let (looping, rider) = (take(1)?[0] != 0, take(1)?[0] != 0);
+        let frames = u16::from_le_bytes(take(2)?.try_into().ok()?) as usize;
+        let keys = take(1)?[0] as usize;
+        let mut motion = mm2_formats::anim::Motion { frames: Vec::with_capacity(frames) };
+        for _ in 0..frames {
+            let mut list = Vec::with_capacity(keys);
+            for _ in 0..keys {
+                let b = take(19)?;
+                let q = |i: usize| i16::from_le_bytes([b[1 + 2 * i], b[2 + 2 * i]]) as f32;
+                let axis = |i: usize| [q(i) / 30000.0, q(i + 1) / 30000.0, q(i + 2) / 30000.0];
+                list.push(mm2_formats::anim::Key {
+                    frame: b[0] as usize,
+                    look: axis(0),
+                    up: axis(3),
+                    position: [q(6) / 1000.0, q(7) / 1000.0, q(8) / 1000.0],
+                });
+            }
+            motion.frames.push(list);
+        }
+        out.push(OwnMotion { name, fps, looping, rider, motion });
+    }
+    Some(out)
+}
+
+/// The tricks for the pack's own riders, as the race reads them: each
+/// trick's own motion with its frames a second and length (no bike
+/// motion: the bike holds still under the rider).
+pub fn own_tricks() -> Vec<Option<crate::race::TrickMotion>> {
+    let names = mm2_physics::stunt::TRICKS
+        .iter()
+        .map(|t| t.to_string())
+        .chain(mm2_physics::stunt::TRICKS.iter().map(|t| format!("{t}Alt")));
+    names
+        .map(|name| {
+            let m = own_table().iter().find(|m| m.rider && m.name.eq_ignore_ascii_case(&name))?;
+            Some(crate::race::TrickMotion {
+                rider: m.name.clone(),
+                bike: String::new(),
+                fps: m.fps,
+                frames: m.motion.frames.len() as i32,
+            })
+        })
+        .collect()
+}
+
+/// Whether `name` (an animated model's `.mcf`) is one of the pack's
+/// riders (`Some(true)`) or bikes (`Some(false)`), as the game drives them.
+pub fn ridden(name: &str) -> Option<bool> {
+    match animated(name)?.0 {
+        "Rider.mcf" | crate::podium::WINNER => Some(true),
+        "Bike.mcf" => Some(false),
+        _ => None,
+    }
 }
 
 /// Whether `name` is one of the pack's liveries or outfits.
@@ -872,6 +928,21 @@ pub fn ui_rect(stem: &str, name: &str) -> Option<[i32; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn own_motions_cover_riding_crashes_and_tricks() {
+        let rider = own_motions(true);
+        for name in ["LeanR02", "Turn2D", "CrosOv2", "Endo", "Kahuna", "Fall01", "HeadHit", "SuperMan", "BarKneelAlt", "Podium3_02", "Podium4_01", "Podium5_03"] {
+            assert!(rider.iter().any(|m| m.0 == name), "{name}");
+        }
+        assert!(rider.iter().filter(|m| m.0 != "BackUpBottom").all(|m| m.1.frames.iter().all(|f| f.len() == 16)));
+        assert!(own_motions(false).iter().any(|m| m.0 == "BTurn2D"));
+        let tricks = own_tricks();
+        assert_eq!(tricks.len(), 32);
+        assert_eq!(tricks.iter().flatten().count(), 22);
+        let kneel = tricks[0].as_ref().unwrap();
+        assert_eq!((kneel.fps, kneel.frames), (18.0, 30));
+    }
 
     #[test]
     fn reads_the_stockmap() {
