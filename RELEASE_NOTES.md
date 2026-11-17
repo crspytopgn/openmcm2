@@ -1,4 +1,45 @@
-# OpenMCM2 0.5.5
+# OpenMCM2 0.6.0
+
+A big one. You can now build your own tracks, and play without a copy of
+the original game.
+
+## New in 0.6.0
+
+* **Course Builder:** make your own tracks right in the game. It's on the
+  main menu (and on the launcher's Play page). Draw the line, add jumps,
+  whoops and rhythm sections, shape and paint the ground with sand or mud,
+  place bales, tents and trailers, then press **Ride it** and race it.
+  *Surprise me* makes a whole track in one click, and *Edit a copy* starts
+  from any track you already have without changing the original. It works
+  with a mouse, a game pad or a Steam Deck, and in the browser too. Don't
+  want it on the menu? Turn it off in the launcher's Extras.
+* **Free graphics (the Free Pack):** a whole new set of art made for
+  OpenMCM2: bikes and riders, a supercross stadium, 28 new tracks across
+  every event, skies, trees, vehicles and aircraft, with real engine sounds
+  for each class. It's all our own work or openly licensed, so it's free
+  for anyone. The launcher and the browser page now ask **MM2 graphics or
+  free graphics?** and download the pack for you. Updates fetch only the
+  parts that changed. Early days: without MM2 files, the free graphics
+  open in the Course Builder for now. Full races and menus with the free
+  art are on the way.
+* **Night races under stadium lights:** pick Night as the time of day and
+  supercross stadiums are lit by their own lamp banks, with soft shadows
+  from each bank (Enhanced switch "Stadium lights at night").
+* **Faster and smaller:** the downloads shrank (game 45 to 30 MB, launcher
+  21 to 14 MB, browser 13.7 to 11.8 MB). Auto graphics now adjusts the 3D
+  resolution while you race to hold a smooth frame rate, Low uses simpler
+  shadow edges, and tracks with lots of ground textures now load in
+  browsers.
+* **Clear loading screens in the browser:** the page shows each step as it
+  loads, with a progress bar, and if something goes wrong it says what and
+  what to try, in plain words.
+* **New look:** a new number-plate logo, app icon and a fresh style for the
+  site and launcher.
+* **Fixes:** keys no longer stay held when the game loses focus, time spent
+  down after a crash no longer counts against lap leaderboard times, a
+  small dead centre stops stick drift leaning the rider, smoother crash
+  falls, roomier speedo numbers, clearer picture extras, and the Controls
+  page shows your pad's own button names.
 
 ## New in 0.5.5
 

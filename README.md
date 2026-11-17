@@ -25,7 +25,7 @@ whoops and rhythm sections, paint sand and mud, add bales, tents and
 trailers, then press **Ride it** and you're racing your own track. *Surprise
 me* makes a whole track in one click, and you can start from a copy of any
 track you already have. It's free, works with either set of graphics, and
-runs in the browser too. (A switch in Options turns the menu entry off.)
+runs in the browser too. (A switch in the launcher's Extras takes it off the menu.)
 
 ## No copy of MM2? Play with the free graphics
 
