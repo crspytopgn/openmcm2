@@ -49,6 +49,15 @@ put(rim, 0.38, 0.9)                                                         # an
 put(tyre, 0.86, 0.0)                                                        # rubber
 put(seat, 0.72, 0.0)                                                        # seat cover
 put(paint, 0.30, 0.0)                                                       # glossy plastics
+TAGS = open(D + 'tags.txt').read().split() if os.path.exists(D + 'tags.txt') else []
+TG = np.rint(L('node')[..., 1]).astype(int) * cov if TAGS else np.zeros(cov.shape, int)
+TAGMR = {'tyre': (0.86, 0), 'anod': (0.36, 0.9), 'anod2': (0.32, 0.9), 'alu': (0.30, 1), 'alu_cast': (0.55, 0.85), 'alu_anod': (0.34, 0.9),
+         'gold': (0.16, 1), 'chrome': (0.06, 1), 'disc': (0.32, 1), 'sprocket': (0.42, 1), 'steel': (0.24, 1), 'spring': (0.38, 0.15),
+         'caliper': (0.48, 0.85), 'paint': (0.30, 0)}
+tg = {t_: (TG == i + 1).astype(np.float32) for i, t_ in enumerate(TAGS)}
+for t_, m_ in tg.items(): put(m_, *TAGMR.get(t_, (0.5, 0.5)))
+if TAGS:   # the old wheel rules don't apply to modelled wheels
+    tyre = tg.get('tyre', 0 * tyre); rim = tg.get('anod', 0 * rim)
 R = R + (noise(40) - 0.5) * 0.08 * (1 - tyre)                               # a little variation everywhere
 # ---- height detail (metres-ish units, small): grip seat, rubber, casting grain, plastic grain
 H = np.zeros_like(R)
@@ -58,6 +67,8 @@ H += tyre * (noise(260, 2) - 0.5) * 0.5
 H += fixed * (1 - tyre) * (1 - seat) * (1 - bright) * (noise(500, 2) - 0.5) * 0.35   # casting / coating grain
 H += paint * (noise(120, 2) - 0.5) * 0.06
 H += (1 - paint) * bright * (noise(900, 1) - 0.5) * 0.10                    # fine brushing
+for t_ in ('alu_cast', 'caliper'):
+    if t_ in tg: H += tg[t_] * (noise(500, 2) - 0.5) * 0.35                  # casting grain on modelled parts
 # tangent-space normal from the height's gradient in texture space, cut at island edges
 hx = np.zeros_like(H); hy = np.zeros_like(H)
 dxp = np.linalg.norm(X[:, 1:] - X[:, :-1], axis=-1); okx = cov[:, 1:] & cov[:, :-1] & (dxp < 0.01)

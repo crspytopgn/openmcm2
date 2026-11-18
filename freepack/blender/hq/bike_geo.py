@@ -19,7 +19,7 @@ def tyre(c, R, Rbead, width, node, rear=False):
             (Rbead + 0.02, w * 0.62), (Rbead + 0.006, w * 0.47), (Rbead - 0.004, w * 0.42)]
     car = lathe(prof, c, (1, 0, 0), 72, "tyre", "tyre", node)
     # knobs
-    rows = 46 if rear else 40
+    rows = 72 if rear else 64
     verts = []; faces = []
     def knob(theta, xo, wid, lng, h, tilt=0.0, ang=0.0):
         # place on surface: radius at xo from profile
@@ -48,12 +48,12 @@ def tyre(c, R, Rbead, width, node, rear=False):
     for i in range(rows):
         th = 2 * math.pi * i / rows
         if i % 2 == 0:
-            knob(th, 0.0, w * 0.55, 0.022, 0.013)
-            knob(th, w * 0.80, w * 0.34, 0.022, 0.012, tilt=0.55, ang=0.15)
-            knob(th, -w * 0.80, w * 0.34, 0.022, 0.012, tilt=0.55, ang=-0.15)
+            knob(th, 0.0, w * 0.50, 0.019, 0.014)
+            knob(th, w * 0.80, w * 0.32, 0.019, 0.013, tilt=0.55, ang=0.15)
+            knob(th, -w * 0.80, w * 0.32, 0.019, 0.013, tilt=0.55, ang=-0.15)
         else:
-            knob(th, w * 0.42, w * 0.36, 0.020, 0.013, tilt=0.15)
-            knob(th, -w * 0.42, w * 0.36, 0.020, 0.013, tilt=0.15)
+            knob(th, w * 0.42, w * 0.34, 0.018, 0.014, tilt=0.15)
+            knob(th, -w * 0.42, w * 0.34, 0.018, 0.014, tilt=0.15)
             if rear:
                 knob(th + math.pi / rows, w * 0.97, w * 0.22, 0.018, 0.010, tilt=0.95)
                 knob(th + math.pi / rows, -w * 0.97, w * 0.22, 0.018, 0.010, tilt=0.95)

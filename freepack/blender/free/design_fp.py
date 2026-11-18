@@ -39,7 +39,26 @@ for k in range(len(names)):
     dd, _ = t.query(q, distance_upper_bound=0.025)
     m = np.zeros_like(pm); m[dst] = np.isfinite(dd)
     pm |= m
+# modelled parts (hd_fix.py) carry a part tag in the node bake's G channel: paint them by part, not by rules
+TAGS = open(D + 'tags.txt').read().split() if os.path.exists(D + 'tags.txt') else []
+TG = np.rint(L('node')[..., 1]).astype(int) * cov if TAGS else np.zeros(cov.shape, int)
+TAGGED = TG > 0
+if TAGS: pm = np.where(TAGGED, TG == TAGS.index('paint') + 1, pm)
 painted = nd.gaussian_filter(pm.astype(np.float32), 0.6) * cov
+if TAGS: painted = np.where(TAGGED, (TG == TAGS.index('paint') + 1).astype(np.float32), painted)
+if b == 'hq':
+    # the HD bike's old liveries also coloured its frame and engine bits: keep paint to the plastics
+    u_ = np.array([0, 0.283 - 0.688, 1.103 - 0.343]); u_ /= np.linalg.norm(u_)
+    perp_ = (y - 0.688) * u_[2] - (z - 0.343) * u_[1]
+    allow = N('Bike') * np.maximum(band(y, -0.12, 0.52, 0.02) * ss(0.60, 0.65, z), band(y, -1.20, -0.20, 0.02) * ss(0.56, 0.61, z))
+    allow = np.maximum(allow, N('HandleBars') * np.maximum(ss(0.40, 0.46, y), ss(0.04, 0.07, perp_) * band(z, 0.84, 1.32, 0.02)))
+    allow = np.maximum(allow, N('HandleBars') * PLATE)
+    pa = (painted > 0.5) & (allow > 0.5)
+    for k_ in (names.index('Bike'), names.index('HandleBars')):   # close the gaps where the old graphics were black
+        msk = ND == k_
+        pa |= nd.binary_closing(pa & msk, iterations=6) & msk & (allow > 0.5) & cov
+    painted = nd.gaussian_filter(pa.astype(np.float32), 0.6) * cov
+    if TAGS: painted = np.where(TAGGED, (TG == TAGS.index('paint') + 1).astype(np.float32), painted)
 lum = old['white'].mean(-1)
 # --- fixed parts
 base = old['white'].copy()
@@ -57,6 +76,13 @@ seat = N('Bike') * band(y, -0.86, -0.03, 0.01) * ss(0.84, 0.87, z) * (1 - ss(0.1
 seat = (nd.grey_closing(seat, size=5) > 0.5).astype(np.float32)
 painted = painted * (1 - seat)
 base = base * (1 - seat[..., None]) + np.array([0.035, 0.035, 0.04]) * seat[..., None]
+TAGCOL = {'tyre': (0.032, 0.032, 0.034), 'anod': (0.05, 0.05, 0.055), 'anod2': (0.055, 0.055, 0.06), 'alu': (0.78, 0.78, 0.79),
+          'alu_cast': (0.56, 0.56, 0.57), 'alu_anod': (0.14, 0.14, 0.15), 'gold': (0.80, 0.60, 0.27), 'chrome': (0.90, 0.90, 0.90),
+          'disc': (0.60, 0.60, 0.62), 'sprocket': (0.50, 0.50, 0.52), 'steel': (0.62, 0.62, 0.64), 'spring': (0.72, 0.12, 0.07),
+          'caliper': (0.52, 0.52, 0.53), 'paint': (0.8, 0.8, 0.8)}
+for i, t_ in enumerate(TAGS):
+    m_ = TG == i + 1
+    if m_.any(): base[m_] = TAGCOL.get(t_, (0.5, 0.5, 0.5))
 # --- paint layers inside the painted plastics: main P, white boards S
 S = np.zeros_like(lum)
 u = np.array([0, HPy - FA[0], HPz - FA[1]]); Lf = np.linalg.norm(u); u /= Lf
@@ -71,7 +97,7 @@ rear_tip = N('Bike') * (1 - ss(-1.12, -1.08, y))
 S = np.maximum(S, np.maximum(fender_tip, rear_tip))
 fork_guard = N('Shocks') * band(t, 0.04, 0.40, 0.01)
 S = np.maximum(S, fork_guard)
-BRD = dict(mx2=(-0.68, -0.34, 0.64, 0.84), enduro=(-0.66, -0.42, 0.68, 0.79))[b]
+BRD = dict(mx2=(-0.68, -0.34, 0.64, 0.84), enduro=(-0.66, -0.42, 0.68, 0.79), hq=(-0.68, -0.36, 0.64, 0.84))[b]
 board = N('Bike') * band(y, BRD[0], BRD[1], 0.006) * band(z - 0.18 * (y - BRD[1]), BRD[2], BRD[3], 0.006) * ss(0.075, 0.09, ax)
 S = np.maximum(S, np.maximum(PLATE * N('HandleBars'), board)) * painted; P = painted * (1 - S)
 aos = nd.gaussian_filter(ao, 1.5)

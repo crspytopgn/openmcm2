@@ -26,6 +26,22 @@ for o in meshes:
     for f in me.polygons:
         if f.material_index in pl: flag[f.index] = True; f.material_index = li
     o['plate'] = flag.tolist()
+# TAGS=npz (from hd_fix.py): modelled parts carry a part tag (G channel of the node bake, 0 = none)
+TG = np.load(os.environ['TAGS']) if os.environ.get('TAGS') else None
+if TG is not None:
+    from scipy.spatial import cKDTree
+    kd = cKDTree(TG['cent']); PAINT_T = list(TG['tags']).index('paint') + 1
+    open(os.path.join(out, 'tags.txt'), 'w').write('\n'.join(TG['tags']))
+for o in meshes:
+    me = o.data; W = o.matrix_world
+    tg = np.zeros(len(me.polygons), np.int32)
+    if TG is not None:
+        Pv = np.array([tuple(W @ v.co) for v in me.vertices]) / 3.355
+        d, i = kd.query(Pv); vt = np.where(d < 1e-4, TG['tid'][i] + 1, 0)
+        for f in me.polygons:   # a face of a modelled part has every corner on it
+            c_ = vt[list(f.vertices)]
+            if (c_ > 0).all(): tg[f.index] = np.bincount(c_).argmax()
+    o['tg'] = tg.tolist()
 for o in meshes:
     me = o.data; k = names.index(o.name.split('.')[0]); W = o.matrix_world
     P = np.array([tuple(W @ v.co) for v in me.vertices], np.float32) / 3.355
@@ -35,80 +51,84 @@ for o in meshes:
         fl = np.array(o['plate'], bool)
         for f in me.polygons:
             if fl[f.index]: kk[f.loop_start:f.loop_start + f.loop_total] = k + 100
-    b = me.color_attributes.new('nd', 'FLOAT_COLOR', 'CORNER'); b.data.foreach_set('color', np.c_[kk, kk, kk, np.ones(nl)].astype(np.float32).ravel())
+    tl = np.zeros(nl, np.float32); tgf = np.array(o['tg'])
+    for f in me.polygons: tl[f.loop_start:f.loop_start + f.loop_total] = tgf[f.index]
+    b = me.color_attributes.new('nd', 'FLOAT_COLOR', 'CORNER'); b.data.foreach_set('color', np.c_[kk, tl, kk, np.ones(nl)].astype(np.float32).ravel())
     old = me.uv_layers[0]; old.name = 'old'
     new = me.uv_layers.new(name='UVMap'); me.uv_layers.active = new
-# painted ("hot") faces: where the old liveries differ, plates, and the rear side panels; they get far more texture room
-from PIL import Image as PI
-oldimg = {n: np.asarray(PI.open(p).convert('RGB')).astype(np.float32) / 255 for n, p in maps if n in ('blue', 'red', 'white', 'black')}
-HOT_K, COLD_K = float(os.environ.get('HOT_K', 2.4)), float(os.environ.get('COLD_K', 0.8))
-hot = {}
-for o in meshes:
-    me = o.data; W = o.matrix_world
-    uv = np.zeros(len(me.loops) * 2, np.float32); me.uv_layers['old'].data.foreach_get('uv', uv); uv = uv.reshape(-1, 2)
-    fl = np.array(o['plate'], bool) if 'plate' in o.keys() else np.zeros(len(me.polygons), bool)
-    h = np.zeros(len(me.polygons), bool); dv = np.zeros(len(me.polygons), np.float32)
-    for f in me.polygons:
-        mt = me.materials[f.material_index] if f.material_index < len(me.materials) else None
-        if not (mt and mt.name in texmat): continue
-        if fl[f.index]: h[f.index] = True; continue
-        lu = uv[f.loop_start:f.loop_start + f.loop_total]; cu = lu.mean(0)
-        pts = [cu] + [cu * 0.4 + p * 0.6 for p in lu]
-        def px(im, u):
-            R0 = im.shape[0]; return im[int(np.clip((1 - u[1] % 1) * R0, 0, R0 - 1)), int(np.clip((u[0] % 1) * R0, 0, R0 - 1))]
-        ds = []
-        for u in pts:
-            d = 0
-            if 'blue' in oldimg and 'red' in oldimg: d = max(d, np.abs(px(oldimg['blue'], u) - px(oldimg['red'], u)).max())
-            if 'white' in oldimg and 'black' in oldimg: d = max(d, np.abs(px(oldimg['white'], u) - px(oldimg['black'], u)).max())
-            ds.append(d)
-        d = float(np.median(ds)); dv[f.index] = d
-        c = (W @ f.center) / 3.355                       # metres: x right, y forward, z up (as the pos bake)
-        side = o.name.split('.')[0] == 'Bike' and -0.85 < c.y < -0.25 and 0.58 < c.z < 0.92 and abs(c.x) > 0.075
-        if 'enduro' in dst and c.z > 0.76 and c.y < -0.42: side = False
-        h[f.index] = d > 0.08 or side
-    # tidy by mesh neighbours: fill faces mostly surrounded by plastic, drop lone specks (plates stay)
-    bm = bmesh.new(); bm.from_mesh(me); bm.faces.ensure_lookup_table()
-    nb = [[g.index for e in f.edges for g in e.link_faces if g.index != f.index] for f in bm.faces]; bm.free()
-    tex = np.array([bool(me.materials[f.material_index] and me.materials[f.material_index].name in texmat) if f.material_index < len(me.materials) else False for f in me.polygons])
-    for _ in range(3):
-        fr = np.array([h[n].mean() if len(n) else 0 for n in nb])
-        h = np.where(fl, True, np.where(h, fr >= 0.25, (fr >= 0.6) & (dv > 0.03))) & tex
-    hot[o.name] = h
-    at = me.color_attributes['nd']; v = np.zeros(len(me.loops) * 4, np.float32); at.data.foreach_get('color', v); v = v.reshape(-1, 4)
-    for f in me.polygons:
-        if h[f.index]: v[f.loop_start:f.loop_start + f.loop_total, :3] += 200
-    at.data.foreach_set('color', v.ravel())
-for x in bpy.data.objects: x.select_set(x.type == 'MESH')
-bpy.context.view_layer.objects.active = meshes[0]
-for want in (True, False):
+if not os.environ.get('NOUV'):   # NOUV=1: keep the model's own UVs, just bake on them
+    # painted ("hot") faces: where the old liveries differ, plates, and the rear side panels; they get far more texture room
+    from PIL import Image as PI
+    oldimg = {n: np.asarray(PI.open(p).convert('RGB')).astype(np.float32) / 255 for n, p in maps if n in ('blue', 'red', 'white', 'black')}
+    HOT_K, COLD_K = float(os.environ.get('HOT_K', 2.4)), float(os.environ.get('COLD_K', 0.8))
+    hot = {}
+    for o in meshes:
+        me = o.data; W = o.matrix_world
+        uv = np.zeros(len(me.loops) * 2, np.float32); me.uv_layers['old'].data.foreach_get('uv', uv); uv = uv.reshape(-1, 2)
+        fl = np.array(o['plate'], bool) if 'plate' in o.keys() else np.zeros(len(me.polygons), bool)
+        h = np.zeros(len(me.polygons), bool); dv = np.zeros(len(me.polygons), np.float32)
+        for f in me.polygons:
+            mt = me.materials[f.material_index] if f.material_index < len(me.materials) else None
+            if not (mt and mt.name in texmat): continue
+            if fl[f.index]: h[f.index] = True; continue
+            lu = uv[f.loop_start:f.loop_start + f.loop_total]; cu = lu.mean(0)
+            pts = [cu] + [cu * 0.4 + p * 0.6 for p in lu]
+            def px(im, u):
+                R0 = im.shape[0]; return im[int(np.clip((1 - u[1] % 1) * R0, 0, R0 - 1)), int(np.clip((u[0] % 1) * R0, 0, R0 - 1))]
+            ds = []
+            for u in pts:
+                d = 0
+                if 'blue' in oldimg and 'red' in oldimg: d = max(d, np.abs(px(oldimg['blue'], u) - px(oldimg['red'], u)).max())
+                if 'white' in oldimg and 'black' in oldimg: d = max(d, np.abs(px(oldimg['white'], u) - px(oldimg['black'], u)).max())
+                ds.append(d)
+            d = float(np.median(ds)); dv[f.index] = d
+            c = (W @ f.center) / 3.355                       # metres: x right, y forward, z up (as the pos bake)
+            side = o.name.split('.')[0] == 'Bike' and -0.85 < c.y < -0.25 and 0.58 < c.z < 0.92 and abs(c.x) > 0.075
+            if 'enduro' in dst and c.z > 0.76 and c.y < -0.42: side = False
+            h[f.index] = d > 0.08 or side
+        # tidy by mesh neighbours: fill faces mostly surrounded by plastic, drop lone specks (plates stay)
+        bm = bmesh.new(); bm.from_mesh(me); bm.faces.ensure_lookup_table()
+        nb = [[g.index for e in f.edges for g in e.link_faces if g.index != f.index] for f in bm.faces]; bm.free()
+        tex = np.array([bool(me.materials[f.material_index] and me.materials[f.material_index].name in texmat) if f.material_index < len(me.materials) else False for f in me.polygons])
+        for _ in range(3):
+            fr = np.array([h[n].mean() if len(n) else 0 for n in nb])
+            h = np.where(fl, True, np.where(h, fr >= 0.25, (fr >= 0.6) & (dv > 0.03))) & tex
+        tgf = np.array(o['tg']); h = np.where(tgf > 0, tgf == (PAINT_T if TG is not None else -1), h) & tex
+        hot[o.name] = h
+        at = me.color_attributes['nd']; v = np.zeros(len(me.loops) * 4, np.float32); at.data.foreach_get('color', v); v = v.reshape(-1, 4)
+        for f in me.polygons:
+            if h[f.index]: v[f.loop_start:f.loop_start + f.loop_total, 0] += 200; v[f.loop_start:f.loop_start + f.loop_total, 2] += 200
+        at.data.foreach_set('color', v.ravel())
+    for x in bpy.data.objects: x.select_set(x.type == 'MESH')
+    bpy.context.view_layer.objects.active = meshes[0]
+    for want in (True, False):
+        bpy.ops.object.mode_set(mode='EDIT')
+        for o in meshes:
+            bm = bmesh.from_edit_mesh(o.data); bm.faces.ensure_lookup_table()
+            for f in bm.faces:
+                mt = o.data.materials[f.material_index] if f.material_index < len(o.data.materials) else None
+                f.select = bool(mt and mt.name in texmat) and bool(hot[o.name][f.index]) == want
+            bmesh.update_edit_mesh(o.data)
+        bpy.ops.uv.smart_project(angle_limit=1.15, island_margin=0.004, area_weight=0.0, scale_to_bounds=False, correct_aspect=True)
+        bpy.ops.object.mode_set(mode='OBJECT')
+    # scale the two sets so the painted plastics get HOT_K/COLD_K times the texel density, then pack everything together
+    for o in meshes:
+        me = o.data; uvl = me.uv_layers['UVMap']
+        uv = np.zeros(len(me.loops) * 2, np.float32); uvl.data.foreach_get('uv', uv); uv = uv.reshape(-1, 2)
+        for f in me.polygons:
+            sl = slice(f.loop_start, f.loop_start + f.loop_total)
+            uv[sl] = uv[sl] * (HOT_K if hot[o.name][f.index] else COLD_K) + (0 if hot[o.name][f.index] else 5)
+        uvl.data.foreach_set('uv', uv.ravel())
     bpy.ops.object.mode_set(mode='EDIT')
     for o in meshes:
-        bm = bmesh.from_edit_mesh(o.data); bm.faces.ensure_lookup_table()
+        bm = bmesh.from_edit_mesh(o.data)
         for f in bm.faces:
             mt = o.data.materials[f.material_index] if f.material_index < len(o.data.materials) else None
-            f.select = bool(mt and mt.name in texmat) and bool(hot[o.name][f.index]) == want
+            f.select = bool(mt and mt.name in texmat)
         bmesh.update_edit_mesh(o.data)
-    bpy.ops.uv.smart_project(angle_limit=1.15, island_margin=0.004, area_weight=0.0, scale_to_bounds=False, correct_aspect=True)
+    bpy.ops.uv.select_all(action='SELECT')
+    bpy.ops.uv.pack_islands(rotate=True, margin=0.003, scale=True)
     bpy.ops.object.mode_set(mode='OBJECT')
-# scale the two sets so the painted plastics get HOT_K/COLD_K times the texel density, then pack everything together
-for o in meshes:
-    me = o.data; uvl = me.uv_layers['UVMap']
-    uv = np.zeros(len(me.loops) * 2, np.float32); uvl.data.foreach_get('uv', uv); uv = uv.reshape(-1, 2)
-    for f in me.polygons:
-        sl = slice(f.loop_start, f.loop_start + f.loop_total)
-        uv[sl] = uv[sl] * (HOT_K if hot[o.name][f.index] else COLD_K) + (0 if hot[o.name][f.index] else 5)
-    uvl.data.foreach_set('uv', uv.ravel())
-bpy.ops.object.mode_set(mode='EDIT')
-for o in meshes:
-    bm = bmesh.from_edit_mesh(o.data)
-    for f in bm.faces:
-        mt = o.data.materials[f.material_index] if f.material_index < len(o.data.materials) else None
-        f.select = bool(mt and mt.name in texmat)
-    bmesh.update_edit_mesh(o.data)
-bpy.ops.uv.select_all(action='SELECT')
-bpy.ops.uv.pack_islands(rotate=True, margin=0.003, scale=True)
-bpy.ops.object.mode_set(mode='OBJECT')
 # bake material: emission from attribute / old texture via old UV, into new UV image
 bm_mat = bpy.data.materials.new('bake'); bm_mat.use_nodes = True; nt = bm_mat.node_tree
 origmats = {o.name: [m for m in o.data.materials] for o in meshes}
