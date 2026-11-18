@@ -4,6 +4,10 @@
   ring of tall mountains instead of low hills, and the land between the
   course and the mountains is smoother, with fewer lumps and steps. The
   free tracks rebuild themselves the first time you ride them.
+* **Fixed a crash after long races.** Each new race and lap time made a
+  text picture that was never thrown away, so memory slowly filled up
+  (#80). Smaller leaks in the Course Builder pictures, the menu movies
+  and sounds on computers with no sound device are fixed too.
 
 # OpenMCM2 0.6.5
 
