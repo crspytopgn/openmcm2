@@ -155,7 +155,10 @@ pub fn solids(
     let skip = skip.map(stem_of);
     for p in placements {
         let stem = stem_of(&p.model);
-        if skip.as_deref() == Some(&*stem) {
+        // The Free Pack's start gate is one still model, but it drops as
+        // the original's animated `StartGate` does, and that one is never
+        // solid: as a solid its standing bars pen the riders in.
+        if skip.as_deref() == Some(&*stem) || crate::freepack::is_gate(&p.model) {
             continue;
         }
         let i = match cache.iter().position(|(n, _)| *n == stem) {
