@@ -314,7 +314,8 @@ fn inline_table(value: &str) -> Vec<(String, String)> {
 }
 
 fn parse_rides(text: &str, root: &std::path::Path) -> Rides {
-    parse_rides_for(text, root, cfg!(target_arch = "wasm32"))
+    // The browser, and Low graphics on a computer, ride the lighter models.
+    parse_rides_for(text, root, cfg!(target_arch = "wasm32") || crate::graphics::low_detail())
 }
 
 /// As [`parse_rides`]; `web` loads a ride's lighter `web_model` and

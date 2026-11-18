@@ -195,6 +195,7 @@ const QHD: u32 = 2560 * 1440;
 fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
     match name {
         "low" => {
+            LOW.store(true, Ordering::Relaxed);
             e.msaa = 1;
             e.ao = false;
             e.shafts = false;
@@ -491,6 +492,15 @@ pub fn ray_traced() -> bool {
 
 /// F3's switch: false shows the original look on the enhanced drawing.
 static SHOWING: AtomicBool = AtomicBool::new(true);
+
+/// Whether the Low preset was chosen (by hand or by `quality=auto`): the
+/// free pack's rides then load their lighter models, as in the browser.
+static LOW: AtomicBool = AtomicBool::new(false);
+
+/// See [`LOW`].
+pub fn low_detail() -> bool {
+    LOW.load(Ordering::Relaxed)
+}
 
 /// Turns the upgrades on, before anything is drawn.
 pub fn enable(e: Enhanced) {

@@ -58,16 +58,18 @@ if os.path.exists(os.path.join(HQ, "fp_bike_hq.glb")):
                      f'web_model = "bikes/hq/web/fp_bike_hq.glb", web_livery = "bikes/hq/web/fp_livery_hq_{n}.png", '
                      f'cc = {cc}, four_stroke = false, name = "{n.title()} {cc} HD" }}')
 L += ["", "[riders]"]
-if os.path.exists(os.path.join(B, "riders", "fp_rider.glb")):
+HQ = os.path.join(B, "riders", "hq")
+# The HD rider is the one rider; its low-poly version (web_model) is what the browser and Low graphics load.
+# The old free rider is listed only for a pack without the HD one.
+if os.path.exists(os.path.join(B, "riders", "fp_rider.glb")) and not os.path.exists(os.path.join(HQ, "fp_rider_hq.glb")):
     for o in sorted(p for p in glob.glob(os.path.join(B, "riders", "fp_rider_*.png")) if not p.endswith(".src.png")):
         n = os.path.basename(o)[9:-4]
         L.append(f'fp_rider_{n} = {{ model = "riders/fp_rider.glb", outfit = "riders/fp_rider_{n}.png", name = "{n.title()}" }}')
-HQ = os.path.join(B, "riders", "hq")
 if os.path.exists(os.path.join(HQ, "fp_rider_hq.glb")):
     for o in sorted(glob.glob(os.path.join(HQ, "fp_rider_hq_*.png"))):
         n = os.path.basename(o)[len("fp_rider_hq_"):-4]
         L.append(f'fp_rider_hq_{n} = {{ model = "riders/hq/fp_rider_hq.glb", outfit = "riders/hq/fp_rider_hq_{n}.png", '
-                 f'web_model = "riders/hq/web/fp_rider_hq.glb", web_outfit = "riders/hq/web/fp_rider_hq_{n}.png", name = "{n.title()} HD" }}')
+                 f'web_model = "riders/hq/web/fp_rider_hq.glb", web_outfit = "riders/hq/web/fp_rider_hq_{n}.png", name = "{n.title()}" }}')
 L += ["", "# Stock models with no stand-in yet (large buildings, vehicles, stadium shells):",
       "missing = [" + ", ".join(f'"{m}"' for m in missing) + "]"]
 open(os.path.join(B, "stockmap.toml"), "w").write("\n".join(L) + "\n")
