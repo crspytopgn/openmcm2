@@ -314,6 +314,13 @@ fn inline_table(value: &str) -> Vec<(String, String)> {
 }
 
 fn parse_rides(text: &str, root: &std::path::Path) -> Rides {
+    parse_rides_for(text, root, cfg!(target_arch = "wasm32"))
+}
+
+/// As [`parse_rides`]; `web` loads a ride's lighter `web_model` and
+/// `web_livery` / `web_outfit` where the map gives them (the browser),
+/// under the same names, so races and lobbies match across the two.
+fn parse_rides_for(text: &str, root: &std::path::Path, web: bool) -> Rides {
     let mut rides = Rides::default();
     let mut section = String::new();
     for line in text.lines() {
@@ -330,10 +337,11 @@ fn parse_rides(text: &str, root: &std::path::Path) -> Rides {
         let get = |k: &str| fields.iter().find(|f| f.0 == k).map(|f| f.1.clone());
         let rider = section == "riders";
         let (Some(model), Some(paint)) = (get("model"), get(if rider { "outfit" } else { "livery" })) else { continue };
+        let lighter = |k: &str, full: &String| if web { get(&format!("web_{k}")).unwrap_or_else(|| full.clone()) } else { full.clone() };
         let shape = stem_of(&model);
-        rides.shapes.insert(shape.clone(), (root.join(&model), rider));
+        rides.shapes.insert(shape.clone(), (root.join(lighter("model", &model)), rider));
         let texture = stem_of(&paint);
-        rides.paints.insert(texture.clone(), root.join(&paint));
+        rides.paints.insert(texture.clone(), root.join(lighter(if rider { "outfit" } else { "livery" }, &paint)));
         let name = get("name").unwrap_or_else(|| key.trim().trim_matches('"').to_string());
         if rider {
             rides.outfits.push(Outfit { shape, outfit: texture, name });
@@ -1146,6 +1154,19 @@ mod tests {
         assert_eq!(rides.outfits, vec![Outfit { shape: "fp_rider".into(), outfit: "fp_rider_red".into(), name: "Red".into() }]);
         assert_eq!(rides.shapes["fp_rider"], (std::path::PathBuf::from("/p/riders/fp_rider.glb"), true));
         assert!(rides.paints.contains_key("fp_livery_blue"));
+    }
+
+    #[test]
+    fn the_browser_loads_the_lighter_ride() {
+        let text = "[bikes]\nfp_bike_hq_blue = { model = \"bikes/hq/fp_bike_hq.glb\", livery = \"bikes/hq/fp_livery_hq_blue.png\", web_model = \"bikes/hq/web/fp_bike_hq.glb\", web_livery = \"bikes/hq/web/fp_livery_hq_blue.png\", cc = 250 }\n";
+        for web in [false, true] {
+            let rides = parse_rides_for(text, std::path::Path::new("/p"), web);
+            assert_eq!(rides.bikes[0].shape, "fp_bike_hq");
+            assert_eq!(rides.bikes[0].livery, "fp_livery_hq_blue");
+            let dir = if web { "/p/bikes/hq/web" } else { "/p/bikes/hq" };
+            assert_eq!(rides.shapes["fp_bike_hq"].0, PathBuf::from(format!("{dir}/fp_bike_hq.glb")));
+            assert_eq!(rides.paints["fp_livery_hq_blue"], PathBuf::from(format!("{dir}/fp_livery_hq_blue.png")));
+        }
     }
 
     #[test]
