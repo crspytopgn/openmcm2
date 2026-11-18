@@ -107,7 +107,7 @@ pub struct Options {
 }
 
 impl Default for Options {
-    /// A new profile's: full volume, the chime, 8-bit sound.
+    /// A new profile's: full volume, the chime, 16-bit sound.
     fn default() -> Self {
         Options::from_profile(&crate::profile::SoundOptions::default())
     }

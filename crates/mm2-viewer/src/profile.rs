@@ -82,7 +82,9 @@ impl Default for SoundOptions {
             waypoint_chime: true,
             ui_volume: 100,
             game_volume: 100,
-            sixteen_bit: false,
+            // The original started new profiles on 8-bit, for the slow
+            // machines of 2000; 16-bit costs nothing now and sounds better.
+            sixteen_bit: true,
         }
     }
 }

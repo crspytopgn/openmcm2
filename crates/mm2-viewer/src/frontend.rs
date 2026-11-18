@@ -838,6 +838,13 @@ impl Frontend {
         }
         let mut next = Next::Stay;
         for e in events {
+            // Every screen's Help button: the help page at that screen.
+            if let Event::Clicked(name) = &e {
+                if crate::help::is_help(name) && self.ghost_ask.is_none() {
+                    crate::help::open(&self.help_pack());
+                    continue;
+                }
+            }
             if self.ghost_ask.is_some() {
                 if let Event::Clicked(name) = &e {
                     self.ghost_answer(name);
@@ -902,6 +909,17 @@ impl Frontend {
             Screen::Loading(_) => {}
         }
         Next::Stay
+    }
+
+    /// The dialog Help was pressed on: the single player screen's page,
+    /// else the screen's top dialog.
+    fn help_pack(&mut self) -> String {
+        match &mut self.screen {
+            Screen::Main(d) => d.pack.clone(),
+            Screen::Loading(d) => d.pack.clone(),
+            Screen::Single { page, .. } => page.pack.clone(),
+            Screen::Extra(s) => s.pack(),
+        }
     }
 
     fn sounds(&mut self, audio: &Audio, events: &[Event]) {
@@ -1029,10 +1047,15 @@ impl Frontend {
                     }
                 }
                 "eventtab" | "bikeridertab" | "raceinfotab" => self.show_tab(&name),
-                // The options, at the controls page for Joystick, and back
+                // The options, at the controls page for Joystick or the
+                // Garage for the Bike & Rider page's wrench (Tune), and back
                 // here after.
-                "options" | "joystick" => {
-                    let at = if name == "joystick" { 3 } else { 0 };
+                "options" | "joystick" | "butwrench" => {
+                    let at = match name.as_str() {
+                        "joystick" => 3,
+                        "butwrench" => 5,
+                        _ => 0,
+                    };
                     let mut cx = Cx {
                         ui: &mut self.ui,
                         audio: Some(audio),
@@ -1305,6 +1328,10 @@ impl Frontend {
                     self.paint_on = true;
                 }
             }
+            "editplatenumber" => {
+                self.typing = true;
+                return;
+            }
             other => {
                 let (row, by) = match (other.strip_suffix("left"), other.strip_suffix("right")) {
                     (Some(row), _) => (row, -1),
@@ -1316,10 +1343,6 @@ impl Frontend {
                 };
                 self.paint[i] = step(self.paint[i], crate::freepack::COLOURS.len(), by);
                 self.paint_on = true;
-            }
-            "editplatenumber" => {
-                self.typing = true;
-                return;
             }
         }
         if self.typing {
