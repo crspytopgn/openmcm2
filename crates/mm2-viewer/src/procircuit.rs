@@ -224,8 +224,7 @@ impl Data {
 
 /// The Free Pack's bikes for a career, all on offer from the start.
 fn free_bikes() -> Vec<Item> {
-    crate::freepack::bikes()
-        .iter()
+    crate::freepack::listed_bikes()
         .map(|b| Item {
             maker: crate::roster::FREE_MAKER.into(),
             name: b.name.clone(),
