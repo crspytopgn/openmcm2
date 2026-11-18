@@ -410,6 +410,10 @@ pub struct Planting {
     #[serde(default)]
     pub everywhere: bool,
     pub dabs: Vec<[f32; 2]>,
+    /// Grown by "Dress the scenery" round the line ([`nature::scenery`]),
+    /// so the next press can grow it again round the line as it is then.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto: bool,
 }
 
 /// A river: its middle line, how wide and deep it is, ft. It runs
@@ -770,6 +774,10 @@ impl Course {
             self.name = format!("My {} {rest}", mode.name());
         }
         self.mode = mode;
+        // Dressed scenery grows again for the new land (none in a stadium).
+        if self.plants.iter().any(|p| p.auto) {
+            nature::redress(self);
+        }
         true
     }
 

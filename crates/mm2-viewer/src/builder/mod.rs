@@ -1043,7 +1043,7 @@ impl Builder {
                 _ => {
                     self.remember();
                     let clear = self.nature == NatureMode::Clear;
-                    self.course.plants.push(Planting { flora: self.flora, radius: self.plant_radius, density: self.plant_density, clear, everywhere: false, dabs: vec![[g.x, g.z]] });
+                    self.course.plants.push(Planting { flora: self.flora, radius: self.plant_radius, density: self.plant_density, clear, everywhere: false, dabs: vec![[g.x, g.z]], auto: false });
                     self.drag = Drag::Brush;
                     self.changed();
                 }
@@ -2367,10 +2367,22 @@ impl Builder {
                 self.plant_density = v;
             }
         }
+        let stadium = self.course.mode == Mode::Supercross;
+        let tip = if stadium {
+            "Grows grass, bushes and trees round the track by itself. Not inside a stadium: change the race kind to outdoors first."
+        } else {
+            "Grows the land round your track by itself: tall grass along the edges, bushes just off the line and groves of trees further out. Press again after changing the track to grow it round the new line. Your own planting and clearing stay."
+        };
+        if p.button(input, "pldress", [left, *y, col, 22.0], "Dress the scenery", tip, false) && !stadium {
+            self.remember();
+            mm2_course::nature::redress(&mut self.course);
+            self.changed();
+        }
+        *y += 28.0;
         let half = col / 2.0 - 1.0;
         if p.button(input, "plall", [left, *y, half, 20.0], "Cover the land", "Grows the chosen plants over the whole land at this density, off the track. Paint or clear on top after.", false) {
             self.remember();
-            self.course.plants.push(Planting { flora: self.flora, radius: 0.0, density: self.plant_density, clear: false, everywhere: true, dabs: Vec::new() });
+            self.course.plants.push(Planting { flora: self.flora, radius: 0.0, density: self.plant_density, clear: false, everywhere: true, dabs: Vec::new(), auto: false });
             self.changed();
         }
         if p.button(input, "plnone", [left + half + 2.0, *y, half, 20.0], "Clear all", "Takes every plant away. Undo brings them back.", false) {
