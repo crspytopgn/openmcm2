@@ -779,6 +779,10 @@ async function start(list) {
     at.step = "saves";
     loader.step("saves");
     await fs.loadUser().catch((e) => console.warn("saves not read", e));
+    // The saves (profiles, careers, records, replays, tracks) live in this
+    // browser's storage: asking for it to be kept stops the browser
+    // clearing it to free space, or (Safari) after a week away.
+    navigator.storage?.persist?.().catch(() => {});
     addTracks();
     setLookInAddress();
     at.step = "engine";

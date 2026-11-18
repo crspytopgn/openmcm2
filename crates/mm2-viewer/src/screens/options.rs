@@ -1595,7 +1595,7 @@ impl Screen for Options {
                     self.open_restore(cx);
                     return Go::Stay;
                 }
-                // The help file is WinHelp, which no system opens now.
+                // Help opens our help page (crate::help), before this.
                 "help" => return Go::Stay,
                 _ => {}
             }

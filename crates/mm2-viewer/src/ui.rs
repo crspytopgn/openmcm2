@@ -965,6 +965,12 @@ struct List {
     lines: [f32; 3],
     rows: usize,
     hover: Option<usize>,
+    /// The list's scroll bar, x, y, width, height (no width while all
+    /// its lines fit), and its thumb's height.
+    bar: [f32; 4],
+    thumb: f32,
+    /// While the thumb is held: where on it the pointer took it.
+    grab: Option<f32>,
 }
 
 /// The height of a line in an open drop-down list (the dialogs' 15 pixel
@@ -1422,6 +1428,10 @@ impl Dlg {
     }
 
     pub fn mouse_move(&mut self, x: f32, y: f32) -> Vec<Event> {
+        if let Some(l) = self.list.filter(|l| l.grab.is_some()) {
+            self.drag_list(l, y);
+            return Vec::new();
+        }
         if let Some(line) = self.list_line(x, y) {
             if let Some(l) = &mut self.list {
                 l.hover = line;
@@ -1447,6 +1457,16 @@ impl Dlg {
     }
 
     pub fn mouse_down(&mut self, x: f32, y: f32) {
+        // An open list's scroll bar: the thumb is taken where it was
+        // pressed, the bar elsewhere brings the thumb's middle there.
+        if let Some(mut l) = self.list.filter(|l| on_bar(l, x, y)) {
+            let top = self.list_thumb_y(&l);
+            l.grab = Some(if y >= top && y < top + l.thumb { y - top } else { l.thumb / 2.0 });
+            self.list = Some(l);
+            self.drag_list(l, y);
+            self.pressed = None;
+            return;
+        }
         self.pressed = if self.list.is_some() {
             None
         } else {
@@ -1466,13 +1486,58 @@ impl Dlg {
         }
     }
 
-    /// Scrolls an open list.
+    /// Scrolls an open list, else the list (or its scroll bar) under the
+    /// pointer.
     pub fn wheel(&mut self, lines: i32) {
+        if lines == 0 {
+            return;
+        }
         if let Some(l) = self.list {
             let ctl = &mut self.ctls[l.control];
             let most = ctl.items.len().saturating_sub(l.rows);
             ctl.scroll = (ctl.scroll as i32 - lines).clamp(0, most as i32) as usize;
+            return;
         }
+        let (x, y) = self.pointer;
+        let under = (0..self.ctls.len()).rev().find(|&i| {
+            let c = &self.dialog.controls[i];
+            let [rx, ry, rw, rh] = self.rect(i);
+            matches!(c.kind, Kind::ListBox | Kind::VScrollBar)
+                && self.showing(i)
+                && x >= rx
+                && y >= ry
+                && x < rx + rw
+                && y < ry + rh
+        });
+        let Some(i) = under else { return };
+        let group = attach(&self.dialog.controls[i]);
+        let scrolls = self.group_lists(group).any(|i| {
+            let rows = (self.rect(i)[3] / self.line(i)).floor() as usize;
+            self.ctls[i].items.len() > rows
+        });
+        if scrolls && (self.dialog.controls[i].kind == Kind::ListBox || self.follows(i).is_some()) {
+            self.scroll_group(group, -lines);
+        }
+    }
+
+    /// The top of an open list's thumb.
+    fn list_thumb_y(&self, l: &List) -> f32 {
+        let ctl = &self.ctls[l.control];
+        let travel = (l.bar[3] - l.thumb).max(0.0);
+        let most = ctl.items.len().saturating_sub(l.rows).max(1) as f32;
+        l.bar[1] + travel * ctl.scroll as f32 / most
+    }
+
+    /// Scrolls an open list to its thumb held at `y`.
+    fn drag_list(&mut self, l: List, y: f32) {
+        let travel = (l.bar[3] - l.thumb).max(0.0);
+        let ctl = &mut self.ctls[l.control];
+        let most = ctl.items.len().saturating_sub(l.rows);
+        if travel <= 0.0 || most == 0 {
+            return;
+        }
+        let top = y - l.grab.unwrap_or(l.thumb / 2.0) - l.bar[1];
+        ctl.scroll = ((top / travel).clamp(0.0, 1.0) * most as f32).round() as usize;
     }
 
     /// Whether a drop-down list is open (it takes the clicks).
@@ -1486,6 +1551,12 @@ impl Dlg {
 
     pub fn mouse_up(&mut self, x: f32, y: f32) -> Vec<Event> {
         let mut events = Vec::new();
+        // Letting go of an open list's scroll bar leaves the list open.
+        if let Some(mut l) = self.list.filter(|l| l.grab.is_some()) {
+            l.grab = None;
+            self.list = Some(l);
+            return events;
+        }
         if let Some(i) = self.dragging.take() {
             self.pressed = None;
             let name = self.dialog.controls[i].name.clone();
@@ -1542,9 +1613,12 @@ impl Dlg {
         match c.kind {
             Kind::MultiState => self.ctls[h].on = !self.ctls[h].on,
             Kind::RadioButton => {
-                if let Some(group) = c.props.int("GroupId") {
+                // The dialogs tie a set of radio buttons together with
+                // `AttachId` (`GroupId` in a few): picking one clears the
+                // others, so only one of 8-bit and 16-bit is ever on.
+                if let Some(group) = radio_group(c) {
                     for (o, ctl) in self.dialog.controls.iter().zip(&mut self.ctls) {
-                        if o.props.int("GroupId") == Some(group) {
+                        if o.kind == Kind::RadioButton && radio_group(o) == Some(group) {
                             ctl.on = false;
                         }
                     }
@@ -1560,6 +1634,9 @@ impl Dlg {
                     lines: [0.0; 3],
                     rows: 0,
                     hover: None,
+                    bar: [0.0; 4],
+                    thumb: 0.0,
+                    grab: None,
                 });
             }
             Kind::ListBox => {
@@ -2344,6 +2421,7 @@ impl Dlg {
         ctl.scroll = ctl.scroll.min(ctl.items.len().saturating_sub(rows));
         let ctl = &self.ctls[l.control];
         let mut lines_w = w;
+        let (mut bar, mut thumb_h) = ([0.0; 4], 0.0);
         if ctl.items.len() > rows {
             if let Some(t) = c
                 .anim("AnimScrollBack")
@@ -2362,9 +2440,13 @@ impl Dlg {
                     let ty = y + travel * ctl.scroll as f32 / most;
                     gfx.sprites
                         .image(thumb, x + lines_w + (sw as f32 - tw as f32) / 2.0, ty);
+                    bar = [x + lines_w, y, sw as f32, sh as f32];
+                    thumb_h = th as f32;
                 }
             }
         }
+        l.bar = bar;
+        l.thumb = thumb_h;
         l.lines = [x, y + 1.0, lines_w];
         l.rows = rows;
         self.list = Some(l);
@@ -2455,6 +2537,18 @@ impl Dlg {
             colour,
         );
     }
+}
+
+/// Whether `(x, y)` is on an open list's scroll bar.
+fn on_bar(l: &List, x: f32, y: f32) -> bool {
+    let [bx, by, bw, bh] = l.bar;
+    bw > 0.0 && x >= bx && x < bx + bw && y >= by && y < by + bh
+}
+
+/// The set of radio buttons a radio button belongs to: its `AttachId`,
+/// else its `GroupId`.
+fn radio_group(c: &Control) -> Option<i32> {
+    attach(c).or_else(|| c.props.int("GroupId").filter(|&g| g != 0))
 }
 
 /// The list group a control belongs to (`AttachId`).

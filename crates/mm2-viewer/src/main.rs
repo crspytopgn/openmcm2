@@ -51,6 +51,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod free_text;
+mod help;
 mod addons;
 mod ibl;
 mod pace;
@@ -703,6 +704,10 @@ fn main() -> Result<(), BoxError> {
             if let (Some(rec), Some(out)) = (rec, flag("--record")) {
                 crate::fs::write(out, rec.finish().write())?;
                 eprintln!("wrote the tape to {out}");
+            }
+            {
+                let me = &r.racers[r.player];
+                eprintln!("laps {:?}, off the course {:?}", me.lap_times, me.lap_off);
             }
             let b = &r.racers[r.player].bike;
             let at = b.position();
@@ -3803,6 +3808,30 @@ async fn menu_screenshot(
             front.key(&audio, code);
             continue;
         }
+        // `wheel:N` turns the wheel N lines (up is positive).
+        if let Some(n) = click.strip_prefix("wheel:").and_then(|n| n.trim().parse::<i32>().ok()) {
+            front.wheel(n);
+            continue;
+        }
+        // `drag:x,y,x2,y2` presses at x,y, moves to x2,y2 and lets go.
+        if let Some(d) = click.strip_prefix("drag:") {
+            let v: Vec<f32> = d.split(',').filter_map(|t| t.trim().parse().ok()).collect();
+            let [x, y, x2, y2] = v[..] else { return Err("--clicks drag wants x,y,x2,y2".into()) };
+            let mut gfx = ui::Gfx {
+                sprites: &mut sprites,
+                device: &device,
+                queue: &queue,
+            };
+            front.draw(&mut gfx, now, 0.0);
+            sprites.discard();
+            front.mouse_move(&audio, x, y);
+            front.mouse_down(x, y);
+            front.mouse_move(&audio, (x + x2) / 2.0, (y + y2) / 2.0);
+            front.mouse_move(&audio, x2, y2);
+            front.mouse_up(&audio, x2, y2, now);
+            now += 1.0;
+            continue;
+        }
         // `move:x,y` rests the pointer there without clicking.
         let (hover, click) = match click.strip_prefix("move:") {
             Some(c) => (true, c),
@@ -6055,10 +6084,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } if self.in_menus() => {
-                let lines = match delta {
-                    winit::event::MouseScrollDelta::LineDelta(_, y) => y.round() as i32,
-                    winit::event::MouseScrollDelta::PixelDelta(p) => (p.y / 15.0).round() as i32,
-                };
+                let lines = menu_wheel_lines(delta);
                 if let Some(f) = &mut self.front {
                     f.wheel(lines);
                 }
@@ -6433,4 +6459,28 @@ fn window_icon() -> Option<winit::window::Icon> {
     let info = reader.next_frame(&mut buf).ok()?;
     buf.truncate(info.buffer_size());
     winit::window::Icon::from_rgba(buf, info.width, info.height).ok()
+}
+
+thread_local! {
+    /// The part of a line the menus' wheel has turned and not yet scrolled.
+    static MENU_WHEEL: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
+}
+
+/// How many lines a turn of the wheel scrolls the menus' lists, keeping
+/// the part of a line left over: a Mac's wheel and trackpad send small
+/// parts of a line (once rounded to nothing), and a browser sends about
+/// 100 pixels a notch (once seven lines).
+fn menu_wheel_lines(delta: winit::event::MouseScrollDelta) -> i32 {
+    let turn = match delta {
+        winit::event::MouseScrollDelta::LineDelta(_, y) => y,
+        winit::event::MouseScrollDelta::PixelDelta(p) => p.y as f32 / 40.0,
+    };
+    MENU_WHEEL.with(|w| {
+        // A turn the other way starts afresh.
+        let mut total = if w.get() * turn < 0.0 { turn } else { w.get() + turn };
+        let lines = total.trunc();
+        total -= lines;
+        w.set(total);
+        lines as i32
+    })
 }
