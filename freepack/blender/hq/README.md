@@ -28,3 +28,12 @@ versions in `web/`. `tools/stockmap.py` adds the entries.
    `.base.png`, `fp_livery_hq.mask.png` and `.base.png`). The Kit & Paint
    page mixes any kit, trim, helmet and bike colours from these in game.
    The helmet mask is the head part of the rider's paint (`kit_helmet.png`).
+8. `hd_fix.py` (2026-11-18) swaps the TRELLIS fork, rear shock, wheels and
+   axle ends for clean modelled ones from `bike_geo.py`, and writes the new
+   parts' tags. `../free/uv_rebake.py` with `TAGS=` gives the bike fresh UVs
+   (4K) and bakes each part's tag; `../free/design_fp.py hq` and
+   `design_mat.py hq` paint it by part and write its metal/roughness and
+   normal maps. The browser and Low version is `lod.py ... 0.3
+   TireFront,TireRear,Shocks` (the modelled parts stay whole) with the
+   PC paints at 1K. In the lists it is the Ironbark; the free MX bike is the
+   Ridgeback.

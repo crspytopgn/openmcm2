@@ -37,37 +37,43 @@ src = tomllib.load(open(os.path.join(HERE, "sources.toml"), "rb"))
 for n in src["sky"]:
     s = n.lower(); L.append(f'"{s}.cub" = [' + ", ".join(f'"skies/sky-{s}-{i}.png"' for i in range(6)) + "]")
 L += ["", "[bikes]"]
-# which bike shape rides in which class: the MX two-stroke for 125/250/500, the enduro four-stroke for 400/600
-LINEUP = {"mx2": ((125, False), (250, False), (500, False)), "enduro": ((400, True), (600, True))}
-for m, classes in LINEUP.items():
-    if not os.path.exists(os.path.join(B, "bikes", f"fp_bike_{m}.glb")): continue
+# Two made-up models for the two-strokes (125/250/500): the Ridgeback (the free
+# MX bike) and the Ironbark (the high-detail one, blender/hq), plus the Drover
+# four-stroke for 400/600. The menus list one of each model and size; the other
+# colours (grid_only) paint the computer riders, and the player picks colours
+# on the Kit & Paint page.
+MODELS = [  # (set, model, folder of its liveries, livery prefix, listed colour, name, classes, web files)
+    ("mx2", "bikes/fp_bike_mx2.glb", "bikes/mx2", "fp_livery_mx2_", "blue", "Ridgeback", ((125, False), (250, False), (500, False)), None),
+    ("hq", "bikes/hq/fp_bike_hq.glb", "bikes/hq", "fp_livery_hq_", "red", "Ironbark", ((125, False), (250, False), (500, False)), "bikes/hq/web"),
+    ("enduro", "bikes/fp_bike_enduro.glb", "bikes/enduro", "fp_livery_enduro_", "green", "Drover", ((400, True), (600, True)), None),
+]
+for m, model, folder, prefix, first, title, classes, web in MODELS:
+    if not os.path.exists(os.path.join(B, model)): continue
+    cols = sorted(os.path.basename(p)[len(prefix):-4] for p in glob.glob(os.path.join(B, folder, prefix + "*.png"))
+                  if "." not in os.path.basename(p)[len(prefix):-4])
+    if not cols:   # a pack without per-model paints: the shared liveries
+        cols = sorted(os.path.basename(p)[len("fp_livery_"):-4] for p in glob.glob(os.path.join(B, "bikes", "fp_livery_*.png")) if not p.endswith(".src.png"))
+        folder, prefix = "bikes", "fp_livery_"
+    if first in cols: cols.remove(first); cols.insert(0, first)
     for cc, four in classes:
-        for lv in sorted(p for p in glob.glob(os.path.join(B, "bikes", "fp_livery_*.png")) if not p.endswith(".src.png")):
-            n = os.path.basename(lv)[len("fp_livery_"):-4]
-            baked = os.path.exists(os.path.join(B, "bikes", m, f"fp_livery_{m}_{n}.png"))
-            pic = f"bikes/{m}/fp_livery_{m}_{n}.png" if baked else f"bikes/fp_livery_{n}.png"
-            L.append(f'fp_bike_{m}{cc}_{n} = {{ model = "bikes/fp_bike_{m}.glb", livery = "{pic}", cc = {cc}, four_stroke = {str(four).lower()}, name = "{n.title()} {cc}{"F" if four else ""}" }}')
-# the high-detail bike (blender/hq): full model and 2K liveries for PCs, a
-# lighter model and 1K liveries the browser loads instead (web_model, web_livery)
-HQ = os.path.join(B, "bikes", "hq")
-if os.path.exists(os.path.join(HQ, "fp_bike_hq.glb")):
-    for cc in (125, 250, 500):
-        for lv in sorted(glob.glob(os.path.join(HQ, "fp_livery_hq_*.png"))):
-            n = os.path.basename(lv)[len("fp_livery_hq_"):-4]
-            L.append(f'fp_bike_hq{cc}_{n} = {{ model = "bikes/hq/fp_bike_hq.glb", livery = "bikes/hq/fp_livery_hq_{n}.png", '
-                     f'web_model = "bikes/hq/web/fp_bike_hq.glb", web_livery = "bikes/hq/web/fp_livery_hq_{n}.png", '
-                     f'cc = {cc}, four_stroke = false, name = "{n.title()} {cc} HD" }}')
+        for i, n in enumerate(cols):
+            extra = f'web_model = "{web}/{os.path.basename(model)}", web_livery = "{web}/{prefix}{n}.png", ' if web else ""
+            L.append(f'fp_bike_{m}{cc}_{n} = {{ model = "{model}", livery = "{folder}/{prefix}{n}.png", {extra}'
+                     f'cc = {cc}, four_stroke = {str(four).lower()}, name = "{title} {cc}{"F" if four else ""}"'
+                     + (", grid_only = true" if i else "") + " }")
 L += ["", "[riders]"]
-if os.path.exists(os.path.join(B, "riders", "fp_rider.glb")):
+HQ = os.path.join(B, "riders", "hq")
+# The HD rider is the one rider; its low-poly version (web_model) is what the browser and Low graphics load.
+# The old free rider is listed only for a pack without the HD one.
+if os.path.exists(os.path.join(B, "riders", "fp_rider.glb")) and not os.path.exists(os.path.join(HQ, "fp_rider_hq.glb")):
     for o in sorted(p for p in glob.glob(os.path.join(B, "riders", "fp_rider_*.png")) if not p.endswith(".src.png")):
         n = os.path.basename(o)[9:-4]
         L.append(f'fp_rider_{n} = {{ model = "riders/fp_rider.glb", outfit = "riders/fp_rider_{n}.png", name = "{n.title()}" }}')
-HQ = os.path.join(B, "riders", "hq")
 if os.path.exists(os.path.join(HQ, "fp_rider_hq.glb")):
     for o in sorted(glob.glob(os.path.join(HQ, "fp_rider_hq_*.png"))):
         n = os.path.basename(o)[len("fp_rider_hq_"):-4]
         L.append(f'fp_rider_hq_{n} = {{ model = "riders/hq/fp_rider_hq.glb", outfit = "riders/hq/fp_rider_hq_{n}.png", '
-                 f'web_model = "riders/hq/web/fp_rider_hq.glb", web_outfit = "riders/hq/web/fp_rider_hq_{n}.png", name = "{n.title()} HD" }}')
+                 f'web_model = "riders/hq/web/fp_rider_hq.glb", web_outfit = "riders/hq/web/fp_rider_hq_{n}.png", name = "{n.title()}" }}')
 L += ["", "# Stock models with no stand-in yet (large buildings, vehicles, stadium shells):",
       "missing = [" + ", ".join(f'"{m}"' for m in missing) + "]"]
 open(os.path.join(B, "stockmap.toml"), "w").write("\n".join(L) + "\n")

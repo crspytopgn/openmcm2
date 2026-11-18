@@ -119,7 +119,7 @@ impl Roster {
 
     /// The free pack's bikes and outfits, after the game's.
     fn add_free(&mut self) {
-        for b in crate::freepack::bikes() {
+        for b in crate::freepack::listed_bikes() {
             self.bikes.push(BikeChoice {
                 name: format!("{FREE_MAKER} {}", b.name),
                 model: format!("{}.mcf", b.shape),

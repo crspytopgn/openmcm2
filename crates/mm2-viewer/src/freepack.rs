@@ -261,6 +261,10 @@ pub struct Bike {
     pub cc: u32,
     pub four_stroke: bool,
     pub name: String,
+    /// In the menus' bike list. The other colours of a model
+    /// (`grid_only = true`) only paint the computer riders: the player
+    /// picks their colours on the Kit & Paint page.
+    pub listed: bool,
 }
 
 /// One of the pack's rider outfits.
@@ -314,7 +318,8 @@ fn inline_table(value: &str) -> Vec<(String, String)> {
 }
 
 fn parse_rides(text: &str, root: &std::path::Path) -> Rides {
-    parse_rides_for(text, root, cfg!(target_arch = "wasm32"))
+    // The browser, and Low graphics on a computer, ride the lighter models.
+    parse_rides_for(text, root, cfg!(target_arch = "wasm32") || crate::graphics::low_detail())
 }
 
 /// As [`parse_rides`]; `web` loads a ride's lighter `web_model` and
@@ -352,6 +357,7 @@ fn parse_rides_for(text: &str, root: &std::path::Path, web: bool) -> Rides {
                 cc: get("cc").and_then(|v| v.parse().ok()).unwrap_or(250),
                 four_stroke: get("four_stroke").is_some_and(|v| v == "true" || v == "1"),
                 name,
+                listed: !get("grid_only").is_some_and(|v| v == "true" || v == "1"),
             });
         }
     }
@@ -361,6 +367,11 @@ fn parse_rides_for(text: &str, root: &std::path::Path, web: bool) -> Rides {
 /// The pack's bikes, in the map's order.
 pub fn bikes() -> &'static [Bike] {
     &rides().bikes
+}
+
+/// The pack's bikes the menus offer: one of each model and engine size.
+pub fn listed_bikes() -> impl Iterator<Item = &'static Bike> {
+    bikes().iter().filter(|b| b.listed)
 }
 
 /// The pack's rider outfits, in the map's order.
@@ -706,7 +717,12 @@ fn masks(set: &str) -> Option<(PathBuf, PathBuf)> {
     let dir = rides()
         .paints
         .iter()
-        .find(|(k, _)| k.strip_prefix(set).is_some_and(|r| r.starts_with('_')))?
+        // only `<set>_<colour>...` names, so `fp_rider` never picks up `fp_rider_hq_blue`
+        .find(|(k, _)| {
+            k.strip_prefix(set)
+                .and_then(|r| r.strip_prefix('_'))
+                .is_some_and(|r| r.split('_').all(|c| colour(c).is_some()))
+        })?
         .1
         .parent()?
         .to_path_buf();
@@ -1271,11 +1287,19 @@ mod tests {
         let rides = parse_rides(text, std::path::Path::new("/p"));
         assert_eq!(
             rides.bikes,
-            vec![Bike { shape: "fp_bike_mx2".into(), livery: "fp_livery_blue".into(), cc: 125, four_stroke: false, name: "Blue 125".into() }]
+            vec![Bike { shape: "fp_bike_mx2".into(), livery: "fp_livery_blue".into(), cc: 125, four_stroke: false, name: "Blue 125".into(), listed: true }]
         );
         assert_eq!(rides.outfits, vec![Outfit { shape: "fp_rider".into(), outfit: "fp_rider_red".into(), name: "Red".into() }]);
         assert_eq!(rides.shapes["fp_rider"], (std::path::PathBuf::from("/p/riders/fp_rider.glb"), true));
         assert!(rides.paints.contains_key("fp_livery_blue"));
+    }
+
+    #[test]
+    fn other_colours_only_paint_the_grid() {
+        let text = "[bikes]\na = { model = \"bikes/fp_bike_mx2.glb\", livery = \"bikes/fp_livery_blue.png\", name = \"Ridgeback 250\" }\n\
+                    b = { model = \"bikes/fp_bike_mx2.glb\", livery = \"bikes/fp_livery_red.png\", name = \"Ridgeback 250\", grid_only = true }\n";
+        let rides = parse_rides(text, std::path::Path::new("/p"));
+        assert_eq!(rides.bikes.iter().map(|b| b.listed).collect::<Vec<_>>(), [true, false]);
     }
 
     #[test]
