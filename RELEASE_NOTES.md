@@ -1,3 +1,25 @@
+# OpenMCM2 0.6.5
+
+* **New free bikes.** Two bikes for 125, 250 and 500, the Ridgeback and
+  the high-detail Ironbark, and the Drover four-stroke for 400F and
+  600F. Each has a fresh paint layout, real metal and rubber materials
+  and light wear, and works with Kit & Paint. The HD rider is now the
+  one free rider. The browser and Low graphics load its lighter version.
+* **Free tracks look less flat.** Nationals get broken dirt lips that
+  build into berms, a worn groove and rollers. Baja and Enduro get rolls,
+  dips and gullies off the trail. There are sponsor fences on the start
+  straights, feather flags, an inflatable sponsor arch, orange checkpoint
+  arches, blue tuff blocks in Supercross and a red "you" marker like the
+  original's. The free tracks rebuild themselves the first time you ride
+  them.
+* **Computer riders:** the free Supercross start gate no longer pens
+  everyone in, a rider who crashes on a free Enduro gets up where they
+  fell, and the 8th rider on Nationals 1 now finds the course.
+* **Menus:** scroll bars can be dragged, the wheel and trackpad scroll
+  smoothly, the wrench on the Bike & Rider page opens the Garage, the
+  8-bit/16-bit buttons work, and every Help button opens a new help page.
+  The browser also asks to keep your saves, so they aren't cleared.
+
 # OpenMCM2 0.6.4
 
 * **Kit & Paint.** A new garage page lets you mix your own colours for
