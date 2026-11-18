@@ -380,7 +380,12 @@ pub fn winner_model(rider: &str) -> Option<String> {
 
 pub fn outfit_model(outfit: &str) -> Option<String> {
     let outfit = outfit.trim().to_ascii_lowercase();
-    rides().outfits.iter().find(|o| o.outfit == outfit).map(|o| format!("{}.mcf", o.shape))
+    let o = rides().outfits.iter().find(|o| o.outfit == outfit).or_else(|| {
+        // A mixed outfit goes on its set's rider.
+        let set = paint_set(&outfit)?;
+        rides().outfits.iter().find(|o| o.outfit.strip_prefix(set.as_str()).is_some_and(|r| r.starts_with('_')))
+    })?;
+    Some(format!("{}.mcf", o.shape))
 }
 
 /// For an animated model the game's files lack but the pack has
@@ -632,15 +637,132 @@ pub fn ridden(name: &str) -> Option<bool> {
 
 /// Whether `name` is one of the pack's liveries or outfits.
 pub fn is_paint(name: &str) -> bool {
-    rides().paints.contains_key(&stem_of(name))
+    let stem = stem_of(name);
+    rides().paints.contains_key(&stem) || mixed(&stem).is_some()
 }
 
 /// A livery or outfit picture by its texture name.
 pub fn paint(name: &str) -> Option<crate::hires::Image> {
-    let path = rides().paints.get(&stem_of(name))?;
-    let bytes = crate::fs::read(path).map_err(|e| eprintln!("{}: {e}", path.display())).ok()?;
-    let (w, h, rgba) = crate::hires::decode_png(&bytes).map_err(|e| eprintln!("{}: {e}", path.display())).ok()?;
+    let stem = stem_of(name);
+    let Some(path) = rides().paints.get(&stem) else {
+        return mix(&stem);
+    };
+    let (w, h, rgba) = read_png(path)?;
     Some(image(w, h, &rgba))
+}
+
+fn read_png(path: &std::path::Path) -> Option<(u32, u32, Vec<u8>)> {
+    let bytes = crate::fs::read(path).map_err(|e| eprintln!("{}: {e}", path.display())).ok()?;
+    crate::hires::decode_png(&bytes).map_err(|e| eprintln!("{}: {e}", path.display())).ok()
+}
+
+/// The paint colours a mixed livery or outfit takes (`fp_rider_hq_blue_white`:
+/// blue with white trim), as the HD set's own colourways have them.
+pub const COLOURS: [(&str, [f32; 3]); 12] = [
+    ("black", [0.08, 0.08, 0.09]),
+    ("blue", [0.06, 0.25, 0.78]),
+    ("green", [0.05, 0.45, 0.15]),
+    ("grey", [0.42, 0.43, 0.45]),
+    ("lime", [0.55, 0.80, 0.05]),
+    ("navy", [0.05, 0.10, 0.32]),
+    ("orange", [0.95, 0.42, 0.02]),
+    ("purple", [0.38, 0.10, 0.62]),
+    ("red", [0.80, 0.07, 0.06]),
+    ("teal", [0.0, 0.50, 0.52]),
+    ("white", [0.92, 0.92, 0.90]),
+    ("yellow", [0.98, 0.80, 0.05]),
+];
+
+fn colour(name: &str) -> Option<[f32; 3]> {
+    COLOURS.iter().find(|c| c.0 == name).map(|c| c.1)
+}
+
+/// A mixed paint's colours: main, trim, and the helmet's (the kit's main
+/// colour unless named).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Mix {
+    pub main: [f32; 3],
+    pub trim: [f32; 3],
+    pub helmet: [f32; 3],
+}
+
+/// The set a livery or outfit belongs to when the set has paint masks
+/// (`fp_rider_hq_blue` -> `fp_rider_hq`): its colours can be mixed.
+pub fn paint_set(name: &str) -> Option<String> {
+    let stem = stem_of(name);
+    let mut set = stem.as_str();
+    while let Some((rest, last)) = set.rsplit_once('_') {
+        if colour(last).is_none() {
+            break;
+        }
+        set = rest;
+    }
+    (set != stem && masks(set).is_some()).then(|| set.to_string())
+}
+
+/// The masks of a paint set: `<set>.mask.png` and `<set>.base.png`, beside
+/// its colourways.
+fn masks(set: &str) -> Option<(PathBuf, PathBuf)> {
+    let dir = rides()
+        .paints
+        .iter()
+        .find(|(k, _)| k.strip_prefix(set).is_some_and(|r| r.starts_with('_')))?
+        .1
+        .parent()?
+        .to_path_buf();
+    let mask = dir.join(format!("{set}.mask.png"));
+    crate::fs::is_file(&mask).then(|| (mask, dir.join(format!("{set}.base.png"))))
+}
+
+/// For a livery or outfit named `<set>_<main>_<trim>[_<helmet>]` whose set
+/// has paint masks: the masks and the colours.
+fn mixed(stem: &str) -> Option<(PathBuf, PathBuf, Mix)> {
+    let mut set = stem;
+    let mut cols = Vec::new();
+    while cols.len() < 3 {
+        let Some((rest, last)) = set.rsplit_once('_') else { break };
+        let Some(c) = colour(last) else { break };
+        cols.insert(0, c);
+        set = rest;
+    }
+    let (main, trim) = (*cols.first()?, *cols.get(1)?);
+    let (mask, base) = masks(set)?;
+    Some((mask, base, Mix { main, trim, helmet: cols.get(2).copied().unwrap_or(main) }))
+}
+
+/// The texture name of a set's paint in these colours.
+pub fn mix_name(set: &str, main: &str, trim: &str, helmet: Option<&str>) -> String {
+    match helmet {
+        Some(h) => format!("{set}_{main}_{trim}_{h}"),
+        None => format!("{set}_{main}_{trim}"),
+    }
+}
+
+/// A mixed livery or outfit, painted from its set's masks: the main colour
+/// where the mask's red is (the helmet's where its blue is), the trim where
+/// its green is, both shaded by its alpha, over everything else (rubber,
+/// metal, skin, the dark kit panels).
+fn mix(stem: &str) -> Option<crate::hires::Image> {
+    let (mask, base, cols) = mixed(stem)?;
+    let (w, h, m) = read_png(&mask)?;
+    let (bw, bh, b) = read_png(&base)?;
+    if (w, h) != (bw, bh) {
+        return None;
+    }
+    Some(image(w, h, &mix_pixels(&m, &b, cols)))
+}
+
+fn mix_pixels(mask: &[u8], base: &[u8], c: Mix) -> Vec<u8> {
+    let mut out = vec![255u8; mask.len()];
+    for ((o, m), b) in out.chunks_exact_mut(4).zip(mask.chunks_exact(4)).zip(base.chunks_exact(4)) {
+        let [r, g, hm, a] = [m[0], m[1], m[2], m[3]].map(|v| v as f32 / 255.0);
+        for i in 0..3 {
+            let main = c.main[i] + (c.helmet[i] - c.main[i]) * hm;
+            let v = (r * main + g * c.trim[i]) * a + b[i] as f32 / 255.0;
+            o[i] = (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+        }
+    }
+    out
 }
 
 /// A bike or rider shape: its frames as the original's, the textured
@@ -1167,6 +1289,23 @@ mod tests {
             assert_eq!(rides.shapes["fp_bike_hq"].0, PathBuf::from(format!("{dir}/fp_bike_hq.glb")));
             assert_eq!(rides.paints["fp_livery_hq_blue"], PathBuf::from(format!("{dir}/fp_livery_hq_blue.png")));
         }
+    }
+
+    #[test]
+    fn mixes_a_paint_from_its_masks() {
+        // Full main colour, half trim, a quarter shade over a grey base.
+        let mask = [255, 0, 0, 255, 0, 255, 0, 128];
+        let base = [0, 0, 0, 255, 64, 64, 64, 255];
+        let c = Mix { main: [1.0, 0.5, 0.0], trim: [0.0, 0.0, 1.0], helmet: [0.0, 1.0, 0.0] };
+        let out = mix_pixels(&mask, &base, c);
+        assert_eq!(&out[..4], &[255, 128, 0, 255]);
+        assert_eq!(&out[4..7], &[64, 64, 192]);
+        // On the helmet (mask blue) the main colour is the helmet's.
+        let out = mix_pixels(&[255, 0, 255, 255], &[0, 0, 0, 255], c);
+        assert_eq!(&out[..3], &[0, 255, 0]);
+        assert_eq!(mix_name("fp_rider_hq", "red", "white", Some("black")), "fp_rider_hq_red_white_black");
+        assert_eq!(colour("teal"), Some([0.0, 0.50, 0.52]));
+        assert_eq!(colour("pink"), None);
     }
 
     #[test]

@@ -24,3 +24,7 @@ at the working folders they were made in, so set them before re-running.
 
 The pack holds them in `bikes/hq/` and `riders/hq/`, with the browser
 versions in `web/`. `tools/stockmap.py` adds the entries.
+7. `make_masks.py` writes each set's paint masks (`fp_rider_hq.mask.png` and
+   `.base.png`, `fp_livery_hq.mask.png` and `.base.png`). The Kit & Paint
+   page mixes any kit, trim, helmet and bike colours from these in game.
+   The helmet mask is the head part of the rider's paint (`kit_helmet.png`).

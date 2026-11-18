@@ -293,6 +293,10 @@ pub struct Profile {
     pub bike: String,
     pub outfit: String,
     pub plate: u32,
+    /// The Kit & Paint page's colours for a high-detail kit and bike, by
+    /// name: kit, kit trim, bike, bike trim, helmet (empty: the colourway
+    /// as picked). Ours; the game's profiles have no such line.
+    pub paint: String,
     pub keys: Controls,
 }
 
@@ -311,6 +315,7 @@ impl Profile {
             bike: String::new(),
             outfit: String::new(),
             plate: 101,
+            paint: String::new(),
             keys,
         }
     }
@@ -318,10 +323,11 @@ impl Profile {
     /// The settings back to the game's defaults, keeping the name and the
     /// rider (the Restore dialog's "Reset to Defaults").
     pub fn defaults(&mut self, messages: [String; 10], keys: Controls) {
-        let keep = (self.name.clone(), self.bike.clone(), self.outfit.clone());
+        let keep = (self.name.clone(), self.bike.clone(), self.outfit.clone(), self.paint.clone());
         *self = Profile::new(&keep.0, messages, keys);
         self.bike = keep.1;
         self.outfit = keep.2;
+        self.paint = keep.3;
     }
 
     /// The profile as `<name>.prf` holds it.
@@ -334,6 +340,9 @@ impl Profile {
             "[Profile]\r\nName={}\r\nBike={}\r\nOutfit={}\r\nPlate={}\r\n",
             self.name, self.bike, self.outfit, self.plate
         );
+        if !self.paint.is_empty() {
+            let _ = write!(o, "Paint={}\r\n", self.paint);
+        }
         let _ = write!(
             o,
             "\r\n[Game]\r\nGauges={}\r\nRaceStats={}\r\nChatMode={}\r\nOverview={}\r\n\
@@ -436,6 +445,7 @@ ForceFeedback={}\r\nGasGyro={}\r\nBrakeGyro={}\r\nAnalogAxes={}\r\nDevice={}\r\n
         p.bike = get("Profile", "Bike").unwrap_or("").to_string();
         p.outfit = get("Profile", "Outfit").unwrap_or("").to_string();
         p.plate = num("Profile", "Plate", 101);
+        p.paint = get("Profile", "Paint").unwrap_or("").trim().to_string();
         let d = GameOptions::default();
         p.game = GameOptions {
             gauges: flag("Game", "Gauges", d.gauges),
