@@ -962,6 +962,58 @@ impl Land {
         }
     }
 
+    /// Mountains round the track: ranges that start `start` ft out from
+    /// the courses and are at full height (`height` ft, more on the
+    /// peaks) by `full` ft, so the ground near the track stays wide and
+    /// open while real mountains stand round it.
+    fn mountains(&mut self, courses: &[&Course], start: f32, full: f32, height: f32, seed: u32) {
+        let dist = self.course_distance(courses);
+        let n = self.size;
+        for z in 0..n {
+            for x in 0..n {
+                let i = z * n + x;
+                let t = smooth((dist[i] - start) / (full - start));
+                if t <= 0.0 {
+                    continue;
+                }
+                let (fx, fz) = (x as f32 * self.scale, z as f32 * self.scale);
+                // Long ridges with peaks along them, and foothills below.
+                let ridge = ridged(fx / 1500.0, fz / 1500.0, seed + 61);
+                let mass = fbm(fx / 950.0, fz / 950.0, seed + 62);
+                let shape = 0.25 + 0.55 * ridge * ridge + 0.5 * mass;
+                self.heights[i] += height * t * t * shape;
+            }
+        }
+    }
+
+    /// Smooths the ground away from the courses: `passes` box blurs
+    /// `radius` samples wide, fading in from `keep` ft out, so the land
+    /// reads as smooth slopes rather than lumps and facets.
+    fn soften(&mut self, courses: &[&Course], keep: f32, radius: usize, passes: usize) {
+        let dist = self.course_distance(courses);
+        let n = self.size;
+        let w: Vec<f32> = dist.iter().map(|d| smooth((d - keep) / 80.0)).collect();
+        for _ in 0..passes {
+            let src = self.heights.clone();
+            // Along x, then along z.
+            let mut tmp = src.clone();
+            for z in 0..n {
+                for x in 0..n {
+                    let (a, b) = (x.saturating_sub(radius), (x + radius).min(n - 1));
+                    tmp[z * n + x] = (a..=b).map(|k| src[z * n + k]).sum::<f32>() / (b - a + 1) as f32;
+                }
+            }
+            for z in 0..n {
+                let (a, b) = (z.saturating_sub(radius), (z + radius).min(n - 1));
+                for x in 0..n {
+                    let i = z * n + x;
+                    let v = (a..=b).map(|k| tmp[k * n + x]).sum::<f32>() / (b - a + 1) as f32;
+                    self.heights[i] = lerp(src[i], v, w[i]);
+                }
+            }
+        }
+    }
+
     /// Lays a course into the land: its corridor `half` feet each side
     /// at the course's own height (`profile`, by distance along), with
     /// `features` on it and its turns banked, blended into the ground
@@ -2020,6 +2072,8 @@ fn national(def: &Def) -> Made {
         }
     }
     land.valley(&[&course], 26.0, 270.0, relief * 0.7, 20.0, relief * 0.8, seed);
+    land.mountains(&[&course], 260.0, 850.0, 420.0, seed);
+    land.soften(&[&course], 40.0, 2, 3);
     let raw = land.profile(&course, 120.0);
     let runs = straights(&course, 140.0);
     let (s0, sl) = longest(&runs);
@@ -2600,9 +2654,11 @@ fn open_country(def: &Def) -> Made {
     {
         let lines: Vec<&Course> = courses.iter().map(|c| &c.0).collect();
         if desert {
-            land.valley(&lines, 40.0, 330.0, 110.0, 18.0, 160.0, seed);
+            land.valley(&lines, 70.0, 420.0, 150.0, 18.0, 220.0, seed);
         } else {
-            land.valley(&lines, 30.0, 300.0, 100.0, 20.0, 200.0, seed);
+            // Wide open ground along the trail, then mountainsides
+            // climbing well above it, inside the game's view distance.
+            land.valley(&lines, 70.0, 420.0, 170.0, 20.0, 260.0, seed);
         }
         // Open country worth riding off the trail: rolls, dips and dry
         // gullies across the ground round it, all smooth enough to ride
@@ -2620,10 +2676,16 @@ fn open_country(def: &Def) -> Made {
                 let rolls = (fbm(fx / 85.0, fz / 85.0, seed + 51) - 0.5) * 11.0;
                 let g = (noise(fx / 240.0, fz / 240.0, seed + 52) * 2.0 - 1.0).abs();
                 let gully = -(1.0 - smooth(g / 0.18)) * 6.0;
-                let humps = (fbm(fx / 28.0, fz / 28.0, seed + 53) - 0.5) * 2.6;
+                let humps = (fbm(fx / 28.0, fz / 28.0, seed + 53) - 0.5) * 1.6;
                 land.heights[i] += (rolls + gully + humps) * away * if desert { 0.8 } else { 1.0 };
             }
         }
+        if desert {
+            land.mountains(&lines, 320.0, 1100.0, 560.0, seed);
+        } else {
+            land.mountains(&lines, 300.0, 1050.0, 700.0, seed);
+        }
+        land.soften(&lines, 50.0, 2, 3);
     }
     for (course, half, gates, _) in &courses {
         let raw = land.profile(course, if desert { 240.0 } else { 140.0 });
@@ -2894,7 +2956,7 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
 /// Which making of the recipes a built track is from (its `.made` file):
 /// a track built by an older one is built again. Change it whenever a
 /// change here moves anything on an existing track.
-pub const MADE: &str = "4";
+pub const MADE: &str = "5";
 
 /// The free track whose file is `stem` (`FPNAT01`), any case.
 pub fn find(stem: &str) -> Option<&'static Def> {
