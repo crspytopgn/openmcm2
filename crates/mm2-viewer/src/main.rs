@@ -1004,6 +1004,9 @@ pub struct Track {
     grid: Vec<usize>,
     /// The start gate's animated object.
     gate: Option<usize>,
+    /// The Free Pack's start gate (a free supercross track's), which drops
+    /// with the race as the original's does.
+    free_gate: Option<usize>,
     /// The flag girl and the 30-second man.
     people: Finish,
     /// The podium and its riders, for after the race.
@@ -1518,7 +1521,7 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
             renderer.set_object_place(r.object + 1, gone);
         }
     }
-    if let Some(gate) = track.gate {
+    for gate in [track.gate, track.free_gate].into_iter().flatten() {
         renderer.set_motion_start(gate, race.lead);
     }
     let hidden = |at: Mat4| Mat4::from_cols(Vec4::ZERO, Vec4::ZERO, Vec4::ZERO, at.w_axis);
@@ -1859,7 +1862,7 @@ fn load_track(
         }
     }
     let name = scene.as_ref().map(|s| s.name.clone()).unwrap_or_default();
-    let (mut grid, mut gate, mut arch_objects) = (Vec::new(), None, Vec::new());
+    let (mut grid, mut gate, mut free_gate, mut arch_objects) = (Vec::new(), None, None, Vec::new());
     let mut people = Finish::default();
     let mut podium_objects = None;
     let mut tricks = Vec::new();
@@ -1923,6 +1926,18 @@ fn load_track(
             load_step();
             // Bikes and riders keep their models, motions and skins together.
             let mut animations = scene.animations.clone();
+            // The Free Pack's start gate stands in the scene as a still
+            // model; it goes with the animations to drop as the original's
+            // `StartGate.mcf` does (freepack::gate_drop).
+            animations.extend(scene.models.iter().filter(|m| freepack::is_gate(&m.model)).map(|m| scn::Animation {
+                model: freepack::GATE_MCF.into(),
+                offset: m.position,
+                look: m.look,
+                up: m.up,
+                scale: m.scale,
+                motion: None,
+                lighting: m.lighting,
+            }));
             let mut skins = Vec::new();
             let mut grid_sources = Vec::new();
             match read_archive(&res.join("BIKE.RES")) {
@@ -1992,6 +2007,7 @@ fn load_track(
             }
             // An outdoor track's trees and bushes, from `ECO.RES`.
             let mut statics = scene.models.clone();
+            statics.retain(|m| !freepack::is_gate(&m.model));
             load_step();
             // A lap race's finish arch and flag girl (0x418cd0). Custom
             // tracks hide them with a finish line that has no direction:
@@ -2278,6 +2294,7 @@ fn load_track(
                 .iter()
                 .position(|a| a.model.eq_ignore_ascii_case("StartGate.mcf"))
                 .and_then(object);
+            free_gate = animations.iter().position(|a| a.model == freepack::GATE_MCF).and_then(object);
             people = Finish {
                 girl: girl_sources.and_then(|[a, b]| Some(([object(a)?, object(b)?], girl_place))),
                 man: man_source.and_then(object),
@@ -2340,6 +2357,7 @@ fn load_track(
         course,
         grid,
         gate,
+        free_gate,
         people,
         podium: podium_objects,
         res,
