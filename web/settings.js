@@ -74,11 +74,12 @@ export const EXTRAS = [
     { key: "steady_camera", flag: "steady-camera", label: "Steadier camera", about: "The chase camera rises and dips with the bike more gently." },
     { key: "fov", flag: "fov", label: "Field of view", about: "How wide the riding cameras see. 85° is the original game's.", range: [60, 120, 1, "°"], off: 85 },
   ]],
-  ["Controllers and picture", [
+  ["Controllers, sound and picture", [
     { key: "pad_dead_zone", flag: "pad-dead-zone", label: "Stick dead zone", about: "How far a stick moves before it steers. 4% is the original game's.", range: [0, 50, 1, "%"], off: 4 },
     { key: "pad_sensitivity", flag: "pad-sensitivity", label: "Stick sensitivity", about: "How far a stick steers for how far it is pushed. 100% is the original game's.", range: [25, 200, 5, "%"], off: 100 },
     { key: "pad_curve", flag: "pad-curve", label: "Stick steering curve", about: "How gently a stick steers near the middle. 100% is the original game's: little steering for a small push and a lot near the edge. 0% steers in straight proportion.", range: [0, 100, 5, "%"], off: 100 },
     { key: "pad_smoothing", flag: "pad-smoothing", label: "Stick smoothing", about: "Evens out a twitchy stick's steering. 0% is the original game's.", range: [0, 90, 5, "%"], off: 0 },
+    { key: "freshen_engines", flag: "freshen-engines", label: "Freshen engine sounds", about: "Your own MM2 engine sounds with a fuller low end, a little crisp top and a hint of a room around them. Off is the original game's sound. The free bikes' own sounds don't change." },
     { key: "fxaa", flag: "fxaa", label: "Smoother edges", about: "Smooths stair-stepped edges after the race is drawn, in either look: the outlines of banners, bushes, tree leaves and fences, which Anti-aliasing (MSAA) does not reach. The change is small, so look at a banner edge with it off and on." },
     { key: "sharpen", flag: "sharpen", label: "Sharpening", about: "Makes the race picture crisper, in either look: the grain in the dirt and grass, banners and bikes stand out more. 0% is the original game's picture; 30 to 50% is a gentle lift, 100% is strong.", range: [0, 100, 5, "%"], off: 0 },
   ]],

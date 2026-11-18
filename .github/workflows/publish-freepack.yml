@@ -101,6 +101,10 @@ jobs:
             mkdir -p "$PACK/sound"
             cp -R "$RUNNER_TEMP/snd/sound/." "$PACK/sound/"
           fi
+          # The free tracks' pictures, for the menus before a track is built.
+          cargo build --release -q -p mm2-tools
+          rm -rf "$PACK/previews"
+          ./target/release/mm2-tools free-previews "$PACK/ground" "$PACK/previews" > /dev/null
           # The menus' own sounds, made in code, when the source lacks them.
           if [ ! -d "$PACK/sound/ui" ]; then
             sudo apt-get install -y -q python3-numpy

@@ -163,6 +163,9 @@ pub struct AnimatedModel {
     /// Frames turned about their own x axis on top of the motion, rad: a
     /// bike's wheels (0x518c40).
     spins: Vec<(usize, f32)>,
+    /// Frames slid along their parent's axes, after the motion (a fork's
+    /// `Shocks` sliding up its stroke).
+    slides: Vec<(usize, Vec3)>,
 }
 
 impl AnimatedModel {
@@ -246,6 +249,11 @@ impl AnimatedModel {
         for &(f, angle) in &self.spins {
             if let Some(m) = local.get_mut(f) {
                 *m *= Mat4::from_rotation_x(angle);
+            }
+        }
+        for &(f, by) in &self.slides {
+            if let Some(m) = local.get_mut(f) {
+                m.w_axis += by.extend(0.0);
             }
         }
         local
@@ -621,14 +629,16 @@ impl ObjectMesh {
                         .then(|| (info.name.clone(), motion, info.fps, info.looping))
                 })
                 .collect();
-            // Without the original's motions the free rider sits on its
-            // bike in a pose of the pack's own, rather than standing.
+            // Without the original's motions the free rider and bike ride
+            // with motions of the pack's own, rather than standing still.
             let mut motions = motions;
             if motions.is_empty() && gate {
                 motions = gate_motions;
             }
-            if motions.is_empty() && crate::freepack::is_rider(&a.model) {
-                motions.push(("Ride".to_string(), crate::freepack::seated_motion(), 1.0, true));
+            if motions.is_empty() {
+                if let Some(rider) = crate::freepack::ridden(&a.model) {
+                    motions = crate::freepack::own_motions(rider);
+                }
             }
             let named = |name: &String| motions.iter().position(|m| m.0.eq_ignore_ascii_case(name));
             let motion = a
@@ -684,6 +694,7 @@ impl ObjectMesh {
                 mud: 0.0,
                 morph,
                 spins: Vec::new(),
+                slides: Vec::new(),
             });
             mesh.placed += 1;
         }
@@ -723,6 +734,7 @@ impl ObjectMesh {
                 mud: 0.0,
                 morph: None,
                 spins: Vec::new(),
+                slides: Vec::new(),
             });
             mesh.placed += 1;
         }
@@ -1894,6 +1906,17 @@ impl ObjectRenderer {
         match a.spins.iter_mut().find(|s| s.0 == frame) {
             Some(s) => s.1 = angle,
             None => a.spins.push((frame, angle)),
+        }
+    }
+
+    /// Slides frame `name` of animated model `index` by `by` in its
+    /// parent's space, on top of its motion.
+    pub fn set_slide(&mut self, index: usize, name: &str, by: Vec3) {
+        let Some(a) = self.animated.get_mut(index) else { return };
+        let Some(frame) = a.frame_named(name) else { return };
+        match a.slides.iter_mut().find(|s| s.0 == frame) {
+            Some(s) => s.1 = by,
+            None => a.slides.push((frame, by)),
         }
     }
 

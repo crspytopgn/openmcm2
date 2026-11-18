@@ -345,8 +345,9 @@ impl Loops {
 
 impl Bank {
     /// `divisor` thins every list of more than one sample, to no fewer
-    /// than one (0x4e7160, +0x468).
-    fn load(res: &Path, sixteen_bit: bool, class: &str, divisor: usize) -> Option<Bank> {
+    /// than one (0x4e7160, +0x468). `freshen`: through the Freshen engine
+    /// sounds extra's chain.
+    fn load(res: &Path, sixteen_bit: bool, class: &str, divisor: usize, freshen: bool) -> Option<Bank> {
         let bytes = crate::read_archive(&res.join("ENGINE.RES"))
             .map_err(|e| eprintln!("{e}"))
             .ok()?;
@@ -377,6 +378,7 @@ impl Bank {
                 (1..=total.min(10))
                     .filter_map(|i| section.get(&format!("{name}_{i}")))
                     .filter_map(|f| mm2_formats::wav::parse(file(f)?).ok())
+                    .map(|s| if freshen { crate::freshen::freshen(&s) } else { s })
                     .map(Arc::new)
                     .collect()
             })
@@ -652,7 +654,7 @@ impl RaceSounds {
         for &c in &present {
             banks[c] = crate::freepack::engine_dir(CLASSES[c])
                 .and_then(|dir| Bank::load_dir(&dir, divisor(c)))
-                .or_else(|| Bank::load(res, options.sixteen_bit, CLASSES[ORIGINAL[c]], divisor(c)));
+                .or_else(|| Bank::load(res, options.sixteen_bit, CLASSES[ORIGINAL[c]], divisor(c), crate::tweaks::more().freshen_engines));
             if banks[c].is_none() {
                 eprintln!("no [{}] engine sounds", CLASSES[c]);
             }
@@ -1281,7 +1283,7 @@ mod tests {
             return;
         }
         for sixteen in [true, false] {
-            let bank = Bank::load(&res, sixteen, "250", 1).expect("the [250] engine");
+            let bank = Bank::load(&res, sixteen, "250", 1, false).expect("the [250] engine");
             for (list, name) in LISTS {
                 let samples = bank.list(list);
                 assert!(!samples.is_empty(), "{name}");
@@ -1291,7 +1293,7 @@ mod tests {
             assert_eq!(bank.bands, [20, 65, 100]);
         }
         // Thinned to half, a list of 8 keeps 4 and a list of 1 keeps 1.
-        let half = Bank::load(&res, true, "250", 2).unwrap();
+        let half = Bank::load(&res, true, "250", 2, false).unwrap();
         assert_eq!(half.list(List::LowTorque).len(), 4);
         assert_eq!(half.list(List::Idle).len(), 1);
     }

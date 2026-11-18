@@ -2030,6 +2030,15 @@ pub fn list_tracks(folder: &Path, event: EventKind) -> Vec<TrackEntry> {
 }
 
 pub fn preview_image(t: &TrackEntry) -> Option<tga::Image> {
+    own_preview(t).or_else(|| {
+        // A free track not built yet: the picture the Free Pack carries.
+        let path = crate::freepack::root()?.join("previews").join(&t.preview);
+        tga::parse(&crate::fs::read(path).ok()?).ok()
+    })
+}
+
+/// The picture a track's own files give (see [`preview_image`]).
+fn own_preview(t: &TrackEntry) -> Option<tga::Image> {
     let bytes = crate::read_archive(&t.path).ok()?;
     let ar = rs2::Archive::parse(&bytes).ok()?;
     if let Some(entry) = ar.entries().iter().find(|e| e.name.eq_ignore_ascii_case(&t.preview)) {

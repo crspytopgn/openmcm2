@@ -88,6 +88,7 @@ mod countdown;
 mod cues;
 mod reverb;
 mod freepack;
+mod freshen;
 mod free_tracks;
 mod menu_link;
 mod frontend;
@@ -1480,6 +1481,11 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
         for (frame, (angle, _)) in ["TireFront", "TireRear"].into_iter().zip(r.wheels) {
             renderer.set_spin(r.object, frame, angle);
         }
+        // The fork slides up its stroke and the swingarm swings up as the
+        // shocks take the bumps (0x4ff100, 0x4ff950 move the frames).
+        let (fork, swing) = r.bike.suspension_frames();
+        renderer.set_slide(r.object, "Shocks", fork);
+        renderer.set_spin(r.object, "SwingArm", swing);
         // In a crash the rider is thrown off and plays the fall.
         let wreck = r.bike.wreck();
         let (rider, motion) = wreck.unwrap_or((place, RIDING));
@@ -1940,6 +1946,11 @@ fn load_track(
                     tricks = rs2::Archive::parse(&bytes)
                         .map(|ar| trick_motions(&ar, bike))
                         .unwrap_or_default();
+                    // Without the game's motions (the Free Pack alone), the
+                    // pack's riders do tricks of their own.
+                    if tricks.iter().all(Option::is_none) {
+                        tricks = freepack::own_tricks();
+                    }
                     // The player's collision points, from the bike's `.col`.
                     if let Ok(ar) = rs2::Archive::parse(&bytes) {
                         let stem = bike.rsplit_once('.').map_or(bike, |(s, _)| s);
@@ -2039,8 +2050,11 @@ fn load_track(
                 .iter()
                 .map(|&bike| {
                     let outfit = skins[bike + 1].clone();
+                    // A rider of the pack's stands up there as itself.
+                    let model = freepack::winner_model(&animations[bike + 1].model)
+                        .unwrap_or_else(|| podium::WINNER.into());
                     animations.push(scn::Animation {
-                        model: podium::WINNER.into(),
+                        model,
                         offset: [0.0; 3],
                         look: [0.0, 0.0, 1.0],
                         up: [0.0, 1.0, 0.0],

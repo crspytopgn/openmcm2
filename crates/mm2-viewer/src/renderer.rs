@@ -905,6 +905,14 @@ impl TerrainRenderer {
         }
     }
 
+    /// Slides frame `name` of animated object `index` by `by` (its
+    /// parent's space), on top of its motion.
+    pub fn set_slide(&mut self, index: usize, name: &str, by: Vec3) {
+        if let Some(o) = &mut self.objects {
+            o.set_slide(index, name, by);
+        }
+    }
+
     /// Mixes motions on animated object `index`, each at a phase and weight.
     pub fn set_blend(&mut self, index: usize, mix: &[(&str, f32, f32, u8)]) {
         if let Some(o) = &mut self.objects {
