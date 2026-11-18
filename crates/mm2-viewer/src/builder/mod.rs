@@ -233,6 +233,20 @@ enum Popup {
     Kind,
 }
 
+thread_local! {
+    /// A closed builder's menus cache, for the next one to open: its
+    /// textures live in the window's sprites, which outlive the builder.
+    static KEPT_UI: std::cell::RefCell<Option<ui::Ui>> = const { std::cell::RefCell::new(None) };
+}
+
+impl Drop for Builder {
+    fn drop(&mut self) {
+        if let Some(ui) = self.ui.take() {
+            KEPT_UI.set(Some(ui));
+        }
+    }
+}
+
 pub struct Builder {
     pub course: Course,
     history: Vec<Course>,
@@ -1428,7 +1442,13 @@ impl Builder {
 
         sprites.scale = size.1 as f32 / 480.0;
         sprites.stretch = true;
-        let mut ui = self.ui.take().unwrap_or_else(|| ui::Ui::new(game));
+        // The last builder's pictures and texts, still on the GPU, rather
+        // than a new set each time the builder opens.
+        let mut ui = self
+            .ui
+            .take()
+            .or_else(|| KEPT_UI.take().filter(|u| u.game() == game))
+            .unwrap_or_else(|| ui::Ui::new(game));
         {
             let mut gfx = Gfx { sprites, device, queue };
             let mut input = std::mem::take(&mut self.input);

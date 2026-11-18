@@ -30,6 +30,10 @@ struct Playing {
     then: VecDeque<(Arc<Sound>, bool)>,
 }
 
+/// Without an output device, the most voices kept before the oldest
+/// one-shot ones go: otherwise every sound played in a long race stays.
+const SILENT_KEPT: usize = 256;
+
 #[derive(Default)]
 struct Mixer {
     voices: Vec<Playing>,
@@ -37,6 +41,10 @@ struct Mixer {
     rate: f32,
     /// The EAX reverb on the whole mix, while a race asks for one.
     reverb: Option<crate::reverb::Tail>,
+    /// No output device: nothing mixes, so no voice ever ends by itself
+    /// and the one-shot sounds are let go as they pile up (see
+    /// [`SILENT_KEPT`]).
+    silent: bool,
     /// Silent, with the voices playing on (the mute-in-background extra).
     muted: bool,
 }
@@ -109,13 +117,17 @@ impl Audio {
             let stream = open(mixer.clone())
                 .map_err(|e| eprintln!("no sound: {e}"))
                 .ok();
+            mixer.lock().unwrap().silent = stream.is_none();
             Audio {
                 mixer,
                 _stream: stream,
             }
         }
         #[cfg(not(feature = "audio"))]
-        Audio { mixer }
+        {
+            mixer.lock().unwrap().silent = true;
+            Audio { mixer }
+        }
     }
 
     /// A mixer with no output device, read back with `render`.
@@ -168,6 +180,15 @@ impl Audio {
             looping,
             then: VecDeque::new(),
         });
+        if m.silent && m.voices.len() > SILENT_KEPT {
+            // The oldest one-shot sounds would long have ended.
+            let mut over = m.voices.len() - SILENT_KEPT / 2;
+            m.voices.retain(|v| {
+                let go = over > 0 && !v.looping && v.id != id;
+                over -= go as usize;
+                !go
+            });
+        }
         Voice(id)
     }
 
@@ -340,5 +361,18 @@ mod tests {
         let mut out = [0.0; 6];
         m.mix(&mut out);
         assert_eq!(out, [0.5, 0.5, 0.25, 0.25, 0.25, 0.25]);
+    }
+
+    #[test]
+    fn without_an_output_one_shot_sounds_do_not_pile_up() {
+        let a = Audio::offline(100.0);
+        a.mixer.lock().unwrap().silent = true;
+        let s = Arc::new(Sound { rate: 100, channels: 1, samples: vec![0.5; 100] });
+        let engine = a.play(&s, 1.0, true);
+        for _ in 0..10_000 {
+            a.play(&s, 1.0, false);
+        }
+        assert!(a.mixer.lock().unwrap().voices.len() <= SILENT_KEPT);
+        assert!(a.playing(engine), "the looping engine plays on");
     }
 }
