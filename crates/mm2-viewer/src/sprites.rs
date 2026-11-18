@@ -32,7 +32,15 @@ struct Texture {
 pub struct Sprites {
     pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
-    textures: Vec<Texture>,
+    /// The textures by id; a freed one's slot is empty until reused.
+    textures: Vec<Option<Texture>>,
+    /// Empty slots, for the next uploads.
+    open: Vec<usize>,
+    /// Textures freed since the last render: they may still be drawn this
+    /// frame, so they go at the next render, once this frame is sent.
+    freed: Vec<usize>,
+    /// Textures freed before the last render, destroyed at the next.
+    releasing: Vec<usize>,
     /// This frame's rectangles, by texture.
     /// The third field is whether the quad stands at a place in the 3D
     /// view (a rider's label), with [`widescreen`](Self::widescreen).
@@ -142,6 +150,9 @@ impl Sprites {
             pipeline,
             sampler,
             textures: Vec::new(),
+            open: Vec::new(),
+            freed: Vec::new(),
+            releasing: Vec::new(),
             quads: Vec::new(),
             spent: Vec::new(),
             stretch: false,
@@ -206,19 +217,55 @@ impl Sprites {
                 },
             ],
         });
-        self.textures.push(Texture {
+        let t = Texture {
             texture,
             group,
             width: image.width,
             height: image.height,
             logical,
-        });
-        TextureId(self.textures.len() - 1)
+        };
+        match self.open.pop() {
+            Some(slot) => {
+                self.textures[slot] = Some(t);
+                TextureId(slot)
+            }
+            None => {
+                self.textures.push(Some(t));
+                TextureId(self.textures.len() - 1)
+            }
+        }
+    }
+
+    /// Lets `id` go: no longer drawn after this frame, its slot then used
+    /// again. For pictures made for a moment (a changing race time), which
+    /// would otherwise pile up a new texture every frame.
+    pub fn free(&mut self, id: TextureId) {
+        if self.textures.get(id.0).is_some_and(Option::is_some) && !self.freed.contains(&id.0) {
+            self.freed.push(id.0);
+        }
+    }
+
+    /// Textures alive now.
+    #[cfg(test)]
+    pub fn live(&self) -> usize {
+        self.textures.iter().filter(|t| t.is_some()).count()
+    }
+
+    /// Destroys the textures freed before the last render (that frame has
+    /// been sent), and holds this frame's frees for the next.
+    fn release(&mut self) {
+        for slot in self.releasing.drain(..) {
+            if let Some(t) = self.textures[slot].take() {
+                t.texture.destroy();
+                self.open.push(slot);
+            }
+        }
+        self.releasing = std::mem::take(&mut self.freed);
     }
 
     /// New pixels for a texture of the same size (a movie's next frame).
     pub fn update(&mut self, queue: &wgpu::Queue, id: TextureId, rgba: &[u8]) {
-        let t = &self.textures[id.0];
+        let Some(t) = &self.textures[id.0] else { return };
         if rgba.len() != (t.width * t.height * 4) as usize {
             return;
         }
@@ -249,7 +296,7 @@ impl Sprites {
     }
 
     pub fn size(&self, id: TextureId) -> (u32, u32) {
-        self.textures[id.0].logical
+        self.textures[id.0].as_ref().map_or((1, 1), |t| t.logical)
     }
 
     /// Draws the whole of `id` with its top left at `x`, `y`.
@@ -309,6 +356,7 @@ impl Sprites {
         (width, height): (u32, u32),
         clear: bool,
     ) {
+        self.release();
         // Fit 640×480 into the window, centred, or stretch it.
         let (sx, sy) = if self.stretch {
             (width as f32 / SCREEN.0, height as f32 / SCREEN.1)
@@ -420,7 +468,8 @@ impl Sprites {
         pass.set_vertex_buffer(0, vb.slice(..));
         pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
         for (id, range) in batches {
-            pass.set_bind_group(0, &self.textures[id.0].group, &[]);
+            let Some(t) = &self.textures[id.0] else { continue };
+            pass.set_bind_group(0, &t.group, &[]);
             pass.draw_indexed(range, 0, 0..1);
         }
         self.spent.extend([vb, ib]);
