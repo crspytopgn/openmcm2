@@ -391,10 +391,13 @@ impl Course {
         // rider on the gate behind it aims down the course from the line.
         // (A race picked up part way round starts from where it is.)
         if confirmed.is_none() {
+            // A gate slot can stand past the course's side (the eighth on
+            // Nationals 1): a rider there still starts from the line, or
+            // it never finds the course and rides off across the map.
             *confirmed = self.start.filter(|&s| {
                 found.iter().any(|&p| {
                     self.along(s, p, 100.0).is_some() || self.along(p, s, 50.0).is_some()
-                })
+                }) || (found.is_empty() && flat(probe - self.point(s)).length() < 100.0)
             });
         }
         let Some(c) = *confirmed else {
@@ -1608,8 +1611,13 @@ impl Racer {
             // Only the lap races' tracker counts the time off the course.
             self.off_course = if self.on_course || !gates.is_empty() { 0.0 } else { self.off_course + frame };
         }
+        // A Baja or Enduro rider gets up where its wreck lies: the
+        // original's gate-race courses have no width, so its tracker never
+        // holds a place there. The Free Pack's have one, and a place left
+        // behind where the rider strayed off a narrow course would put it
+        // back thousands of feet down the trail.
         let reset_to = match (course, self.place) {
-            (Some(course), Some(p)) => Some((course.point(p), course.way(p))),
+            (Some(course), Some(p)) if gates.is_empty() => Some((course.point(p), course.way(p))),
             _ => None,
         };
         self.plan(course, gates, level, ground.terrain.scale, seed);
