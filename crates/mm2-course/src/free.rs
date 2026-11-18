@@ -966,9 +966,35 @@ impl Land {
     /// at the course's own height (`profile`, by distance along), with
     /// `features` on it and its turns banked, blended into the ground
     /// over `blend` feet.
-    fn carve(&mut self, course: &Course, half: f32, blend: f32, profile: &dyn Fn(f32) -> f32, features: &Features, bank: f32) {
+    fn carve(&mut self, course: &Course, half: f32, blend: f32, profile: &dyn Fn(f32) -> f32, features: &Features, bank: f32, sculpt: f32, calm: Option<(f32, f32)>) {
         let n = self.size;
         let reach = half + blend;
+        let len = course.length;
+        // Shaped like a raced track: graded dirt pushed up in a lip along
+        // each edge (taller round the outside of turns), the edges ragged
+        // where dirt spills into the grass, a worn groove down the middle
+        // and sets of low rollers on the quieter straights.
+        let lip_w = (self.scale * 1.7).max(5.0);
+        let seed = (len * 7.0) as u32;
+        let rolled: Vec<f32> = if sculpt > 0.0 {
+            let k = (len / 4.0).ceil() as usize;
+            (0..k)
+                .map(|j| {
+                    let s = j as f32 * 4.0;
+                    let near_jump = [-45.0f32, -20.0, 0.0, 20.0, 45.0].iter().any(|o| features.height((s + o).rem_euclid(len), len) > 0.05);
+                    let in_calm = calm.is_some_and(|(at, l)| (s - at).rem_euclid(len) < l + 60.0 || (at - s).rem_euclid(len) < 90.0);
+                    if near_jump || in_calm { return 0.0; }
+                    let set = smooth((noise(s / 260.0, 3.5, seed) - 0.5) * 5.0);
+                    set * (s / 46.0 * TAU).sin() * 1.1 * sculpt
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        // Rollers fade in and out smoothly between jumps.
+        let rolled: Vec<f32> = (0..rolled.len())
+            .map(|j| (-3i32..=3).map(|o| rolled[(j as i32 + o).rem_euclid(rolled.len() as i32) as usize]).sum::<f32>() / 7.0)
+            .collect();
         for z in 0..n {
             for x in 0..n {
                 let p = [x as f32 * self.scale, z as f32 * self.scale];
@@ -977,12 +1003,37 @@ impl Land {
                 let curve = course.curve[near.index];
                 // The outside of a turn rises: a berm.
                 let outside = -near.side * curve.signum();
-                let berm = if outside > 0.0 { bank * (curve.abs() * 120.0).min(1.0) * smooth(near.distance / half) } else { 0.0 };
+                let turn = (curve.abs() * 120.0).min(1.0);
+                let berm = if outside > 0.0 { bank * turn * smooth(near.distance / half) } else { 0.0 };
                 let jump = if near.distance < half + 2.0 { features.height(near.along, course.length) } else { 0.0 };
                 let edge = smooth((near.distance - half) / blend);
-                let on = profile(near.along) + jump * (1.0 - smooth((near.distance - half + 3.0) / 5.0)) + berm;
-                self.heights[i] = lerp(on, self.heights[i], edge);
-                let surface = 1.0 - smooth((near.distance - half) / 6.0);
+                let mut on = profile(near.along) + jump * (1.0 - smooth((near.distance - half + 3.0) / 5.0)) + berm;
+                let mut spill = 0.0;
+                if sculpt > 0.0 {
+                    let t = (near.distance / half).min(1.0);
+                    let groove = -0.7 * (1.0 - t * t);
+                    let roll = if rolled.is_empty() { 0.0 } else { rolled[((near.along / 4.0) as usize).min(rolled.len() - 1)] } * (1.0 - smooth((near.distance - half * 0.75) / (half * 0.3)));
+                    on += (groove + roll) * sculpt;
+                    // Ragged edges: the dirt wanders out into the grass.
+                    spill = (fbm(p[0] / 40.0, p[1] / 40.0, seed + 11) - 0.45) * 12.0 + smooth((fbm(p[0] / 18.0, p[1] / 18.0, seed + 12) - 0.58) * 6.0) * 9.0;
+                }
+                let mut h = lerp(on, self.heights[i], edge);
+                let mut lip_dirt = 0.0;
+                if sculpt > 0.0 {
+                    // The lip: broken here and there, higher on the outside of turns.
+                    // Low and often broken on the straights, so the ground
+                    // past the track stays easy to ride out onto; it builds
+                    // into a berm only round the outside of turns.
+                    let gap = smooth((noise(near.along / 45.0, near.side, seed + 13) - 0.45) * 5.0);
+                    let lip_h = (0.7 + 0.8 * noise(near.along / 30.0, near.side * 2.0, seed + 14)) * gap * (1.0 + if outside > 0.0 { 3.0 * turn } else { 0.0 });
+                    let u = (near.distance - half - lip_w * 0.6) / lip_w;
+                    let lip = lip_h * (1.0 - u * u).max(0.0).powf(1.5) * sculpt;
+                    h += lip;
+                    // The pushed-up dirt is bare, grass only on its back.
+                    lip_dirt = smooth(lip / 0.8) * (1.0 - smooth(u * 1.4));
+                }
+                self.heights[i] = h;
+                let surface = (1.0 - smooth((near.distance - half - spill.max(-3.0)) / 6.0)).max(lip_dirt * 0.95);
                 self.track[i] = self.track[i].max(surface);
                 if near.distance < self.lane[i][0].abs() {
                     self.lane[i] = [near.distance * near.side, near.along, half];
@@ -1451,7 +1502,14 @@ fn paint(land: &Land, kind: Kind, biome: Biome, ground: &Ground, seed: u32) -> (
                     if pw > 0.0 {
                         let rag = (fbm(x / 9.0, z / 9.0, seed + 6) - 0.5) * 0.5;
                         let t = smooth((pw + rag - 0.15) / 0.5);
-                        let cp = ground.color(pm as usize, x, z, fpp, seed);
+                        let mut cp = ground.color(pm as usize, x, z, fpp, seed);
+                        if biome == Biome::Arena && pm as usize == CONCRETE {
+                            // A stadium's concrete under a race: darker, with
+                            // dirt tracked over it in drifts and tyre smears.
+                            let cd = ground.color(LOOSE, x, z, fpp, seed);
+                            let drift = smooth((fbm(x / 16.0, z / 16.0, seed + 41) - 0.3) / 0.3) * 0.8 + fbm(x / 2.5, z / 2.5, seed + 42) * 0.25;
+                            cp = std::array::from_fn(|q| lerp(cp[q] * 0.5, cd[q] * 0.8, drift.min(0.92)));
+                        }
                         c = std::array::from_fn(|q| lerp(c[q], cp[q], t));
                     }
                     let steep = land.sample(&land.steep, x, z);
@@ -1976,7 +2034,7 @@ fn national(def: &Def) -> Made {
     let half = 17.0;
     {
         let profile = profile_fn(&course, raw);
-        land.carve(&course, half, cell / 2.0 - half, &profile, &features, 5.0);
+        land.carve(&course, half, cell / 2.0 - half, &profile, &features, 5.0, 1.0, Some(((line - 80.0).rem_euclid(course.length), 80.0 + (sl * 0.7).min(320.0))));
         land.widen_start(&course, line, half, START_HALF, 12.0, &profile);
         if std::env::var_os("FT_DEBUG").is_some() {
             let (p, _) = course.at(line);
@@ -2001,15 +2059,19 @@ fn national(def: &Def) -> Made {
     let mut models = Vec::new();
     // Fences down the start straight, banners by the gate.
     let mut s = line - 40.0;
+    let mut panel = 0usize;
+    const FENCES: [&str; 4] = ["fp_fence", "fp_fence_2", "fp_fence_3", "fp_fence_4"];
     while s < line + (sl * 0.7).min(320.0) {
         let (p, d) = course.at(s);
         let left = [-d[1], d[0]];
         // Out round the wide start, then in along the track.
         let ahead = (s - line - 15.0).max(0.0);
         let off = half + (START_HALF - half) * (1.0 - smooth(ahead / 60.0)) + 6.0;
-        for sign in [-1.0f32, 1.0] {
-            models.push(model("fp_fence", &land, p[0] + left[0] * off * sign, p[1] + left[1] * off * sign, d));
+        // A run of one sponsor's mesh, then the next.
+        for (k, sign) in [-1.0f32, 1.0].into_iter().enumerate() {
+            models.push(model(FENCES[(panel / 6 + k * 2) % 4], &land, p[0] + left[0] * off * sign, p[1] + left[1] * off * sign, d));
         }
+        panel += 1;
         s += 6.5;
     }
     for sign in [-1.0f32, 1.0] {
@@ -2073,8 +2135,32 @@ fn national_dressing(course: &Course, land: &Land, half: f32, line: f32, feature
         let at = [p[0] + left[0] * off, p[1] + left[1] * off];
         if clear(at, off - 3.0) && ((at[0] - pits[0]).powi(2) + (at[1] - pits[1]).powi(2)).sqrt() > 130.0 {
             models.push(model(RACE_BANNERS[(rng.next() * 6.0) as usize % 6], land, at[0], at[1], [-left[0], -left[1]]));
+            // A sponsor's feather flags either side of its banner.
+            let flag = 1 + (rng.next() * 4.0) as usize % 4;
+            for along in [-12.0f32, 12.0] {
+                let q = [at[0] + d[0] * along + left[0] * 2.0, at[1] + d[1] * along + left[1] * 2.0];
+                if clear(q, off - 2.0) {
+                    models.push(model(&format!("fp_flag_{flag}"), land, q[0], q[1], d));
+                }
+            }
         }
-        s += rng.range(90.0, 150.0);
+        s += rng.range(60.0, 100.0);
+    }
+    // An inflatable sponsor arch over the track on a quiet straight,
+    // half a lap from the start, as race day puts up.
+    let mut s = line + course.length * 0.45;
+    for _ in 0..40 {
+        let at = s.rem_euclid(course.length);
+        let near = course.near(course.at(at).0, 1.0).map_or(0, |n| n.index);
+        let quiet = [-40.0f32, 0.0, 40.0].iter().all(|o| features.height((at + o).rem_euclid(course.length), course.length) < 0.05);
+        if quiet && course.curve[near].abs() < 0.003 {
+            let (p, d) = course.at(at);
+            let mut arch = model("waypnt", land, p[0], p[1], d);
+            arch.scale = (half + 6.0) / 18.5;
+            models.push(arch);
+            break;
+        }
+        s += 25.0;
     }
     // Speaker and light poles down the start straight, behind the fences.
     let mut s = line - 30.0;
@@ -2088,6 +2174,19 @@ fn national_dressing(course: &Course, land: &Land, half: f32, line: f32, feature
             models.push(model(if k < 2 { "speakerpole" } else { "lightpole" }, land, at[0], at[1], [-left[0], -left[1]]));
         }
         s += 55.0;
+    }
+    // Feather flags behind the fences down the start straight.
+    let mut s = line - 20.0;
+    for k in 0..6 {
+        let (p, d) = course.at(s);
+        let sign = if k % 2 == 0 { 1.0 } else { -1.0 };
+        let left = [-d[1] * sign, d[0] * sign];
+        let off = START_HALF + 12.0;
+        let at = [p[0] + left[0] * off, p[1] + left[1] * off];
+        if clear(at, off - 4.0) {
+            models.push(model(&format!("fp_flag_{}", 1 + k % 4), land, at[0], at[1], d));
+        }
+        s += 24.0;
     }
     // A TV camera platform beside the biggest jump.
     if let Some((at, _)) = features.0.iter().find(|(_, sh)| matches!(sh, Shape::Gap { .. } | Shape::Table { .. })) {
@@ -2258,7 +2357,7 @@ fn supercross(def: &Def) -> Made {
     let finish = (line + (run - 60.0).clamp(30.0, 120.0)) % course.length;
     let features = fill_straights(&course, &runs, &mut rng, &mut |r, room| pick_shape(r, room, SX_JUMPS), 24.0, 20.0, (8.0, 22.0), Some(((line - 40.0).rem_euclid(course.length), 200.0)));
     let half = 12.0;
-    land.carve(&course, half, 6.0, &|_| floor + 0.3, &features, 3.0);
+    land.carve(&course, half, 6.0, &|_| floor + 0.3, &features, 3.0, 0.0, None);
     land.widen_start(&course, line, half, SX_START_HALF, 4.0, &|_| floor + 0.3);
     land.compute_steep();
     let mut models = vec![Model { name: "fp_arena".into(), at: [cx, floor, cz], look: [0.0, 1.0], scale: 1.0 }];
@@ -2505,6 +2604,26 @@ fn open_country(def: &Def) -> Made {
         } else {
             land.valley(&lines, 30.0, 300.0, 100.0, 20.0, 200.0, seed);
         }
+        // Open country worth riding off the trail: rolls, dips and dry
+        // gullies across the ground round it, all smooth enough to ride
+        // over, coming in from just past the trail.
+        let dist = land.course_distance(&lines);
+        let n = land.size;
+        for z in 0..n {
+            for x in 0..n {
+                let i = z * n + x;
+                let (fx, fz) = (x as f32 * land.scale, z as f32 * land.scale);
+                let away = smooth((dist[i] - 55.0) / 90.0);
+                if away <= 0.0 {
+                    continue;
+                }
+                let rolls = (fbm(fx / 85.0, fz / 85.0, seed + 51) - 0.5) * 11.0;
+                let g = (noise(fx / 240.0, fz / 240.0, seed + 52) * 2.0 - 1.0).abs();
+                let gully = -(1.0 - smooth(g / 0.18)) * 6.0;
+                let humps = (fbm(fx / 28.0, fz / 28.0, seed + 53) - 0.5) * 2.6;
+                land.heights[i] += (rolls + gully + humps) * away * if desert { 0.8 } else { 1.0 };
+            }
+        }
     }
     for (course, half, gates, _) in &courses {
         let raw = land.profile(course, if desert { 240.0 } else { 140.0 });
@@ -2515,7 +2634,7 @@ fn open_country(def: &Def) -> Made {
             _ => Shape::Table { up: r.range(30.0, 40.0), top: r.range(30.0, 50.0), down: r.range(40.0, 60.0), height: r.range(6.0, 10.0) },
         };
         let features = place_features(course, &mut rng, &mut make, 400.0, 300.0, 600.0);
-        land.carve(course, *half, if desert { 40.0 } else { 26.0 }, &profile, &features, 3.0);
+        land.carve(course, *half, if desert { 40.0 } else { 26.0 }, &profile, &features, 3.0, 0.0, None);
         let start_s = *gates.last().unwrap_or(&0.0);
         land.widen_start(course, start_s, *half, START_HALF, if desert { 40.0 } else { 20.0 }, &profile);
     }
@@ -2576,7 +2695,7 @@ fn quarry(def: &Def) -> Made {
     {
         let raw = land.profile(&course, 200.0);
         let profile = profile_fn(&course, raw);
-        land.carve(&course, 16.0, 30.0, &profile, &features, 4.0);
+        land.carve(&course, 16.0, 30.0, &profile, &features, 4.0, 0.6, None);
     }
     let mut models = Vec::new();
     for k in 0..rng.range(4.0, 8.0) as usize {
@@ -2775,7 +2894,7 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
 /// Which making of the recipes a built track is from (its `.made` file):
 /// a track built by an older one is built again. Change it whenever a
 /// change here moves anything on an existing track.
-pub const MADE: &str = "3";
+pub const MADE: &str = "4";
 
 /// The free track whose file is `stem` (`FPNAT01`), any case.
 pub fn find(stem: &str) -> Option<&'static Def> {

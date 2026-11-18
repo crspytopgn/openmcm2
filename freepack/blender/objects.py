@@ -122,6 +122,48 @@ def race_banner(lo, hi, name):
     for x in (lo.x + (hi.x - lo.x) * 0.2, hi.x - (hi.x - lo.x) * 0.2):
         box(Vector((x - 0.25, y0 + th + 0.02, lo.z)), Vector((x + 0.25, y0 + th + 0.52, top - 0.3)), wood(), uv_scale=3)
 
+FENCE_BRANDS = ["oakmere", "copperhead", "juniper", "marlow"]
+
+def sponsor_fence(lo, hi, name):
+    # printed sponsor mesh, the kind every pro track lines its straights
+    # with, zip-tied between two steel T-posts, a little slack in it
+    k = int(name.rsplit("_", 1)[1]) if name[-1].isdigit() else 1
+    b = FENCE_BRANDS[(k - 1) % len(FENCE_BRANDS)]
+    m = image_mat(os.path.join(BUILD, "brands", b + "_race.png"), "fence_" + b, rough=0.9)
+    cy = (lo.y + hi.y) / 2; bottom = lo.z + 0.45; top = min(hi.z - 0.35, bottom + 3.0)
+    for x in (lo.x + 0.08, hi.x - 0.08):
+        box(Vector((x - 0.05, cy - 0.05, lo.z)), Vector((x + 0.05, cy + 0.05, top + 0.25)), galv())
+    _banner_quad(Vector((lo.x + 0.02, cy - 0.015, bottom)), Vector((hi.x - 0.02, cy - 0.015, top)), m, -1)
+    _banner_quad(Vector((lo.x + 0.02, cy + 0.015, bottom)), Vector((hi.x - 0.02, cy + 0.015, top)), m, 1)
+
+# linear colours: the shadows of a saturated colour sit very near 0
+FLAG_COLOURS = [((0.6, 0.006, 0.004), (0.8, 0.8, 0.78)), ((0.8, 0.42, 0.0), (0.01, 0.01, 0.012)),
+                ((0.004, 0.035, 0.42), (0.8, 0.8, 0.78)), ((0.07, 0.32, 0.0), (0.01, 0.01, 0.012))]
+
+def feather_flag(lo, hi, name):
+    # a sponsor's feather flag: a bent fibreglass pole on a ground spike
+    # and a tall teardrop of printed cloth with a stripe down its edge
+    k = int(name.rsplit("_", 1)[1]); body, edge = FLAG_COLOURS[(k - 1) % len(FLAG_COLOURS)]
+    cloth = flat(f"flag_cloth_{k}", body, 0.8); trim = flat(f"flag_trim_{k}", edge, 0.8)
+    x0 = lo.x + 0.15; cy = (lo.y + hi.y) / 2; H = hi.z - lo.z; Wf = (hi.x - lo.x) - 0.3
+    pole = [Vector((x0 + 0.5 * Wf * (t ** 3) * 0.6, cy, lo.z + H * t)) for t in [i / 12 for i in range(13)]]
+    for a, b in zip(pole, pole[1:]): cyl(a, b, 0.05, flat("flag_pole", (0.08, 0.08, 0.09), 0.5), 6)
+    bm = bmesh.new(); rows = 14; tri = []
+    top = lo.z + H * 0.98; bottom = lo.z + H * 0.22
+    for i in range(rows + 1):
+        t = i / rows; z = bottom + (top - bottom) * t
+        xa = x0 + 0.5 * Wf * (((z - lo.z) / H) ** 3) * 0.6
+        w = Wf * (0.45 + 0.55 * math.sin(math.pi * min(1.0, t * 1.15)) ** 0.7) * (1 - 0.35 * t)
+        tri.append((xa, xa + w * 0.86, xa + w, z))
+    for side, y in ((-1, cy - 0.01), (1, cy + 0.01)):
+        for mat_i, (u0, u1) in ((0, (0, 1)), (1, (1, 2))):
+            vs = [[bm.verts.new((r[u0], y, r[3])), bm.verts.new((r[u1], y, r[3]))] for r in tri]
+            for a, b in zip(vs, vs[1:]):
+                f = bm.faces.new([a[0], a[1], b[1], b[0]] if side > 0 else [b[0], b[1], a[1], a[0]]); f.material_index = mat_i
+    me = bpy.data.meshes.new(name); bm.to_mesh(me); bm.free()
+    o = bpy.data.objects.new(name, me); bpy.context.scene.collection.objects.link(o)
+    me.materials.append(cloth); me.materials.append(trim)
+
 def giant_tyre(lo, hi, name):
     # two upright earthmover tyres side by side, filling the footprint
     n = 2 if (hi.x - lo.x) > 1.5 * (hi.z - lo.z) else 1
@@ -263,15 +305,28 @@ def _fence_mat():
     return m
 
 def waypoint(lo, hi, name):
-    # checkpoint arch: two padded legs and an inflatable-style beam
-    leg = canvas((0.82, 0.82, 0.8)); beam = brand_mat("checkpoint")
-    W = 3.0; z0 = max(lo.z, 0)
+    # checkpoint arch: a race-orange inflatable, white seam bands, the
+    # sponsor across the beam and a pennant flying from each corner
+    tube = flat("inflatable_orange", (0.8, 0.11, 0.0), 0.45); band = flat("inflatable_white", (0.82, 0.82, 0.8), 0.5)
+    beam = brand_mat("checkpoint")
+    W = 3.0; cy = (lo.y + hi.y) / 2
     for x in (lo.x + W / 2, hi.x - W / 2):
-        cyl((x, (lo.y + hi.y) / 2, lo.z), (x, (lo.y + hi.y) / 2, hi.z - W), W / 2, leg, 24)
-    cy = (lo.y + hi.y) / 2
-    cyl((lo.x, cy, hi.z - W / 2), (hi.x, cy, hi.z - W / 2), W / 2, leg, 24)
-    _banner_quad(Vector((lo.x + W, cy - W / 2 - 0.05, hi.z - W + 0.2)), Vector((hi.x - W, cy - W / 2 - 0.05, hi.z - 0.2)), beam, -1)
-    _banner_quad(Vector((lo.x + W, cy + W / 2 + 0.05, hi.z - W + 0.2)), Vector((hi.x - W, cy + W / 2 + 0.05, hi.z - 0.2)), beam, 1)
+        cyl((x, cy, lo.z), (x, cy, hi.z - W), W / 2, tube, 24)
+        cyl((x, cy, lo.z), (x, cy, lo.z + 0.6), W / 2 + 0.25, flat("inflatable_base", (0.08, 0.08, 0.09), 0.8), 24)
+        for z in (lo.z + (hi.z - lo.z) * 0.3, lo.z + (hi.z - lo.z) * 0.6):
+            cyl((x, cy, z), (x, cy, z + 0.35), W / 2 + 0.04, band, 24)
+        # a pennant on a whip pole at each top corner
+        cyl((x, cy, hi.z - 0.2), (x, cy, hi.z + 5.0), 0.05, galv(), 6)
+        tip = 2.2 if x < (lo.x + hi.x) / 2 else -2.2
+        f = bmesh.new(); vs = [f.verts.new(v) for v in ((x, cy - 0.02, hi.z + 5.0), (x, cy - 0.02, hi.z + 3.6), (x + tip, cy - 0.02, hi.z + 4.4))]
+        ws = [f.verts.new(v) for v in ((x, cy + 0.02, hi.z + 5.0), (x, cy + 0.02, hi.z + 3.6), (x + tip, cy + 0.02, hi.z + 4.4))]
+        f.faces.new(vs); f.faces.new(ws[::-1]); me = bpy.data.meshes.new("pennant"); f.to_mesh(me); f.free()
+        o = bpy.data.objects.new("pennant", me); bpy.context.scene.collection.objects.link(o); me.materials.append(flat("pennant_yellow", (0.85, 0.5, 0.0), 0.7))
+    cyl((lo.x, cy, hi.z - W / 2), (hi.x, cy, hi.z - W / 2), W / 2, tube, 24)
+    for x in (lo.x + W + 0.2, hi.x - W - 0.2):
+        cyl((x - 0.18, cy, hi.z - W / 2), (x + 0.18, cy, hi.z - W / 2), W / 2 + 0.04, band, 24)
+    _banner_quad(Vector((lo.x + W + 0.6, cy - W / 2 - 0.05, hi.z - W + 0.3)), Vector((hi.x - W - 0.6, cy - W / 2 - 0.05, hi.z - 0.3)), beam, -1)
+    _banner_quad(Vector((lo.x + W + 0.6, cy + W / 2 + 0.05, hi.z - W + 0.3)), Vector((hi.x - W - 0.6, cy + W / 2 + 0.05, hi.z - 0.3)), beam, 1)
 
 def podium(lo, hi, name):
     w = (hi.x - lo.x) / 3; base = max(lo.z, 0)
@@ -980,6 +1035,13 @@ FP_PROPS = {  # name: (game lo, game hi) in feet, y up
     "fp_tuffblock": ((-2.5, 0, -1), (2.5, 2.6, 1)),
     "fp_startgate_post": ((-1.5, 0, -0.6), (1.5, 2.2, 0.6)),
     "fp_fence": ((-3.3, 0, -0.1), (3.3, 4.0, 0.1)),
+    "fp_fence_2": ((-3.3, 0, -0.1), (3.3, 4.0, 0.1)),
+    "fp_flag_1": ((0, 0, -0.1), (3.2, 14.0, 0.1)),
+    "fp_flag_2": ((0, 0, -0.1), (3.2, 14.0, 0.1)),
+    "fp_flag_3": ((0, 0, -0.1), (3.2, 14.0, 0.1)),
+    "fp_flag_4": ((0, 0, -0.1), (3.2, 14.0, 0.1)),
+    "fp_fence_3": ((-3.3, 0, -0.1), (3.3, 4.0, 0.1)),
+    "fp_fence_4": ((-3.3, 0, -0.1), (3.3, 4.0, 0.1)),
     "fp_tirewall": ((-4.6, 0, -1.15), (4.6, 2.8, 1.15)),
     "fp_flagman_stand": ((-2, 0, -2), (2, 8, 2)),
     "fp_banner": ((-6, 0, -0.2), (6, 6, 0.2)),
@@ -988,7 +1050,7 @@ FP_PROPS = {  # name: (game lo, game hi) in feet, y up
 
 RULES = [
     (r"^fp_haybale$", single_bale), (r"^fp_tuffblock$", tuffblock), (r"^fp_startgate_post$", startgate_post),
-    (r"^fp_fence$", mesh_fence), (r"^fp_tirewall$", tirewall), (r"^fp_flagman_stand$", flagman_stand), (r"^fp_banner$", billboard), (r"^fp_banner_\d$", race_banner),
+    (r"^fp_fence(_\d)?$", sponsor_fence), (r"^fp_flag_\d$", feather_flag), (r"^fp_tirewall$", tirewall), (r"^fp_flagman_stand$", flagman_stand), (r"^fp_banner$", billboard), (r"^fp_banner_\d$", race_banner),
     (r"^triplebale\d+$", triplebale), (r"^haybale$", bale_stack), (r"^haybale_", single_bale),
     (r"^(fox\d+|.*hb)$", single_bale), (r"^billboard", billboard), (r"^gianttire", giant_tyre),
     (r"^cameraplatform", camera_platform), (r"^rail$", rail), (r"^50gal$|^trash_can", drum),

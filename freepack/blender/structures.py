@@ -1309,7 +1309,13 @@ def b_marker(lo, hi, name):
     if name == "youind":
         # The player's own sign: a red cut gem, point down, as the game's
         # red diamond over the bike.
-        gem(lo, hi, marker_mat("marker_youind", (0.72, 0.06, 0.05)))
+        # A square pyramid, point down, in deep matt red: shiny facets
+        # caught the sky and read as a pale pink crystal in game.
+        m = marker_mat("marker_youind", (0.55, 0.004, 0.002)); b = m.node_tree.nodes["Principled BSDF"]
+        b.inputs["Roughness"].default_value = 0.95; b.inputs["Specular IOR Level"].default_value = 0.0
+        r = min(W, D) / 2
+        top = [V((c.x + r * math.cos(math.pi / 4 + k * math.pi / 2), c.y + r * math.sin(math.pi / 4 + k * math.pi / 2), hi.z)) for k in range(4)]
+        mesh("youind", [V((c.x, c.y, lo.z))] + top, [[0, 1 + (k + 1) % 4, 1 + k] for k in range(4)] + [[1, 2, 3, 4]], m)
         return
     if name == "itind":
         # Moto-Tag's IT sign: a flat chevron pointing down, bevelled.

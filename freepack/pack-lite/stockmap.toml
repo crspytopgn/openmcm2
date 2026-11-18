@@ -361,7 +361,14 @@ cargoplane = { file = "objects/cargoplane.glb", kind = "aircraft" }
 fp_haybale = { file = "objects/fp_haybale.glb", kind = "single_bale" }
 fp_tuffblock = { file = "objects/fp_tuffblock.glb", kind = "tuffblock" }
 fp_startgate_post = { file = "objects/fp_startgate_post.glb", kind = "startgate_post" }
-fp_fence = { file = "objects/fp_fence.glb", kind = "mesh_fence" }
+fp_fence = { file = "objects/fp_fence.glb", kind = "sponsor_fence" }
+fp_fence_2 = { file = "objects/fp_fence_2.glb", kind = "sponsor_fence" }
+fp_fence_3 = { file = "objects/fp_fence_3.glb", kind = "sponsor_fence" }
+fp_fence_4 = { file = "objects/fp_fence_4.glb", kind = "sponsor_fence" }
+fp_flag_1 = { file = "objects/fp_flag_1.glb", kind = "feather_flag" }
+fp_flag_2 = { file = "objects/fp_flag_2.glb", kind = "feather_flag" }
+fp_flag_3 = { file = "objects/fp_flag_3.glb", kind = "feather_flag" }
+fp_flag_4 = { file = "objects/fp_flag_4.glb", kind = "feather_flag" }
 fp_tirewall = { file = "objects/fp_tirewall.glb", kind = "tirewall" }
 fp_flagman_stand = { file = "objects/fp_flagman_stand.glb", kind = "flagman_stand" }
 fp_banner = { file = "objects/fp_banner.glb", kind = "billboard" }
