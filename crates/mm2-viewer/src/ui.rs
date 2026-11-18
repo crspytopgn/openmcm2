@@ -376,6 +376,10 @@ impl Fonts {
     }
 }
 
+/// The most texts kept drawn before the ones unused longest go: far more
+/// than a screen shows at once.
+const TEXTS_KEPT: usize = 2048;
+
 /// Everything the front end loads, cached.
 pub struct Ui {
     dir: PathBuf,
@@ -383,7 +387,11 @@ pub struct Ui {
     packs: HashMap<String, Option<Pack>>,
     images: HashMap<(String, String), Option<TextureId>>,
     sounds: HashMap<String, Option<Arc<wav::Sound>>>,
-    texts: HashMap<(String, u32, bool, bool), Option<TextureId>>,
+    /// Texts drawn, each with when it was last asked for (see
+    /// [`TEXTS_KEPT`]).
+    texts: HashMap<(String, u32, bool, bool), (Option<TextureId>, u64)>,
+    /// Counts the texts asked for, to know which went unused longest.
+    text_clock: u64,
     /// The window scale the cached texts were drawn for.
     text_scale: f32,
     /// Tooltip texts, by tenths of their em.
@@ -431,6 +439,7 @@ impl Ui {
             images: HashMap::new(),
             sounds: HashMap::new(),
             texts: HashMap::new(),
+            text_clock: 0,
             text_scale: 1.0,
             tips: HashMap::new(),
             strings: menu_strings,
@@ -776,12 +785,37 @@ impl Ui {
     }
 
     /// Forgets texts drawn for another window size.
-    fn match_scale(&mut self, gfx: &Gfx) {
+    fn match_scale(&mut self, gfx: &mut Gfx) {
         if gfx.sprites.scale != self.text_scale {
             self.text_scale = gfx.sprites.scale;
-            self.texts.clear();
-            self.tips.clear();
+            for (t, _) in self.texts.drain().map(|(_, v)| v) {
+                t.map(|t| gfx.sprites.free(t));
+            }
+            for t in self.tips.drain().filter_map(|(_, t)| t) {
+                gfx.sprites.free(t);
+            }
         }
+    }
+
+    /// Past [`TEXTS_KEPT`] texts, lets the half asked for longest ago go.
+    /// A race's clock and lap time make a new text every frame, which
+    /// kept would fill the graphics memory within the hour.
+    fn forget_old_texts(&mut self, gfx: &mut Gfx) {
+        if self.texts.len() <= TEXTS_KEPT {
+            return;
+        }
+        let mut ages: Vec<u64> = self.texts.values().map(|v| v.1).collect();
+        let keep = TEXTS_KEPT / 2;
+        let cut = *ages.select_nth_unstable(self.texts.len() - keep).1;
+        self.texts.retain(|_, (t, used)| {
+            let kept = *used >= cut;
+            if !kept {
+                if let Some(t) = t {
+                    gfx.sprites.free(*t);
+                }
+            }
+            kept
+        });
     }
 
     /// A tooltip's text: GDI's hinted small Arial measures like a
@@ -814,9 +848,12 @@ impl Ui {
         self.match_scale(gfx);
         let px = (cell / CELL).round().max(1.0) as u32;
         let key = (text.to_string(), px, bold, italic);
-        if let Some(t) = self.texts.get(&key) {
+        self.text_clock += 1;
+        if let Some((t, used)) = self.texts.get_mut(&key) {
+            *used = self.text_clock;
             return *t;
         }
+        self.forget_old_texts(gfx);
         let tex = self
             .fonts
             .render(text, px as f32, bold, italic, 0.5, self.text_scale)
@@ -824,7 +861,7 @@ impl Ui {
                 gfx.sprites
                     .upload_covering(gfx.device, gfx.queue, &img, size)
             });
-        self.texts.insert(key, tex);
+        self.texts.insert(key, (tex, self.text_clock));
         tex
     }
 
@@ -2604,5 +2641,43 @@ mod tests {
                 1.0
             ]
         );
+    }
+
+    /// A long race's clock makes a new text each frame: the old ones must
+    /// go, or the graphics memory fills (issue #80, a crash after 20 to 60
+    /// minutes). Needs a GPU (or a software one); skipped without.
+    #[test]
+    fn a_long_race_clock_keeps_the_texture_count_flat() {
+        let Ok((_, device, queue)) = pollster::block_on(crate::gpu(None)) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let target = crate::offscreen(&device, format, 64, 48);
+        let view = target.create_view(&Default::default());
+        let mut sprites = crate::sprites::Sprites::new(&device, format);
+        let mut ui = Ui::new(Path::new("/nonexistent-game"));
+        ui.fonts = Fonts { regular: None, bold: None, bold_italic: None, italic: None }.or_built_in();
+        let mut most = 0;
+        // Ten minutes at 30 frames a second: the race and lap clocks, and
+        // a label that stays.
+        for frame in 0..18_000u32 {
+            let t = frame as f32 / 30.0;
+            let mut gfx = Gfx { sprites: &mut sprites, device: &device, queue: &queue };
+            for text in [format!("Time {}", crate::hud::clock_text(t)), format!("Lap {}", crate::hud::clock_text(t * 0.7)), "Position 1 / 8".into()] {
+                let id = ui.text(&mut gfx, &text, 10.0, false).expect("text drawn");
+                gfx.sprites.quad(id, [0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 10.0, 10.0], [1.0; 4]);
+            }
+            let mut encoder = device.create_command_encoder(&Default::default());
+            sprites.render(&device, &mut encoder, &view, (64, 48), true);
+            queue.submit([encoder.finish()]);
+            if frame % 300 == 0 {
+                let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            }
+            most = most.max(sprites.live());
+        }
+        // 36,000 different texts were drawn; no more than the kept ones live.
+        assert!(most <= TEXTS_KEPT + 8, "{most} textures alive");
+        assert!(ui.texts.len() <= TEXTS_KEPT);
     }
 }
