@@ -147,12 +147,22 @@ impl Movie {
                     gfx.sprites.update(gfx.queue, t, &rgba)
                 }
                 _ => {
-                    let image = mm2_formats::tga::Image {
-                        width: self.width as u32,
-                        height: self.height as u32,
-                        rgba,
-                    };
-                    self.texture = Some(gfx.sprites.upload(gfx.device, gfx.queue, &image));
+                    let size = (self.width as u32, self.height as u32);
+                    // A closed movie's texture of this size, else a new one.
+                    let spare = SPARE.with_borrow_mut(|v| v.iter().position(|&(_, s)| s == size).map(|k| v.swap_remove(k).0));
+                    if let Some(t) = self.texture.take() {
+                        SPARE.with_borrow_mut(|v| v.push((t, gfx.sprites.size(t))));
+                    }
+                    self.texture = Some(match spare {
+                        Some(t) => {
+                            gfx.sprites.update(gfx.queue, t, &rgba);
+                            t
+                        }
+                        None => {
+                            let image = mm2_formats::tga::Image { width: size.0, height: size.1, rgba };
+                            gfx.sprites.upload(gfx.device, gfx.queue, &image)
+                        }
+                    });
                 }
             }
         }
@@ -162,8 +172,18 @@ impl Movie {
     }
 }
 
+thread_local! {
+    /// Closed movies' textures and their sizes, for the next movie: they
+    /// live in the window's sprites, which outlive the movie, so each
+    /// visit to a menu with a movie would otherwise leave one behind.
+    static SPARE: std::cell::RefCell<Vec<(crate::sprites::TextureId, (u32, u32))>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 impl Drop for Movie {
     fn drop(&mut self) {
+        if let Some(t) = self.texture.take() {
+            SPARE.with_borrow_mut(|v| v.push((t, (self.width as u32, self.height as u32))));
+        }
         self.stop();
     }
 }
