@@ -2657,7 +2657,6 @@ mod tests {
         let view = target.create_view(&Default::default());
         let mut sprites = crate::sprites::Sprites::new(&device, format);
         let mut ui = Ui::new(Path::new("/nonexistent-game"));
-        ui.fonts = Fonts { regular: None, bold: None, bold_italic: None, italic: None }.or_built_in();
         let mut most = 0;
         // Ten minutes at 30 frames a second: the race and lap clocks, and
         // a label that stays.
