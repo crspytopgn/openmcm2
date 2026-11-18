@@ -706,7 +706,12 @@ fn masks(set: &str) -> Option<(PathBuf, PathBuf)> {
     let dir = rides()
         .paints
         .iter()
-        .find(|(k, _)| k.strip_prefix(set).is_some_and(|r| r.starts_with('_')))?
+        // only `<set>_<colour>...` names, so `fp_rider` never picks up `fp_rider_hq_blue`
+        .find(|(k, _)| {
+            k.strip_prefix(set)
+                .and_then(|r| r.strip_prefix('_'))
+                .is_some_and(|r| r.split('_').all(|c| colour(c).is_some()))
+        })?
         .1
         .parent()?
         .to_path_buf();
