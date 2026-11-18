@@ -1,3 +1,9 @@
+# OpenMCM2 0.6.4
+
+* **Kit & Paint.** A new garage page lets you mix your own colours for
+  the HD rider's kit and helmet and for the HD bike. Pick a ready-made
+  colourway again to go back to it.
+
 # OpenMCM2 0.6.3
 
 The free graphics take a big step towards the original's look and feel:
