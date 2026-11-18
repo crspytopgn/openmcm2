@@ -1,3 +1,10 @@
+# OpenMCM2 0.6.6
+
+* **Bigger mountains in free mode.** Outdoor free tracks now sit in a
+  ring of tall mountains instead of low hills, and the land between the
+  course and the mountains is smoother, with fewer lumps and steps. The
+  free tracks rebuild themselves the first time you ride them.
+
 # OpenMCM2 0.6.5
 
 * **New free bikes.** Two bikes for 125, 250 and 500, the Ridgeback and
