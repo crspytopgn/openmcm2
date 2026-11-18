@@ -1327,7 +1327,26 @@ def b_marker(lo, hi, name):
         return
     gem(lo, hi, m)
 
+def b_viscue(lo, hi, name):
+    """The off-course arrow on the screen (Baja and Enduro): a solid green
+    3D arrow pointing along +game z, a square shaft and a four-sided head,
+    like the game's own. Was a plain pole, which showed as a grey pipe."""
+    m = flat("viscue_green", (0.16, 0.62, 0.12), 0.45)
+    b = m.node_tree.nodes["Principled BSDF"]
+    b.inputs["Emission Color"].default_value = (0.16, 0.62, 0.12, 1); b.inputs["Emission Strength"].default_value = 0.6
+    W, H = hi.x - lo.x, hi.z - lo.z; c = (lo + hi) / 2
+    neck = lo.y + (hi.y - lo.y) * 0.55
+    sw, sh = W * 0.22, H * 0.2
+    verts = [V((c.x - sw, lo.y, c.z - sh)), V((c.x + sw, lo.y, c.z - sh)), V((c.x + sw, lo.y, c.z + sh)), V((c.x - sw, lo.y, c.z + sh)),
+             V((c.x - sw, neck, c.z - sh)), V((c.x + sw, neck, c.z - sh)), V((c.x + sw, neck, c.z + sh)), V((c.x - sw, neck, c.z + sh)),
+             V((lo.x, neck, lo.z)), V((hi.x, neck, lo.z)), V((hi.x, neck, hi.z)), V((lo.x, neck, hi.z)), V((c.x, hi.y, c.z))]
+    faces = [[0, 3, 2, 1], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7],
+             [8, 9, 10, 11], [8, 12, 9], [9, 12, 10], [10, 12, 11], [11, 12, 8]]
+    o = mesh("viscue", verts, faces, m)
+    bm = bmesh.new(); bm.from_mesh(o.data); bmesh.ops.recalc_face_normals(bm, faces=bm.faces); bm.to_mesh(o.data); bm.free()
+
 STRUCT = [
+    (r"^viscue$", b_viscue),
     (r"^farmhouse$", b_farmhouse), (r"^garage0\d$", b_garage), (r"^gasstation$", b_gasstation), (r"^hanger$", b_hangar),
     (r"^quonset$", b_quonset), (r"^office01$|^main_office$", b_office), (r"^radiostation$", b_radiostation),
     (r"^rangerstation", b_rangerstation), (r"^miningbldg01$", b_mining), (r"^station$", b_station), (r"^cabin$", b_cabin), (r"^hut$", b_hut2),
