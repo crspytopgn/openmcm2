@@ -228,6 +228,13 @@ pub struct Frontend {
     /// The player has picked a bike on the Bike & Rider page.
     bike_picked: bool,
     outfit: usize,
+    /// The Kit & Paint page shows in the Bike & Rider page's place.
+    paint_page: bool,
+    /// The Kit & Paint page's colours, as places in freepack::COLOURS, in
+    /// PAINT_ROWS' order (kit, kit trim, bike, bike trim, helmet); used
+    /// while `paint_on`.
+    paint: [usize; 5],
+    paint_on: bool,
     plate: String,
     /// The plate number box has the keyboard.
     typing: bool,
@@ -307,6 +314,20 @@ fn sky_row(page: &mut Dlg) {
     page.add_copy("EventTypeDropDown", "WeatherList", [330, y - 3, 129, 27]);
     page.set_text("TimeLabel", "Time of Day:");
     page.set_text("WeatherLabel", "Weather:");
+}
+
+/// The Kit & Paint page's rows: list, label, and top in the page.
+const PAINT_ROWS: [(&str, &str, i32); 5] = [
+    ("PaintKit", "Kit", 4),
+    ("PaintKitTrim", "Kit trim", 27),
+    ("PaintBike", "Bike", 274),
+    ("PaintBikeTrim", "Bike trim", 297),
+    ("PaintHelmet", "Helmet", 320),
+];
+
+fn title(name: &str) -> String {
+    let mut c = name.chars();
+    c.next().map(|f| f.to_ascii_uppercase().to_string() + c.as_str()).unwrap_or_default()
 }
 
 /// The track filter's choices (the extra's).
@@ -408,6 +429,9 @@ impl Frontend {
             bike: 0,
             bike_picked: false,
             outfit: 0,
+            paint_page: false,
+            paint: [1, 10, 1, 10, 1],
+            paint_on: false,
             plate: "107".into(),
             typing: false,
             random_gates: false,
@@ -1156,6 +1180,15 @@ impl Frontend {
         if let Some(o) = self.roster.outfits.get(self.outfit) {
             ride.outfit = o.file.clone();
         }
+        if self.paint_on {
+            let c = |i: usize| crate::freepack::COLOURS[self.paint[i].min(11)].0;
+            if let Some(set) = crate::freepack::paint_set(&ride.outfit) {
+                ride.outfit = crate::freepack::mix_name(&set, c(0), c(1), Some(c(4)));
+            }
+            if let Some(set) = crate::freepack::paint_set(&ride.bike.texture) {
+                ride.bike.texture = crate::freepack::mix_name(&set, c(2), c(3), None);
+            }
+        }
         let mut plate: u32 = self.plate.parse().unwrap_or(0);
         if plate < 100 {
             plate += 100;
@@ -1188,6 +1221,58 @@ impl Frontend {
         page.enable("TxtEngineSize", own);
         page.set_on("ChkAutoRotate", true);
         page.set_text("EditPlateNumber", self.plate.clone());
+        self.fill_paint_rows();
+    }
+
+    /// Whether the picked kit or bike takes the Kit & Paint page's colours
+    /// (the high-detail ones, whose paint has masks).
+    fn paintable(&self) -> bool {
+        let outfit = self.roster.outfits.get(self.outfit).is_some_and(|o| crate::freepack::paint_set(&o.file).is_some());
+        let bike = self.roster.bikes.get(self.bike).is_some_and(|b| crate::freepack::paint_set(&b.texture).is_some());
+        outfit || bike
+    }
+
+    /// The Kit & Paint page: the Bike & Rider page's own boxes and arrows,
+    /// copied, one row for each colour around the turning bike and rider,
+    /// and its box beside Auto Rotate to come and go.
+    fn fill_paint_rows(&mut self) {
+        let paintable = self.paintable();
+        if !paintable {
+            self.paint_page = false;
+        }
+        let (on, paint) = (self.paint_page, self.paint);
+        let Screen::Single { page, .. } = &mut self.screen else {
+            return;
+        };
+        if page.index("ChkPaint").is_none() {
+            page.add_copy("ChkAutoRotate", "ChkPaint", [416, 4, 129, 21]);
+            page.set_text("ChkPaint", "Kit & Paint");
+            for (name, _, y) in PAINT_ROWS {
+                page.add_copy("DDLRiders", name, [95, y, 285, 21]);
+                page.add_copy("RiderLeft", &format!("{name}Left"), [73, y, 21, 21]);
+                page.add_copy("RiderRight", &format!("{name}Right"), [381, y, 21, 21]);
+            }
+        }
+        page.set_tip(
+            "ChkPaint",
+            if paintable {
+                "Pick your own colours for the HD kit, helmet and bike"
+            } else {
+                "Pick an HD outfit or bike to choose its colours"
+            },
+        );
+        page.enable("ChkPaint", paintable);
+        page.set_on("ChkPaint", on);
+        for name in ["DDLRiders", "RiderLeft", "RiderRight", "DDLBikes", "BikeLeft", "BikeRight", "DDLEngineSize", "TxtEngineSize", "rbwLabel1", "EditPlateNumber", "ButWrench"] {
+            page.show(name, !on);
+        }
+        for (i, (name, label, _)) in PAINT_ROWS.iter().enumerate() {
+            for n in [name.to_string(), format!("{name}Left"), format!("{name}Right")] {
+                page.show(&n, on);
+            }
+            let items = crate::freepack::COLOURS.iter().map(|c| format!("{label}: {}", title(c.0))).collect();
+            page.set_items(name, items, paint[i]);
+        }
     }
 
     /// The Bike & Rider page's arrows and boxes.
@@ -1205,13 +1290,37 @@ impl Frontend {
                 self.bike = step(self.bike, bikes, 1);
                 self.bike_picked = true;
             }
-            "riderleft" => self.outfit = step(self.outfit, outfits, -1),
-            "riderright" => self.outfit = step(self.outfit, outfits, 1),
+            "riderleft" => {
+                self.outfit = step(self.outfit, outfits, -1);
+                self.paint_on = false;
+            }
+            "riderright" => {
+                self.outfit = step(self.outfit, outfits, 1);
+                self.paint_on = false;
+            }
+            "chkpaint" => {
+                self.paint_page = !self.paint_page;
+                if self.paint_page && !self.paint_on {
+                    self.paint = self.paint_from_picks();
+                    self.paint_on = true;
+                }
+            }
+            other => {
+                let (row, by) = match (other.strip_suffix("left"), other.strip_suffix("right")) {
+                    (Some(row), _) => (row, -1),
+                    (_, Some(row)) => (row, 1),
+                    _ => return,
+                };
+                let Some(i) = PAINT_ROWS.iter().position(|r| r.0.eq_ignore_ascii_case(row)) else {
+                    return;
+                };
+                self.paint[i] = step(self.paint[i], crate::freepack::COLOURS.len(), by);
+                self.paint_on = true;
+            }
             "editplatenumber" => {
                 self.typing = true;
                 return;
             }
-            _ => return,
         }
         if self.typing {
             self.commit_plate();
@@ -1301,6 +1410,29 @@ impl Frontend {
         if (101..=999).contains(&p.plate) {
             self.plate = p.plate.to_string();
         }
+        let named: Vec<usize> = p
+            .paint
+            .split(',')
+            .filter_map(|n| crate::freepack::COLOURS.iter().position(|c| c.0 == n.trim()))
+            .collect();
+        if let Ok(paint) = <[usize; 5]>::try_from(named) {
+            self.paint = paint;
+            self.paint_on = true;
+        }
+    }
+
+    /// The Kit & Paint page's colours to start from: the picked kit's and
+    /// bike's own (their colourway's name), white trim.
+    fn paint_from_picks(&self) -> [usize; 5] {
+        let named = |file: &str| {
+            let stem = file.rsplit_once('.').map_or(file, |s| s.0).to_ascii_lowercase();
+            let last = stem.rsplit('_').next().unwrap_or("");
+            crate::freepack::COLOURS.iter().position(|c| c.0 == last)
+        };
+        let kit = self.roster.outfits.get(self.outfit).and_then(|o| named(&o.file)).unwrap_or(self.paint[0]);
+        let bike = self.roster.bikes.get(self.bike).and_then(|b| named(&b.texture)).unwrap_or(self.paint[2]);
+        let trim = |c: usize| if matches!(crate::freepack::COLOURS[c].0, "white" | "yellow" | "lime") { 0 } else { 10 };
+        [kit, trim(kit), bike, trim(bike), kit]
     }
 
     /// The page's picks into the profile, saved (`0x4513f0`), so the next
@@ -1309,8 +1441,14 @@ impl Frontend {
         let bike = self.roster.bikes.get(self.bike).filter(|_| self.bike_picked).map(|b| b.name.clone());
         let outfit = self.roster.outfits.get(self.outfit).map(|o| o.name.clone());
         let plate = self.plate.parse().ok().filter(|n| (101..=999).contains(n));
+        let paint = if self.paint_on {
+            self.paint.iter().map(|&i| crate::freepack::COLOURS[i.min(11)].0).collect::<Vec<_>>().join(",")
+        } else {
+            String::new()
+        };
         let p = &mut self.user.profile;
-        let before = (p.bike.clone(), p.outfit.clone(), p.plate);
+        let before = (p.bike.clone(), p.outfit.clone(), p.plate, p.paint.clone());
+        p.paint = paint;
         if let Some(b) = bike {
             p.bike = b;
         }
@@ -1320,7 +1458,7 @@ impl Frontend {
         if let Some(n) = plate {
             p.plate = n;
         }
-        if (p.bike.clone(), p.outfit.clone(), p.plate) != before {
+        if (p.bike.clone(), p.outfit.clone(), p.plate, p.paint.clone()) != before {
             self.user.save();
         }
     }
@@ -1462,7 +1600,15 @@ impl Frontend {
             }
             "ddlriders" => {
                 self.outfit = line;
+                self.paint_on = false;
                 self.keep_ride();
+            }
+            n if PAINT_ROWS.iter().any(|r| r.0.eq_ignore_ascii_case(n)) => {
+                let i = PAINT_ROWS.iter().position(|r| r.0.eq_ignore_ascii_case(n)).unwrap_or(0);
+                self.paint[i] = line.min(crate::freepack::COLOURS.len() - 1);
+                self.paint_on = true;
+                self.keep_ride();
+                self.fill_bike_page();
             }
             "tracksource" => {
                 self.track_source = line.min(TRACK_SOURCES.len() - 1);
