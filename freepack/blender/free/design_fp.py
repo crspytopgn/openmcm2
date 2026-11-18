@@ -78,6 +78,25 @@ aos = nd.gaussian_filter(ao, 1.5)
 shade = (0.42 + 0.58 * aos ** 0.6)[..., None]                               # fixed parts
 shade_p = (0.72 + 0.28 * aos ** 0.8)[..., None]                             # glossy paint shows little AO
 fixed = np.clip(base * shade, 0, 1) * (1 - painted[..., None])
+# ---- a ridden bike, kept subtle: slight tone drift in the paint, boot scuffs on the side plastics, dust low down
+rng = np.random.default_rng(11); G3 = rng.random((96, 96, 96)).astype(np.float32)
+def noise(f, oct=3, stretch=(1, 1, 1)):
+    out = np.zeros(x.shape, np.float32); a = 1.0; tot = 0
+    for o in range(oct):
+        q = (X * np.array(stretch, np.float32) * f * 2 ** o) % 96
+        out += a * nd.map_coordinates(G3, [q[..., 0].ravel(), q[..., 1].ravel(), q[..., 2].ravel()], order=1, mode='wrap').reshape(x.shape)
+        tot += a; a *= 0.5
+    return out / tot
+drift = 1 + (noise(6) - 0.5) * 0.06
+boot = N('Bike') * ss(0.08, 0.11, ax) * band(z, 0.48, 0.80, 0.03) * band(y, -0.55, 0.30, 0.05)
+streak = ss(0.62, 0.80, noise(260, 2, (0.15, 1.0, 0.15)))                    # fine scratches running fore and aft
+wear = painted * boot * streak * 0.22
+dust = (1 - ss(0.20, 0.60, z)) * ss(0.35, 0.75, noise(30)) * 0.14
+dustc = np.array([0.42, 0.36, 0.29])
+shade_p = shade_p * drift[..., None] * (1 - wear - dust)[..., None]
+paint_add = (wear * 0.70)[..., None] + dust[..., None] * dustc
+fixed = fixed * (1 - dust[..., None]) + (dust[..., None] * dustc * shade) * (1 - painted[..., None])
+fixed = fixed + paint_add * painted[..., None]
 mask = np.stack([P, S, np.zeros_like(P), shade_p[..., 0]], -1)
 def save(a, name, mode='RGB'):
     Image.fromarray((np.clip(a, 0, 1) * 255 + 0.5).astype(np.uint8), mode).save(os.path.join(OUT, name), optimize=True)

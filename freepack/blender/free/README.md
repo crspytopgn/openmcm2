@@ -11,4 +11,8 @@ Gives the free models a fresh texture layout and clean generic paint, with masks
 2. `design_fp.py BIKE OUTDIR` and `design_rider.py OUTDIR` (with `BAKE` set to the bake folder): paint the panels by
    rules in 3D and write the 12 colourways plus `<set>.mask.png` (R main, G trim, B helmet, A shade) and `<set>.base.png`.
 
+3. `design_mat.py BIKE OUTDIR` writes the bike's metal/roughness and normal maps (rider's come from `design_rider.py`),
+   and `attach_maps.py -- in.glb out.glb mr.png nrm.png` puts them on the model's material. The liveries replace only
+   the colour, so every colourway keeps the gloss, metal and surface detail (seen with Enhanced lighting).
+
 No logos, brands or numbers. Everything is generated, so it ships with the Free Pack under its usual licence.
