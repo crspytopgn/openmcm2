@@ -2,6 +2,21 @@
 
 Every Freesound recording used in `engine/` and `fx/`. CC0 clips need no credit (they are listed anyway). CC BY clips **must** be credited as below in any release.
 
+## Engines 125, 250 and 500: YouTube recordings
+
+These three classes are untouched stretches of real onboard recordings, cut into the original game's engine slots (LowTorque, MidTorque, HighTorque, PowerBand, Sputter, Decel, Idle, Rev). The only edits are cuts, 10 ms fades, loudness matching and, for the 250 and 500 Idle01, a 0.1 s loop crossfade. They have no engine.ini, so the game plays them as whole samples the way MM2 does. The Freesound table below no longer applies to these three folders except where noted here.
+
+| Class | Recording | Uploader | Licence | Files |
+|---|---|---|---|---|
+| 125 | [2023 CR125 2 Stroke, Raw GoPro, Field Of Dreams NJ](https://www.youtube.com/watch?v=eFumQsGcKjE) (0:35-1:05) | The Moto Academy | YouTube Standard Licence | all but Idle01 and Rev01 |
+| 250 | [HONDA CR250 TOP SPEED RUN](https://www.youtube.com/watch?v=DE5nSP9d78U) | Matt McHugh | YouTube Standard Licence | all |
+| 500 | [HELMET CAM: 500cc / Tyler Wozney, Tale Of The 2 Stroke 2.0 Shoot](https://www.youtube.com/watch?v=akMqExb8EWs) (0:35-1:15) | MXPTV | YouTube Standard Licence | all but Rev01 |
+| 125 Idle01, 125 Rev01, 500 Rev01 | ["motorbike crm 250cc kick start rev engine.wav"](https://freesound.org/people/martian/sounds/148855/) | martian | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | kept from the Freesound set |
+
+The YouTube recordings are not openly licensed; the project owner chose to include them. Recording owners who want theirs removed can open an issue.
+
+## Freesound recordings
+
 | Freesound ID | Title | Author | Licence | Used in |
 |---|---|---|---|---|
 | [148855](https://freesound.org/people/martian/sounds/148855/) | motorbike crm 250cc kick start rev engine.wav | martian | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | 125/Idle01.wav, 125/Rev01.wav, 125/Sputter02.wav, 250/Decel03.wav, 250/Idle01.wav, 250/Rev01.wav, 250/Sputter01.wav, 500/Idle01.wav, 500/Rev01.wav, 500/Sputter02.wav, 125/IdleLoop.wav, 250/OffLoop.wav, 250/IdleLoop.wav, 500/OnLoop.wav, 500/IdleLoop.wav |

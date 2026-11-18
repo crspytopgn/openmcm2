@@ -6,7 +6,10 @@ OpenMCM2 project.
 as their licences ask. CREDITS.md lists every recording and which files it
 went into.
 
-engine/<class>/engine.ini names each class's rev loops (on the gas, off
+The 125, 250 and 500 engines are cut from YouTube onboard recordings
+(see CREDITS.md) and play as whole samples, with no engine.ini.
+
+elsewhere, engine/<class>/engine.ini names each class's rev loops (on the gas, off
 the gas, idle) and the revs they were recorded at. The chimes and the
 crowd's ooh and boo are made in code (tools/freepack/make_stopgap_sounds.py).
 
