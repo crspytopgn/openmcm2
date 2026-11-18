@@ -77,7 +77,7 @@ def _cactus_mat():
     tc = nt.nodes.new("ShaderNodeTexCoord"); n = nt.nodes.new("ShaderNodeTexNoise"); n.inputs["Scale"].default_value = 60.0; n.inputs["Detail"].default_value = 6
     nt.links.new(tc.outputs["Object"], n.inputs["Vector"])
     skin = nt.nodes.new("ShaderNodeValToRGB"); e = skin.color_ramp.elements
-    e[0].position = 0.0; e[0].color = (0.035, 0.06, 0.03, 1); e[1].position = 1.0; e[1].color = (0.2, 0.26, 0.14, 1)
+    e[0].position = 0.0; e[0].color = (0.012, 0.022, 0.01, 1); e[1].position = 1.0; e[1].color = (0.075, 0.11, 0.05, 1)
     mixf = nt.nodes.new("ShaderNodeMath"); mixf.operation = "MULTIPLY_ADD"
     nt.links.new(at.outputs["Fac"], mixf.inputs[0]); mixf.inputs[1].default_value = 0.85; nt.links.new(n.outputs["Fac"], mixf.inputs[2])
     nt.links.new(mixf.outputs["Value"], skin.inputs["Fac"])
@@ -108,7 +108,7 @@ def proc_saguaro(v):
             ring = []
             for j in range(seg):
                 a = 2 * math.pi * j / seg; k = abs(math.cos(a * RIBS / 2)) ** 0.6
-                vt = bm.verts.new(c + (ax * math.cos(a) + ay * math.sin(a)) * r * (0.86 + 0.14 * k)); vt[ridge] = k; ring.append(vt)
+                vt = bm.verts.new(c + (ax * math.cos(a) + ay * math.sin(a)) * r * (0.78 + 0.22 * k)); vt[ridge] = k; ring.append(vt)
             rings.append(ring)
         for i in range(n - 1):
             for j in range(seg): bm.faces.new((rings[i][j], rings[i][(j + 1) % seg], rings[i + 1][(j + 1) % seg], rings[i + 1][j]))
@@ -119,26 +119,33 @@ def proc_saguaro(v):
             pass
         for p in me.polygons: p.use_smooth = True
         o = bpy.data.objects.new("saguaro", me); bpy.context.scene.collection.objects.link(o); me.materials.append(g); return o
-    H = 1.0; ribbed([(0, 0, H * i / 12) for i in range(13)], 0.09, 0.085)
-    for i in range(rnd.randint(1, 3)):
-        z = rnd.uniform(0.3, 0.55); out = rnd.uniform(0.12, 0.18); top = z + rnd.uniform(0.38, 0.58); ang = rnd.uniform(0, 2 * math.pi)
+    # Tall and slim (a real one is about a twentieth as wide as it is
+    # tall), arms out to the sides so the front-on card shows them, each
+    # bending up from the trunk.
+    H = 1.0; lean = rnd.uniform(-0.02, 0.02)
+    ribbed([(lean * i / 30, 0, H * i / 30) for i in range(31)], 0.05, 0.046)
+    arms = rnd.choice([1, 2, 2, 3, 4])
+    sides = [(-1) ** (i + rnd.randint(0, 1)) for i in range(arms)]
+    for i, sx in enumerate(sides):
+        z = rnd.uniform(0.32, 0.62); out = rnd.uniform(0.09, 0.14); top = z + out + rnd.uniform(0.12, 0.34)
+        ang = (0 if sx > 0 else math.pi) + rnd.uniform(-0.45, 0.45)
         dx, dy = math.cos(ang), math.sin(ang); pts = []
         for k in range(7):   # out from the trunk, a quarter-circle elbow, then straight up
-            t = k / 6 * math.pi / 2; pts.append((dx * (0.05 + out * math.sin(t)), dy * (0.05 + out * math.sin(t)), z + out * (1 - math.cos(t))))
+            t = k / 6 * math.pi / 2; pts.append((dx * (0.03 + out * math.sin(t)), dy * (0.03 + out * math.sin(t)), z + out * (1 - math.cos(t))))
         e = z + out
-        for k in range(1, 6): pts.append((dx * (0.05 + out), dy * (0.05 + out), e + (top - e) * k / 5 if top > e else e + 0.08 * k))
-        ribbed(pts, 0.06, 0.056)
+        for k in range(1, 15): pts.append((dx * (0.03 + out), dy * (0.03 + out), e + (top - e) * k / 14))
+        ribbed(pts, 0.036, 0.032)
 
 def proc_ocotillo(v):
-    rnd = random.Random(v); g = mat_rgb("ocotillo", (0.2, 0.18, 0.12))
+    rnd = random.Random(v); g = mat_rgb("ocotillo", (0.11, 0.09, 0.06))
     leaf = mat_rgb("ocotillo_leaf", (0.2, 0.32, 0.1)); flower = mat_rgb("ocotillo_flower", (0.75, 0.12, 0.05), 0.6)
     for i in range(22):
         a = rnd.uniform(0, 2 * math.pi); lean = rnd.uniform(0.15, 0.4); L = rnd.uniform(0.7, 1.0)
         tip = Vector((math.cos(a) * lean * L, math.sin(a) * lean * L, L))
         cyl((0, 0, 0), tip, 0.012, g, 6, r2=0.005)
-        for k in range(10):   # little leaf clusters up the cane, a red flower spike at the tip
+        for k in range(18):   # little leaf clusters up the cane, a red flower spike at the tip
             p = tip * rnd.uniform(0.15, 0.85)
-            bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.014, location=p); o = bpy.context.object; o.scale = (1, 1, 0.5); o.data.materials.append(leaf)
+            bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.024, location=p); o = bpy.context.object; o.scale = (1.0, 0.45, 0.3); o.rotation_euler = (rnd.uniform(0, 3.1), rnd.uniform(0, 3.1), rnd.uniform(0, 3.1)); o.data.materials.append(leaf)
         if rnd.random() < 0.7: cyl(tip, tip + (tip.normalized() * 0.035), 0.008, flower, 6, r2=0.002)
 
 def _frond_texture():

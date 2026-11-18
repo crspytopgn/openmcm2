@@ -51,7 +51,9 @@ def sheet(name, rgb, puff_rgb, spark=(1.0, 0.72, 0.35), S=256):
     q, e, s = S // 4, S // 8, S // 16
     for c in range(14):
         tint = np.array(rgb) * rng.uniform(0.8, 1.1)
-        im[(c // 4) * q:(c // 4 + 1) * q, (c % 4) * q:(c % 4 + 1) * q] = blob(q, tint, 0.15, c)
+        # Soft-edged and as light as the dirt they're thrown from: hard
+        # dark clods drew the tyres' trail as a dark smear behind a bike.
+        im[(c // 4) * q:(c // 4 + 1) * q, (c % 4) * q:(c % 4 + 1) * q] = blob(q, tint, 0.32, c)
     for k in range(4):
         y0, x0 = int(0.75 * S) + (k // 2) * e, int(0.25 * S) + (k % 2) * e
         b = blob(e, puff_rgb, 0.9, 50 + k); b[..., 3] *= 0.35
@@ -63,15 +65,24 @@ def sheet(name, rgb, puff_rgb, spark=(1.0, 0.72, 0.35), S=256):
         im[y0:y0 + s, x0:x0 + s] = blob(s, spark, 0.6, 200 + k)
     Image.fromarray((im * 255 + 0.5).astype(np.uint8), "RGBA").save(os.path.join(OUT, name + ".png"))
 
+# The clods' colour against the dirt's own: the game's are about this much
+# lighter than the ground under them.
+LIGHTER = 1.45
+
 if __name__ == "__main__":
+    import sys
     os.makedirs(OUT, exist_ok=True)
+    dirt_only = "--dirt-only" in sys.argv
     # The game's GrayNoise: alpha 68 about, spread 21; its whitenoise 28, 9.
-    detail("graynoise", 68, 21, 1); detail("whitenoise", 28, 9, 2)
-    for i, n in enumerate(["mxunat03noise", "mxunat13noise", "mxusx16noise"]): detail(n, 68, 21, 10 + i)
+    if not dirt_only:
+        detail("graynoise", 68, 21, 1); detail("whitenoise", 28, 9, 2)
+        for i, n in enumerate(["mxunat03noise", "mxunat13noise", "mxusx16noise"]): detail(n, 68, 21, 10 + i)
     dirt = {"track01p": (0.36, 0.26, 0.17), "track02p": (0.33, 0.24, 0.16), "track03p": (0.40, 0.30, 0.20), "track04p": (0.30, 0.22, 0.15),
             "track05p": (0.38, 0.28, 0.18), "track06p": (0.35, 0.27, 0.19), "track07p": (0.32, 0.25, 0.18), "track11p": (0.42, 0.32, 0.22),
             "track13p": (0.29, 0.21, 0.14), "track14p": (0.37, 0.29, 0.21), "track15p": (0.34, 0.25, 0.17), "track16p": (0.39, 0.29, 0.19),
             "dirtpart": (0.35, 0.26, 0.18), "bajadirt": (0.55, 0.42, 0.28), "sand": (0.66, 0.56, 0.40), "snow": (0.88, 0.9, 0.93)}
     for n, rgb in dirt.items():
-        sheet(n, rgb, tuple(min(1, c * 1.5 + 0.15) for c in rgb))
+        if n != "snow":
+            rgb = tuple(min(1, c * LIGHTER) for c in rgb)
+        sheet(n, rgb, tuple(min(1, c * 1.3 + 0.15) for c in rgb))
     print(len(dirt) + 5, "textures")

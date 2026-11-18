@@ -346,7 +346,7 @@ twr-d = { file = "objects/twr-d.glb", kind = "b_lattice_tower" }
 twr-pole = { file = "objects/twr-pole.glb", kind = "b_lattice_tower" }
 ufo = { file = "objects/ufo.glb", kind = "b_ufo" }
 uigarage = { file = "objects/uigarage.glb", kind = "b_shed_metal" }
-viscue = { file = "objects/viscue.glb", kind = "pole" }
+viscue = { file = "objects/viscue.glb", kind = "b_viscue" }
 watertank01 = { file = "objects/watertank01.glb", kind = "b_tank" }
 watertower = { file = "objects/watertower.glb", kind = "watertower" }
 waypoint_big = { file = "objects/waypoint_big.glb", kind = "b_finish" }
@@ -365,6 +365,12 @@ fp_fence = { file = "objects/fp_fence.glb", kind = "mesh_fence" }
 fp_tirewall = { file = "objects/fp_tirewall.glb", kind = "tirewall" }
 fp_flagman_stand = { file = "objects/fp_flagman_stand.glb", kind = "flagman_stand" }
 fp_banner = { file = "objects/fp_banner.glb", kind = "billboard" }
+fp_banner_7 = { file = "objects/fp_banner_7.glb", kind = "race_banner" }
+fp_banner_6 = { file = "objects/fp_banner_6.glb", kind = "race_banner" }
+fp_banner_5 = { file = "objects/fp_banner_5.glb", kind = "race_banner" }
+fp_banner_4 = { file = "objects/fp_banner_4.glb", kind = "race_banner" }
+fp_banner_3 = { file = "objects/fp_banner_3.glb", kind = "race_banner" }
+fp_banner_2 = { file = "objects/fp_banner_2.glb", kind = "race_banner" }
 fp_arena = { file = "objects/fp_arena.glb", kind = "arena" }
 300zx = { file = "objects/300zx.glb", kind = "vehicle" }
 4runner_blue = { file = "objects/4runner_blue.glb", kind = "vehicle" }

@@ -1897,9 +1897,13 @@ fn load_track(
         let name = scene.as_ref().and_then(|s| s.particle_texture.as_deref());
         name.and_then(|n| global_texture(r, n)).or_else(|| dirt_sheet(r))
     });
-    let scene_lights = scene
+    let mut scene_lights = scene
         .as_ref()
         .map_or_else(|| renderer::SceneLights::from_scene(&[]), |s| renderer::SceneLights::from_scene(&s.lights));
+    // Free and Course Builder tracks: ground with no light painted in.
+    if find(".scn").is_some_and(|e| archive.data(e).windows(13).any(|w| w.eq_ignore_ascii_case(b"LightGround=1"))) {
+        scene_lights.light_ground = 1.0;
+    }
     let sun = scene
         .as_ref()
         .and_then(|s| {

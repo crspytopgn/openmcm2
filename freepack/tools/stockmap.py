@@ -47,11 +47,27 @@ for m, classes in LINEUP.items():
             baked = os.path.exists(os.path.join(B, "bikes", m, f"fp_livery_{m}_{n}.png"))
             pic = f"bikes/{m}/fp_livery_{m}_{n}.png" if baked else f"bikes/fp_livery_{n}.png"
             L.append(f'fp_bike_{m}{cc}_{n} = {{ model = "bikes/fp_bike_{m}.glb", livery = "{pic}", cc = {cc}, four_stroke = {str(four).lower()}, name = "{n.title()} {cc}{"F" if four else ""}" }}')
+# the high-detail bike (blender/hq): full model and 2K liveries for PCs, a
+# lighter model and 1K liveries the browser loads instead (web_model, web_livery)
+HQ = os.path.join(B, "bikes", "hq")
+if os.path.exists(os.path.join(HQ, "fp_bike_hq.glb")):
+    for cc in (125, 250, 500):
+        for lv in sorted(glob.glob(os.path.join(HQ, "fp_livery_hq_*.png"))):
+            n = os.path.basename(lv)[len("fp_livery_hq_"):-4]
+            L.append(f'fp_bike_hq{cc}_{n} = {{ model = "bikes/hq/fp_bike_hq.glb", livery = "bikes/hq/fp_livery_hq_{n}.png", '
+                     f'web_model = "bikes/hq/web/fp_bike_hq.glb", web_livery = "bikes/hq/web/fp_livery_hq_{n}.png", '
+                     f'cc = {cc}, four_stroke = false, name = "{n.title()} {cc} HD" }}')
 L += ["", "[riders]"]
 if os.path.exists(os.path.join(B, "riders", "fp_rider.glb")):
     for o in sorted(p for p in glob.glob(os.path.join(B, "riders", "fp_rider_*.png")) if not p.endswith(".src.png")):
         n = os.path.basename(o)[9:-4]
         L.append(f'fp_rider_{n} = {{ model = "riders/fp_rider.glb", outfit = "riders/fp_rider_{n}.png", name = "{n.title()}" }}')
+HQ = os.path.join(B, "riders", "hq")
+if os.path.exists(os.path.join(HQ, "fp_rider_hq.glb")):
+    for o in sorted(glob.glob(os.path.join(HQ, "fp_rider_hq_*.png"))):
+        n = os.path.basename(o)[len("fp_rider_hq_"):-4]
+        L.append(f'fp_rider_hq_{n} = {{ model = "riders/hq/fp_rider_hq.glb", outfit = "riders/hq/fp_rider_hq_{n}.png", '
+                 f'web_model = "riders/hq/web/fp_rider_hq.glb", web_outfit = "riders/hq/web/fp_rider_hq_{n}.png", name = "{n.title()} HD" }}')
 L += ["", "# Stock models with no stand-in yet (large buildings, vehicles, stadium shells):",
       "missing = [" + ", ".join(f'"{m}"' for m in missing) + "]"]
 open(os.path.join(B, "stockmap.toml"), "w").write("\n".join(L) + "\n")

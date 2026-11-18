@@ -685,6 +685,8 @@ fn scene(course: &Course, field: &Field, path: &Path, stem: &str) -> String {
     let mut s = String::new();
     s += "; made by the OpenMCM2 Course Builder\r\n[SceneInfo]\r\n";
     s += &format!("SceneName=\"{}\"\r\n", course.name.replace('"', "'"));
+    // The ground's textures have no light painted in: OpenMCM2 shades it.
+    s += "LightGround=1\r\n";
     s += &format!(
         "DefaultStartPosition={:.1},{:.1},{:.1}\r\nEventType={}\r\n",
         p[0],
@@ -834,7 +836,7 @@ mod tests {
     fn plants_rivers_and_flights_go_into_the_track() {
         let mut c = Course::new(Mode::Enduro);
         let side = c.mode.side();
-        c.plants.push(crate::Planting { flora: crate::Flora::Mixed, radius: 200.0, density: 0.7, clear: false, everywhere: false, dabs: vec![[side * 0.3, side * 0.3], [side * 0.35, side * 0.3]] });
+        c.plants.push(crate::Planting { flora: crate::Flora::Mixed, radius: 200.0, density: 0.7, clear: false, everywhere: false, dabs: vec![[side * 0.3, side * 0.3], [side * 0.35, side * 0.3]], auto: false });
         c.rivers.push(crate::River { points: vec![[side * 0.1, side * 0.5], [side * 0.9, side * 0.55]], width: 28.0, depth: 2.0 });
         c.flights.push(crate::Flight { craft: crate::Craft::Biplane, points: vec![[side * 0.5, 160.0, side * 0.5]], speed: 110.0 });
         let baked = write(&c);
