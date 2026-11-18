@@ -1,3 +1,44 @@
+# OpenMCM2 0.6.3
+
+The free graphics take a big step towards the original's look and feel:
+the rider moves like the original, the land round the tracks looks like
+a real course, and there's a new high-detail bike and rider.
+
+* **The free rider rides like the original.** The free rider and bike
+  now use all of the original's motions, the suspension moves, the rider
+  puts the inside leg out in turns, and their boots and knees no longer
+  poke through the bikes.
+* **High-detail bike and rider** in the Free Pack's garage: an HD bike
+  in 125, 250 and 500 and an HD rider, 12 colours each. The browser loads
+  lighter copies of them under the same names, so online races still
+  match.
+* **Free tracks sit in real land.** Valleys and hillsides climb away
+  from the track, hills ring the edge so the world doesn't end in a flat
+  line, and the track ground has ruts along the racing line, braking
+  bumps, damp patches and roost thrown onto the grass. The ground is
+  shaded as it faces the sun, and the fog takes each sky's own colour.
+* **Race-day dressing.** Nationals get sponsor banners, speaker and
+  light poles, a TV platform, team trucks behind the pits and a blimp.
+  Supercross gets banners round the stadium floor, and its start gate
+  drops at the start.
+* **Gentler jumps.** The free tracks' jump faces and landings are now as
+  steep as the original game's, not steeper, so you and the computer
+  riders crash less.
+* **New Free Pack art:** lighter dirt clods, saguaro cacti with arms,
+  leafy ocotillo, a real green off-course arrow, a clean "you" marker and
+  six race-day banner sponsors. The free tracks rebuild themselves the
+  first time you ride them.
+* **Course Builder: Dress the scenery.** One button grows tall grass,
+  bushes and trees round the track you've drawn. Press it again after
+  changing the line and it regrows round the new one. Your own planting
+  stays.
+* **Freshen engine sounds** (Extras, off by default): if you have the
+  game, its own engine samples are played back cleaner and fuller, at
+  about the same loudness. The free bikes' sounds come from recordings
+  on Freesound (see the credits).
+* **Free tracks show their pictures** in the menus before they're
+  built.
+
 # OpenMCM2 0.6.2
 
 The free graphics are now the whole game, with no MM2 files needed, and
