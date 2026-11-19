@@ -50,6 +50,7 @@
 // keeps stderr in last-run.log.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod gpu_free;
 mod free_text;
 mod drive;
 mod drive_sound;
@@ -3529,6 +3530,18 @@ async fn gpu_from(
             ..Default::default()
         })
         .await?;
+    // A lost device draws nothing again: every frame after is skipped and
+    // the picture freezes. In a browser the page starts the game again
+    // (Safari loses it when short of graphics memory); natively it is said
+    // in the log.
+    device.set_device_lost_callback(|reason, why| {
+        if reason == wgpu::DeviceLostReason::Destroyed {
+            return;
+        }
+        eprintln!("the graphics device was lost: {why}");
+        #[cfg(target_arch = "wasm32")]
+        web::gpu_lost(&why);
+    });
     if !specific.is_empty() {
         let counts = |f| adapter.get_texture_format_features(f).flags.supported_sample_counts();
         let depth = counts(renderer::DEPTH_FORMAT);

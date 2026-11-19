@@ -39,6 +39,9 @@ extern "C" {
     fn js_track_loading(on: bool);
     #[wasm_bindgen(js_name = building)]
     fn js_building(on: bool);
+    /// The graphics device was lost: the page starts the game again.
+    #[wasm_bindgen(js_name = gpuLost, catch)]
+    fn js_gpu_lost(why: &str) -> Result<(), JsValue>;
     /// The steps of effects this computer needs set aside (dynres), to
     /// start with next time; a page without it is left alone.
     #[wasm_bindgen(js_name = autoShed, catch)]
@@ -80,6 +83,13 @@ pub fn started() {
 pub fn fail(why: &str) {
     web_sys::console::error_1(&why.into());
     js_fail(why);
+}
+
+/// Tells the page the GPU was lost (the browser reset it, often for want
+/// of graphics memory): nothing can be drawn again, so rather than leave a
+/// frozen picture the page starts the game again.
+pub fn gpu_lost(why: &str) {
+    let _ = js_gpu_lost(why);
 }
 
 /// Tells the page a track is loading (the page can't draw while it does).
