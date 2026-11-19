@@ -18,6 +18,9 @@ for name, a in src["sky"].items():
 L += ["", "## Materials (ambientCG, CC0)", "", "| Material | Link |", "| --- | --- |"]
 for m in src["materials"]["ambientcg"]:
     L.append(f"| {m} | [ambientcg.com/view?id={m}](https://ambientcg.com/view?id={m}) |")
+L += ["", "## Fonts (SIL Open Font License 1.1)", "", "Printed on the sponsor banners and gate arches.", "", "| Font | Source |", "| --- | --- |"]
+for f in ("Anton", "Archivo Black", "Barlow Condensed"):
+    L.append(f"| {f} | [fonts.google.com/specimen/{f.replace(' ', '+')}](https://fonts.google.com/specimen/{f.replace(' ', '+')}) |")
 L += ["", "## Models (Poly Haven, CC0)", "", "| Model | Authors |", "| --- | --- |"]
 for a in src["models"]["polyhaven"]:
     i = ph_info(a); au = ", ".join(i.get("authors", {}).keys()) or "Poly Haven"

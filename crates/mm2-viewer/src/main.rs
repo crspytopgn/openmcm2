@@ -2229,7 +2229,17 @@ fn load_track(
                 .iter()
                 .map(|b| rs2::Archive::parse(b))
                 .collect::<Result<Vec<_>, _>>()?;
-            let arches = waypoints.placements(&gate_list);
+            let mut arches = waypoints.placements(&gate_list);
+            // Without the game's own arch (the Free Pack's art), the pack's
+            // checkpoint arches take turns.
+            let own_arch = models.iter().any(|m| m.get("waypnt.slb").is_some());
+            if !own_arch && waypoints.model.eq_ignore_ascii_case("waypnt.slt") {
+                let seed = file_name(path).bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b.to_ascii_uppercase() as u32));
+                let last = arches.len().saturating_sub(1);
+                for (i, a) in arches.iter_mut().enumerate().take(last) {
+                    a.model = format!("{}.slt", freepack::waypoint_variant(i, seed));
+                }
+            }
             let procvue = read_archive(&res.join("PROCVUE.RES")).unwrap_or_default();
             let procvue = rs2::Archive::parse(&procvue).ok();
             let mut vehicles = traffic::load(&scene, procvue.as_ref());

@@ -69,6 +69,16 @@ or comes from the CC0 and CC-BY sources below. CC0 needs no credit, but we give 
 | Wood087 | [ambientcg.com/view?id=Wood087](https://ambientcg.com/view?id=Wood087) |
 | WoodSiding008 | [ambientcg.com/view?id=WoodSiding008](https://ambientcg.com/view?id=WoodSiding008) |
 
+## Fonts (SIL Open Font License 1.1)
+
+Printed on the sponsor banners and gate arches.
+
+| Font | Source |
+| --- | --- |
+| Anton | [fonts.google.com/specimen/Anton](https://fonts.google.com/specimen/Anton) |
+| Archivo Black | [fonts.google.com/specimen/Archivo+Black](https://fonts.google.com/specimen/Archivo+Black) |
+| Barlow Condensed | [fonts.google.com/specimen/Barlow+Condensed](https://fonts.google.com/specimen/Barlow+Condensed) |
+
 ## Models (Poly Haven, CC0)
 
 | Model | Authors |

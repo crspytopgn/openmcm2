@@ -872,6 +872,24 @@ fn soften_glow(materials: &mut [mm2_formats::slb::Material]) {
     }
 }
 
+/// The pack's checkpoint arches: the stock `waypnt` and the variants the
+/// pack adds beside it (an inflatable rainbow arch, a truss gantry, a
+/// second square inflatable), so a Baja or Enduro course isn't one arch
+/// over and over.
+const WAYPOINT_VARIANTS: [&str; 4] = ["waypnt", "fp_waypnt_2", "fp_waypnt_3", "fp_waypnt_4"];
+
+/// The arch to stand at checkpoint `index` of a course whose own name
+/// hashes to `seed`: the variants the pack holds in turn, from a start the
+/// course picks, so each track has its own order and neighbouring gates
+/// differ. With an older pack, or none, it is the stock arch.
+pub fn waypoint_variant(index: usize, seed: u32) -> &'static str {
+    let have: Vec<&'static str> = WAYPOINT_VARIANTS.iter().copied().filter(|v| stockmap().contains_key(*v)).collect();
+    if have.len() < 2 {
+        return WAYPOINT_VARIANTS[0];
+    }
+    have[(index + seed as usize) % have.len()]
+}
+
 /// The pack's stand-in for the model `stem` (bare, no extension), and the
 /// images its materials name.
 pub fn model(stem: &str) -> Option<(mm2_formats::slb::Model, Vec<(String, crate::hires::Image)>)> {
