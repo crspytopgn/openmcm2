@@ -1460,6 +1460,11 @@ const DETAIL_GREY: f32 = 83.0;
 const DETAIL_GAIN: f32 = 1.53;
 
 /// The pack's place for control `name` of dialog `stem`.
+/// Whether the menus wear the pack's new look.
+pub fn ui_art_on() -> bool {
+    ui_art().is_some()
+}
+
 /// Whether the pack's picture for control `name` already shows its label.
 pub fn ui_no_text(stem: &str, name: &str) -> bool {
     ui_art().is_some_and(|a| a.no_text.contains(&(stem.to_ascii_lowercase(), name.to_ascii_lowercase())))
