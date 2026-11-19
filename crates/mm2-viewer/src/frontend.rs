@@ -2116,6 +2116,22 @@ const PULL_DOWNS: [(&str, &str); 3] = [
     ("menuuserprofile", "MenuUserAnimation"),
 ];
 
+/// A Free Pack track's entries in an event's list (one per course for a
+/// Baja or enduro track), built at `path` when first ridden.
+pub fn free_entries(path: &Path, def: &mm2_course::free::Def, event: EventKind) -> Vec<TrackEntry> {
+    let stem = def.file;
+    let courses = crate::free_tracks::courses(def);
+    if event.courses() && !courses.is_empty() {
+        courses
+            .into_iter()
+            .enumerate()
+            .map(|(c, course)| TrackEntry { path: path.to_path_buf(), course: c, name: course, preview: format!("{stem}{:02}.tga", c + 1) })
+            .collect()
+    } else {
+        vec![TrackEntry { path: path.to_path_buf(), course: 0, name: def.name.to_string(), preview: format!("{stem}.tga") }]
+    }
+}
+
 pub fn list_tracks(folder: &Path, event: EventKind) -> Vec<TrackEntry> {
     let mut files: Vec<PathBuf> = crate::fs::read_dir(folder)
         .map(|d| {
@@ -2131,18 +2147,7 @@ pub fn list_tracks(folder: &Path, event: EventKind) -> Vec<TrackEntry> {
     let (teraform, name) = (folder.parent(), folder.file_name().and_then(|n| n.to_str()));
     let free = teraform.zip(name).map(|(t, n)| crate::free_tracks::listed(t, n)).unwrap_or_default();
     files.retain(|p| !free.iter().any(|(f, _)| f.file_name().is_some_and(|n| p.file_name().is_some_and(|m| m.eq_ignore_ascii_case(n)))));
-    let mut extra = Vec::new();
-    for (path, def) in &free {
-        let stem = def.file;
-        let courses = crate::free_tracks::courses(def);
-        if event.courses() && !courses.is_empty() {
-            for (c, course) in courses.into_iter().enumerate() {
-                extra.push(TrackEntry { path: path.clone(), course: c, name: course, preview: format!("{stem}{:02}.tga", c + 1) });
-            }
-        } else {
-            extra.push(TrackEntry { path: path.clone(), course: 0, name: def.name.to_string(), preview: format!("{stem}.tga") });
-        }
-    }
+    let extra: Vec<TrackEntry> = free.iter().flat_map(|(path, def)| free_entries(path, def, event)).collect();
     for path in files {
         let Ok(bytes) = crate::read_archive(&path) else {
             continue;

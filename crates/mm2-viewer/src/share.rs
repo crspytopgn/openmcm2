@@ -40,6 +40,26 @@ pub struct Share {
     asked: HashSet<(u8, String)>,
 }
 
+/// Motocross Madness 2's own tracks, by file stem. Nobody is sent one:
+/// they're the game's files, and every MM2 player has them already.
+const ORIGINAL_TRACKS: [&str; 51] = [
+    "BAJA01", "BAJA02", "BAJA03", "BAJA04", "BAJA05", "AIRFIELD", "FARM", "OPENPIT", "SKILODGE", "TRAILER", "CHANOS", "HILLSIDE", "IFFENDIC",
+    "NAT01", "NAT02", "NAT03", "NAT04", "NAT05", "NAT06", "NAT07", "NAT08", "NAT09", "NAT10", "NAT11", "NAT12", "VV", "QUARRY01", "QUARRY02",
+    "QUARRY03", "QUARRY04", "QUARRY05", "SX01", "SX02", "SX03", "SX04", "SX05", "SX06", "SX07", "SX08", "SX09", "SX10", "SX11", "SX12", "SX13",
+    "SX14", "SX15", "SX16", "SX17", "TAG01", "TAG02", "TAG03",
+];
+
+/// Whether `stem` is one of Motocross Madness 2's own tracks.
+pub fn original_track(stem: &str) -> bool {
+    ORIGINAL_TRACKS.iter().any(|t| t.eq_ignore_ascii_case(stem))
+}
+
+/// Whether a track can be had from its host: not one of the game's own,
+/// and not a Free Pack track, which everyone builds from its recipe.
+fn shared_track(stem: &str) -> bool {
+    !original_track(stem) && mm2_course::free::find(stem).is_none()
+}
+
 /// Whether the extra is on.
 pub fn on() -> bool {
     crate::tweaks::more().lobby_downloads
@@ -126,7 +146,7 @@ impl Share {
     pub fn want(&mut self, game: &Path, track: Option<(EventKind, &str)>, players: &[Player], me: u8) -> Vec<String> {
         let mut said = Vec::new();
         let mut wants: Vec<(u8, u8, String)> = Vec::new();
-        if let Some((event, stem)) = track.filter(|(e, s)| *e != EventKind::Tag && !s.is_empty()) {
+        if let Some((event, stem)) = track.filter(|(e, s)| *e != EventKind::Tag && !s.is_empty() && shared_track(s)) {
             if me != 0 {
                 wants.push((0, FILE_TRACK, track_name(event, stem)));
             }
@@ -156,7 +176,7 @@ impl Share {
             Msg::FileAsk(n) => {
                 // Only what is in use: the host's race track, my own skins.
                 let ok = match n.kind {
-                    FILE_TRACK => track.is_some_and(|(e, s)| track_name(e, s).eq_ignore_ascii_case(&n.name)),
+                    FILE_TRACK => track.is_some_and(|(e, s)| shared_track(s) && track_name(e, s).eq_ignore_ascii_case(&n.name)),
                     FILE_BIKE => own_skin(mine.0).is_some_and(|(_, f)| f.eq_ignore_ascii_case(&n.name)),
                     FILE_RIDER => own_skin(mine.1).is_some_and(|(_, f)| f.eq_ignore_ascii_case(&n.name)),
                     _ => false,
@@ -259,6 +279,15 @@ mod tests {
         assert!(place(game, FILE_BIKE, "x.exe").is_none());
         let p = place(game, FILE_TRACK, &track_name(EventKind::Supercross, "MYSX")).unwrap();
         assert!(p.ends_with("TERAFORM/SX/MYSX.ENV"), "{}", p.display());
+    }
+
+    #[test]
+    fn the_games_own_and_free_pack_tracks_are_never_asked_for() {
+        let game = Path::new("/no/such/game");
+        let mut share = Share::default();
+        assert!(share.want(game, Some((EventKind::Nationals, "nat01")), &[], 1).is_empty());
+        assert!(share.want(game, Some((EventKind::Nationals, "FPNAT01")), &[], 1).is_empty());
+        assert!(original_track("Iffendic") && !original_track("FPNAT01") && !original_track("MYSX"));
     }
 
     #[test]
