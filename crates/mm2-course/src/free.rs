@@ -436,121 +436,271 @@ fn rounded(corners: &[([f32; 2], f32)]) -> Vec<[f32; 2]> {
     out
 }
 
-/// A closed course laid out the way motocross tracks fold up on
-/// themselves: a random tree is grown over a grid of `nx` × `nz` points,
-/// `nodes` points big, and the course runs round its outline. Every
-/// stretch is `cell` feet from the next, the turns are hairpins and
-/// corners of `cell / 2` radius, and long straight branches make long
-/// straights. Returns the outline's corners, in cells.
-fn tree_outline(rng: &mut Rng, nx: i32, nz: i32, nodes: usize, straight: f32) -> Vec<[i32; 2]> {
-    use std::collections::HashSet;
-    let mut tree: Vec<([i32; 2], Option<usize>)> = vec![([rng.range(0.0, nx as f32) as i32, rng.range(0.0, nz as f32) as i32], None)];
-    let mut taken: HashSet<[i32; 2]> = tree.iter().map(|t| t.0).collect();
-    let mut cells: HashSet<[i32; 2]> = HashSet::new();
-    cells.insert([tree[0].0[0] * 2, tree[0].0[1] * 2]);
-    let dirs = [[1, 0], [0, 1], [-1, 0], [0, -1]];
-    let mut tries = 0;
-    while tree.len() < nodes && tries < 20000 {
-        tries += 1;
-        // Grow from a recent point more often: longer branches.
-        let pick = if rng.next() < 0.35 { tree.len() - 1 - ((rng.next() * 3.0) as usize).min(tree.len() - 1) } else { (rng.next() * tree.len() as f32) as usize };
-        let (at, parent) = tree[pick.min(tree.len() - 1)];
-        let came = parent.map(|p| [at[0] - tree[p].0[0], at[1] - tree[p].0[1]]);
-        let weights: Vec<f32> = dirs
-            .iter()
-            .map(|d| {
-                let to = [at[0] + d[0], at[1] + d[1]];
-                if to[0] < 0 || to[1] < 0 || to[0] >= nx || to[1] >= nz || taken.contains(&to) {
-                    0.0
-                } else if came == Some(*d) {
-                    straight
-                } else {
-                    1.0
-                }
-            })
-            .collect();
-        let total: f32 = weights.iter().sum();
-        if total == 0.0 {
-            continue;
-        }
-        let mut r = rng.next() * total;
-        let mut k = 0;
-        for (i, w) in weights.iter().enumerate() {
-            r -= w;
-            if r <= 0.0 && *w > 0.0 {
-                k = i;
-                break;
-            }
-        }
-        let d = dirs[k];
-        let to = [at[0] + d[0], at[1] + d[1]];
-        taken.insert(to);
-        tree.push((to, Some(pick)));
-        cells.insert([to[0] * 2, to[1] * 2]);
-        cells.insert([at[0] * 2 + d[0], at[1] * 2 + d[1]]);
-    }
-    // The outline, anticlockwise: each cell side with nothing beyond it.
-    let mut next: HashMap<[i32; 2], [i32; 2]> = HashMap::new();
-    for &[x, z] in &cells {
-        let has = |dx: i32, dz: i32| cells.contains(&[x + dx, z + dz]);
-        if !has(0, -1) {
-            next.insert([x, z], [x + 1, z]);
-        }
-        if !has(1, 0) {
-            next.insert([x + 1, z], [x + 1, z + 1]);
-        }
-        if !has(0, 1) {
-            next.insert([x + 1, z + 1], [x, z + 1]);
-        }
-        if !has(-1, 0) {
-            next.insert([x, z + 1], [x, z]);
-        }
-    }
-    let first = *next.keys().min().unwrap();
-    let mut ring = vec![first];
-    let mut at = next[&first];
-    while at != first && ring.len() <= next.len() {
-        ring.push(at);
-        at = next[&at];
-    }
-    // Only the corners.
-    let n = ring.len();
-    (0..n)
-        .filter(|&i| {
-            let (a, b, c) = (ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]);
-            (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]) != 0
-        })
-        .map(|i| ring[i])
-        .collect()
+/// How a layout's line is finished.
+struct Flow {
+    /// Passes of easing (each a ~30 ft running average): turns tighten in
+    /// and open out gradually instead of starting all at once.
+    ease: usize,
+    /// A long gentle bend through the whole layout, ft.
+    warp: f32,
 }
 
-/// The outline as a smooth course: scaled to `cell` ft, its corners
-/// rounded, turned by `turn`, bent by a gentle warp of `warp` ft, and
-/// centred on `centre`.
-fn outline_course(corners: &[[i32; 2]], cell: [f32; 2], centre: [f32; 2], turn: f32, warp: f32, seed: u32) -> Course {
-    let (mut lo, mut hi) = ([i32::MAX; 2], [i32::MIN; 2]);
-    for c in corners {
-        for k in 0..2 {
-            lo[k] = lo[k].min(c[k]);
-            hi[k] = hi[k].max(c[k]);
-        }
+/// Eases a rounded line (`flow.ease` passes of a ~30 ft running average),
+/// bends it gently by `flow.warp` and places it round `centre`.
+fn ease_course(rounded_line: &[[f32; 2]], lane: f32, centre: [f32; 2], turn: f32, flow: &Flow, seed: u32) -> Course {
+    let mut line = Course::new(rounded_line, 3.0).points;
+    for _ in 0..flow.ease {
+        let m = line.len();
+        line = (0..m)
+            .map(|i| {
+                let mut a = [0.0f32; 2];
+                for o in 0..11 {
+                    let q = line[(i + m + o - 5) % m];
+                    a = [a[0] + q[0] / 11.0, a[1] + q[1] / 11.0];
+                }
+                a
+            })
+            .collect();
     }
-    let mid = [(lo[0] + hi[0]) as f32 / 2.0, (lo[1] + hi[1]) as f32 / 2.0];
-    let r = cell[0].min(cell[1]) * 0.48;
-    let pts: Vec<([f32; 2], f32)> = corners.iter().map(|c| ([(c[0] as f32 - mid[0]) * cell[0], (c[1] as f32 - mid[1]) * cell[1]], r)).collect();
-    let smooth_line = rounded(&pts);
     let (s, c) = turn.sin_cos();
-    let wave = cell[0].min(cell[1]) * 5.0;
-    let bent: Vec<[f32; 2]> = smooth_line
+    let wave = lane * 5.0;
+    let bent: Vec<[f32; 2]> = line
         .iter()
         .map(|p| {
-            let wx = (fbm(p[0] / wave, p[1] / wave, seed + 201) - 0.5) * 2.0 * warp;
-            let wz = (fbm(p[0] / wave, p[1] / wave, seed + 202) - 0.5) * 2.0 * warp;
+            let wx = (fbm(p[0] / wave, p[1] / wave, seed + 201) - 0.5) * 2.0 * flow.warp;
+            let wz = (fbm(p[0] / wave, p[1] / wave, seed + 202) - 0.5) * 2.0 * flow.warp;
             let (x, z) = (p[0] + wx, p[1] + wz);
             [centre[0] + x * c - z * s, centre[1] + x * s + z * c]
         })
         .collect();
     Course::new(&bent, 3.0)
+}
+
+/// How a branching layout is grown, all in feet.
+struct Branches {
+    /// How many straight branches, at most.
+    count: usize,
+    /// Each branch's length.
+    length: (f32, f32),
+    /// Half the spacing of the two lanes either side of a branch: the
+    /// radius of the hairpin round its tip.
+    width: (f32, f32),
+    /// The least gap between lanes of different branches, centre to
+    /// centre.
+    gap: f32,
+    /// The least angle between two branches from one point, radians.
+    spread: f32,
+    /// How the next branch turns from the one before: the share that run
+    /// nearly straight on (a sweeper), and that turn hard back (a
+    /// hairpin-like corner); the rest turn 40-100 degrees.
+    straight_on: f32,
+    hard: f32,
+    /// The box the branches and their lanes stay in, each side of the
+    /// middle.
+    bound: [f32; 2],
+    /// How round the inside corners where branches meet are.
+    fillet: f32,
+    /// The lap it should make.
+    lap: (f32, f32),
+    /// Most turns rounded to this many degrees (and a few either way), as
+    /// a stadium's lanes mostly line up with its walls; 0 for any angle.
+    snap: f32,
+    /// The first branch's heading, or any if `None`.
+    heading: Option<f32>,
+}
+
+fn segment_distance(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+    let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
+    let l2 = dx * dx + dz * dz;
+    let t = if l2 > 0.0 { (((p[0] - a[0]) * dx + (p[1] - a[1]) * dz) / l2).clamp(0.0, 1.0) } else { 0.0 };
+    ((p[0] - a[0] - dx * t).powi(2) + (p[1] - a[1] - dz * t).powi(2)).sqrt()
+}
+
+fn segments_distance(a: [f32; 2], b: [f32; 2], c: [f32; 2], d: [f32; 2]) -> f32 {
+    // Segments that cross are 0 apart; otherwise the nearest end.
+    let cross = |o: [f32; 2], p: [f32; 2], q: [f32; 2]| (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
+    let (d1, d2, d3, d4) = (cross(c, d, a), cross(c, d, b), cross(a, b, c), cross(a, b, d));
+    if d1 * d2 < 0.0 && d3 * d4 < 0.0 {
+        return 0.0;
+    }
+    segment_distance(a, c, d).min(segment_distance(b, c, d)).min(segment_distance(c, a, b)).min(segment_distance(d, a, b))
+}
+
+/// A course that runs round a tree of straight branches grown at random
+/// angles, the way a motocross track folds up in its field: out along
+/// each branch and back down its other side, a hairpin round each tip,
+/// and a corner of whatever angle the branches meet at where they join.
+/// Its lanes are the branches' widths apart, and no closer than `gap` to
+/// any other.
+fn branch_course(rng: &mut Rng, b: &Branches, centre: [f32; 2], turn: f32, flow: &Flow, seed: u32) -> Option<Course> {
+    // The tree: nodes, and edges (from, to, half width).
+    let first = b.heading.unwrap_or_else(|| rng.range(0.0, TAU));
+    let mut nodes: Vec<([f32; 2], f32)> = vec![([rng.range(-0.3, 0.3) * b.bound[0], rng.range(-0.3, 0.3) * b.bound[1]], first)];
+    let mut edges: Vec<(usize, usize, f32)> = Vec::new();
+    let mut degree = vec![0usize];
+    let estimate = |edges: &[(usize, usize, f32)], nodes: &[([f32; 2], f32)]| -> f32 {
+        edges.iter().map(|&(i, j, _)| ((nodes[j].0[0] - nodes[i].0[0]).powi(2) + (nodes[j].0[1] - nodes[i].0[1]).powi(2)).sqrt() * 2.0).sum::<f32>()
+    };
+    let target = rng.range(b.lap.0, b.lap.1);
+    let mut tries = 0;
+    while edges.len() < b.count && tries < 3000 {
+        tries += 1;
+        if estimate(&edges, &nodes) > target * 0.92 {
+            break;
+        }
+        // Grow on from the newest point more often: long winding runs.
+        let from = if rng.next() < 0.55 { nodes.len() - 1 } else { (rng.next() * nodes.len() as f32) as usize % nodes.len() };
+        if degree[from] >= 3 {
+            continue;
+        }
+        let pick = rng.next();
+        let bend = if pick < b.straight_on {
+            rng.range(10.0, 32.0)
+        } else if pick < b.straight_on + b.hard {
+            rng.range(105.0, 135.0)
+        } else {
+            rng.range(40.0, 100.0)
+        }
+        .to_radians()
+            * if rng.next() < 0.5 { -1.0 } else { 1.0 };
+        let bend = if b.snap > 0.0 && rng.next() < 0.6 { (bend.to_degrees() / b.snap).round() * b.snap.to_radians() + rng.range(-10.0, 10.0).to_radians() } else { bend };
+        let dir = if edges.is_empty() { nodes[0].1 } else { nodes[from].1 + bend };
+        // The first branch is the longest: the start straight.
+        let len = if edges.is_empty() { b.length.1 * rng.range(1.0, 1.15) } else { rng.range(b.length.0, b.length.1) };
+        let w = rng.range(b.width.0, b.width.1);
+        let p = nodes[from].0;
+        let q = [p[0] + dir.cos() * len, p[1] + dir.sin() * len];
+        // Inside the box, lanes and all.
+        if q[0].abs() > b.bound[0] - w || q[1].abs() > b.bound[1] - w {
+            continue;
+        }
+        // Clear of the other branches, and spread from its neighbours.
+        let ok = edges.iter().all(|&(i, j, we)| {
+            if i == from || j == from {
+                let other = if i == from { nodes[j].0 } else { nodes[i].0 };
+                let a = (other[1] - p[1]).atan2(other[0] - p[0]);
+                let mut d = (a - dir).abs() % TAU;
+                if d > PI {
+                    d = TAU - d;
+                }
+                d >= b.spread
+            } else {
+                segments_distance(p, q, nodes[i].0, nodes[j].0) >= w + we + b.gap
+            }
+        });
+        // And its tip clear of every other branch's point.
+        if !ok {
+            continue;
+        }
+        nodes.push((q, dir));
+        degree.push(1);
+        degree[from] += 1;
+        edges.push((from, nodes.len() - 1, w));
+    }
+    if edges.len() < 3 {
+        return None;
+    }
+    // The lanes: where the branches' widths meet, the inside corners
+    // filleted (a smooth union of each branch's distance).
+    let k = b.fillet;
+    let field = |p: [f32; 2]| -> f32 {
+        let mut f = f32::MAX;
+        for &(i, j, w) in &edges {
+            let d = segment_distance(p, nodes[i].0, nodes[j].0) - w;
+            if f == f32::MAX {
+                f = d;
+            } else {
+                let h = (k - (f - d).abs()).max(0.0) / k;
+                f = f.min(d) - h * h * k * 0.25;
+            }
+        }
+        f
+    };
+    let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+    for (p, _) in &nodes {
+        lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+        hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+    }
+    let pad = b.width.1 + k + 8.0;
+    let step = 2.0;
+    let (ox, oz) = (lo[0] - pad, lo[1] - pad);
+    let (nx, nz) = (((hi[0] - lo[0] + 2.0 * pad) / step) as usize + 2, ((hi[1] - lo[1] + 2.0 * pad) / step) as usize + 2);
+    let values: Vec<f32> = (0..nz).flat_map(|z| (0..nx).map(move |x| (x, z))).map(|(x, z)| field([ox + x as f32 * step, oz + z as f32 * step])).collect();
+    let loops = contours(&values, nx, nz);
+    if loops.len() != 1 {
+        return None;
+    }
+    let line: Vec<[f32; 2]> = loops[0].iter().map(|p| [ox + p[0] * step, oz + p[1] * step]).collect();
+    // Centre the layout on the middle of its box.
+    let mid = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0];
+    let line: Vec<[f32; 2]> = line.iter().map(|p| [p[0] - mid[0], p[1] - mid[1]]).collect();
+    Some(ease_course(&line, b.width.0 * 2.0, centre, turn, flow, seed))
+}
+
+/// The closed zero lines of a field of `nx` × `nz` samples (marching
+/// squares), in sample units, each anticlockwise round where the field
+/// is below zero.
+fn contours(v: &[f32], nx: usize, nz: usize) -> Vec<Vec<[f32; 2]>> {
+    // Each crossing is keyed by the grid edge it sits on.
+    let at = |x: usize, z: usize| v[z * nx + x];
+    let cross = |x0: usize, z0: usize, x1: usize, z1: usize| -> [f32; 2] {
+        let (a, b) = (at(x0, z0), at(x1, z1));
+        let t = if (a - b).abs() > 1e-9 { a / (a - b) } else { 0.5 };
+        [x0 as f32 + (x1 as f32 - x0 as f32) * t, z0 as f32 + (z1 as f32 - z0 as f32) * t]
+    };
+    // Edge keys: (x, z, 0) the edge to x+1, (x, z, 1) the edge to z+1.
+    let mut next: HashMap<(usize, usize, u8), (usize, usize, u8)> = HashMap::new();
+    for z in 0..nz - 1 {
+        for x in 0..nx - 1 {
+            let inside = |x: usize, z: usize| at(x, z) < 0.0;
+            let c = (inside(x, z) as u8) | (inside(x + 1, z) as u8) << 1 | (inside(x + 1, z + 1) as u8) << 2 | (inside(x, z + 1) as u8) << 3;
+            let (s, e, n, w) = ((x, z, 0u8), (x + 1, z, 1u8), (x, z + 1, 0u8), (x, z, 1u8));
+            // Segments run with the inside on their left.
+            let segs: &[((usize, usize, u8), (usize, usize, u8))] = match c {
+                1 => &[(w, s)],
+                2 => &[(s, e)],
+                3 => &[(w, e)],
+                4 => &[(e, n)],
+                5 => &[(w, n), (e, s)],
+                6 => &[(s, n)],
+                7 => &[(w, n)],
+                8 => &[(n, w)],
+                9 => &[(n, s)],
+                10 => &[(n, e), (s, w)],
+                11 => &[(n, e)],
+                12 => &[(e, w)],
+                13 => &[(e, s)],
+                14 => &[(s, w)],
+                _ => &[],
+            };
+            for &(a, b) in segs {
+                next.insert(a, b);
+            }
+        }
+    }
+    let point = |k: (usize, usize, u8)| if k.2 == 0 { cross(k.0, k.1, k.0 + 1, k.1) } else { cross(k.0, k.1, k.0, k.1 + 1) };
+    let mut loops = Vec::new();
+    let mut keys: Vec<_> = next.keys().copied().collect();
+    keys.sort();
+    let mut used = std::collections::HashSet::new();
+    for k in keys {
+        if used.contains(&k) {
+            continue;
+        }
+        let mut ring = Vec::new();
+        let mut at_k = k;
+        while used.insert(at_k) {
+            ring.push(point(at_k));
+            match next.get(&at_k) {
+                Some(&n) => at_k = n,
+                None => break,
+            }
+        }
+        if ring.len() > 8 {
+            loops.push(ring);
+        }
+    }
+    loops
 }
 
 /// The straight runs of a course: (from, to) distances along, where it
@@ -1018,7 +1168,11 @@ impl Land {
     /// at the course's own height (`profile`, by distance along), with
     /// `features` on it and its turns banked, blended into the ground
     /// over `blend` feet.
-    fn carve(&mut self, course: &Course, half: f32, blend: f32, profile: &dyn Fn(f32) -> f32, features: &Features, bank: f32, sculpt: f32, calm: Option<(f32, f32)>) {
+    /// `twist` varies the turns' camber round the lap: 0 berms every
+    /// turn alike; 1 builds some up into big berms, leaves some flat and
+    /// tips a few the wrong way, off-camber.
+    #[allow(clippy::too_many_arguments)]
+    fn carve(&mut self, course: &Course, half: f32, blend: f32, profile: &dyn Fn(f32) -> f32, features: &Features, bank: f32, sculpt: f32, calm: Option<(f32, f32)>, twist: f32) {
         let n = self.size;
         let reach = half + blend;
         let len = course.length;
@@ -1056,7 +1210,16 @@ impl Land {
                 // The outside of a turn rises: a berm.
                 let outside = -near.side * curve.signum();
                 let turn = (curve.abs() * 120.0).min(1.0);
-                let berm = if outside > 0.0 { bank * turn * smooth(near.distance / half) } else { 0.0 };
+                // How this turn is cambered: mostly bermed, some flat, a
+                // few off-camber (the outside low, the inside high).
+                let camber = 1.0 + twist * ((noise(near.along / 300.0, 7.7, seed + 21) - 0.5) * 4.4 + 0.15);
+                let across = smooth(near.distance / half);
+                let berm = if camber >= 0.0 {
+                    if outside > 0.0 { bank * turn * across * camber } else { 0.0 }
+                } else {
+                    // Off-camber: a steady tilt across the track, down to the outside.
+                    bank * turn * camber * 0.45 * across * outside
+                };
                 let jump = if near.distance < half + 2.0 { features.height(near.along, course.length) } else { 0.0 };
                 let edge = smooth((near.distance - half) / blend);
                 let mut on = profile(near.along) + jump * (1.0 - smooth((near.distance - half + 3.0) / 5.0)) + berm;
@@ -2012,6 +2175,55 @@ fn model(name: &str, land: &Land, x: f32, z: f32, look: [f32; 2]) -> Model {
     Model { name: name.to_string(), at: [x, land.at(x, z), z], look, scale: 1.0 }
 }
 
+/// A national's course: (the course, the lane spacing it was laid out
+/// on, ft).
+fn national_layout(rng: &mut Rng, seed: u32, centre: [f32; 2]) -> (Course, f32) {
+    let cell = rng.range(72.0, 84.0);
+    let mut course = None;
+    for attempt in 0..400 {
+        let branches = Branches {
+            count: 14,
+            length: (160.0, 360.0),
+            width: (cell * 0.4, cell * 0.62),
+            gap: cell * 0.8,
+            spread: 55f32.to_radians(),
+            straight_on: 0.3,
+            hard: 0.2,
+            bound: [380.0, 380.0],
+            fillet: rng.range(25.0, 45.0),
+            lap: (3300.0, 3900.0),
+            snap: 0.0,
+            heading: None,
+        };
+        let flow = Flow { ease: 2, warp: cell * 0.12 };
+        let turn = rng.range(0.0, TAU);
+        let Some(c) = branch_course(rng, &branches, centre, turn, &flow, seed + attempt) else { continue };
+        // Folded up, not strung out: the layout's box no longer than
+        // twice its width, each side of it the length of a straight.
+        let (lo, hi) = bounds(&c);
+        let (w, h) = (hi[0] - lo[0], hi[1] - lo[1]);
+        let (a, b) = (w.max(h), w.min(h));
+        if a > b * 2.0 || b < 380.0 || a > 820.0 {
+            if std::env::var_os("FT_LAYOUT").is_some() {
+                eprintln!("try {attempt}: box {a:.0}x{b:.0}");
+            }
+            continue;
+        }
+        if std::env::var_os("FT_LAYOUT").is_some() {
+            eprintln!("try {attempt}: box {a:.0}x{b:.0} len {:.0} tight {:.0} crosses {}", c.length, c.tightest(), c.crosses(cell * 0.72));
+        }
+        let jumpable = straights(&c, 140.0).iter().filter(|r| r.1 >= 150.0).count();
+        // And not mostly square corners.
+        let t = turns(&c.points);
+        let square = t.iter().filter(|t| (75.0..=105.0).contains(&t.0.abs())).count();
+        if square * 2 <= t.len() && jumpable >= 4 && (3200.0..4000.0).contains(&c.length) && c.tightest() >= cell * 0.34 && !c.crosses(cell * 0.72) {
+            course = Some(c);
+            break;
+        }
+    }
+    (course.expect("a national layout"), cell)
+}
+
 fn national(def: &Def) -> Made {
     let mut rng = Rng(def.seed.wrapping_mul(7919));
     let mut land = Land::new(Kind::National);
@@ -2019,27 +2231,7 @@ fn national(def: &Def) -> Made {
     let seed = def.seed;
     let centre = [span / 2.0, span / 2.0];
     // The layout first, so the land can be shaped round it.
-    let cell = rng.range(72.0, 84.0);
-    let mut course = None;
-    for attempt in 0..400 {
-        let nodes = rng.range(7.0, 11.99) as usize;
-        let long = cell * rng.range(2.0, 3.0);
-        let outline = tree_outline(&mut rng, 4, 6, nodes, 1.5);
-        let c = outline_course(&outline, [long, cell], centre, rng.range(0.0, TAU), cell * 0.15, seed + attempt);
-        // Folded up, not strung out: the layout's box no longer than
-        // twice its width, each side of it the length of a straight.
-        let (lo, hi) = bounds(&c);
-        let (w, h) = (hi[0] - lo[0], hi[1] - lo[1]);
-        let (a, b) = (w.max(h), w.min(h));
-        if a > b * 2.0 || b < 380.0 {
-            continue;
-        }
-        if (3200.0..4000.0).contains(&c.length) && c.tightest() >= cell * 0.34 && !c.crosses(cell * 0.72) {
-            course = Some(c);
-            break;
-        }
-    }
-    let course = course.expect("a national layout");
+    let (course, cell) = national_layout(&mut rng, seed, centre);
     let (lo, hi) = bounds(&course);
     let relief = match def.biome {
         Biome::Alpine => 240.0,
@@ -2088,7 +2280,7 @@ fn national(def: &Def) -> Made {
     let half = 17.0;
     {
         let profile = profile_fn(&course, raw);
-        land.carve(&course, half, cell / 2.0 - half, &profile, &features, 5.0, 1.0, Some(((line - 80.0).rem_euclid(course.length), 80.0 + (sl * 0.7).min(320.0))));
+        land.carve(&course, half, cell / 2.0 - half, &profile, &features, 5.0, 1.0, Some(((line - 80.0).rem_euclid(course.length), 80.0 + (sl * 0.7).min(320.0))), 1.0);
         land.widen_start(&course, line, half, START_HALF, 12.0, &profile);
         if std::env::var_os("FT_DEBUG").is_some() {
             let (p, _) = course.at(line);
@@ -2346,6 +2538,123 @@ const ARENA_SCALE: f32 = 1.25;
 const SX_APRON: [f32; 2] = [388.0, 200.0];
 
 /// A stadium floor: the track folds over it in lanes.
+/// A supercross course on the floor `inner` ft each side of `centre`,
+/// its lanes `cell` ft apart.
+fn sx_layout(rng: &mut Rng, seed: u32, centre: [f32; 2], inner: [f32; 2], cell: f32) -> Course {
+    let (hx, hz) = (inner[0], inner[1]);
+    let mut course = None;
+    for attempt in 0..600 {
+        let branches = Branches {
+            count: 14,
+            length: (150.0, 340.0),
+            width: (cell * 0.4, cell * 0.56),
+            gap: cell * 0.8,
+            spread: 50f32.to_radians(),
+            straight_on: 0.1,
+            hard: 0.45,
+            bound: [hx - 16.0, hz - 16.0],
+            fillet: rng.range(24.0, 40.0),
+            lap: (3100.0, 4400.0),
+            snap: 45.0,
+            heading: Some(if rng.next() < 0.5 { 0.0 } else { PI }),
+        };
+        let flow = Flow { ease: 3, warp: 0.0 };
+        let Some(c) = branch_course(rng, &branches, centre, 0.0, &flow, seed + attempt) else { continue };
+        // Inside the floor, clear of the wall.
+        let (lo, hi) = bounds(&c);
+        let fits = lo[0] > centre[0] - hx + 16.0 && hi[0] < centre[0] + hx - 16.0 && lo[1] > centre[1] - hz + 16.0 && hi[1] < centre[1] + hz - 16.0;
+        if std::env::var_os("FT_LAYOUT").is_some() {
+            eprintln!("sx try {attempt}: fits {fits} len {:.0} tight {:.0} crosses {}", c.length, c.tightest(), c.crosses(cell * 0.7));
+        }
+        // Room for rhythm sections: three straights or more long enough for jumps.
+        let jumpable = straights(&c, 140.0).iter().filter(|r| r.1 >= 150.0).count();
+        // And not mostly square corners.
+        let t = turns(&c.points);
+        let square = t.iter().filter(|t| (75.0..=105.0).contains(&t.0.abs())).count();
+        if square * 2 <= t.len() && fits && jumpable >= 3 && (2800.0..4800.0).contains(&c.length) && c.tightest() >= cell * 0.34 && !c.crosses(cell * 0.7) {
+            course = Some(c);
+            break;
+        }
+    }
+    course.expect("a supercross layout")
+}
+
+/// The centre line of a free national or supercross track, for maps and
+/// checks: the same layout `make` builds, without the land.
+pub fn layout(def: &Def) -> Option<Vec<[f32; 2]>> {
+    match def.kind {
+        Kind::National => {
+            let mut rng = Rng(def.seed.wrapping_mul(7919));
+            let span = Land::new(Kind::National).span();
+            Some(national_layout(&mut rng, def.seed, [span / 2.0, span / 2.0]).0.points)
+        }
+        Kind::Supercross => {
+            let mut rng = Rng(def.seed.wrapping_mul(104_729));
+            let span = Land::new(Kind::Supercross).span();
+            let inner = (300.0 * ARENA_SCALE - 6.0, 150.0 * ARENA_SCALE - 6.0);
+            Some(sx_layout(&mut rng, def.seed, [span / 2.0, span / 2.0], [inner.0, inner.1], 54.0).points)
+        }
+        _ => None,
+    }
+}
+
+/// The straight runs of a closed centre line long enough for a jump
+/// (turning no tighter than 140 ft radius), ft.
+pub fn straight_lengths(points: &[[f32; 2]]) -> Vec<f32> {
+    let c = Course::new(points, 3.0);
+    straights(&c, 140.0).into_iter().map(|r| r.1).collect()
+}
+
+/// The turns of a closed centre line: (how far it turns, degrees, signed
+/// left positive; its tightest radius, ft). A turn is a stretch bending
+/// tighter than 300 ft radius one way.
+pub fn turns(points: &[[f32; 2]]) -> Vec<(f32, f32)> {
+    // Smoothed first over ~25 ft: the originals' centre lines are
+    // corners every 20-40 ft, and each would count as a little turn.
+    let mut pts = Course::new(points, 3.0).points;
+    for _ in 0..4 {
+        let m = pts.len();
+        pts = (0..m)
+            .map(|i| {
+                let mut a = [0.0f32; 2];
+                for o in 0..9 {
+                    let q = pts[(i + m + o - 4) % m];
+                    a = [a[0] + q[0] / 9.0, a[1] + q[1] / 9.0];
+                }
+                a
+            })
+            .collect();
+    }
+    let c = Course::new(&pts, 3.0);
+    let n = c.curve.len();
+    let step = c.length / n as f32;
+    // Smoothed over ~15 ft so sampling noise doesn't split a turn.
+    let k: Vec<f32> = (0..n).map(|i| (0..5).map(|o| c.curve[(i + n + o - 2) % n]).sum::<f32>() / 5.0).collect();
+    let on = |v: f32| v.abs() > 1.0 / 300.0;
+    let Some(begin) = (0..n).find(|&i| !on(k[i])) else { return vec![(360.0, 1.0 / k[0].abs())] };
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < n {
+        let j = (begin + i) % n;
+        if on(k[j]) {
+            let sign = k[j].signum();
+            let (mut angle, mut tight) = (0.0f32, 0.0f32);
+            while i < n && on(k[(begin + i) % n]) && k[(begin + i) % n].signum() == sign {
+                let v = k[(begin + i) % n];
+                angle += v * step;
+                tight = tight.max(v.abs());
+                i += 1;
+            }
+            if angle.abs().to_degrees() > 20.0 {
+                out.push((angle.to_degrees(), 1.0 / tight));
+            }
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
 fn supercross(def: &Def) -> Made {
     let mut rng = Rng(def.seed.wrapping_mul(104_729));
     let mut land = Land::new(Kind::Supercross);
@@ -2370,22 +2679,7 @@ fn supercross(def: &Def) -> Made {
         }
     }
     let cell = 54.0;
-    let long = cell * 2.0;
-    let fine_x = ((2.0 * (hx - 16.0)) / long) as i32;
-    let fine_z = ((2.0 * (hz - 16.0)) / cell) as i32;
-    let (nx, nz) = ((fine_x + 1) / 2, (fine_z + 1) / 2);
-    let mut course = None;
-    for attempt in 0..400 {
-        let nodes = rng.range((nx * nz) as f32 * 0.6, (nx * nz) as f32 + 0.99) as usize;
-        let outline = tree_outline(&mut rng, nx, nz, nodes, 2.0);
-        let turn = if rng.next() < 0.5 { 0.0 } else { PI };
-        let c = outline_course(&outline, [long, cell], [cx, cz], turn, 0.0, def.seed + attempt);
-        if (3200.0..4800.0).contains(&c.length) && c.tightest() >= cell * 0.4 {
-            course = Some(c);
-            break;
-        }
-    }
-    let course = course.expect("a supercross layout");
+    let course = sx_layout(&mut rng, def.seed, [cx, cz], [hx, hz], cell);
     let runs = straights(&course, 120.0);
     // The start: on the longest straight with room for a full gate across
     // it, clear of the walls (the original's starts are 140 ft wide).
@@ -2411,7 +2705,7 @@ fn supercross(def: &Def) -> Made {
     let finish = (line + (run - 60.0).clamp(30.0, 120.0)) % course.length;
     let features = fill_straights(&course, &runs, &mut rng, &mut |r, room| pick_shape(r, room, SX_JUMPS), 24.0, 20.0, (8.0, 22.0), Some(((line - 40.0).rem_euclid(course.length), 200.0)));
     let half = 12.0;
-    land.carve(&course, half, 6.0, &|_| floor + 0.3, &features, 3.0, 0.0, None);
+    land.carve(&course, half, 6.0, &|_| floor + 0.3, &features, 3.0, 0.0, None, 0.0);
     land.widen_start(&course, line, half, SX_START_HALF, 4.0, &|_| floor + 0.3);
     land.compute_steep();
     let mut models = vec![Model { name: "fp_arena".into(), at: [cx, floor, cz], look: [0.0, 1.0], scale: 1.0 }];
@@ -2696,7 +2990,7 @@ fn open_country(def: &Def) -> Made {
             _ => Shape::Table { up: r.range(30.0, 40.0), top: r.range(30.0, 50.0), down: r.range(40.0, 60.0), height: r.range(6.0, 10.0) },
         };
         let features = place_features(course, &mut rng, &mut make, 400.0, 300.0, 600.0);
-        land.carve(course, *half, if desert { 40.0 } else { 26.0 }, &profile, &features, 3.0, 0.0, None);
+        land.carve(course, *half, if desert { 40.0 } else { 26.0 }, &profile, &features, 3.0, 0.0, None, 0.0);
         let start_s = *gates.last().unwrap_or(&0.0);
         land.widen_start(course, start_s, *half, START_HALF, if desert { 40.0 } else { 20.0 }, &profile);
     }
@@ -2757,7 +3051,7 @@ fn quarry(def: &Def) -> Made {
     {
         let raw = land.profile(&course, 200.0);
         let profile = profile_fn(&course, raw);
-        land.carve(&course, 16.0, 30.0, &profile, &features, 4.0, 0.6, None);
+        land.carve(&course, 16.0, 30.0, &profile, &features, 4.0, 0.6, None, 0.5);
     }
     let mut models = Vec::new();
     for k in 0..rng.range(4.0, 8.0) as usize {
@@ -2956,7 +3250,7 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
 /// Which making of the recipes a built track is from (its `.made` file):
 /// a track built by an older one is built again. Change it whenever a
 /// change here moves anything on an existing track.
-pub const MADE: &str = "5";
+pub const MADE: &str = "6";
 
 /// The free track whose file is `stem` (`FPNAT01`), any case.
 pub fn find(stem: &str) -> Option<&'static Def> {
@@ -3041,6 +3335,22 @@ mod tests {
         assert!(c.tightest() >= 70.0);
         let near = c.near(c.points[10], 5.0).unwrap();
         assert!(near.distance < 0.5);
+    }
+
+    #[test]
+    fn nationals_and_supercross_flow() {
+        // Not a grid of right angles: corners of all kinds, and room for
+        // jumps between them.
+        for def in SET.iter().filter(|d| matches!(d.kind, Kind::National | Kind::Supercross)) {
+            let line = layout(def).unwrap();
+            let t = turns(&line);
+            let square = t.iter().filter(|t| (75.0..=105.0).contains(&t.0.abs())).count();
+            assert!(t.len() >= 8 && square * 2 <= t.len(), "{}: {square} of {} turns square", def.file, t.len());
+            let radii: Vec<f32> = t.iter().map(|t| t.1).collect();
+            let (lo, hi) = (radii.iter().copied().fold(f32::MAX, f32::min), radii.iter().copied().fold(0.0, f32::max));
+            assert!(hi > lo * 2.0, "{}: radii {lo}-{hi}", def.file);
+            assert!(straight_lengths(&line).iter().filter(|&&r| r >= 150.0).count() >= 3, "{}", def.file);
+        }
     }
 
     #[test]
