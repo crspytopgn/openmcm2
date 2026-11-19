@@ -157,6 +157,9 @@ pub const ACCENT: [f32; 3] = [0.64, 0.76, 0.29];
 const LINE_COLOUR: [f32; 4] = [1.0, 1.0, 1.0, 0.75];
 const JUMP_COLOUR: [f32; 4] = [1.0, 0.72, 0.25, 0.95];
 
+/// How far a pad's stick goes before the builder takes it.
+pub const PAD_DEAD: f32 = 0.2;
+
 /// An orbiting camera over the land, in the game's coordinates.
 #[derive(Debug, Clone, Copy)]
 struct Camera {
@@ -249,6 +252,12 @@ impl Drop for Builder {
 
 pub struct Builder {
     pub course: Course,
+    /// Which of the pad's sticks and triggers (left x, y, right x, y,
+    /// zoom) have been seen at rest since the builder opened: one that
+    /// never sits in the middle (a worn or odd stick, a trigger read as
+    /// resting at its end, a wheel or 3D mouse taken for a pad) would
+    /// otherwise spin or slide the view on its own.
+    pad_live: [bool; 5],
     history: Vec<Course>,
     future: Vec<Course>,
     /// The game folder, where baked tracks go (`TERAFORM`).
@@ -345,6 +354,7 @@ impl Builder {
             baked_at: -1.0,
             view: None,
             cam: Camera { target: Vec3::ZERO, yaw: 0.0, pitch: 0.95, dist: 1000.0 },
+            pad_live: [false; 5],
             tool: Tool::Line,
             kind: Kind::Tabletop,
             picked: None,
@@ -615,6 +625,23 @@ impl Builder {
         self.keys.clear();
         self.drag = Drag::None;
         self.input = Input::default();
+        self.pad_live = [false; 5];
+    }
+
+    /// The pad's left stick, right stick and zoom triggers as the builder
+    /// takes them: each reads 0 until it has once been seen back in its
+    /// dead zone, so an axis stuck off centre does nothing.
+    pub fn pad_axes(&mut self, v: [f32; 5]) -> [f32; 5] {
+        let mut out = [0.0; 5];
+        for i in 0..5 {
+            if v[i].abs() < PAD_DEAD {
+                self.pad_live[i] = true;
+            }
+            if self.pad_live[i] {
+                out[i] = v[i];
+            }
+        }
+        out
     }
 
     // ---- input ----
@@ -711,7 +738,7 @@ impl Builder {
     /// (`zoom` + in), `pan` moves the view when the pointer is pushed
     /// against the screen's edge.
     pub fn pad_view(&mut self, right: [f32; 2], zoom: f32, pan: [f32; 2], dt: f32) {
-        let dead = |v: f32| if v.abs() < 0.2 { 0.0 } else { v };
+        let dead = |v: f32| if v.abs() < PAD_DEAD { 0.0 } else { v };
         self.cam.yaw -= dead(right[0]) * 2.2 * dt;
         self.cam.pitch = (self.cam.pitch + dead(right[1]) * 1.4 * dt).clamp(0.12, 1.56);
         if dead(zoom) != 0.0 {
@@ -2596,4 +2623,27 @@ fn copy_of(path: &Path, mode: Mode, course: usize, name: &str) -> Result<Course,
     crate::free_tracks::ensure(path)?;
     let bytes = crate::fs::read(path).map_err(|e| e.to_string())?;
     mm2_course::copy::import(&bytes, &path.to_string_lossy(), Some(mode), course, &format!("{name} copy"))
+}
+
+#[cfg(test)]
+mod pad_tests {
+    use super::*;
+
+    #[test]
+    fn stuck_stick_does_not_turn_the_view() {
+        let mut b = Builder::new(None, None);
+        let yaw = b.cam.yaw;
+        // The right stick held at its end from the start (a stick that
+        // rests off centre): nothing, frame after frame.
+        for _ in 0..60 {
+            let [_, _, rx, ry, z] = b.pad_axes([0.0, 0.0, -1.0, 0.0, 0.0]);
+            b.pad_view([rx, ry], z, [0.0; 2], 1.0 / 60.0);
+        }
+        assert_eq!(b.cam.yaw, yaw);
+        // Once seen in the middle, it turns the view.
+        b.pad_axes([0.0; 5]);
+        let [_, _, rx, ry, z] = b.pad_axes([0.0, 0.0, -1.0, 0.0, 0.0]);
+        b.pad_view([rx, ry], z, [0.0; 2], 1.0 / 60.0);
+        assert!(b.cam.yaw != yaw);
+    }
 }
