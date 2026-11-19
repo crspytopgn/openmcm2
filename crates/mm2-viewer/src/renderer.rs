@@ -836,6 +836,12 @@ impl TerrainRenderer {
         }
     }
 
+    /// Animated object `index`, for a craft the player takes over
+    /// (crate::drive).
+    pub fn animated_mut(&mut self, index: usize) -> Option<&mut crate::objects::AnimatedModel> {
+        self.objects.as_mut()?.animated_mut(index)
+    }
+
     /// The bikes' headlights: each one's place and the way it faces, game
     /// coordinates; lit at night with ray tracing.
     pub fn set_headlights(&mut self, lamps: &[(Vec3, Vec3)]) {
@@ -910,6 +916,14 @@ impl TerrainRenderer {
     pub fn set_spin(&mut self, index: usize, name: &str, angle: f32) {
         if let Some(o) = &mut self.objects {
             o.set_spin(index, name, angle);
+        }
+    }
+
+    /// Turns frame `name` of animated object `index` by `angle` about its
+    /// own `axis` (a propeller or rotor, crate::drive).
+    pub fn set_turn(&mut self, index: usize, name: &str, axis: Vec3, angle: f32) {
+        if let Some(o) = &mut self.objects {
+            o.set_turn(index, name, axis, angle);
         }
     }
 

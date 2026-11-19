@@ -33,6 +33,7 @@
 //! it lacks reads as empty.
 
 use std::path::PathBuf;
+use glam::{Mat4, Vec3};
 
 /// The folder `--freepack` named, which goes before `MM2_FREEPACK`.
 static GIVEN: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -886,6 +887,8 @@ pub fn model(stem: &str) -> Option<(mm2_formats::slb::Model, Vec<(String, crate:
             if MARKERS.contains(&stem.as_str()) {
                 soften_glow(&mut model.materials);
             }
+            split_blades(&stem, &mut model);
+            make_props(&stem, &mut model);
             (model, images, path)
         }
     };
@@ -909,6 +912,232 @@ pub fn model(stem: &str) -> Option<(mm2_formats::slb::Model, Vec<(String, crate:
         })
         .collect();
     Some((model, images))
+}
+
+/// The free pack's craft are each one piece; the original's turn their
+/// propellers and rotors on frames of their own. Those parts are split
+/// out here onto frames named as the original's, so they can spin
+/// (crate::drive::BLADES): each model's part as the box it lies in, game
+/// axes, its hub (the middle of the box when not given) and the axis it
+/// turns about (the frame's z; z when not given).
+type Part = (&'static str, &'static str, [f32; 3], [f32; 3], Option<[f32; 3]>, Option<[f32; 3]>);
+const BLADE_PARTS: [Part; 8] = [
+    ("supercub", "Cub_Prop", [-2.0, -4.0, -11.0], [2.0, 4.0, -9.5], None, None),
+    // The helicopter stands 6 ft off its middle; its rotor turns on the
+    // mast top, and the tail rotor on the boom's left.
+    ("bellranger", "BellRngr_Main-Rotor", [-25.0, 11.07, -55.0], [35.0, 14.0, 1.5], Some([6.09, 11.6, -26.11]), None),
+    ("bellranger", "BellRngr_Tail-Rotor", [4.6, 4.0, 2.5], [4.95, 12.2, 8.8], Some([4.83, 8.09, 5.63]), None),
+    ("helinocam", "BellRngr_Main-Rotor", [-25.0, 11.07, -55.0], [35.0, 14.0, 1.5], Some([6.09, 11.6, -26.11]), None),
+    ("helinocam", "BellRngr_Tail-Rotor", [4.6, 4.0, 2.5], [4.95, 12.2, 8.8], Some([4.83, 8.09, 5.63]), None),
+    ("beech18", "Prop1", [2.6, -4.6, -22.1], [13.8, 7.2, -20.7], Some([8.15, 1.3, -21.5]), None),
+    ("beech18", "Prop2", [-13.8, -4.6, -22.1], [-2.6, 7.2, -20.7], Some([-8.15, 1.3, -21.5]), None),
+    // The biplane was made nose to -x.
+    ("biplane", "Bip_Prop", [-11.45, -5.2, -1.8], [-10.85, 3.2, 1.3], Some([-11.1, -1.0, -0.33]), Some([-1.0, 0.0, 0.0])),
+];
+
+/// Propellers the free pack's craft were made without (their engines
+/// end in a spinner), made here on frames of their own: each one's model,
+/// frame, hub and axis (game axes, nose-ward), its radius, ft, and how
+/// many blades it has. The DC-3's were drawn as a still disc, which is
+/// taken away.
+type Prop = (&'static str, &'static str, [f32; 3], [f32; 3], f32, usize);
+const MADE_PROPS: [Prop; 6] = [
+    ("dc-3", "PropL", [0.26, 3.06, -35.41], [0.428, 0.0, -0.904], 5.4, 3),
+    ("dc-3", "PropR", [17.6, 3.1, -27.23], [0.428, 0.0, -0.904], 5.4, 3),
+    ("cargoplane", "Prop1", [40.6, 4.74, -77.3], [1.0, 0.0, 0.0], 6.4, 4),
+    ("cargoplane", "Prop2", [40.6, 4.74, -52.25], [1.0, 0.0, 0.0], 6.4, 4),
+    ("cargoplane", "Prop3", [40.6, 4.74, -8.45], [1.0, 0.0, 0.0], 6.4, 4),
+    ("cargoplane", "Prop4", [40.6, 4.74, 16.55], [1.0, 0.0, 0.0], 6.4, 4),
+];
+/// The models whose props were a still disc, drawn within this far of
+/// the hub along its axis and round it, ft.
+const PROP_DISCS: [(&str, f32, f32); 1] = [("dc-3", 0.3, 5.7)];
+
+/// A frame at `hub` whose z is `axis`, as a row-vector matrix.
+fn hub_frame(hub: [f32; 3], axis: Option<[f32; 3]>) -> [f32; 16] {
+    let z = Vec3::from(axis.unwrap_or([0.0, 0.0, 1.0])).normalize();
+    let x = if z.y.abs() > 0.9 { Vec3::X } else { Vec3::Y.cross(z).normalize() };
+    let y = z.cross(x);
+    let mut m = [0.0f32; 16];
+    m[0..3].copy_from_slice(&x.to_array());
+    m[4..7].copy_from_slice(&y.to_array());
+    m[8..11].copy_from_slice(&z.to_array());
+    m[12..15].copy_from_slice(&hub);
+    m[15] = 1.0;
+    m
+}
+
+/// Makes `stem`'s missing propellers (MADE_PROPS): thin twisted blades,
+/// black with yellow tips, in the material of the spinner they sit on.
+fn make_props(stem: &str, model: &mut mm2_formats::slb::Model) {
+    let props: Vec<&Prop> = MADE_PROPS.iter().filter(|p| p.0 == stem).collect();
+    if props.is_empty() || model.frames.len() != 1 {
+        return;
+    }
+    for prop in props {
+        let frame = model.frames.len() as u32;
+        let matrix = hub_frame(prop.2, Some(prop.3));
+        model.frames.push(mm2_formats::slb::Frame { name: prop.1.into(), matrix, parent: Some(0) });
+        let place = Mat4::from_cols_array(&matrix);
+        let hub = Vec3::from(prop.2);
+        let axis = Vec3::from(prop.3).normalize();
+        let disc = PROP_DISCS.iter().find(|d| d.0 == stem);
+        for lod in &mut model.lods {
+            if let Some(&(_, depth, radius)) = disc {
+                let in_disc = |p: &[f32; 3]| {
+                    let q = Vec3::from(*p) - hub;
+                    let along = q.dot(axis);
+                    along.abs() <= depth && (q - along * axis).length() <= radius
+                };
+                for s in &mut lod.surfaces {
+                    let positions = &s.positions;
+                    s.faces.retain(|f| !f.iter().all(|&v| positions.get(v as usize).is_some_and(in_disc)));
+                }
+            }
+            // The spinner: the surface with the point nearest the hub.
+            let Some((near, v)) = lod
+                .surfaces
+                .iter()
+                .enumerate()
+                .flat_map(|(i, s)| s.positions.iter().enumerate().map(move |(v, p)| (i, v, Vec3::from(*p).distance(hub))))
+                .min_by(|a, b| a.2.total_cmp(&b.2))
+                .map(|(i, v, _)| (i, v))
+            else {
+                continue;
+            };
+            let like = &lod.surfaces[near];
+            let uv = like.uvs.get(v).copied();
+            let mut s = mm2_formats::slb::Surface {
+                positions: Vec::new(),
+                normals: Vec::new(),
+                uvs: Vec::new(),
+                colors: Vec::new(),
+                faces: Vec::new(),
+                materials: like.materials.clone(),
+                groups: vec![(frame, 0)],
+            };
+            let r = prop.4;
+            for b in 0..prop.5 {
+                let turn = b as f32 * std::f32::consts::TAU / prop.5 as f32;
+                // Root to tip in four pieces, the last yellow; each piece
+                // a flat box, twisted less towards the tip.
+                let stations = [0.35, 0.45, 0.7, 0.88, 1.0];
+                for k in 0..4 {
+                    let colour = if k == 3 { [0, 190, 235, 255] } else { [28, 28, 30, 255] };
+                    let corner = |st: usize, side: f32, face: f32| {
+                        let t = stations[st];
+                        let chord = r * (0.13 - 0.05 * t);
+                        let pitch = (55.0 - 35.0 * t).to_radians();
+                        let thick = r * 0.012;
+                        let (sp, cp) = pitch.sin_cos();
+                        // Along the blade (x), across it (y) and its face (z).
+                        let local = Vec3::new(t * r, side * chord * 0.5 * cp - face * thick * sp, side * chord * 0.5 * sp + face * thick * cp);
+                        place.transform_point3(Mat4::from_rotation_z(turn).transform_point3(local))
+                    };
+                    let quad = |s: &mut mm2_formats::slb::Surface, q: [Vec3; 4]| {
+                        let n = (q[1] - q[0]).cross(q[2] - q[0]).normalize_or_zero();
+                        let at = s.positions.len() as u16;
+                        for p in q {
+                            s.positions.push(p.to_array());
+                            s.normals.push(n.to_array());
+                            s.colors.push(colour);
+                            if let Some(uv) = uv {
+                                s.uvs.push(uv);
+                            }
+                        }
+                        s.faces.push([at, at + 1, at + 2]);
+                        s.faces.push([at, at + 2, at + 3]);
+                    };
+                    let c = |st, side, face| corner(st, side, face);
+                    let (a, e) = (k, k + 1);
+                    // Front and back faces, both edges, and the tip.
+                    quad(&mut s, [c(a, -1.0, 1.0), c(a, 1.0, 1.0), c(e, 1.0, 1.0), c(e, -1.0, 1.0)]);
+                    quad(&mut s, [c(a, 1.0, -1.0), c(a, -1.0, -1.0), c(e, -1.0, -1.0), c(e, 1.0, -1.0)]);
+                    quad(&mut s, [c(a, 1.0, 1.0), c(a, 1.0, -1.0), c(e, 1.0, -1.0), c(e, 1.0, 1.0)]);
+                    quad(&mut s, [c(a, -1.0, -1.0), c(a, -1.0, 1.0), c(e, -1.0, 1.0), c(e, -1.0, -1.0)]);
+                    if k == 3 {
+                        quad(&mut s, [c(e, -1.0, 1.0), c(e, 1.0, 1.0), c(e, 1.0, -1.0), c(e, -1.0, -1.0)]);
+                    }
+                }
+            }
+            lod.surfaces.push(s);
+        }
+    }
+}
+
+fn split_blades(stem: &str, model: &mut mm2_formats::slb::Model) {
+    let parts: Vec<&Part> = BLADE_PARTS.iter().filter(|p| p.0 == stem).collect();
+    if parts.is_empty() || model.frames.len() != 1 {
+        return;
+    }
+    let inside = |part: &Part, p: &[f32; 3]| (0..3).all(|i| p[i] >= part.2[i] && p[i] <= part.3[i]);
+    // Each part's frame, at its hub.
+    let first = model.frames.len() as u32;
+    for part in &parts {
+        let hub = part.4.unwrap_or_else(|| [0, 1, 2].map(|i| (part.2[i] + part.3[i]) / 2.0));
+        let matrix = hub_frame(hub, part.5);
+        model.frames.push(mm2_formats::slb::Frame { name: part.1.into(), matrix, parent: Some(0) });
+    }
+    for lod in &mut model.lods {
+        for s in &mut lod.surfaces {
+            if s.groups.len() > 1 {
+                continue;
+            }
+            // Each face on the body (0) or on the first part it lies in.
+            let n = s.positions.len();
+            let side: Vec<usize> = s
+                .faces
+                .iter()
+                .map(|f| {
+                    parts
+                        .iter()
+                        .position(|part| f.iter().all(|&v| s.positions.get(v as usize).is_some_and(|p| inside(part, p))))
+                        .map_or(0, |k| k + 1)
+                })
+                .collect();
+            if side.iter().all(|&k| k == 0) {
+                continue;
+            }
+            // The body's points first, then each part's, each copied once.
+            let mut remap = vec![u32::MAX; n * (parts.len() + 1)];
+            let (mut order, mut faces, mut groups) = (Vec::new(), Vec::new(), Vec::new());
+            for k in 0..=parts.len() {
+                let start = order.len() as u32;
+                let before = faces.len();
+                for (f, _) in s.faces.iter().zip(&side).filter(|(_, &sd)| sd == k) {
+                    faces.push(f.map(|v| {
+                        let key = v as usize + k * n;
+                        if remap[key] == u32::MAX {
+                            remap[key] = order.len() as u32;
+                            order.push(v as usize);
+                        }
+                        remap[key] as u16
+                    }));
+                }
+                if faces.len() > before || k == 0 {
+                    groups.push((if k == 0 { 0 } else { first + k as u32 - 1 }, start));
+                }
+            }
+            if order.len() > u16::MAX as usize {
+                continue;
+            }
+            let pick = |len: usize| len == n;
+            if pick(s.positions.len()) {
+                s.positions = order.iter().map(|&i| s.positions[i]).collect();
+            }
+            if pick(s.normals.len()) {
+                s.normals = order.iter().map(|&i| s.normals[i]).collect();
+            }
+            if pick(s.uvs.len()) {
+                s.uvs = order.iter().map(|&i| s.uvs[i]).collect();
+            }
+            if pick(s.colors.len()) {
+                s.colors = order.iter().map(|&i| s.colors[i]).collect();
+            }
+            s.faces = faces;
+            s.groups = groups;
+        }
+    }
 }
 
 /// The pack's stand-in for the model `stem`, without its pictures (for

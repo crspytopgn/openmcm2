@@ -18,6 +18,11 @@ pub struct Car {
     pub object: Option<usize>,
     /// Its place in the scene's procedural animations, for its sound.
     pub source: usize,
+    /// The player drives it (crate::drive): off its path, where they
+    /// leave it.
+    pub driven: bool,
+    /// Its model (the `.slt` name).
+    pub model: String,
 }
 
 #[derive(Default)]
@@ -32,6 +37,9 @@ pub struct Traffic {
 const CLIMB: f32 = 6.0;
 
 /// The scene's vehicles and their models, from `RES/PROCVUE.RES`'s paths,
+/// The source of a vehicle that stands parked, not one of the scene's.
+pub const PARKED: usize = usize::MAX;
+
 /// each with its index in the scene's procedural animations.
 pub fn load(scene: &scn::Scene, procvue: Option<&rs2::Archive>) -> Vec<(usize, Vehicle, scn::Placement)> {
     let Some(vues) = procvue else {
@@ -84,6 +92,20 @@ pub fn solids(model: &str, colseg: &rs2::Archive) -> Vec<Solid> {
         .unwrap_or_default()
 }
 
+/// The ground a vehicle stands on at `x`, `z`: the terrain or a track
+/// object's top under `above` (30 ft over the terrain when not given), as
+/// its height and normal.
+pub fn ground_at(terrain: &Terrain, statics: &[Solid], x: f32, z: f32, above: Option<f32>) -> (f32, Vec3) {
+    let h = ride::ground(terrain, x, z);
+    let n = ride::normal(terrain, Vec3::new(x, 0.0, z));
+    let top = above.map_or(h + 30.0, |a| a.max(h));
+    statics
+        .iter()
+        .filter_map(|s| s.crossing(Vec3::new(x, top, z), Vec3::new(x, h - 0.1, z)))
+        .min_by(|a, b| a.along.total_cmp(&b.along))
+        .map_or((h, n), |c| (c.point.y, c.normal))
+}
+
 impl Traffic {
     /// Runs every vehicle's clock on by `dt` and moves its solids.
     pub fn update(&mut self, dt: f32, terrain: &Terrain, world: &mut World) {
@@ -94,16 +116,9 @@ impl Traffic {
             let statics = &world.solids[..self.first];
             let placed = car.vehicle.position != Vec3::ZERO;
             let above = car.vehicle.position.y + CLIMB;
-            car.vehicle.update(dt, |x, z| {
-                let h = ride::ground(terrain, x, z);
-                let n = ride::normal(terrain, Vec3::new(x, 0.0, z));
-                let top = if placed { above.max(h) } else { h + 30.0 };
-                statics
-                    .iter()
-                    .filter_map(|s| s.crossing(Vec3::new(x, top, z), Vec3::new(x, h - 0.1, z)))
-                    .min_by(|a, b| a.along.total_cmp(&b.along))
-                    .map_or((h, n), |c| (c.point.y, c.normal))
-            });
+            if !car.driven {
+                car.vehicle.update(dt, |x, z| ground_at(terrain, statics, x, z, placed.then_some(above)));
+            }
             let (turn, at) = (car.vehicle.rotation(), car.vehicle.position);
             for s in &mut world.solids[car.solids.clone()] {
                 s.place(turn, at, car.vehicle.velocity);
@@ -115,6 +130,11 @@ impl Traffic {
     pub fn places(&self) -> impl Iterator<Item = (usize, Mat4)> + '_ {
         self.cars.iter().filter_map(|c| {
             let mut place = Mat4::from_mat3(c.vehicle.rotation());
+            // A model made facing back is turned round to face its way.
+            let yaw = crate::drive::model_yaw(&c.model);
+            if yaw != 0.0 {
+                place *= Mat4::from_rotation_y(yaw);
+            }
             place.w_axis = c.vehicle.position.extend(1.0);
             Some((c.object?, place))
         })

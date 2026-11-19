@@ -99,17 +99,15 @@ fn flat(v: Vec3) -> Vec2 {
     Vec2::new(v.x, v.z)
 }
 
-/// The dressing for a track: its course (or else its gates, in order),
-/// where the start is and which way it faces, and what already stands
-/// there. Desert tracks get oil drums and pallets in place of hay.
-pub fn place(
-    terrain: &Terrain,
+/// The course as `Ground` to place things clear of (its course, or else
+/// its gates, in order), with what already stands there taken, and each
+/// run of it as points with their sides.
+fn course_ground<'a>(
+    terrain: &'a Terrain,
     course: Option<&TrackDef>,
     gates: &[Vec3],
-    start: (Vec3, Vec3),
     standing: &[Placement],
-    desert: bool,
-) -> (Vec<Placement>, Vec<(Vec3, Vec3)>) {
+) -> Option<(Ground<'a>, Vec<Vec<(Vec2, Vec2, Vec2)>>)> {
     let mut path = Vec::new();
     // Each run of the course: points with their sides.
     let mut runs: Vec<Vec<(Vec2, Vec2, Vec2)>> = Vec::new();
@@ -144,7 +142,7 @@ pub fn place(
         }
     }
     if path.len() < 3 {
-        return (Vec::new(), Vec::new());
+        return None;
     }
     let mut ground = Ground {
         terrain,
@@ -155,6 +153,23 @@ pub fn place(
     for s in standing {
         ground.take(Vec2::new(s.position[0], s.position[2]), 5.0);
     }
+    Some((ground, runs))
+}
+
+/// The dressing for a track: its course (or else its gates, in order),
+/// where the start is and which way it faces, and what already stands
+/// there. Desert tracks get oil drums and pallets in place of hay.
+pub fn place(
+    terrain: &Terrain,
+    course: Option<&TrackDef>,
+    gates: &[Vec3],
+    start: (Vec3, Vec3),
+    standing: &[Placement],
+    desert: bool,
+) -> (Vec<Placement>, Vec<(Vec3, Vec3)>) {
+    let Some((mut ground, runs)) = course_ground(terrain, course, gates, standing) else {
+        return (Vec::new(), Vec::new());
+    };
     let mut out = Vec::new();
     // Where spectators stand, and which way they look.
     let mut people = Vec::new();
@@ -267,6 +282,109 @@ pub fn place(
         }
     }
     (out, people)
+}
+
+/// Where a parked vehicle wants to stand.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Park {
+    /// Beside the start, with the others.
+    Lot,
+    /// At the end of a flat, straight strip this long, ft, facing along it.
+    Strip(f32),
+    /// On a flat pad of its own.
+    Pad,
+}
+
+/// Spots for vehicles to stand parked (for [`crate::drive`]): each one's
+/// model, how far round it needs clear, ft, how high its middle stands
+/// off the ground, and where it wants to be. Cars and machines park in
+/// a lot beside the start, aircraft further out where the ground is
+/// open and flat. Those with no room are left out.
+pub fn parking(
+    terrain: &Terrain,
+    course: Option<&TrackDef>,
+    gates: &[Vec3],
+    start: (Vec3, Vec3),
+    standing: &[Placement],
+    fleet: &[(&str, f32, f32, Park)],
+) -> Vec<Placement> {
+    let Some((mut ground, _)) = course_ground(terrain, course, gates, standing) else {
+        return Vec::new();
+    };
+    let at = flat(start.0);
+    let mut out = Vec::new();
+    // Rings round the start, nearest first, `step` ft apart along each.
+    let rings = |from: f32, to: f32, step: f32| {
+        let mut spots = Vec::new();
+        let mut d = from;
+        while d <= to {
+            let n = ((std::f32::consts::TAU * d / step) as usize).max(6);
+            for k in 0..n {
+                let a = k as f32 / n as f32 * std::f32::consts::TAU;
+                spots.push(at + Vec2::new(a.cos(), a.sin()) * d);
+            }
+            d += step;
+        }
+        spots
+    };
+    let near = rings(70.0, 1600.0, 22.0);
+    let far = rings(250.0, 4000.0, 70.0);
+    for &(model, r, lift, park) in fleet {
+        let placed = match park {
+            Park::Lot | Park::Pad => {
+                let (clear, steep) = if park == Park::Lot { (25.0, 0.15) } else { (40.0, 0.1) };
+                let spots = if park == Park::Lot { &near } else { &far };
+                spots.iter().copied().find(|&p| ground.fits(p, r, clear, steep)).map(|p| {
+                    let look = (at - p).normalize_or(Vec2::Y);
+                    (p, look, vec![(p, r)])
+                })
+            }
+            Park::Strip(length) => far.iter().copied().find_map(|c| {
+                if !ground.fits(c, r, 30.0, 0.15) {
+                    return None;
+                }
+                (0..8).find_map(|k| {
+                    let a = k as f32 / 8.0 * std::f32::consts::PI;
+                    let d = Vec2::new(a.cos(), a.sin());
+                    let steps = (length / 35.0).ceil() as i32;
+                    let strip: Vec<Vec2> = (-steps / 2..=steps / 2).map(|t| c + d * (t as f32 * 35.0)).collect();
+                    // A gentle, even grade end to end, with no humps in it.
+                    let (h0, h1) = (ground.height(strip[0]), ground.height(strip[strip.len() - 1]));
+                    let n = (strip.len() - 1) as f32;
+                    let even = (h1 - h0).abs() < length * 0.06
+                        && strip.iter().enumerate().all(|(i, &p)| (ground.height(p) - (h0 + (h1 - h0) * i as f32 / n)).abs() < 3.0 + length * 0.006);
+                    (even && strip.iter().all(|&p| ground.fits(p, r, 30.0, 0.2))).then(|| {
+                        // At the end nearer the start, facing down the strip.
+                        let (a, b) = (strip[0], strip[strip.len() - 1]);
+                        let (from, to) = if a.distance(at) < b.distance(at) { (a, b) } else { (b, a) };
+                        let taken = strip.iter().map(|&p| (p, r)).collect();
+                        (from, (to - from).normalize_or(Vec2::Y), taken)
+                    })
+                })
+            }),
+        };
+        // An aircraft with no strip stands on open ground anyway.
+        let placed = placed.or_else(|| {
+            let p = far.iter().copied().find(|&p| ground.fits(p, r, 40.0, 0.12))?;
+            Some((p, (at - p).normalize_or(Vec2::Y), vec![(p, r)]))
+        });
+        let Some((p, look, taken)) = placed else {
+            eprintln!("no room to park the {model}");
+            continue;
+        };
+        for (q, s) in taken {
+            ground.take(q, s);
+        }
+        out.push(Placement {
+            model: model.into(),
+            position: [p.x, ground.height(p) + lift, p.y],
+            look: [look.x, 0.0, look.y],
+            up: [0.0, 1.0, 0.0],
+            scale: [1.0; 3],
+            lighting: Lighting::default(),
+        });
+    }
+    out
 }
 
 /// Spectators in a stadium's front rows: the stands just outside its wall
