@@ -210,6 +210,8 @@
       title="Starts straight in the Course Builder, with the graphics picked above. Draw the track's line, drop in jumps, shape and paint the ground, then press Ride it. Your tracks stay in this browser and join the track lists.">Open the Course Builder</button>
     <span class="hint">Make your own track and ride it. It works with either graphics, and it's on the game's main menu too (the shovel on the chain).</span>
   </div>
+  <h2 class="ask sub">Controls</h2>
+  <div id="padrow"></div>
   <div id="lookbox"></div>
   <details class="more">
     <summary>Settings and extras</summary>
@@ -300,6 +302,7 @@ const zip = await import(fresh("./zip.js"));
 const iso = await import(fresh("./iso.js"));
 const touch = await import(fresh("./touch.js"));
 const net = await import(fresh("./net.js"));
+const gamepads = await import(fresh("./gamepad.js"));
 
 const $ = (id) => document.getElementById(id);
 const status = (t) => ($("status").textContent = t);
@@ -618,6 +621,7 @@ globalThis.mm2page = {
     $("setup").hidden = true;
     $("mm2").focus();
     pad?.show(false);
+    gamepad.started({ touch: !!pad });
     net.invite();
     // Shown for a moment, then only when the pointer is on it.
     $("heart").hidden = false;
@@ -654,12 +658,19 @@ globalThis.mm2page = {
   // A race started or ended: the touch buttons come and go with it.
   racing(on) {
     racingNow = on;
-    pad?.show(on);
+    pad?.show(on && !gamepad.found());
   },
 };
 
 // Touch screens: buttons for riding, and full screen on the first tap.
 const pad = touch.wanted() ? touch.setup($("mm2")) : null;
+// Game pads: a word on the start page and over the game, since browsers
+// show a pad only after a button on it is pressed. With one plugged in,
+// a tablet's touch buttons keep out of the way.
+const gamepad = gamepads.setup($("padrow"));
+gamepad.onChange((found) => {
+  if (racingNow) pad?.show(!found);
+});
 if (pad) {
   $("mm2").addEventListener("pointerdown", () => {
     if (document.fullscreenElement) return;
