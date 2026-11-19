@@ -1218,6 +1218,33 @@ pub struct ObjectRenderer {
     pub extras_shown: bool,
     /// The enhanced drawing ([`crate::graphics`]), when on.
     enhanced: Option<Enhanced>,
+    /// The models' pictures and the draws' small buffers, which only their
+    /// bind groups hold: destroyed with the renderer (see
+    /// [`crate::gpu_free`]).
+    held: crate::gpu_free::Held,
+}
+
+impl Drop for ObjectRenderer {
+    /// In a browser the GPU memory goes now rather than whenever the
+    /// page's garbage collector runs (see [`crate::gpu_free`]).
+    fn drop(&mut self) {
+        let mut buffers = vec![&self.vertices, &self.indices, &self.shadow_uniform];
+        buffers.extend(&self.extras);
+        buffers.extend(self.shadow.as_ref().map(|s| &s.0));
+        buffers.extend(&self.cast_indices);
+        if let Some((a, b)) = &self.node_buffers {
+            buffers.extend([a, b]);
+        }
+        buffers.extend(self.motion.as_ref().map(|m| &m.1));
+        if let Some(e) = &self.enhanced {
+            buffers.extend(e.cascades.iter().map(|c| &c.0));
+            buffers.extend(e.moving.as_ref().map(|m| &m.0));
+        }
+        for b in buffers {
+            b.destroy();
+        }
+        self.nodes.destroy();
+    }
 }
 
 /// The views the moving models' motion is drawn with (fs_motion).
@@ -1725,6 +1752,9 @@ impl ObjectRenderer {
             levels: vec![vec![255; 4]],
         };
         let layout = texture_layout;
+        let held = std::cell::RefCell::new(crate::gpu_free::Held::default());
+        let upload_as = |device, queue, image: &Image, srgb| held.borrow_mut().texture(upload_as(device, queue, image, srgb));
+        let upload = |device, queue, image: &Image| upload_as(device, queue, image, true);
         // The physically based materials' pictures, each uploaded once;
         // what a material without one of them reads instead: flat, white.
         let one = |pixel: [u8; 4], srgb: bool| {
@@ -1757,11 +1787,11 @@ impl ObjectRenderer {
                 let tex = upload(device, queue, tex.as_ref().unwrap_or(&white));
                 // Its photo material's layer, or -1 for none.
                 let surface = mesh.surfaced.then(|| crate::materials::surface(name)).flatten();
-                let surface = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                let surface = held.borrow_mut().buffer(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("object surface"),
                     contents: bytemuck::cast_slice(&[surface.map_or(-1.0, |m| m as f32), crate::materials::backlit(name) as u32 as f32, lod as f32, 0.0]),
                     usage: wgpu::BufferUsages::UNIFORM,
-                });
+                }));
                 let pbr = mesh.draw_pbr.get(d).copied().flatten().and_then(|i| mesh.pbr.get(i));
                 let none = slb::Pbr::default();
                 let p = pbr.unwrap_or(&none);
@@ -1775,11 +1805,11 @@ impl ObjectRenderer {
                     [e[0], e[1], e[2], p.specular],
                     [pbr.is_some() as u32 as f32, has_normal as u32 as f32, has_mr as u32 as f32, has_occlusion as u32 as f32],
                 ];
-                let look = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                let look = held.borrow_mut().buffer(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("object look"),
                     contents: bytemuck::cast_slice(&look),
                     usage: wgpu::BufferUsages::UNIFORM,
-                });
+                }));
                 let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("object texture"),
                     layout: &layout,
@@ -1836,6 +1866,7 @@ impl ObjectRenderer {
             extra_node: mesh.extra_node.map(|n| n as usize),
             extras_shown: true,
             enhanced,
+            held: held.into_inner(),
         })
     }
 

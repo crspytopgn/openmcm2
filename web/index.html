@@ -660,6 +660,38 @@ globalThis.mm2page = {
     racingNow = on;
     pad?.show(on && !gamepad.found());
   },
+  // The browser reset the graphics card under the game (Safari does when
+  // it runs short of graphics memory): nothing can be drawn again, so
+  // rather than a frozen picture the game starts again, saves kept. Twice
+  // within a few minutes, it says so instead of going round and round.
+  gpuLost(why) {
+    if (stopped) return;
+    console.warn("graphics device lost:", why);
+    if (loader.shown && loader.now) return this.fail("device lost: " + why);
+    let last = 0;
+    try {
+      last = Number(sessionStorage.getItem("mm2gpulost")) || 0;
+      sessionStorage.setItem("mm2gpulost", String(Date.now()));
+    } catch {}
+    stopped = true;
+    if (Date.now() - last < 5 * 60 * 1000) {
+      $("ldSteps").replaceChildren();
+      return loader.fail(
+        "The graphics card stopped answering",
+        "The browser reset the graphics card under the game twice in a few minutes. Your saves are kept. " +
+          "Closing other tabs and apps frees graphics memory; the original look or Low quality is lighter too.",
+        "device lost: " + why,
+        look === "enhanced" ? [["Try the original look", () => restartWith(() => (s.enhanced = false))]] : [],
+        "Graphics lost"
+      );
+    }
+    $("ldSteps").replaceChildren();
+    loader.fail("Starting the game again", "The browser reset the graphics card, so the game is starting again. Your saves are kept.", "device lost: " + why, [], "Restarting");
+    try {
+      sessionStorage.setItem("mm2autoplay", "1");
+    } catch {}
+    setTimeout(() => location.reload(), 1500);
+  },
 };
 
 // Touch screens: buttons for riding, and full screen on the first tap.

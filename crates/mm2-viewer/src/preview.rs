@@ -27,6 +27,9 @@ pub struct Preview {
     objects: ObjectRenderer,
     globals: wgpu::Buffer,
     depth: Option<(wgpu::TextureView, u32, u32)>,
+    /// The depth view's texture, destroyed when it is made anew or the
+    /// preview goes (see [`crate::gpu_free`]).
+    depth_texture: Option<wgpu::Texture>,
     angle: f32,
     /// Waiting (WaitR), or playing one of the idles since a time.
     idle: Option<f32>,
@@ -37,6 +40,18 @@ pub struct Preview {
 /// waiting, each frame has a 1 in 200 chance of one of these, picked
 /// evenly; when it has played, the bike and rider go back to waiting.
 const IDLES: [&str; 3] = ["LookLeftR", "LookRightR", "StretchR"];
+
+impl Drop for Preview {
+    /// A new preview is made for every bike, colour and outfit picked: in
+    /// a browser its GPU memory goes now, not when the page's garbage
+    /// collector runs (the models' own go with [`ObjectRenderer`]).
+    fn drop(&mut self) {
+        self.globals.destroy();
+        if let Some(t) = &self.depth_texture {
+            t.destroy();
+        }
+    }
+}
 
 impl Preview {
     /// Builds the models for `ride` from `RES/BIKE.RES`.
@@ -91,6 +106,7 @@ impl Preview {
             objects,
             globals,
             depth: None,
+            depth_texture: None,
             angle: 0.0,
             idle: None,
             seed: 0x1234_5678,
@@ -158,6 +174,9 @@ impl Preview {
                 view_formats: &[],
             });
             self.depth = Some((depth.create_view(&Default::default()), width, height));
+            if let Some(old) = self.depth_texture.replace(depth) {
+                old.destroy();
+            }
         }
         if turning {
             self.angle += TURN * dt;
