@@ -519,6 +519,8 @@ pub struct Options {
     listening: Option<usize>,
     ratchet: Option<Voice>,
     ratchet_at: f32,
+    /// The pad the controls page last listed.
+    pad_shown: Option<keys::PadInfo>,
 }
 
 impl Options {
@@ -540,6 +542,7 @@ impl Options {
             listening: None,
             ratchet: None,
             ratchet_at: f32::MIN,
+            pad_shown: keys::pad(),
         };
         // The fork's Tweaks box, between Help and Advanced.
         o.base.add_copy("Restore", "Tweaks", TWEAKS_BUTTON);
@@ -655,15 +658,7 @@ impl Options {
                 }
                 let actions = (0..ACTIONS as u32).map(|i| cx.ui.lang(402 + i)).collect();
                 d.set_items("ActionListBox", actions, 0);
-                // The pad plugged in by its own name in place of its kind.
-                let pad = keys::pad();
-                let devices = (0..8)
-                    .map(|i| match &pad {
-                        Some(p) if p.device == i && !p.name.is_empty() => p.name.clone(),
-                        _ => cx.ui.lang(460 + i as u32),
-                    })
-                    .collect();
-                d.set_items("InputDeviceDDL", devices, p.controls.device as usize);
+                Self::fill_devices(cx.ui, d, p);
                 d.set_selectable("ActionListBox", true);
                 d.set_selectable("MapKeyListBox", true);
                 Self::fill_keys(cx.ui, d, p);
@@ -681,6 +676,31 @@ impl Options {
                 self.fill_curves(cx.ui);
                 self.show_bands();
             }
+        }
+    }
+
+    /// The controls page's devices, the pad plugged in by its own name
+    /// in place of its kind. In a browser the list's tip also says a pad
+    /// shows up only once one of its buttons is pressed (browsers keep
+    /// pads from a page until then).
+    fn fill_devices(ui: &Ui, d: &mut Dlg, p: &Profile) {
+        let pad = keys::pad();
+        let devices = (0..8)
+            .map(|i| match &pad {
+                Some(info) if info.device == i && !info.name.is_empty() => info.name.clone(),
+                _ => ui.lang(460 + i as u32),
+            })
+            .collect();
+        d.set_items("InputDeviceDDL", devices, p.controls.device as usize);
+        if cfg!(target_arch = "wasm32") {
+            let tip = match &pad {
+                Some(info) => format!(
+                    "Click arrow to display all available controller types. {} is plugged in: it rides the bike as it is, or pick it here to change its buttons.",
+                    if info.name.is_empty() { "Your pad" } else { info.name.as_str() }
+                ),
+                None => "Click arrow to display all available controller types. Using a game pad? Press any button on it and it shows up here: browsers only show a pad to a page after a button is pressed.".to_string(),
+            };
+            d.set_tip("InputDeviceDDL", &tip);
         }
     }
 
@@ -1640,9 +1660,19 @@ impl Screen for Options {
         Go::Stay
     }
 
-    fn tick(&mut self, _cx: &mut Cx) -> Go {
+    fn tick(&mut self, cx: &mut Cx) -> Go {
         self.describe_tweak();
         self.describe_difficulty();
+        // A pad woken (or unplugged) with the controls page open shows
+        // up in its list straight away.
+        let pad = keys::pad();
+        if pad != self.pad_shown && self.listening.is_none() {
+            self.pad_shown = pad;
+            if let Some((3, d)) = self.page.as_mut() {
+                Self::fill_devices(cx.ui, d, &self.p);
+                Self::fill_keys(cx.ui, d, &self.p);
+            }
+        }
         Go::Stay
     }
 

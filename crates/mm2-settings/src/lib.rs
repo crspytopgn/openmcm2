@@ -93,6 +93,9 @@ pub enum Quality {
     /// High's look with ray tracing, at 2x anti-aliasing.
     RayTraced,
     Ultra,
+    /// Ultra drawn finer for the strongest cards: supersampled, with the
+    /// detail reaching further.
+    Max,
 }
 
 /// The anti-aliasing the launcher offers, one of them: its name, what it
@@ -145,25 +148,25 @@ pub const RESOLUTIONS: [(&str, &str); 6] = [
 ];
 
 impl Quality {
-    pub const ALL: [Quality; 5] = [Quality::Low, Quality::Medium, Quality::High, Quality::RayTraced, Quality::Ultra];
+    pub const ALL: [Quality; 6] = [Quality::Low, Quality::Medium, Quality::High, Quality::RayTraced, Quality::Ultra, Quality::Max];
     pub fn name(self) -> &'static str {
-        ["low", "medium", "high", "raytraced", "ultra"][self as usize]
+        ["low", "medium", "high", "raytraced", "ultra", "max"][self as usize]
     }
 
     /// What the launcher calls it.
     pub fn label(self) -> &'static str {
-        ["Low", "Medium", "High", "Ray traced", "Ultra"][self as usize]
+        ["Low", "Medium", "High", "Ray traced", "Ultra", "Max"][self as usize]
     }
 
     /// The anti-aliasing this preset draws with ([`ANTIALIASING`]).
     pub fn antialiasing(self) -> &'static str {
-        ["off", "taa", "msaa4", "msaa2", "msaa8"][self as usize]
+        ["off", "taa", "msaa4", "msaa2", "msaa8", "msaa4"][self as usize]
     }
 
     /// The most pixels this preset draws the scene with on Auto, as the
     /// launcher says it.
     pub fn most_pixels(self) -> &'static str {
-        ["up to 1280×720 worth", "up to 1920×1080 worth", "up to 2560×1440 worth", "up to 2560×1440 worth", "the screen's own"][self as usize]
+        ["up to 1280×720 worth", "up to 1920×1080 worth", "up to 2560×1440 worth", "up to 2560×1440 worth", "the screen's own", "up to 3840×2160 worth, shrunk to the screen"][self as usize]
     }
 
     /// Whether the upgrade `name` is on with this preset unless changed,
@@ -180,6 +183,7 @@ impl Quality {
         let on: &[&str] = match self {
             Quality::RayTraced => &["raytracing"],
             Quality::Ultra => &["ruts"],
+            Quality::Max => &["supersample", "far"],
             _ => &[],
         };
         if on.contains(&name) {
@@ -247,7 +251,7 @@ pub fn parse_difficulty(text: &str) -> Option<[[u32; 3]; 4]> {
     (n.len() == 12 && n.iter().all(|v| (1..=MOST_STEP).contains(v))).then_some(t)
 }
 
-pub const UPGRADES: [(&str, &str, bool); 25] = [
+pub const UPGRADES: [(&str, &str, bool); 27] = [
     ("lighting", "Per-pixel lighting", true),
     ("shadows", "Sun shadows", true),
     ("distance", "Far draw distance and haze", true),
@@ -274,6 +278,9 @@ pub const UPGRADES: [(&str, &str, bool); 25] = [
     ("nightlights", "Stadium lights at night", true),
     // Only on a GPU that can trace rays; elsewhere the shadow maps stay.
     ("raytracing", "Ray tracing: shadows and reflections", false),
+    // The Max preset's own.
+    ("supersample", "Supersampling (sharper than the screen)", false),
+    ("far", "Detail reaching further", false),
 ];
 
 #[derive(Debug, Clone, PartialEq)]

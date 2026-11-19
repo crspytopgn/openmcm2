@@ -45,15 +45,28 @@ fn main() -> eframe::Result {
     if args.first().is_some_and(|a| a == "--play") {
         std::process::exit(play_only(&args[1..]));
     }
+    // A widescreen window (16:9) that fits a 1366 x 768 laptop with its
+    // title bar; in a Steam Deck's Game Mode (gamescope) the whole
+    // 1280 x 800 screen, as there is no window to size there.
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("OpenMCM2")
-            .with_inner_size([1000.0, 760.0])
-            .with_min_inner_size([760.0, 520.0])
+            .with_inner_size([1200.0, 675.0])
+            .with_min_inner_size([760.0, 480.0])
+            .with_fullscreen(in_gamescope())
             .with_icon(eframe::icon_data::from_png_bytes(ICON_PNG).expect("built-in icon")),
         ..Default::default()
     };
     eframe::run_native("OpenMCM2", options, Box::new(|cc| Ok(Box::new(Launcher::new(cc)))))
+}
+
+/// SteamOS's Game Mode (and other gamescope sessions): one app on the
+/// whole screen, with no title bar or close button.
+fn in_gamescope() -> bool {
+    let set = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty() && v != "0");
+    set("SteamGamepadUI")
+        || set("GAMESCOPE_WAYLAND_DISPLAY")
+        || std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.eq_ignore_ascii_case("gamescope"))
 }
 
 fn play_only(args: &[String]) -> i32 {
@@ -127,6 +140,8 @@ struct Launcher {
     pack_update: Slot<Option<freepack::Update>>,
     /// The last thing to tell the player, and whether it's bad news.
     note: Option<(String, bool)>,
+    /// Exit was pressed once while something was copying.
+    exit_asked: bool,
     /// Where this copy of OpenMCM2 is installed, if it can update itself.
     install: Result<update::Install, String>,
     update: Update,
@@ -387,6 +402,7 @@ impl Launcher {
             pack_update: Arc::new(Mutex::new(None)),
             running: None,
             note: None,
+            exit_asked: false,
             install,
             update: Update::Idle,
             tracks: Tracks { added: tracks::Added::load(), ..Default::default() },
@@ -647,7 +663,7 @@ impl Launcher {
             .frame(egui::Frame::new().fill(look::BG).inner_margin(egui::Margin { left: 28, right: 20, top: 18, bottom: 8 }))
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    ui.set_max_width(ui.available_width().min(820.0));
+                    ui.set_max_width(ui.available_width().min(1000.0));
                     match self.page {
                         Page::Play => self.play_page(ui, busy),
                         Page::Graphics => self.graphics_page(ui),
@@ -679,10 +695,12 @@ impl Launcher {
                 self.page = page;
             }
         }
-        // From the bottom up: the version, the shortcut, Play, and the
-        // last thing to tell the player.
+        // From the bottom up: Exit and the version, the shortcut, Play,
+        // and the last thing to tell the player.
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             ui.add_space(2.0);
+            self.exit_button(ui, busy);
+            ui.add_space(6.0);
             let version = update::current().map_or("Built from source".to_string(), |v| format!("OpenMCM2 {v}"));
             ui.label(look::weak(version));
             ui.add_space(6.0);
@@ -715,6 +733,37 @@ impl Launcher {
                 ui.add(egui::Label::new(egui::RichText::new(text).color(if *bad { look::BAD } else { look::GOOD }).size(13.0)).wrap());
             }
         });
+    }
+
+    /// Closes the launcher: on a Steam Deck in Game Mode there's no
+    /// window to close, so this is the way back to Steam. The pad gets
+    /// here with the D-pad (down from the version) or the shoulder
+    /// buttons, and A presses it. A game already running carries on.
+    /// While something is being copied or downloaded, the first press
+    /// only asks.
+    fn exit_button(&mut self, ui: &mut egui::Ui, busy: bool) {
+        let label = if self.exit_asked { "Press again to exit" } else { "Exit" };
+        let tip = if busy {
+            "Closes the launcher. The copy or download going now stops, and starts over next time."
+        } else if self.running.is_some() {
+            "Closes the launcher. The game keeps running."
+        } else {
+            "Closes the launcher. Your settings are saved as you go."
+        };
+        let r = ui
+            .add(egui::Button::new(look::with(look::icon::ICON_LOGOUT, label)).min_size(egui::vec2(ui.available_width(), 32.0)))
+            .on_hover_text(tip);
+        if r.clicked() {
+            if busy && !self.exit_asked {
+                self.exit_asked = true;
+                return;
+            }
+            let _ = self.settings.save();
+            self.saved = self.settings.clone();
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if self.exit_asked && !r.has_focus() && !r.hovered() {
+            self.exit_asked = false;
+        }
     }
 
     // ---- Play ----
@@ -1961,6 +2010,8 @@ fn effect_about(name: &str) -> &'static str {
         "scenery" => "Props along the course, a paddock and a crowd.",
         "grade" => "A bolder look: colour, contrast, a vignette.",
         "raytracing" => "Truer shadows, light shafts and reflections, traced as rays.",
+        "supersample" => "For a strong graphics card: the 3D scene is drawn with more pixels than your screen has (up to 4K's worth, at most twice across) and shrunk to fit, so the edges of fences, trees, bikes and far hills are as clean as they can be and fine detail doesn't shimmer. The colours and light don't change. Costs up to four times the work on a 1080p screen; nothing extra on a 4K one.",
+        "far" => "The 3D grass reaches half as far again, the smoothed hills round you about twice as far, and the sun's shadows keep going nearly twice as far before fading, so more of the view looks finished. Close up nothing changes. Takes effect from the next track loaded.",
         _ => "",
     }
 }
@@ -1981,7 +2032,8 @@ fn preset_text(q: Quality) -> String {
         Quality::Medium => "without light shafts or smooth hills, with TAA rebuilding the scene at the screen's sharpness",
         Quality::RayTraced => "High's effects with ray tracing (needs a graphics card that can trace rays)",
         Quality::High => "every effect that's on unless changed",
-        _ => "every effect but ray tracing, with lasting ruts",
+        Quality::Ultra => "every effect but ray tracing, with lasting ruts",
+        Quality::Max => "for the strongest graphics cards: Ultra's effects drawn finer, the scene supersampled (drawn with more pixels than the screen and shrunk to it) and the grass, smooth hills and shadows reaching further; the same light and colours as High, without lasting ruts",
     };
     let msaa = ANTIALIASING.iter().find(|a| a.0 == q.antialiasing()).map_or("", |a| a.1);
     format!("{}: {effects}; anti-aliasing {msaa}; scene resolution {}.", q.label(), q.most_pixels())
@@ -2010,8 +2062,15 @@ mod shots {
             ("play_full", Page::Play, true, 1300.0),
             ("play_free", Page::Play, true, 1300.0),
             ("play_free_new", Page::Play, true, 1300.0),
+            // The window as it opens, and a Steam Deck's screen.
+            ("window", Page::Play, true, 675.0),
+            ("deck", Page::Play, true, 800.0),
         ] {
-            let width = if name.ends_with("small") { 760.0 } else { 1000.0 };
+            let width = match name {
+                n if n.ends_with("small") => 760.0,
+                "deck" => 1280.0,
+                _ => 1200.0,
+            };
             let custom = name.ends_with("custom");
             let mut s = Settings::default();
             s.enhanced = enhanced;
