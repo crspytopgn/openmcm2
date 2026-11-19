@@ -5024,6 +5024,13 @@ impl App {
     fn builder_event(&mut self, event: &WindowEvent) -> bool {
         let Some(b) = &mut self.builder else { return false };
         match event {
+            // Away from the window (Steam's overlay, another app), no key,
+            // button or drag stays held: one whose release went elsewhere
+            // would keep turning or sliding the view.
+            WindowEvent::Focused(false) => {
+                b.back();
+                return false;
+            }
             WindowEvent::CursorMoved { position, .. } => b.mouse_move(position.x, position.y),
             WindowEvent::MouseInput { state, button, .. } => b.mouse_button(*button, *state == ElementState::Pressed),
             WindowEvent::MouseWheel { delta, .. } => b.wheel(match delta {
@@ -5626,8 +5633,10 @@ impl App {
         if self.in_builder() {
             let back = b;
             let (Some(b), Some(s)) = (&mut self.builder, &self.state) else { return };
+            let [sx, sy, rx, ry, zoom] = b.pad_axes([stick[0], stick[1], right[0], right[1], zoom]);
+            let (stick, right) = ([sx, sy], [rx, ry]);
             let (w, h) = (s.config.width as f64, s.config.height as f64);
-            let speed = |v: f32| if v.abs() < 0.2 { 0.0 } else { v as f64 * 600.0 * dt as f64 * h / 480.0 };
+            let speed = |v: f32| if v.abs() < builder::PAD_DEAD { 0.0 } else { v as f64 * 600.0 * dt as f64 * h / 480.0 };
             let (dx, dy) = (speed(stick[0]), speed(stick[1]));
             let mut pan = [0.0f32; 2];
             if dx != 0.0 || dy != 0.0 {
