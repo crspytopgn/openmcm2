@@ -76,6 +76,9 @@ triplebale06 = { file = "objects/triplebale06.glb", kind = "triplebale" }
 triplebale07 = { file = "objects/triplebale07.glb", kind = "triplebale" }
 triplebale08 = { file = "objects/triplebale08.glb", kind = "triplebale" }
 waypnt = { file = "objects/waypnt.glb", kind = "waypoint" }
+fp_waypnt_2 = { file = "objects/fp_waypnt_2.glb", kind = "waypoint" }
+fp_waypnt_3 = { file = "objects/fp_waypnt_3.glb", kind = "waypoint" }
+fp_waypnt_4 = { file = "objects/fp_waypnt_4.glb", kind = "waypoint" }
 0 = { file = "objects/0.glb", kind = "pole" }
 1 = { file = "objects/1.glb", kind = "pole" }
 2 = { file = "objects/2.glb", kind = "pole" }
@@ -164,7 +167,7 @@ fence_barbedwire = { file = "objects/fence_barbedwire.glb", kind = "b_barbed" }
 fence_barbedwirepost = { file = "objects/fence_barbedwirepost.glb", kind = "pole" }
 fence_chlinkgate = { file = "objects/fence_chlinkgate.glb", kind = "b_gate" }
 fence_chlinkpole = { file = "objects/fence_chlinkpole.glb", kind = "pole" }
-finish = { file = "objects/finish.glb", kind = "b_finish" }
+finish = { file = "objects/finish.glb", kind = "waypoint" }
 finish_big = { file = "objects/finish_big.glb", kind = "b_finish" }
 five = { file = "objects/five.glb", kind = "pole" }
 flaggirl = { file = "objects/flaggirl.glb", kind = "person" }
