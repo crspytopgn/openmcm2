@@ -54,8 +54,16 @@ def files_of(root):
     return out
 
 
+def top_of(rel):
+    # The menus' sounds get a part of their own, so the new look menus
+    # alone (ui/, menus/, sound/ui/) download without the race sounds.
+    if rel.lower().startswith("sound/ui/"):
+        return "sound-ui"
+    return rel.split("/", 1)[0] if "/" in rel else "base"
+
+
 def part_of(rel, sizes_by_top):
-    top = rel.split("/", 1)[0] if "/" in rel else "base"
+    top = top_of(rel)
     count = max(1, -(-sizes_by_top[top] // PART_BYTES))
     if count == 1:
         return top
@@ -73,7 +81,7 @@ def main():
     listed = files_of(root)
     sizes_by_top = {}
     for rel, full in listed:
-        top = rel.split("/", 1)[0] if "/" in rel else "base"
+        top = top_of(rel)
         sizes_by_top[top] = sizes_by_top.get(top, 0) + os.path.getsize(full)
     files = []
     for rel, full in listed:

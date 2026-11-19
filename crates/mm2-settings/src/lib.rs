@@ -297,6 +297,10 @@ pub struct Settings {
     /// layout, `--new-menus`), with either graphics; `menus=original` (the
     /// default) keeps the original game's, which need its files.
     pub new_menus: bool,
+    /// `menus_pack`: a folder with only the new look menus (the Free
+    /// Pack's menus part), for the new menus with the original graphics
+    /// when the whole Free Pack isn't there. The Free Pack wins if both are.
+    pub menus_pack: Option<PathBuf>,
     pub hires: Option<PathBuf>,
     pub use_hires: bool,
     pub enhanced: bool,
@@ -626,6 +630,7 @@ impl Default for Settings {
             free_graphics: false,
             new_menus: false,
             freepack: None,
+            menus_pack: None,
             hires: None,
             use_hires: true,
             enhanced: false,
@@ -746,6 +751,7 @@ impl Settings {
                 "graphics" => s.free_graphics = v == "free",
                 "menus" => s.new_menus = v == "new",
                 "freepack" if !v.is_empty() => s.freepack = Some(v.into()),
+                "menus_pack" if !v.is_empty() => s.menus_pack = Some(v.into()),
                 "hires" if !v.is_empty() => s.hires = Some(v.into()),
                 "use_hires" => s.use_hires = yes(v),
                 "enhanced" => s.enhanced = yes(v),
@@ -863,10 +869,11 @@ impl Settings {
             b(self.forgiving_landings),
         );
         t += &format!(
-            "graphics={}\nfreepack={}\nmenus={}\n",
+            "graphics={}\nfreepack={}\nmenus={}\nmenus_pack={}\n",
             if self.free_graphics { "free" } else { "original" },
             p(&self.freepack),
-            if self.new_menus { "new" } else { "original" }
+            if self.new_menus { "new" } else { "original" },
+            p(&self.menus_pack)
         );
         t += &self.more.text();
         for (u, on) in UPGRADES.iter().zip(&self.upgrades) {
@@ -894,7 +901,9 @@ impl Settings {
             }
             (pack, Some(g)) => {
                 a.push(g.display().to_string());
-                match pack {
+                // The new menus from the Free Pack, or from the menus
+                // downloaded on their own.
+                match pack.as_ref().or(self.menus_pack.as_ref()) {
                     Some(f) if self.new_menus => a.push(format!("--new-menus={}", f.display())),
                     Some(_) => a.push("--original-menus".into()),
                     None => {}
@@ -1192,6 +1201,13 @@ mod tests {
             t.new_menus = true;
             assert_eq!(Settings::parse(&t.text()).new_menus, true);
             assert_eq!(t.args()[..2], ["/games/mm2".to_string(), "--new-menus=/packs/free".to_string()]);
+            // The menus alone, with no Free Pack.
+            t.freepack = None;
+            t.menus_pack = Some("/packs/menus".into());
+            assert_eq!(Settings::parse(&t.text()), t);
+            assert_eq!(t.args()[..2], ["/games/mm2".to_string(), "--new-menus=/packs/menus".to_string()]);
+            t.new_menus = false;
+            assert_eq!(t.args()[..2], ["/games/mm2".to_string(), "--original-menus".to_string()]);
         }
         let mut args = vec!["mm2-viewer".to_string()];
         args.extend(s.args());

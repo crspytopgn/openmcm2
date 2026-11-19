@@ -138,6 +138,10 @@ struct Launcher {
     pack_download: Option<Arc<freepack::Progress>>,
     /// A newer Free Pack, once looked for.
     pack_update: Slot<Option<freepack::Update>>,
+    /// The new look menus alone being downloaded or updated.
+    menus_download: Option<Arc<freepack::Progress>>,
+    /// Newer new look menus, once looked for.
+    menus_update: Slot<Option<freepack::Update>>,
     /// The last thing to tell the player, and whether it's bad news.
     note: Option<(String, bool)>,
     /// Exit was pressed once while something was copying.
@@ -381,6 +385,15 @@ impl Launcher {
             let slot = l.pack_update.clone();
             std::thread::spawn(move || *slot.lock().unwrap() = Some(freepack::check(&dir)));
         }
+        // The new look menus downloaded on their own: still there, and
+        // newer ones when the player uses them.
+        if l.settings.menus_pack.as_deref().is_some_and(|p| !game::has_menus(p)) {
+            l.settings.menus_pack = None;
+        }
+        if let Some(dir) = l.settings.menus_pack.clone().filter(|d| freepack::local(d).is_some() && l.settings.check_updates && l.settings.new_menus) {
+            let slot = l.menus_update.clone();
+            std::thread::spawn(move || *slot.lock().unwrap() = Some(freepack::check(&dir)));
+        }
         // A game copied before but since moved or deleted.
         if let Some(g) = l.settings.game.clone() {
             if !game::missing(&g).is_empty() {
@@ -400,6 +413,8 @@ impl Launcher {
             pack_import: None,
             pack_download: None,
             pack_update: Arc::new(Mutex::new(None)),
+            menus_download: None,
+            menus_update: Arc::new(Mutex::new(None)),
             running: None,
             note: None,
             exit_asked: false,
@@ -582,6 +597,24 @@ impl Launcher {
                 ctx.request_repaint_after(Duration::from_millis(100));
             }
         }
+        if let Some(p) = self.menus_download.clone() {
+            let r = p.result.lock().unwrap().take();
+            if let Some(r) = r {
+                match r {
+                    Ok(dir) => {
+                        self.note = Some(("The new look menus are ready.".into(), false));
+                        self.settings.menus_pack = Some(dir);
+                        self.settings.new_menus = true;
+                        let _ = self.settings.save();
+                        *self.menus_update.lock().unwrap() = Some(Ok(None));
+                    }
+                    Err(e) => self.note = Some((e, true)),
+                }
+                self.menus_download = None;
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+        }
         if let Some(child) = &mut self.running {
             match child.try_wait() {
                 Ok(Some(status)) => {
@@ -653,7 +686,7 @@ impl Launcher {
             let image = egui::ColorImage::from_rgba_unmultiplied([png.width as usize, png.height as usize], &png.rgba);
             self.logo = Some(ui.ctx().load_texture("logo", image, egui::TextureOptions::LINEAR));
         }
-        let busy = self.import.is_some() || self.pack_import.is_some() || self.pack_download.is_some();
+        let busy = self.import.is_some() || self.pack_import.is_some() || self.pack_download.is_some() || self.menus_download.is_some();
         egui::Panel::left("nav")
             .exact_size(236.0)
             .resizable(false)
@@ -776,9 +809,10 @@ impl Launcher {
             self.freepack_card(ui, busy);
         } else {
             self.game_card(ui, busy);
-            // The new menus come with the Free Pack.
-            if self.settings.new_menus {
-                self.freepack_card(ui, busy);
+            // The new menus come with the Free Pack, or on their own as a
+            // small download.
+            if self.settings.new_menus && self.settings.freepack.is_none() {
+                self.menus_card(ui, busy);
             }
         }
         self.summary_card(ui);
@@ -800,6 +834,7 @@ impl Launcher {
         use look::icon;
         let free = self.settings.free_graphics;
         let (has_game, has_pack) = (self.settings.game.is_some(), self.settings.freepack.is_some());
+        let has_menus = self.settings.menus_pack.is_some();
         let mut pick = None;
         let mut pick_menus = None;
         look::card(ui, icon::ICON_PALETTE, "How do you want to play?", |ui| {
@@ -854,11 +889,12 @@ impl Launcher {
                     icon::ICON_AUTO_AWESOME,
                     "New look",
                     "Menus redrawn for OpenMCM2: same buttons and screens as the original, in a fresh workshop style.",
-                    "Every menu and button from the original, laid out the same and working the same, drawn in a new style. Works with either graphics. Comes with the Free Pack.",
+                    "Every menu and button from the original, laid out the same and working the same, drawn in a new style. Works with either graphics. Comes with the Free Pack, or with your MM2 graphics as a small download of just the menus (under 100 MB), no Free Pack needed.",
                     w,
-                    |ui| match has_pack {
-                        true => look::status(ui, true, "Free Pack ready"),
-                        false => look::status(ui, false, "Comes with the Free Pack"),
+                    |ui| match (has_pack, has_menus) {
+                        (true, _) => look::status(ui, true, "Free Pack ready"),
+                        (false, true) => look::status(ui, true, "New look menus ready"),
+                        (false, false) => look::status(ui, false, "Small download (under 100 MB)"),
                     },
                 ) {
                     pick_menus = Some(true);
@@ -908,6 +944,57 @@ impl Launcher {
         if let Some(new) = pick_menus {
             self.settings.new_menus = new;
         }
+    }
+
+    /// The new look menus on their own, for the original graphics without
+    /// the whole Free Pack: only the pack's menus part downloads.
+    fn menus_card(&mut self, ui: &mut egui::Ui, busy: bool) {
+        use look::icon;
+        look::card(ui, icon::ICON_AUTO_AWESOME, "New look menus", |ui| {
+            match &self.settings.menus_pack {
+                Some(p) => look::status(ui, true, &format!("Ready: {}", p.display())),
+                None => look::status(ui, false, "Not downloaded yet: until then the game shows the original menus"),
+            }
+            let update = match &*self.menus_update.lock().unwrap() {
+                Some(Ok(Some(u))) => Some((u.version.clone(), u.bytes)),
+                _ => None,
+            };
+            if let Some((version, bytes)) = &update {
+                look::status(ui, true, &format!("Newer menus are out ({version}): {} MB to download", (bytes >> 20).max(1)));
+            }
+            ui.label(look::weak(
+                "Just the menus from the Free Pack: their art, layout, words and sounds, under 100 MB. Your bikes, tracks and sounds stay the original game's. You don't need the whole Free Pack for this.",
+            ));
+            if let Some(p) = &self.menus_download {
+                let total = p.total.load(Ordering::Relaxed).max(1);
+                let done = p.done.load(Ordering::Relaxed);
+                ui.horizontal(|ui| {
+                    ui.add(egui::ProgressBar::new(done as f32 / total as f32).show_percentage().desired_width(ui.available_width() - 90.0));
+                    if ui.button("Cancel").clicked() {
+                        p.cancel.store(true, Ordering::Relaxed);
+                    }
+                });
+                let stage = p.stage.lock().unwrap().clone();
+                ui.label(look::weak(format!("{stage} {} of {} MB", done >> 20, total >> 20)));
+            }
+            ui.add_space(2.0);
+            let dir = settings::user_dir().join("NewMenus");
+            ui.add_enabled_ui(!busy && self.running.is_none(), |ui| {
+                let label = match (&self.settings.menus_pack, &update) {
+                    (None, _) => "Download the new look menus",
+                    (Some(_), Some(_)) => "Update the new look menus",
+                    (Some(_), None) => "Check for newer menus",
+                };
+                if ui
+                    .add(egui::Button::new(egui::RichText::new(look::with(icon::ICON_DOWNLOAD, label)).color(look::ON_ACCENT)).fill(look::ACCENT))
+                    .on_hover_text("Downloads only the menus' part of the Free Pack from the OpenMCM2 releases on GitHub into your OpenMCM2 folder, checking every file. Next time, only what changed comes down.")
+                    .clicked()
+                {
+                    self.note = None;
+                    self.menus_download = Some(freepack::install_menus(dir));
+                }
+            });
+        });
     }
 
     /// Setting up the Free Pack: its zip, or its folder.

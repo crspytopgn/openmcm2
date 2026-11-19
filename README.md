@@ -45,7 +45,8 @@ With no MM2 files at all you still get the whole game: every menu, single
 races on the free tracks, a Pro Circuit career, and the Course Builder. The
 menus wear a **new look**: the same screens and buttons as the original,
 redrawn. Own the game? Pick **New look** or **Original menus** beside the
-graphics choice.
+graphics choice. The new look with your own MM2 graphics needs only the
+menus, a small download, not the whole Free Pack.
 
 [![OpenMCM2 showcase video](https://img.youtube.com/vi/rP0TEnWLzNo/maxresdefault.jpg)](https://youtu.be/rP0TEnWLzNo)
 

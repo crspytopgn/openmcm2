@@ -6,6 +6,11 @@
 //! zips. The pack's folder keeps the manifest it was last brought up to
 //! date with, so an update downloads only the parts holding a changed
 //! file, and removes files the pack no longer has.
+//!
+//! The new look menus alone (art, layout, words and sounds) come from the
+//! same release: a folder kept with only the menus' files in its list
+//! (`install_menus`) downloads and updates just their parts, for players
+//! with the original graphics who want the new menus.
 
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -51,7 +56,28 @@ pub struct Manifest {
     pub files: Vec<Entry>,
 }
 
+/// Whether a pack file belongs to the new look menus: their art (`ui/`),
+/// layout and words (`menus/`) and sounds (`sound/ui/`). The same list
+/// the browser page uses.
+pub fn is_menu_file(path: &str) -> bool {
+    let p = path.to_ascii_lowercase();
+    p.starts_with("ui/") || p.starts_with("menus/") || p.starts_with("sound/ui/")
+}
+
 impl Manifest {
+    /// Only the new look menus' files, and the parts holding them.
+    pub fn menus_only(&self) -> Manifest {
+        let files: Vec<Entry> = self.files.iter().filter(|f| is_menu_file(&f.path)).cloned().collect();
+        let used: HashSet<&str> = files.iter().map(|f| f.part.as_str()).collect();
+        Manifest { version: self.version.clone(), parts: self.parts.iter().filter(|p| used.contains(p.name.as_str())).cloned().collect(), files }
+    }
+
+    /// Whether this list holds only the menus' files (a folder kept by
+    /// `install_menus`).
+    pub fn is_menus_only(&self) -> bool {
+        !self.files.is_empty() && self.files.iter().all(|f| is_menu_file(&f.path))
+    }
+
     pub fn parse(text: &str) -> Result<Manifest, String> {
         let json: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("the Free Pack's list didn't make sense: {e}"))?;
         let s = |v: &serde_json::Value, k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or_default().to_string();
@@ -123,10 +149,18 @@ pub struct Update {
     pub bytes: u64,
 }
 
-/// Looks for a newer pack than the one in `dir`.
-pub fn check(dir: &Path) -> Result<Option<Update>, String> {
+/// The newest list for the folder kept with `have`: the whole pack, or
+/// only its menus for a menus-only folder.
+fn newest_for(have: Option<&Manifest>, menus: bool) -> Result<Manifest, String> {
     let new = fetch()?;
+    Ok(if menus || have.is_some_and(|h| h.is_menus_only()) { new.menus_only() } else { new })
+}
+
+/// Looks for a newer pack than the one in `dir` (or newer menus, for a
+/// menus-only folder).
+pub fn check(dir: &Path) -> Result<Option<Update>, String> {
     let have = local(dir);
+    let new = newest_for(have.as_ref(), false)?;
     if have.as_ref().is_some_and(|h| h.version == new.version) {
         return Ok(None);
     }
@@ -147,20 +181,31 @@ pub struct Progress {
 /// Downloads the newest pack into `dir`, or brings the one there up to
 /// date, on a thread of its own.
 pub fn install(dir: PathBuf) -> Arc<Progress> {
+    start(dir, false)
+}
+
+/// Downloads only the new look menus into `dir`, or brings them up to
+/// date: a small part of the pack, for playing with the original graphics.
+pub fn install_menus(dir: PathBuf) -> Arc<Progress> {
+    start(dir, true)
+}
+
+fn start(dir: PathBuf, menus: bool) -> Arc<Progress> {
     let p = Arc::new(Progress::default());
     let q = p.clone();
     std::thread::spawn(move || {
-        let r = run(&dir, &q).map(|_| dir.clone());
+        let r = run(&dir, &q, menus).map(|_| dir.clone());
         let _ = fs::remove_dir_all(dir.join(".download"));
         *q.result.lock().unwrap() = Some(r);
     });
     p
 }
 
-fn run(dir: &Path, p: &Progress) -> Result<(), String> {
-    *p.stage.lock().unwrap() = "Checking the Free Pack…".into();
-    let new = fetch()?;
+fn run(dir: &Path, p: &Progress, menus: bool) -> Result<(), String> {
+    let what = if menus { "the new look menus" } else { "the Free Pack" };
+    *p.stage.lock().unwrap() = format!("Checking {what}…");
     let have = local(dir);
+    let new = newest_for(have.as_ref(), menus)?;
     let parts = new.needed(have.as_ref(), dir);
     let base = manifest_url();
     let base = base.rsplit_once('/').map_or(base.as_str(), |(b, _)| b).to_string();
@@ -171,7 +216,7 @@ fn run(dir: &Path, p: &Progress) -> Result<(), String> {
     // The old list goes first: a stopped update then starts over cleanly.
     let _ = fs::remove_file(dir.join(LOCAL));
     for (i, part) in parts.iter().enumerate() {
-        *p.stage.lock().unwrap() = format!("Downloading the Free Pack {}: part {} of {}…", new.version, i + 1, parts.len());
+        *p.stage.lock().unwrap() = format!("Downloading {what} {}: part {} of {}…", new.version, i + 1, parts.len());
         let zip = staging.join(&part.file);
         download(&format!("{base}/{}", part.file), part, &zip, p)?;
         unpack(&zip, dir, &wanted)?;
@@ -289,18 +334,33 @@ mod tests {
     }
 
     #[test]
+    fn menus_alone() {
+        let text = r#"{"format":1,"version":"3","parts":[{"name":"ui-1","file":"u.zip","size":10,"sha256":"x"},{"name":"sound","file":"s.zip","size":20,"sha256":"y"},{"name":"bikes","file":"b.zip","size":30,"sha256":"z"}],
+            "files":[{"path":"ui/MAINMENU/a.png","size":3,"sha256":"11","part":"ui-1"},{"path":"menus/MAINMENU.dtm","size":3,"sha256":"12","part":"ui-1"},{"path":"sound/ui/click.wav","size":4,"sha256":"22","part":"sound"},{"path":"sound/engine/125/a.wav","size":4,"sha256":"23","part":"sound"},{"path":"bikes/a.glb","size":5,"sha256":"33","part":"bikes"}]}"#;
+        let full = Manifest::parse(text).unwrap();
+        assert!(!full.is_menus_only());
+        let m = full.menus_only();
+        assert!(m.is_menus_only());
+        assert_eq!(m.files.len(), 3);
+        assert_eq!(m.parts.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["ui-1", "sound"]);
+        // Kept and read back, it's still the menus alone.
+        assert!(Manifest::parse(&json_of(&m).to_string()).unwrap().is_menus_only());
+    }
+
+    #[test]
     fn refuses_paths_outside() {
         assert!(Manifest::parse(&TEXT.replace("a/one.png", "../x")).is_err());
         assert!(Manifest::parse(&TEXT.replace("\"format\":1", "\"format\":2")).is_err());
     }
 
     /// Downloads the pack `MM2_FREEPACK_URL` names into `MM2_FREEPACK_DIR`:
-    /// `cargo test -p mm2-launcher downloads_a_pack -- --ignored --nocapture`.
+    /// `cargo test -p mm2-launcher downloads_a_pack -- --ignored --nocapture`
+    /// (`MM2_FREEPACK_MENUS=1`: the new look menus alone).
     #[test]
     #[ignore]
     fn downloads_a_pack() {
         let dir = PathBuf::from(std::env::var("MM2_FREEPACK_DIR").expect("MM2_FREEPACK_DIR"));
-        let p = install(dir.clone());
+        let p = if std::env::var_os("MM2_FREEPACK_MENUS").is_some() { install_menus(dir.clone()) } else { install(dir.clone()) };
         loop {
             if let Some(r) = p.result.lock().unwrap().take() {
                 r.expect("download");

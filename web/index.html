@@ -160,7 +160,7 @@
   <h2 class="ask sub">Menus</h2>
   <div class="choices" role="radiogroup" aria-label="Menus">
     <button type="button" class="choice" id="picknewmenus" role="radio" aria-checked="false"
-      title="Every menu and button from the original, laid out the same and working the same, drawn in a new style. Works with either graphics. Comes with the Free Pack (only the menus' part downloads with MM2 graphics).">
+      title="Every menu and button from the original, laid out the same and working the same, drawn in a new style. Works with either graphics. With MM2 graphics only the menus download (about 60 MB), not the whole Free Pack.">
       <b>New look</b>
       <span>Menus redrawn for OpenMCM2: the same buttons and screens as the original, in a fresh workshop style.</span>
       <em id="newmenustate">Comes with the Free Pack</em>
@@ -323,6 +323,8 @@ const STEPS = {
   graphics: ["Setting up the graphics", "Building the shaders the game draws with."],
   packcheck: ["Checking the Free Pack", "Asking for the newest list of the pack's files."],
   pack: ["Downloading the Free Pack", ""],
+  menuscheck: ["Checking the new look menus", "Asking for the newest list of the menus' files. Only the menus download, not the whole Free Pack."],
+  menus: ["Downloading the new look menus", ""],
 };
 const MB = (n) => (n / 1048576).toFixed(n < 10 * 1048576 ? 1 : 0);
 const loader = {
@@ -1230,7 +1232,7 @@ async function syncPack(fetchNew, pick) {
     (await fs.packGet(key).catch(() => null)) || (pick ? await fs.packGet("manifest").catch(() => null) : null);
   if (fetchNew) {
     try {
-      loader.step("packcheck");
+      loader.step(pick ? "menuscheck" : "packcheck");
       const r = await fetch(PACK_URL + "freepack.json", { cache: "no-cache" });
       if (!r.ok) throw new Error(`the Free Pack download answered ${r.status}`);
       const latest = await r.json();
@@ -1241,7 +1243,7 @@ async function syncPack(fetchNew, pick) {
       let fetched = 0;
       const all = want(latest).reduce((n, f) => n + f.size, 0);
       loader.step(
-        "pack",
+        pick ? "menus" : "pack",
         missing.length
           ? `${MB(total)} MB to download${total < all ? ` (of ${MB(all)} MB: the rest is already here)` : ""}. It stays in this browser, so next time only changes come down.`
           : "Already up to date."
@@ -1337,14 +1339,23 @@ const keptPackFile = await fs.keptPack().catch(() => null);
 let keptPack = keptPackFile ? await packFrom(keptPackFile).catch(() => null) : null;
 // A downloaded pack: Play checks for an update first.
 let downloaded = !keptPack && (await fs.packGet("manifest").catch(() => null));
+// Only the new look menus, downloaded for the MM2 graphics.
+let menusKept = !keptPack && !downloaded && (await fs.packGet("menusmanifest").catch(() => null));
 
 function showReady() {
   haveGame = !!kept;
   showMenus();
   $("oldmenustate").textContent = kept ? "Your MM2 files are here" : "Needs your MM2 files";
   $("oldmenustate").classList.toggle("ready", !!kept);
-  $("newmenustate").textContent = keptPack || downloaded ? "Free Pack kept in this browser" : "Comes with the Free Pack";
-  $("newmenustate").classList.toggle("ready", !!(keptPack || downloaded));
+  $("newmenustate").textContent =
+    keptPack || downloaded
+      ? "Free Pack kept in this browser"
+      : menusKept
+        ? "New look menus kept in this browser"
+        : kept
+          ? "Small download (about 60 MB)"
+          : "Comes with the Free Pack";
+  $("newmenustate").classList.toggle("ready", !!(keptPack || downloaded || menusKept));
   $("mm2state").textContent = kept ? "Remembered in this browser" : "Needs your MM2 files";
   $("mm2state").classList.toggle("ready", !!kept);
   const has = keptPack || downloaded;
@@ -1366,6 +1377,7 @@ $("forgetpack").addEventListener("click", async () => {
   await fs.packDelete([...(await fs.packStored())]);
   keptPack = null;
   downloaded = null;
+  menusKept = null;
   $("freekept").hidden = true;
   $("freepick").hidden = false;
   showReady();
