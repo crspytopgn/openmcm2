@@ -251,7 +251,7 @@ pub fn parse_difficulty(text: &str) -> Option<[[u32; 3]; 4]> {
     (n.len() == 12 && n.iter().all(|v| (1..=MOST_STEP).contains(v))).then_some(t)
 }
 
-pub const UPGRADES: [(&str, &str, bool); 27] = [
+pub const UPGRADES: [(&str, &str, bool); 28] = [
     ("lighting", "Per-pixel lighting", true),
     ("shadows", "Sun shadows", true),
     ("distance", "Far draw distance and haze", true),
@@ -281,6 +281,7 @@ pub const UPGRADES: [(&str, &str, bool); 27] = [
     // The Max preset's own.
     ("supersample", "Supersampling (sharper than the screen)", false),
     ("far", "Detail reaching further", false),
+    ("roost", "Flying dirt (roost)", false),
 ];
 
 #[derive(Debug, Clone, PartialEq)]

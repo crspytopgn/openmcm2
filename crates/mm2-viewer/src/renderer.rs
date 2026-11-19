@@ -584,8 +584,8 @@ impl TerrainRenderer {
             rain: upgrades.is_some_and(|e| e.weather == crate::graphics::Weather::Rain).then(|| {
                 crate::rain::RainRenderer::new(device, &layout, &shared.layout, format, samples, DEPTH_FORMAT)
             }),
-            dust: upgrades.is_some_and(|e| e.dust).then(|| {
-                crate::dust::DustRenderer::new(device, &layout, &shared.layout, format, samples, DEPTH_FORMAT, &shared.buffer)
+            dust: upgrades.is_some_and(|e| e.dust || e.roost).then(|| {
+                crate::dust::DustRenderer::new(device, queue, &layout, &shared.layout, format, samples, DEPTH_FORMAT, &shared.buffer)
             }),
             grass: upgrades.is_some_and(|e| e.grass).then(|| {
                 crate::grass::GrassRenderer::new(device, queue, terrain, &layout, &shared.layout, format, samples, DEPTH_FORMAT)
@@ -960,8 +960,13 @@ impl TerrainRenderer {
         }
         let upgrades = crate::graphics::enhanced();
         let wet = upgrades.is_some_and(|u| u.weather == crate::graphics::Weather::Rain && !self.desert);
-        if let Some(dust) = &mut e.dust {
-            dust.step(feed, dt, wet);
+        if let (Some(dust), Some(u)) = (&mut e.dust, crate::graphics::showing().or(upgrades)) {
+            let budget = crate::dust::Budget {
+                dust: u.dust,
+                roost: u.roost,
+                amount: u.dust_amount,
+            };
+            dust.step(feed, dt, wet, budget);
         }
         // Dirt builds up as a bike runs on the ground: slowly in the dry,
         // fast on wet ground.
@@ -1196,7 +1201,8 @@ impl TerrainRenderer {
         let dust_view = self
             .enhanced
             .as_ref()
-            .filter(|_| showing.is_some_and(|e| e.dust))
+            // Not on Low: there the puffs are lit without it.
+            .filter(|_| showing.is_some_and(|e| e.dust && e.dust_amount >= 0.6))
             .and_then(|e| e.dust.as_ref()?.bounds(camera.position))
             .map(|(low, high)| crate::dust::sun_view(low, high, lights.to_sun));
         // The light poles' light baked the first night frame: traced
@@ -1382,6 +1388,8 @@ impl TerrainRenderer {
             };
             // The enhanced dust clouds stand in for the tyres' dust trail.
             self.particles.hide_trail = showing.is_some_and(|e| e.dust);
+            // And its flying dirt for the spinning tyre's chunks.
+            self.particles.hide_chunks = showing.is_some_and(|e| e.roost);
             self.particles.prepare(queue, proj, view, (self.fog, range));
         }
 
@@ -1422,7 +1430,7 @@ impl TerrainRenderer {
                 crowd.cull(&seen);
             }
             if let Some(dust) = &mut e.dust {
-                dust.prepare(queue, camera.position);
+                dust.prepare(queue, camera.position, showing.is_some_and(|e| e.dust), showing.is_some_and(|e| e.roost));
                 if dust_view.is_some() {
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("dust shadows"),
@@ -1644,7 +1652,7 @@ impl TerrainRenderer {
             if let Some((dust, own, group)) = self
                 .enhanced
                 .as_ref()
-                .filter(|_| showing.is_some_and(|e| e.dust))
+                .filter(|_| showing.is_some_and(|e| e.dust || e.roost))
                 .and_then(|e| Some((e.dust.as_ref()?, &e.group, &e.shared.group)))
             {
                 dust.draw(&mut pass, own, group);

@@ -30,6 +30,11 @@ struct Globals {
 
 #include "enhanced_fns.wgsl"
 
+// The baked pictures of lumpy dust (dust.rs puff_atlas): red how thick,
+// green the lumps' height, blue and alpha their slope.
+@group(2) @binding(0) var puffs: texture_2d_array<f32>;
+@group(2) @binding(1) var puff_sampler: sampler;
+
 struct Out {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -39,13 +44,18 @@ struct Out {
     // Across the puff, in the world: with the way to the eye, its surface.
     @location(4) side: vec3<f32>,
     @location(5) @interpolate(flat) to_eye: vec3<f32>,
-    // 1 for a drop of spray.
-    @location(6) @interpolate(flat) drop: f32,
+    // 0 for a puff, 1 for a drop of spray, 2 for a clod.
+    @location(6) @interpolate(flat) kind: f32,
     // The puff's own across and up, in the world.
     @location(7) @interpolate(flat) right: vec3<f32>,
-    // How much of the sun reaches the puff past what is solid, asked of
-    // the ray-traced scene; -1 to read the shadow maps instead.
-    @location(8) @interpolate(flat) sun: f32,
+    // How much of the sun reaches this corner: past what is solid at the
+    // puff's top, then through the dust to it. Asked at the corners and
+    // blended across, not for every pixel.
+    @location(8) sun: f32,
+    // The two pictures and turns its shape is read with (x, y the
+    // pictures; z, w the turns), and how much of the second.
+    @location(9) @interpolate(flat) shape: vec4<f32>,
+    @location(10) @interpolate(flat) blend: f32,
 };
 
 // The painted ground's colour (linear) under drawing point `xz`, blurred.
@@ -80,21 +90,23 @@ fn vs_main(@builtin(vertex_index) vi: u32, @location(0) place: vec4<f32>, @locat
         vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
         vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0),
     )[vi];
+    let kind = home.z;
     let to_eye = normalize(globals.camera.xyz - place.xyz);
     let right = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), to_eye));
     let up = cross(to_eye, right);
     // Brought toward the eye by its size and shrunk to match, so it looks
     // the same but the ground in front of it does not cut it off flat.
     let d = length(globals.camera.xyz - place.xyz);
-    let pull = select(min(place.w, d * 0.5), 0.0, home.z > 0.5);
+    let pull = select(min(place.w, d * 0.5), 0.0, kind > 0.5);
     var side = right * corner.x + up * corner.y;
     var world = place.xyz + to_eye * pull + side * place.w * (d - pull) / max(d, 1e-3);
-    if (home.z > 0.5) {
-        // A drop is drawn streaked along the way it flies, as in a blink.
+    if (kind > 0.5) {
+        // A drop or a clod is drawn streaked along the way it flies, as
+        // in a blink: a drop much more than a clod.
         let v = look.yzw - to_eye * dot(look.yzw, to_eye);
         let along = select(up, normalize(v), length(v) > 1e-3);
         let across = normalize(cross(along, to_eye));
-        let reach = place.w + length(v) * 0.02;
+        let reach = place.w + length(v) * select(0.02, 0.008, kind > 1.5);
         side = across * corner.x + along * corner.y;
         world = place.xyz + across * corner.x * place.w + along * corner.y * reach;
     }
@@ -108,23 +120,55 @@ fn vs_main(@builtin(vertex_index) vi: u32, @location(0) place: vec4<f32>, @locat
     let g = ground_colour(home.xy);
     let grey = vec3<f32>(dot(g, vec3<f32>(0.3, 0.59, 0.11)));
     out.colour = mix(grey, g, 0.8) * 2.3 + vec3<f32>(0.06, 0.05, 0.035);
-    if (home.z > 0.5) {
+    if (kind > 1.5) {
+        // A clod: the dirt under the surface, darker and richer than the
+        // dry top the dust comes off.
+        out.colour = mix(grey, g, 1.2) * 0.95;
+    } else if (kind > 0.5) {
         // Muddy water: the ground's colour, a little darker.
         out.colour = g * 0.7;
     }
     out.side = side;
     out.to_eye = to_eye;
-    out.drop = home.z;
+    out.kind = kind;
     out.right = right;
-    // At three points across its top, so a puff passes into shade softly.
-    out.sun = -1.0;
-    if (home.z < 0.5) {
+    // Its shape: a puff turns slowly one way as it churns, blended with a
+    // second picture turning the other, so it rolls rather than spins; a
+    // clod tumbles (dust.rs works out its turn).
+    let s = select(look.y, fract(home.w * 7.31), kind > 0.5);
+    let n = 8.0;
+    if (kind > 1.5) {
+        out.shape = vec4<f32>(floor(home.w), floor(home.w), fract(home.w) * 6.2831853, 0.0);
+        out.blend = 0.0;
+    } else {
+        let age = look.z;
+        out.shape = vec4<f32>(floor(s * n), floor(fract(s * 5.3) * n), s * 6.2831853 + age * 0.22, s * 11.0 - age * 0.17);
+        out.blend = 0.5 + 0.45 * sin(age * 0.6 + s * 6.2831853);
+    }
+    // The sun past what is solid at the puff's top (the ray-traced
+    // scene's, else the shadow maps'), so the bike's own shadow does not
+    // black out the dust right behind it; then through the dust between
+    // this corner and the sun, its own included, so a cloud is bright on
+    // the sun's side and dim beneath and behind.
+    var sun = 1.0;
+    if (kind < 1.5) {
         let top = place.xyz + vec3<f32>(0.0, place.w * 0.5, 0.0);
-        let a = sun_point(top);
-        if (a >= 0.0) {
-            out.sun = (a + sun_point(top + right * place.w * 0.6) + sun_point(top - right * place.w * 0.6)) / 3.0;
+        sun = sun_point(top);
+        if (sun < 0.0) {
+            sun = sun_solid(top, vec3<f32>(0.0, 1.0, 0.0), d, 0.0);
+        }
+        if (kind < 0.5) {
+            // At the corner's point on the ball's sunward side: a cloud is
+            // lit on its face to the sun and dark under and behind.
+            sun *= dust_through(place.xyz + (side * 0.6 + enh.to_sun.xyz * 0.5) * place.w);
+        }
+    } else {
+        sun = sun_point(place.xyz);
+        if (sun < 0.0) {
+            sun = sun_solid(place.xyz, vec3<f32>(0.0, 1.0, 0.0), d, 0.0);
         }
     }
+    out.sun = sun;
     return out;
 }
 
@@ -152,6 +196,7 @@ fn vs_shadow(@builtin(vertex_index) vi: u32, @location(0) place: vec4<f32>, @loc
     var out: ShadowOut;
     out.clip = enh.dust_view * vec4<f32>(world, 1.0);
     out.uv = corner;
+    // Drops and clods cast nothing here.
     out.thick = select(look.x, 0.0, home.z > 0.5);
     out.depth = (enh.dust_view * vec4<f32>(place.xyz, 1.0)).z;
     return out;
@@ -168,42 +213,28 @@ fn fs_shadow(in: ShadowOut) -> @location(0) vec4<f32> {
     return vec4<f32>(tau, tau * in.depth, tau * in.depth * in.depth, 0.0);
 }
 
-fn hash(p: vec2<f32>) -> f32 {
-    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
-}
-
-// Gradient noise (Perlin 2002's fade), 0 to 1 about a middle of a half:
-// smooth, with none of the square cells plain value noise shows.
-fn slope(i: vec2<f32>, f: vec2<f32>) -> f32 {
-    let a = hash(i) * 6.2831853;
-    return dot(vec2<f32>(cos(a), sin(a)), f);
-}
-
-fn noise(p: vec2<f32>) -> f32 {
-    let i = floor(p);
-    let f = fract(p);
-    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-    let a = slope(i, f);
-    let b = slope(i + vec2<f32>(1.0, 0.0), f - vec2<f32>(1.0, 0.0));
-    let c = slope(i + vec2<f32>(0.0, 1.0), f - vec2<f32>(0.0, 1.0));
-    let d = slope(i + vec2<f32>(1.0, 1.0), f - vec2<f32>(1.0, 1.0));
-    return clamp(0.5 + 1.1 * mix(mix(a, b, u.x), mix(c, d, u.x), u.y), 0.0, 1.0);
-}
-
-// The dust's lumps at `q`, churned by `churn`: four layers of noise, each
-// turned from the last so no grid lines up.
-fn lumps(q: vec2<f32>, churn: f32) -> f32 {
-    let turn = mat2x2<f32>(0.8, 0.6, -0.6, 0.8);
-    let q2 = turn * q;
-    let q3 = turn * q2;
-    let q4 = turn * q3;
-    return noise(q) * 0.5 + noise(q2 * 2.1 + 3.1 - churn * 0.6) * 0.27 + noise(q3 * 4.3 + 7.7) * 0.15 + noise(q4 * 8.9 + 1.3 + churn) * 0.08;
+// The baked picture `layer` at `uv` (-1 to 1 across) turned by `turn`:
+// how thick, the lumps' height, and their slope turned back to the puff's
+// own across and up.
+// `dx` and `dy` are how uv changes a pixel across and down, for the
+// picture's level of detail.
+fn picture(uv: vec2<f32>, layer: f32, turn: f32, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
+    let c = cos(turn);
+    let s = sin(turn);
+    let q = vec2<f32>(c * uv.x - s * uv.y, s * uv.x + c * uv.y);
+    // Up the puff is up the picture, down its rows.
+    let t = textureSampleGrad(puffs, puff_sampler, vec2<f32>(q.x * 0.5 + 0.5, 0.5 - q.y * 0.5), i32(layer), dx * 0.5, dy * 0.5);
+    let sl = (t.zw - 0.5) * 8.0;
+    return vec4<f32>(t.x, t.y, c * sl.x + s * sl.y, -s * sl.x + c * sl.y);
 }
 
 @fragment
 fn fs_main(in: Out) -> @location(0) vec4<f32> {
+    // Asked first, while every pixel still runs.
+    let dx = dpdx(in.uv);
+    let dy = dpdy(in.uv);
     let dist = length(in.centre - globals.camera.xyz);
-    if (in.drop > 0.5) {
+    if (in.kind > 0.5 && in.kind < 1.5) {
         // A drop: a soft streak, the sky's light caught in it.
         let r = length(in.uv);
         if (r > 1.0) {
@@ -214,19 +245,30 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
         let c = in.colour * pow(soft_clamp(lit), vec3<f32>(2.2)) + enh.horizon.rgb * 0.03;
         return vec4<f32>(apply_haze(c, in.centre, dist) * a, a);
     }
-    // Lumps of dust from four layers of noise that churn and roll as it
-    // ages: wispy at the rim, clumped and thicker inside.
-    let s = in.look.y * 50.0;
-    let churn = in.look.z * 0.35;
-    let q = in.uv * 1.6 + vec2<f32>(s, s * 0.7) + vec2<f32>(churn * 0.4, -churn);
-    let n = lumps(q, churn);
-    let r = length(in.uv) + (n - 0.5) * 0.9;
-    if (r > 1.0) {
-        discard;
+    let l = globals.to_sun.xyz;
+    let up = cross(in.to_eye, in.right);
+    if (in.kind > 1.5) {
+        // A clod: a solid lump cut from the picture's thickest part, lit
+        // as a little rough stone, a hard edge softened by a pixel.
+        let p = picture(in.uv * 0.8, in.shape.x, in.shape.z, dx * 0.8, dy * 0.8);
+        let edge = (abs(dx.x) + abs(dx.y) + abs(dy.x) + abs(dy.y)) * 0.6 + 0.02;
+        let a = smoothstep(0.45 - edge, 0.45 + edge, p.x) * in.look.x * smoothstep(1.5, 5.0, dist);
+        if (a < 0.01) {
+            discard;
+        }
+        let r = min(length(in.uv), 1.0);
+        let ball = normalize(in.side * r + in.to_eye * sqrt(max(1.0 - r * r, 0.05)));
+        let sn = normalize(ball - (in.right * p.z + up * p.w) * 0.6);
+        let lit = globals.ambient.rgb * mix(0.7, 1.15, sn.y * 0.5 + 0.5) + globals.sun.rgb * in.sun * max(dot(sn, l), 0.0);
+        let c = in.colour * mix(0.75, 1.1, p.y) * pow(soft_clamp(lit), vec3<f32>(2.2));
+        return vec4<f32>(apply_haze(c, in.centre, dist) * a, a);
     }
-    let body = 1.0 - smoothstep(0.2, 0.98, r);
-    let clumps = mix(0.45, 1.5, smoothstep(0.3, 0.72, n));
-    let alpha = clamp(body * clumps, 0.0, 1.0) * in.look.x;
+    // Lumps of dust from two baked pictures turning against each other as
+    // it ages: wispy at the rim, clumped and thicker inside.
+    let p = mix(picture(in.uv, in.shape.x, in.shape.z, dx, dy), picture(in.uv * 0.92, in.shape.y, in.shape.w, dx * 0.92, dy * 0.92), in.blend);
+    // A touch thicker than the picture: two blended pictures thin each
+    // other's clumps.
+    let alpha = min(p.x * 1.15, 1.0) * in.look.x;
     if (alpha < 0.004) {
         discard;
     }
@@ -234,28 +276,18 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
     // eye, tilted by each lump, so the lumps are bright on the sun's side
     // and shaded on the other; the light wraps round a little, as through
     // dust.
-    let ball = normalize(in.side * min(r, 1.0) + in.to_eye * sqrt(max(1.0 - r * r, 0.05)));
-    let up = cross(in.to_eye, in.right);
-    let slope = vec2<f32>(lumps(q + vec2<f32>(0.06, 0.0), churn) - n, lumps(q + vec2<f32>(0.0, 0.06), churn) - n) / 0.06;
-    let sn = normalize(ball - (in.right * slope.x + up * slope.y) * 0.35);
-    // Shadowed by what is solid at its top, so the bike's own shadow does
-    // not black out the dust right behind it (ray traced, asked at its
-    // vertices); then by the dust between this point of it and the sun,
-    // its own included, so a cloud is bright on the sun's side and dim
-    // beneath and behind.
-    var solid = in.sun;
-    if (solid < 0.0) {
-        solid = sun_solid(in.centre + vec3<f32>(0.0, in.look.w, 0.0), vec3<f32>(0.0, 1.0, 0.0), dist, 0.0);
-    }
-    let sun = solid * dust_through(in.centre + ball * in.look.w * 0.7);
-    let l = globals.to_sun.xyz;
+    let r = min(length(in.uv), 1.0);
+    let ball = normalize(in.side * r + in.to_eye * sqrt(max(1.0 - r * r, 0.05)));
+    let sn = normalize(ball - (in.right * p.z + up * p.w) * 0.35);
     let wrap = clamp((dot(sn, l) + 0.3) / 1.3, 0.0, 1.0);
+    // How deep in the puff this is: its middle is thicker than its rim.
+    let body = 1.0 - smoothstep(0.2, 0.98, r);
     // Light coming through the thin rim when the sun is behind it.
     let behind = pow(max(dot(-in.to_eye, l), 0.0), 3.0) * (1.6 - body * 0.8);
     let sky = mix(0.9, 1.3, sn.y * 0.5 + 0.5);
-    let lit = globals.ambient.rgb * sky + globals.sun.rgb * sun * (wrap + behind);
+    let lit = globals.ambient.rgb * sky + globals.sun.rgb * in.sun * (wrap + behind);
     // Its thick clumps shade themselves a little.
-    let shade = mix(1.0, 0.72, body * smoothstep(0.4, 0.8, n));
+    let shade = mix(1.0, 0.72, body * smoothstep(0.4, 0.8, p.y));
     let c = in.colour * shade * pow(soft_clamp(lit), vec3<f32>(2.2));
     let hazed = apply_haze(c, in.centre, dist);
     // Thin near the eye, so a puff never fills the screen or hides the

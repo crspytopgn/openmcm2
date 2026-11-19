@@ -311,7 +311,8 @@ impl Shared {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    // Also for the dust's corners (crate::dust).
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Depth,
                         view_dimension: wgpu::TextureViewDimension::D2Array,
@@ -321,7 +322,7 @@ impl Shared {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
                     count: None,
                 },
@@ -382,22 +383,22 @@ impl Shared {
             ];
             entries.extend(types.into_iter().zip(8..).map(|(ty, binding)| wgpu::BindGroupLayoutEntry {
                 binding,
-                // The scene also for the dust's vertices, to ask whether
-                // each puff is in the sun.
-                visibility: if binding == 9 { wgpu::ShaderStages::VERTEX_FRAGMENT } else { wgpu::ShaderStages::FRAGMENT },
+                // The scene and the traced shadows also for the dust's
+                // vertices, to ask whether each puff is in the sun.
+                visibility: if binding == 8 || binding == 9 { wgpu::ShaderStages::VERTEX_FRAGMENT } else { wgpu::ShaderStages::FRAGMENT },
                 ty,
                 count: None,
             }));
         }
         entries.push(wgpu::BindGroupLayoutEntry {
             binding: DUST_BINDING,
-            visibility: wgpu::ShaderStages::FRAGMENT,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
             ty: texture(wgpu::TextureViewDimension::D2, wgpu::TextureSampleType::Float { filterable: true }),
             count: None,
         });
         entries.push(wgpu::BindGroupLayoutEntry {
             binding: DUST_BINDING + 1,
-            visibility: wgpu::ShaderStages::FRAGMENT,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
             ty: sampler(),
             count: None,
         });
