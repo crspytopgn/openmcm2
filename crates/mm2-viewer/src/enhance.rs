@@ -20,6 +20,19 @@ pub const CASCADES: usize = 3;
 /// How far each cascade reaches from the camera, ft; past the last the
 /// shadows fade out.
 const SPLITS: [f32; CASCADES] = [36.0, 140.0, 520.0];
+/// With the detail reaching further (crate::graphics::Enhanced::far):
+/// the nearest the same, the far ones further out, so hills and trees
+/// keep their shadows well into the distance.
+const FAR_SPLITS: [f32; CASCADES] = [36.0, 170.0, 950.0];
+
+/// The cascades' reach with the upgrades as set.
+fn reach() -> [f32; CASCADES] {
+    if crate::graphics::enhanced().is_some_and(|e| e.far) {
+        FAR_SPLITS
+    } else {
+        SPLITS
+    }
+}
 /// How far beyond a cascade toward the sun a caster may stand, ft.
 const SUNWARD: f32 = 1500.0;
 
@@ -610,7 +623,7 @@ pub fn cascades(view: Mat4, fovy: f32, aspect: f32, to_sun: Vec3, side: u32) -> 
     let mut near = 0.5;
     let mut out = [Mat4::IDENTITY; CASCADES];
     let mut texels = [0.0; CASCADES];
-    for (i, &far) in SPLITS.iter().enumerate() {
+    for (i, &far) in reach().iter().enumerate() {
         // The slice's bounding sphere, so its size never changes as the
         // camera turns.
         let corners: Vec<Vec3> = [near, far]
@@ -641,7 +654,8 @@ pub fn cascades(view: Mat4, fovy: f32, aspect: f32, to_sun: Vec3, side: u32) -> 
 
 /// Each cascade's reach, and where the shadows end.
 pub fn splits() -> [f32; 4] {
-    [SPLITS[0], SPLITS[1], SPLITS[2], SPLITS[2]]
+    let s = reach();
+    [s[0], s[1], s[2], s[2]]
 }
 
 /// `source` with the enhanced drawing's shared declarations put in where

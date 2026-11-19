@@ -1961,6 +1961,8 @@ fn effect_about(name: &str) -> &'static str {
         "scenery" => "Props along the course, a paddock and a crowd.",
         "grade" => "A bolder look: colour, contrast, a vignette.",
         "raytracing" => "Truer shadows, light shafts and reflections, traced as rays.",
+        "supersample" => "For a strong graphics card: the 3D scene is drawn with more pixels than your screen has (up to 4K's worth, at most twice across) and shrunk to fit, so the edges of fences, trees, bikes and far hills are as clean as they can be and fine detail doesn't shimmer. The colours and light don't change. Costs up to four times the work on a 1080p screen; nothing extra on a 4K one.",
+        "far" => "The 3D grass reaches half as far again, the smoothed hills round you about twice as far, and the sun's shadows keep going nearly twice as far before fading, so more of the view looks finished. Close up nothing changes. Takes effect from the next track loaded.",
         _ => "",
     }
 }
@@ -1981,7 +1983,8 @@ fn preset_text(q: Quality) -> String {
         Quality::Medium => "without light shafts or smooth hills, with TAA rebuilding the scene at the screen's sharpness",
         Quality::RayTraced => "High's effects with ray tracing (needs a graphics card that can trace rays)",
         Quality::High => "every effect that's on unless changed",
-        _ => "every effect but ray tracing, with lasting ruts",
+        Quality::Ultra => "every effect but ray tracing, with lasting ruts",
+        Quality::Max => "for the strongest graphics cards: Ultra's effects drawn finer, the scene supersampled (drawn with more pixels than the screen and shrunk to it) and the grass, smooth hills and shadows reaching further; the same light and colours as High, without lasting ruts",
     };
     let msaa = ANTIALIASING.iter().find(|a| a.0 == q.antialiasing()).map_or("", |a| a.1);
     format!("{}: {effects}; anti-aliasing {msaa}; scene resolution {}.", q.label(), q.most_pixels())

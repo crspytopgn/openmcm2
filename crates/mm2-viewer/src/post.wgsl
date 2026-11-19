@@ -21,8 +21,9 @@ struct Post {
     // Replays' camera look: x the distance in focus (ft), y the blur's
     // size out of focus (px), z the motion blur's strength, w 1 on.
     cinematic: vec4<f32>,
-    // x 1 when the scene is drawn smaller than the screen and stretched
-    // over it.
+    // x 1 when the scene is drawn at another size than the screen and
+    // stretched or shrunk to it; y the ray-traced shafts' strength; z the
+    // scene's pixels across one of the screen's (above 1 supersampled).
     scaled: vec4<f32>,
     // Temporal anti-aliasing (fs_taa): from the screen into the world and
     // the world into the last frame's screen, unshifted; the camera; x 1
@@ -499,7 +500,18 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
     var c: vec3<f32>;
     if (post.scaled.x > 0.5) {
         p = vec2<i32>(in.uv * post.size.xy);
-        c = textureSampleLevel(hdr_tex, smooth_sampler, in.uv, 0.0).rgb;
+        if (post.scaled.z > 1.001) {
+            // Drawn bigger than the screen (supersampled): each screen
+            // pixel the mean of the scene's pixels under it, four smooth
+            // taps a quarter of a screen pixel from its middle.
+            let q = 0.25 * post.taa_out.zw;
+            c = 0.25 * (textureSampleLevel(hdr_tex, smooth_sampler, in.uv + vec2<f32>(-q.x, -q.y), 0.0).rgb
+                + textureSampleLevel(hdr_tex, smooth_sampler, in.uv + vec2<f32>(q.x, -q.y), 0.0).rgb
+                + textureSampleLevel(hdr_tex, smooth_sampler, in.uv + vec2<f32>(-q.x, q.y), 0.0).rgb
+                + textureSampleLevel(hdr_tex, smooth_sampler, in.uv + vec2<f32>(q.x, q.y), 0.0).rgb);
+        } else {
+            c = textureSampleLevel(hdr_tex, smooth_sampler, in.uv, 0.0).rgb;
+        }
     } else {
         c = textureLoad(hdr_tex, p, 0).rgb;
     }
