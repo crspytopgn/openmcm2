@@ -972,6 +972,17 @@ pub struct Ctl {
     /// The archive its pictures come from, when not the dialog's: a
     /// control borrowed from another dialog (the fork's).
     pack: Option<String>,
+    /// A plain face drawn in place of the button's picture (the new
+    /// look's Ready buttons, whose state is their colour).
+    pub face: Option<Face>,
+}
+
+/// A button face the game draws itself: a plate of `fill` with its text
+/// in `ink` (VB colours), edged brighter under the pointer or the pad.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Face {
+    pub fill: i32,
+    pub ink: i32,
 }
 
 impl Ctl {
@@ -1105,6 +1116,7 @@ impl Dlg {
                 selectable: false,
                 wrap: false,
                 pack: None,
+                face: None,
             })
             .collect();
         Some(Dlg {
@@ -1231,6 +1243,14 @@ impl Dlg {
     pub fn enable(&mut self, name: &str, enabled: bool) {
         if let Some(c) = self.ctl(name) {
             c.enabled = enabled;
+        }
+    }
+
+    /// Draws button `name` as a plain face rather than its picture (none:
+    /// its picture again).
+    pub fn set_face(&mut self, name: &str, face: Option<Face>) {
+        if let Some(c) = self.ctl(name) {
+            c.face = face;
         }
     }
 
@@ -2142,6 +2162,24 @@ impl Dlg {
                     let (w, _) = gfx.sprites.size(t);
                     gfx.sprites.image(t, rect[0] + rect[2] - w as f32, rect[1]);
                 }
+            } else if let Some(face) = self.ctls[i].face {
+                // Its own plate in an ink edge, ringed in lime while the
+                // pointer or the pad is on it (as the new look's menus
+                // ring theirs).
+                if self.hover == Some(i) && self.ctls[i].enabled {
+                    ui.fill(gfx, [rect[0] - 2.0, rect[1] - 2.0, rect[2] + 4.0, rect[3] + 4.0], color(0x4ac2a3));
+                }
+                ui.fill(gfx, rect, color(face.ink));
+                ui.fill(gfx, [rect[0] + 1.0, rect[1] + 1.0, rect[2] - 2.0, rect[3] - 2.0], color(face.fill));
+                if let Some(text) = self.ctls[i].text.clone().filter(|t| !t.is_empty()) {
+                    let mut plain = c.clone();
+                    plain.props.0.retain(|(k, _)| !["TextColor", "TextAlign", "TextAlignV"].iter().any(|n| k.eq_ignore_ascii_case(n)));
+                    plain.props.0.push(("TextColor".into(), face.ink.to_string()));
+                    plain.props.0.push(("TextAlign".into(), "CENTER".into()));
+                    plain.props.0.push(("TextAlignV".into(), "MIDDLE".into()));
+                    self.draw_text(ui, gfx, &plain, rect, &text, false);
+                }
+                continue;
             } else if let Some(t) = self
                 .image_for(i, now)
                 .and_then(|n| ui.image(gfx, self.pack_of(i), &n))

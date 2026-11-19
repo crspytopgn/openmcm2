@@ -68,6 +68,29 @@ const ENGINES: [&str; 5] = [
 const NOT_READY: i32 = 0x808080;
 const READY: i32 = 0xffffff;
 
+/// The new look's Ready plates (VB colours): lime when ready, bone when
+/// not, ink words.
+const FREE_READY: i32 = 0x4ac2a3;
+const FREE_NOT_READY: i32 = 0xd2e2e8;
+const FREE_INK: i32 = 0x141618;
+
+/// A Ready button's look. In the original its words are white when ready
+/// and grey when not. The new look's picture has "READY" painted on and
+/// shows no state, so the game draws its own plate: lime with the first
+/// of `words` when ready, bone with the second when not.
+fn show_ready(base: &mut Dlg, name: &str, ready: bool, words: (&str, &str)) {
+    base.set_color(name, if ready { READY } else { NOT_READY });
+    if crate::freepack::ui_art_on() {
+        let fill = if ready { FREE_READY } else { FREE_NOT_READY };
+        base.set_face(name, Some(crate::ui::Face { fill, ink: FREE_INK }));
+        base.set_text(name, if ready { words.0 } else { words.1 });
+        base.set_font(name, 12.0);
+    }
+}
+
+/// This player's Ready button's words in the new look.
+const MY_READY: (&str, &str) = ("READY", "NOT READY");
+
 /// The lobby's choices, kept across its pages and races.
 struct Game {
     event: EventKind,
@@ -375,14 +398,8 @@ impl Multi {
             // The host's Remove buttons send that player away.
             base.enable(&rdy, host && p.is_some());
             base.show(&rdy, p.is_some());
-            base.set_color(
-                &rdy,
-                if p.is_some_and(|p| p.ready) {
-                    READY
-                } else {
-                    NOT_READY
-                },
-            );
+            let words = if host { ("REMOVE", "REMOVE") } else { ("READY", "WAITING") };
+            show_ready(base, &rdy, p.is_some_and(|p| p.ready), words);
         }
     }
 
@@ -488,7 +505,6 @@ impl Multi {
             base.enable(&format!("ButRdyPlayer{i}"), false);
             base.set_color(&format!("ButRdyPlayer{i}"), NOT_READY);
         }
-        base.set_color("ButRdyUser", if self.ready { READY } else { NOT_READY });
         // The buttons' words (`0x4f8510`): "Ready" on this player's, and
         // on the others' "Remove" for the host, "Ready" for a guest, all
         // at 18 points (`0x4f9400`).
@@ -498,6 +514,12 @@ impl Multi {
         for i in 2..=8 {
             base.set_text(&format!("ButRdyPlayer{i}"), others.clone());
             base.set_font(&format!("ButRdyPlayer{i}"), 18.0);
+            let words = if Self::guest() { ("READY", "WAITING") } else { ("REMOVE", "REMOVE") };
+            show_ready(&mut base, &format!("ButRdyPlayer{i}"), false, words);
+        }
+        show_ready(&mut base, "ButRdyUser", self.ready, MY_READY);
+        if crate::freepack::ui_art_on() {
+            base.set_tip("ButRdyUser", "Press when you're ready to ride: it turns green. Press again to wait.");
         }
         if let Some(c) = base.ctl("EditChat") {
             c.max_len = 60;
@@ -841,7 +863,7 @@ impl Multi {
     fn set_ready(&mut self, cx: &Cx, r: bool) {
         self.ready = r;
         if let View::Lobby { base, .. } = &mut self.view {
-            base.set_color("ButRdyUser", if r { READY } else { NOT_READY });
+            show_ready(base, "ButRdyUser", r, MY_READY);
         }
         net::with(|s| s.say(Msg::Ready(r)));
         if r {
@@ -1162,7 +1184,7 @@ impl Multi {
                     }
                     "butrdyuser" => {
                         self.ready = !self.ready;
-                        base.set_color("ButRdyUser", if self.ready { READY } else { NOT_READY });
+                        show_ready(base, "ButRdyUser", self.ready, MY_READY);
                         let r = self.ready;
                         net::with(|s| s.say(Msg::Ready(r)));
                         if self.ready {
