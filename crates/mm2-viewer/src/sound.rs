@@ -176,7 +176,15 @@ struct Bank {
     /// The free pack's steady loops, played by revs instead of the
     /// original's whole samples (see [`Revs`]).
     loops: Option<Loops>,
+    /// Seconds each sample fades into the next over: none for the game's
+    /// own samples, which are cut to follow each other, and [`BLEND`] for
+    /// the free pack's recordings, cut from longer takes, so the seams
+    /// and the jumps between takes aren't heard on your own bike.
+    blend: f32,
 }
+
+/// How long a free pack sample fades into the next, s.
+const BLEND: f32 = 0.12;
 
 /// A free pack class's engine as steady loops, each recorded at a known
 /// engine speed, pitched to the revs of the moment: on the gas, off it,
@@ -397,6 +405,7 @@ impl Bank {
                 band("HighTorqueMaxSpeed", 100),
             ],
             loops: None,
+            blend: 0.0,
         })
     }
 
@@ -459,6 +468,7 @@ impl Bank {
                 band("HighTorqueMaxSpeed", 100),
             ],
             loops,
+            blend: BLEND,
         })
     }
 
@@ -1057,6 +1067,7 @@ impl RaceSounds {
                 // A new voice takes up the stream where it stood.
                 if let Some(s) = &e.sound {
                     let v = audio.play_from(s, e.clock, 0.0, e.then.is_none());
+                    audio.set_blend(v, self.banks[e.class].as_ref().map_or(0.0, |b| b.blend));
                     if let Some(t) = &e.then {
                         audio.then(v, t, t_loops(e.state));
                     }
@@ -1065,8 +1076,10 @@ impl RaceSounds {
             }
             // Each sample runs on into the next (0x4e9aa0).
             e.clock += dt;
+            // A sample fading into the next hands over that much sooner.
+            let blend = self.banks[e.class].as_ref().map_or(0.0, |b| b.blend);
             while let (Some(s), Some(next)) = (&e.sound, e.state.next()) {
-                let length = seconds(s);
+                let length = (seconds(s) - blend).max(seconds(s) * 0.5);
                 if e.clock < length || length <= 0.0 {
                     break;
                 }

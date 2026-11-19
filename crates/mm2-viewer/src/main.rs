@@ -480,7 +480,13 @@ fn main() -> Result<(), BoxError> {
                 let mut sounds = sound::RaceSounds::load(
                     res,
                     &audio,
-                    &[sound::class(250, false)],
+                    &[match flag("--engine-class").map(String::as_str) {
+                        Some("125") => sound::class(125, false),
+                        Some("400") => sound::class(450, true),
+                        Some("500") => sound::class(500, false),
+                        Some("600") => sound::class(600, true),
+                        _ => sound::class(250, false),
+                    }],
                     0,
                     frontend::EventKind::Nationals,
                     false,
