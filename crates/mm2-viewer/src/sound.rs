@@ -860,10 +860,12 @@ impl RaceSounds {
         let player = race.player;
 
         // The four nearest the camera get a voice, however far (0x4e8720).
+        // An empty place in free roam has nobody on it, so no engine.
         let mut near: Vec<(usize, f32)> = race
             .racers
             .iter()
             .enumerate()
+            .filter(|&(i, _)| !race.away(i))
             .map(|(i, r)| {
                 let to = r.bike.position() - l.eye;
                 let far = to.x.abs() > FAR || to.z.abs() > FAR;

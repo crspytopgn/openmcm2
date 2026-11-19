@@ -345,16 +345,32 @@ impl Multi {
         self.game.tag_ball = info.tag_ball;
         self.game.tag_stunts = info.tag_stunts;
         self.game.collisions = info.collisions;
-        let tracks = self.tracks(ui, event);
-        if let Some(at) = tracks.iter().position(|t| {
+        if let Some(at) = self.host_track(ui, info) {
+            self.game.track = at;
+        }
+    }
+
+    /// Where the host's track is in this player's list for its event, if
+    /// they have it. A Free Pack track anyone can have: it's built here
+    /// from its recipe, so it joins the list when the host picks it, with
+    /// MM2's graphics as well as the free ones.
+    fn host_track(&mut self, ui: &Ui, info: &GameInfo) -> Option<usize> {
+        let event = EventKind::from_number(info.event as u32)?;
+        let is_it = |t: &TrackEntry| {
             t.course == info.course as usize
                 && t.path
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .is_some_and(|s| s.eq_ignore_ascii_case(&info.track))
-        }) {
-            self.game.track = at;
+        };
+        if let Some(at) = self.tracks(ui, event).iter().position(is_it) {
+            return Some(at);
         }
+        let def = mm2_course::free::find(&info.track).filter(|d| event.folder().ends_with(d.kind.folder()))?;
+        let path = ui.game().join(event.folder()).join(format!("{}.ENV", def.file));
+        let list = self.tracks.entry(event).or_default();
+        list.extend(crate::frontend::free_entries(&path, def, event));
+        list.iter().position(is_it)
     }
 
     /// The other players' names and Ready buttons.
@@ -391,7 +407,19 @@ impl Multi {
     fn net_setup(&mut self, cx: &mut Cx, info: &GameInfo, players: &[Player]) -> Option<Setup> {
         self.apply_game(cx.ui, info);
         let event = self.game.event;
-        let track = self.tracks(cx.ui, event).get(self.game.track).cloned()?;
+        // Only the host's own track: never another one in its place.
+        let Some(at) = self.host_track(cx.ui, info) else {
+            let line = if crate::share::original_track(&info.track) {
+                format!("Can't ride {}: it's one of Motocross Madness 2's own tracks, and needs the game's files.", info.track)
+            } else {
+                format!("Can't ride {}: it isn't here yet.", info.track)
+            };
+            if self.chat.last() != Some(&line) {
+                self.say(line);
+            }
+            return None;
+        };
+        let track = self.tracks(cx.ui, event).get(at).cloned()?;
         let me = net::with(|s| s.me).unwrap_or(0);
         let host = net::with(|s| s.host).unwrap_or(true);
         let at = players.iter().position(|p| p.id == me).unwrap_or(0);
