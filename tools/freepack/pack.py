@@ -94,7 +94,12 @@ def main():
         with zipfile.ZipFile(zpath, "w", zipfile.ZIP_STORED) as z:
             for f in members:
                 # Pictures and models are compressed already; text is small.
-                z.write(os.path.join(root, f["path"]), f["path"])
+                # A fixed date and mode, so the same files always make the
+                # same zip, byte for byte, whatever the source's file times.
+                info = zipfile.ZipInfo(f["path"], date_time=(1980, 1, 1, 0, 0, 0))
+                info.external_attr = 0o644 << 16
+                with open(os.path.join(root, f["path"]), "rb") as src, z.open(info, "w") as dst:
+                    shutil.copyfileobj(src, dst, 1 << 20)
         parts.append({"name": name, "file": zname, "size": os.path.getsize(zpath), "sha256": sha256(zpath)})
         print(f"part {zname}: {len(members)} files, {os.path.getsize(zpath) >> 20} MB")
     manifest = {

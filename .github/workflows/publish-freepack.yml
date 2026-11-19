@@ -154,6 +154,27 @@ jobs:
           for f in out/github/*.zip; do
             echo "$have" | grep -qx "$(basename "$f")" || gh release upload freepack "$f" --repo "$REPO"
           done
+          # A part already on the release keeps its file as uploaded then, so the
+          # list must carry that file's checksum, not the one of this run's
+          # rebuilt zip (same files inside, other bytes).
+          gh api "repos/$REPO/releases/tags/freepack" --jq '.assets[] | [.name, .digest] | @tsv' > digests.tsv
+          python3 - out/github/freepack.json digests.tsv <<'PY'
+          import json, sys
+          path, tsv = sys.argv[1], sys.argv[2]
+          have = {}
+          for line in open(tsv):
+              name, _, digest = line.rstrip("\n").partition("\t")
+              if digest.startswith("sha256:"):
+                  have[name] = digest[len("sha256:"):]
+          m = json.load(open(path))
+          for p in m["parts"]:
+              if p["file"] not in have:
+                  sys.exit(f"{p['file']} isn't on the release")
+              if have[p["file"]] != p["sha256"]:
+                  print(f"{p['file']}: using the uploaded file's checksum")
+                  p["sha256"] = have[p["file"]]
+          open(path, "w").write(json.dumps(m, indent=1))
+          PY
           gh release upload freepack out/github/freepack.json --clobber --repo "$REPO"
           # Parts the new list no longer names.
           for old in $(echo "$have" | grep '^freepack-.*\.zip$'); do
