@@ -104,6 +104,14 @@ pub struct Enhanced {
     /// apart and blended with the ones before, so fine textures and thin
     /// edges hold still (crate::post).
     pub taa: bool,
+    /// The 3D scene drawn with more pixels than the screen has (up to
+    /// 4K's worth, at most twice across) and shrunk to it: the finest
+    /// edges, fences, leaves and far detail without shimmer (Max).
+    pub supersample: bool,
+    /// The grass, the smooth hills and the sun's shadows reaching further
+    /// out from the rider (Max): more of the view finished, none of it
+    /// changed close up.
+    pub far: bool,
     /// How dirty the bikes start, 0 to 1.
     pub mud_start: f32,
     /// How strongly the new ground's detail shows, 0 to 1.
@@ -175,6 +183,8 @@ impl Default for Enhanced {
             shadow_side: crate::enhance::SHADOW_SIDE,
             raytracing: false,
             taa: false,
+            supersample: false,
+            far: false,
             mud_start: 0.0,
             detail: 0.5,
             weather: Weather::Clear,
@@ -189,6 +199,8 @@ impl Default for Enhanced {
 
 /// 2560 × 1440.
 const QHD: u32 = 2560 * 1440;
+/// 3840 × 2160.
+const UHD: u32 = 3840 * 2160;
 
 /// The quality presets (`quality=`): what each turns off, and the most
 /// pixels it draws the scene with.
@@ -241,13 +253,25 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             // the rider, for four times the memory (200 MB).
             e.shadow_side = 2 * crate::enhance::SHADOW_SIDE;
         }
+        // For the strongest graphics cards: Ultra's look drawn with more
+        // pixels than the screen and shrunk to it (supersampling, with
+        // 4x MSAA on top in place of 8x), the grass, smooth hills and
+        // shadows reaching further, and without Ultra's lasting ruts. Only
+        // finer, never bolder: the same light and colours as High.
+        "max" => {
+            preset(e, "ultra")?;
+            e.msaa = 4;
+            e.ruts = false;
+            e.supersample = true;
+            e.far = true;
+        }
         // For the computer it's on: Medium until the graphics card is
         // known, then [`pick_auto`]'s.
         "auto" => {
             preset(e, "medium")?;
             e.dynamic = true;
         }
-        _ => return Err(format!("quality must be auto, low, medium, high, raytraced or ultra, not {name}")),
+        _ => return Err(format!("quality must be auto, low, medium, high, raytraced, ultra or max, not {name}")),
     }
     Ok(())
 }
@@ -257,6 +281,15 @@ impl Enhanced {
     /// screen's own, or smaller with the same shape when it has more than
     /// [`Enhanced::pixels`].
     pub fn scene_size(&self, screen: (u32, u32)) -> (u32, u32) {
+        // Supersampled: up to 4K's worth of pixels, never more than twice
+        // the screen across nor 8192 (the GPU's largest picture). Not with
+        // temporal anti-aliasing, which rebuilds at the screen's size.
+        if self.supersample && !self.taa && self.scale.is_none() {
+            let have = (screen.0 as f64 * screen.1 as f64).max(1.0);
+            let k = (UHD as f64 / have).sqrt().clamp(1.0, 2.0);
+            let k = k.min(8192.0 / screen.0.max(screen.1).max(1) as f64).max(1.0);
+            return (((screen.0 as f64 * k).round() as u32).max(1), ((screen.1 as f64 * k).round() as u32).max(1));
+        }
         if let Some(k) = self.scale {
             let k = k as f64;
             return (((screen.0 as f64 * k).round() as u32).max(1), ((screen.1 as f64 * k).round() as u32).max(1));
@@ -403,9 +436,11 @@ impl Enhanced {
                 "raytracing" | "rt" => e.raytracing = on,
                 "taa" | "temporal" => e.taa = on,
                 "dynamic" | "dynamic-resolution" => e.dynamic = on,
+                "supersample" | "ssaa" => e.supersample = on,
+                "far" | "far-detail" => e.far = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-dynamic, raytracing, taa, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra, resolution=1080p or 85%, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-dynamic, raytracing, taa, supersample, far, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra/max, resolution=1080p or 85%, weather=rain or time=dusk"
                     ))
                 }
             }
@@ -621,6 +656,8 @@ impl Enhanced {
         self.ssr = false;
         self.gtao = false;
         self.shadow_side = self.shadow_side.min(crate::enhance::SHADOW_SIDE);
+        self.supersample = false;
+        self.far = false;
         self
     }
 }
@@ -683,6 +720,7 @@ impl Enhanced {
             self.ssr = false;
             self.shafts = false;
             self.cinematic = false;
+            self.supersample = false;
         }
         if n >= 2 {
             self.grass = false;
@@ -760,6 +798,32 @@ mod tests {
         let share = Enhanced::parse("quality=high,resolution=75%").unwrap();
         assert_eq!(share.scene_size((3440, 1440)), (2580, 1080));
         assert!(Enhanced::parse("resolution=150%").is_err());
+    }
+
+    #[test]
+    fn max_draws_finer_than_ultra() {
+        let max = Enhanced::parse("quality=max").unwrap();
+        assert!(max.supersample && max.far && !max.ruts && !max.raytracing && !max.scenery && !max.grade && !max.bloom);
+        assert_eq!(max.msaa, 4);
+        assert_eq!(max.shadow_side, 2 * crate::enhance::SHADOW_SIDE);
+        // A 1080p screen drawn at 4K, 1440p at 4K, 4K as it is.
+        assert_eq!(max.scene_size((1920, 1080)), (3840, 2160));
+        assert_eq!(max.scene_size((2560, 1440)), (3840, 2160));
+        assert_eq!(max.scene_size((3840, 2160)), (3840, 2160));
+        // A small window at most twice across.
+        assert_eq!(max.scene_size((1280, 720)), (2560, 1440));
+        // A screen past 4K as it is; and never past what the GPU can draw.
+        assert_eq!(max.scene_size((7680, 2160)), (7680, 2160));
+        assert!(max.scene_size((6000, 800)).0 <= 8192);
+        // With TAA or a share of the screen, as those say.
+        assert_eq!(Enhanced::parse("quality=max,taa").unwrap().scene_size((1920, 1080)), (1920, 1080));
+        assert_eq!(Enhanced::parse("quality=max,resolution=50%").unwrap().scene_size((1920, 1080)), (960, 540));
+        // Each part its own switch; none in a browser.
+        assert!(!Enhanced::parse("quality=max,no-supersample").unwrap().supersample);
+        assert!(Enhanced::parse("far").unwrap().far);
+        let web = max.for_browser();
+        assert!(!web.supersample && !web.far);
+        assert!(!max.shed_to(1).supersample);
     }
 
     #[test]

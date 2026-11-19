@@ -5,12 +5,30 @@
 
 use mm2_formats::trn::Terrain;
 
-/// Tufts on the grid round the camera (384 a side, `SIDE` in the shader).
-const TUFTS: u32 = 384 * 384;
+/// Tufts a side of the grid round the camera (`SIDE` in the shader).
+const SIDE: u32 = 384;
+/// With the detail reaching further (crate::graphics::Enhanced::far):
+/// half as far again, the tufts as close together.
+const FAR_SIDE: u32 = 576;
 
 pub struct GrassRenderer {
     pipeline: wgpu::RenderPipeline,
     heights: wgpu::BindGroup,
+    tufts: u32,
+}
+
+/// The grass shader for a grid `side` tufts across: its reach, and where
+/// it sinks away, grown with it.
+fn source(side: u32) -> String {
+    let source = include_str!("grass.wgsl");
+    if side == SIDE {
+        return source.to_string();
+    }
+    let k = side as f32 / SIDE as f32;
+    source
+        .replace("const SIDE: u32 = 384u;", &format!("const SIDE: u32 = {side}u;"))
+        .replace("const FADE: f32 = 90.0;", &format!("const FADE: f32 = {:.1};", 90.0 * k))
+        .replace("const END: f32 = 160.0;", &format!("const END: f32 = {:.1};", 160.0 * k))
 }
 
 impl GrassRenderer {
@@ -72,7 +90,8 @@ impl GrassRenderer {
             bind_group_layouts: &[Some(terrain_layout), Some(shared_layout), Some(&heights_layout)],
             immediate_size: 0,
         });
-        let shader = crate::enhance::shader(device, "grass", include_str!("grass.wgsl"));
+        let side = if crate::graphics::enhanced().is_some_and(|e| e.far) { FAR_SIDE } else { SIDE };
+        let shader = crate::enhance::shader(device, "grass", &source(side));
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("grass"),
             layout: Some(&layout),
@@ -104,7 +123,7 @@ impl GrassRenderer {
             multiview_mask: None,
             cache: None,
         });
-        GrassRenderer { pipeline, heights }
+        GrassRenderer { pipeline, heights, tufts: side * side }
     }
 
     /// Draws the grass, with the terrain's own group and the shared one.
@@ -113,6 +132,16 @@ impl GrassRenderer {
         pass.set_bind_group(0, terrain, &[]);
         pass.set_bind_group(1, shared, &[]);
         pass.set_bind_group(2, &self.heights, &[]);
-        pass.draw(0..18, 0..TUFTS);
+        pass.draw(0..18, 0..self.tufts);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_far_grass_shader_reaches_further() {
+        let far = super::source(super::FAR_SIDE);
+        assert!(far.contains("const SIDE: u32 = 576u;") && far.contains("const END: f32 = 240.0;") && far.contains("const FADE: f32 = 135.0;"));
+        assert_eq!(super::source(super::SIDE), include_str!("grass.wgsl"));
     }
 }

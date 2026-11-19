@@ -536,7 +536,9 @@ impl Post {
             scaled: [
                 (t.size != screen) as u32 as f32,
                 if self.traced_shafts.is_some() && showing.is_some_and(|e| e.shafts) { self.shaft_strength } else { 0.0 },
-                0.0,
+                // How many of the scene's pixels across one of the screen's
+                // (above 1 when supersampled).
+                t.size.0 as f32 / t.output.0.max(1) as f32,
                 0.0,
             ],
             taa_inverse: taa.map_or(Mat4::IDENTITY, |a| a.inverse).to_cols_array_2d(),

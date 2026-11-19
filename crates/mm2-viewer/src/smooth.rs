@@ -12,6 +12,8 @@ use wgpu::util::DeviceExt;
 const SPLIT: u32 = 4;
 /// How far the patch reaches each way from the eye, ft.
 const REACH: f32 = 220.0;
+/// With the detail reaching further (crate::graphics::Enhanced::far).
+const FAR_REACH: f32 = 420.0;
 
 pub struct SmoothGround {
     pipeline: wgpu::RenderPipeline,
@@ -151,7 +153,8 @@ impl SmoothGround {
                 cache: None,
             })
         });
-        let cells = ((2.0 * REACH / terrain.scale).round() as u32).clamp(8, n.saturating_sub(1).max(8));
+        let reach = if crate::graphics::enhanced().is_some_and(|e| e.far) { FAR_REACH } else { REACH };
+        let cells = ((2.0 * reach / terrain.scale).round() as u32).clamp(8, n.saturating_sub(1).max(8));
         let side = cells * SPLIT + 1;
         // In blocks of the patch, so those out of view can be left out.
         let step = (side - 1).div_ceil(8);
