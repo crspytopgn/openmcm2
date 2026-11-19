@@ -1,3 +1,37 @@
+# OpenMCM2 0.6.8
+
+* **New look menus without the Free Pack.** If you play with MM2
+  graphics but like the new look menus, the launcher now fetches just
+  the menus instead of the whole pack, and keeps them up to date.
+* **A Ready button you can read.** In the new look lobby your button
+  says NOT READY or READY, and everyone else shows READY or WAITING.
+* **Ride free tracks together.** Players with MM2 graphics can now join
+  free roam and free track races with Free Pack players. A race never
+  starts on a different track from the host's any more; the lobby says
+  why instead. Quiet corners of free roam stop revving phantom engines.
+* **Flowing free tracks.** Free nationals and supercross tracks swap
+  their square grid corners for turns of every angle, and nationals get
+  big berms, flat turns and the odd off-camber corner. Free tracks
+  rebuild themselves the first time you ride them.
+* **Proper race gates on free tracks.** Inflatable arches, a truss
+  gantry and an inflatable finish line.
+* **Your own bike sounds right in free mode.** The four-strokes play
+  their recorded engine clips instead of one stretched loop.
+* **Max graphics** for strong graphics cards (desktop only): Ultra drawn
+  finer, with supersampling and grass, hills and shadows reaching
+  further. Both parts have their own switches in the launcher.
+* **Launcher:** an Exit button you can reach with a pad, and a widescreen
+  window that goes full screen in Steam Deck Game Mode.
+* **Free Pack downloads fixed.** The launcher no longer turns down pack
+  parts with "doesn't match its checksum".
+* **Course Builder:** a stick resting slightly off centre no longer
+  spins the view (seen on Steam Deck).
+* **Drive the scenery:** planes no longer dip their nose when you bank
+  with a pad stick.
+* **Browser:** clicking through bikes in the menus no longer freezes the
+  picture in Safari, and the start page explains how to wake a game pad
+  (press any button) and shows when it's found.
+
 # OpenMCM2 0.6.7
 
 * **Drive the scenery** (Extras, off by default). Get in the tracks'
