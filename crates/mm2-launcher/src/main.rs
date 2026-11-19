@@ -1290,6 +1290,7 @@ impl Launcher {
         look::card(ui, icon::ICON_TWO_WHEELER, "Tracks, bikes and riders", |ui| {
             tile(ui, &mut s.more.all_gear, "All gear in every event", "The bikes and outfits the Pro Circuit gives out, in single races too.");
             tile(ui, &mut s.more.track_filter, "Track filter", "All tracks, the base game's or only the ones you added, on the event page.");
+            tile(ui, &mut s.more.drive_vehicles, "Drive the scenery", "In Practice and free roam, press V (or the pad's D-pad down) next to one of a track's cars, trucks or trains to get in and drive it, or press V anywhere to jump into the nearest plane, helicopter or blimp in the sky and fly it. Each one has its own springs, weight, power and grip. Each one sounds like what it is, and your bike goes quiet meanwhile. V again puts you back on your bike beside it. The Enduro tracks (Airfield, Farm, Open Pit, Ski Lodge, Trailer) have the most, and the free tracks get a car park by the start and planes, a helicopter, a blimp and a UFO out on open ground.");
             slider(ui, "Riders on the gate", "Up to 30 riders in a single race. 0 is the original game's count.", &mut s.more.riders, 0..=mm2_settings::RIDERS_MOST, 1.0, "");
             ui.label(look::weak("Extra art for added tracks goes in the game's RES/ADDONS folder; it never replaces the game's own."));
         });

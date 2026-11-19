@@ -163,12 +163,48 @@ pub struct AnimatedModel {
     /// Frames turned about their own x axis on top of the motion, rad: a
     /// bike's wheels (0x518c40).
     spins: Vec<(usize, f32)>,
+    /// Frames turned about an axis of their own on top of the motion: a
+    /// craft's propellers and rotors while the player flies it.
+    turns: Vec<(usize, Vec3, f32)>,
     /// Frames slid along their parent's axes, after the motion (a fork's
     /// `Shocks` sliding up its stroke).
     slides: Vec<(usize, Vec3)>,
+    /// The model it draws (the `.slt` name).
+    pub model: String,
+    /// Its root frame held in this turn at the place, the motion moving
+    /// only what hangs on it (a craft the player flies, crate::drive).
+    pub pin: Option<Mat4>,
 }
 
 impl AnimatedModel {
+    /// Where its root frame is at `time` on the track, game coordinates.
+    pub fn root_at(&self, time: f32) -> Mat4 {
+        let local = self.locals(self.motion, self.motion_start, &self.blend, time);
+        let mut world = vec![None; local.len()];
+        match local.len() {
+            0 => self.place,
+            _ => self.resolve(0, &local, &mut world, 0),
+        }
+    }
+
+    /// Its root frame's turn in its motion at `time`, relative to its
+    /// place.
+    pub fn root_turn(&self, time: f32) -> Mat4 {
+        let local = self.locals(self.motion, self.motion_start, &self.blend, time);
+        let m = local.first().copied().unwrap_or(Mat4::IDENTITY);
+        Mat4::from_mat3(glam::Mat3::from_mat4(m))
+    }
+
+    /// Where its place on the track is (its root frame's parent).
+    pub fn place(&self) -> Mat4 {
+        self.place
+    }
+
+    /// Moves its place on the track.
+    pub fn set_place(&mut self, place: Mat4) {
+        self.place = place;
+    }
+
     /// Where the model stands on the track, in game coordinates.
     pub fn position(&self) -> Vec3 {
         self.place.w_axis.truncate()
@@ -246,9 +282,19 @@ impl AnimatedModel {
                 }
             }
         }
+        // Only the root that flies the craft: what else hangs free (a
+        // helicopter's body) keeps its own turn.
+        if let (Some(pin), Some(None)) = (self.pin, self.frames.first().map(|f| f.1)) {
+            local[0] = pin;
+        }
         for &(f, angle) in &self.spins {
             if let Some(m) = local.get_mut(f) {
                 *m *= Mat4::from_rotation_x(angle);
+            }
+        }
+        for &(f, axis, angle) in &self.turns {
+            if let Some(m) = local.get_mut(f) {
+                *m *= Mat4::from_axis_angle(axis, angle);
             }
         }
         for &(f, by) in &self.slides {
@@ -694,7 +740,10 @@ impl ObjectMesh {
                 mud: 0.0,
                 morph,
                 spins: Vec::new(),
+                turns: Vec::new(),
                 slides: Vec::new(),
+                model: mcf.model.clone(),
+                pin: None,
             });
             mesh.placed += 1;
         }
@@ -734,7 +783,10 @@ impl ObjectMesh {
                 mud: 0.0,
                 morph: None,
                 spins: Vec::new(),
+                turns: Vec::new(),
                 slides: Vec::new(),
+                model: p.model.clone(),
+                pin: None,
             });
             mesh.placed += 1;
         }
@@ -1795,6 +1847,11 @@ impl ObjectRenderer {
         }
     }
 
+    /// Animated model `index`, for a craft the player takes over.
+    pub fn animated_mut(&mut self, index: usize) -> Option<&mut AnimatedModel> {
+        self.animated.get_mut(index)
+    }
+
     /// Draws animated model `index` see-through, or solid again.
     pub fn set_ghost(&mut self, index: usize, ghost: bool) {
         if let Some(a) = self.animated.get_mut(index) {
@@ -1906,6 +1963,17 @@ impl ObjectRenderer {
         match a.spins.iter_mut().find(|s| s.0 == frame) {
             Some(s) => s.1 = angle,
             None => a.spins.push((frame, angle)),
+        }
+    }
+
+    /// Turns animated model `index`'s frame `name` by `angle` about its own
+    /// `axis`, on top of its motion: a propeller or a rotor.
+    pub fn set_turn(&mut self, index: usize, name: &str, axis: Vec3, angle: f32) {
+        let Some(a) = self.animated.get_mut(index) else { return };
+        let Some(frame) = a.frame_named(name) else { return };
+        match a.turns.iter_mut().find(|s| s.0 == frame) {
+            Some(s) => (s.1, s.2) = (axis, angle),
+            None => a.turns.push((frame, axis, angle)),
         }
     }
 

@@ -51,6 +51,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod free_text;
+mod drive;
+mod drive_sound;
 mod help;
 mod addons;
 mod ibl;
@@ -487,6 +489,7 @@ fn main() -> Result<(), BoxError> {
                 sounds.engines_only = true;
                 Some((audio, sounds, Vec::<f32>::new(), 0.0f64))
             });
+            let mut drive_sound = drive_sound::DriveSound::new();
             // Each frame lasts 1/60 s unless `--fps N` says otherwise. At
             // more than 50 fps the original runs one bike step per frame,
             // as long as that frame.
@@ -514,6 +517,7 @@ fn main() -> Result<(), BoxError> {
             let mut next = 0;
             let mut elapsed = 0.0;
             let mut k = 0usize;
+            let mut driving: Option<drive::Drive> = None;
             while elapsed < seconds {
                 while next < frames.len() && frames[next] <= r.time + 1e-4 {
                     next += 1;
@@ -583,19 +587,55 @@ fn main() -> Result<(), BoxError> {
                     }
                 }
                 track.run_traffic(frame);
+                // `--drive-at T` (`--drive-craft T` for the nearest craft):
+                // into a vehicle T s into the script, and drive it with it.
+                for (flag_name, craft) in [("--drive-at", false), ("--drive-craft", true)] {
+                    let at = flag(flag_name).and_then(|t| t.parse::<f32>().ok());
+                    if driving.is_none() && at.is_some_and(|t| r.time - script_at >= t) {
+                        driving = pick_vehicle(&r, &mut track, craft);
+                        eprintln!("drive: {:?}", driving.as_ref().map(|d| (&d.name, d.kind)));
+                        if let Some(drive::Seat::Air(o)) = driving.as_ref().map(|d| d.seat) {
+                            pin_craft(track.objects.animated.get_mut(o), driving.as_ref());
+                        }
+                    }
+                }
+                let gas = c.throttle;
+                let c = match &mut driving {
+                    Some(d) => {
+                        d.update(c, &track.terrain, &track.world, &mut track.traffic, frame);
+                        if let drive::Seat::Air(o) = d.seat {
+                            pin_craft(track.objects.animated.get_mut(o), Some(d));
+                        }
+                        Controls { brake: 1.0, ..Controls::default() }
+                    }
+                    None => c,
+                };
                 chase = r.update(&track.ground(), c, frame);
+                if let Some(d) = &mut driving {
+                    chase = d.camera(&track.terrain, frame);
+                    if k % 30 == 0 {
+                        eprintln!("drive t {:.1} at {:.0?} speed {:.0} up {:.2?} fwd {:.2?} springs {:.2?}", r.time - script_at, d.position, d.speed, d.up, d.forward, d.springs);
+                    }
+                }
                 if let Some(f) = &mut film {
+                    f.drive = driving.clone();
                     let clock = r.time - script_at;
                     f.frame(&mut r, &track, chase, clock)?;
                 }
                 if let Some((audio, sounds, out, owed)) = &mut engine_wav {
                     let bike = &r.racers[r.player].bike;
-                    let listener = sound::Listener {
-                        eye: bike.position(),
-                        right: Vec3::X,
-                        velocity: bike.velocity(),
+                    let listener = match &driving {
+                        // Heard from the chase camera, going with it.
+                        Some(d) => sound::Listener { velocity: d.velocity(), ..listener(&r, chase.0, chase.1) },
+                        None => sound::Listener {
+                            eye: bike.position(),
+                            right: Vec3::X,
+                            velocity: bike.velocity(),
+                        },
                     };
+                    sounds.hush = driving.is_some().then_some(r.player);
                     sounds.update(audio, &r, &listener, frame);
+                    drive_sound.update(audio, 1.0, driving.as_ref(), gas, &listener, frame);
                     *owed += 22050.0 / 60.0;
                     let n = *owed as usize;
                     *owed -= n as f64;
@@ -1074,6 +1114,8 @@ pub struct Track {
     water: Vec<mm2_course::nature::Water>,
     /// The scene's ambient sounds and what each hangs on.
     sounds: Vec<(scn::SoundSpec, sound::Site)>,
+    /// The craft in its sky that can be flown (crate::drive).
+    aircraft: Vec<drive::Craft>,
 }
 
 impl Track {
@@ -1639,6 +1681,59 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
     }
 }
 
+/// The vehicle the player at the bike gets in: the nearest of the track's
+/// cars, trucks and trains within reach, or else (or with `craft_only`)
+/// the nearest craft in the sky, wherever it is.
+fn pick_vehicle(r: &Race, track: &mut Track, craft_only: bool) -> Option<drive::Drive> {
+    let at = r.racers[r.player].bike.position();
+    let time = r.time;
+    match drive::nearest_car(&track.traffic, at).filter(|_| !craft_only) {
+        Some(i) => {
+            let model = track.traffic.cars[i].model.clone();
+            drive::Drive::car(&mut track.traffic, i, &model)
+        }
+        None => {
+            let objects = &track.objects.animated;
+            drive::nearest_craft(&track.aircraft, at, |o| objects.get(o).map(|m| m.root_at(time).w_axis.truncate()))
+                .and_then(|c| Some(drive::Drive::craft(c, objects.get(c.object)?, time)))
+        }
+    }
+}
+
+/// Holds a craft where the player flies it.
+fn pin_craft(model: Option<&mut objects::AnimatedModel>, d: Option<&drive::Drive>) {
+    if let (Some(a), Some(d)) = (model, d) {
+        a.pin = Some(d.key);
+        a.set_place(d.place());
+    }
+}
+
+/// The player in a vehicle (crate::drive): the rider has got off the bike
+/// and into it, a craft goes where it is flown, and its shadow is the
+/// player's.
+fn drive_show(d: &drive::Drive, race: &Race, track: &Track, renderer: &mut TerrainRenderer) {
+    let me = &race.racers[race.player];
+    let hidden = Mat4::from_cols(Vec4::ZERO, Vec4::ZERO, Vec4::ZERO, me.bike.position().extend(1.0));
+    renderer.set_object_place(me.object + 1, hidden);
+    let object = match d.seat {
+        drive::Seat::Air(o) => {
+            pin_craft(renderer.animated_mut(o), Some(d));
+            Some(o)
+        }
+        drive::Seat::Car(c) => track.traffic.cars.get(c).and_then(|c| c.object),
+    };
+    if let Some(o) = object {
+        renderer.set_shadow([o, o], d.position + Vec3::Y * 2.0, track.sun);
+    }
+    // A parked craft's propellers and rotors turn while it is flown (one
+    // in its own flight turns them in its motion).
+    if let (drive::Seat::Car(_), Some(o)) = (d.seat, object) {
+        for (name, axis, angle) in d.blades() {
+            renderer.set_turn(o, name, axis, angle);
+        }
+    }
+}
+
 /// The 3D countdown numbers (0x48cf70): in a race, in the live race's
 /// own view, before the gate drops when the 30-second man is not out, and
 /// while the player is off the course.
@@ -2137,7 +2232,25 @@ fn load_track(
             let arches = waypoints.placements(&gate_list);
             let procvue = read_archive(&res.join("PROCVUE.RES")).unwrap_or_default();
             let procvue = rs2::Archive::parse(&procvue).ok();
-            let vehicles = traffic::load(&scene, procvue.as_ref());
+            let mut vehicles = traffic::load(&scene, procvue.as_ref());
+            // "Drive the scenery" on a free track, which has no traffic of
+            // its own: a lot of the pack's cars and machines parked by the
+            // start, and its aircraft out on open ground, all to drive.
+            let free_track = file_name(path).to_ascii_uppercase().starts_with("FP");
+            if tweaks::more().drive_vehicles && free_track && vehicles.is_empty() && scene.stadium.is_none() {
+                let gates: Vec<Vec3> = gate_list.iter().map(|g| g.position).collect();
+                let parked = scenery::parking(&terrain, course.as_ref(), &gates, (start.position, start.direction), &statics, &drive::FLEET);
+                eprintln!("{} parked vehicles to drive", parked.len());
+                for place in parked {
+                    let (at, look) = (Vec3::from(place.position), Vec3::from(place.look));
+                    let path = mm2_physics::procedural::Path { keys: vec![(0.0, at), (15.0, at + look)], fps: 15.0 };
+                    let mut vehicle = mm2_physics::procedural::Vehicle::new(path, 0.0, Vec3::ZERO);
+                    vehicle.position = at;
+                    vehicle.heading = look;
+                    vehicle.up = Vec3::Y;
+                    vehicles.push((traffic::PARKED, vehicle, place));
+                }
+            }
             let mut movable = arches.clone();
             movable.extend(popup::Popup::placements());
             movable.extend(TAG_MODELS.map(|m| mm2_formats::scn::Placement {
@@ -2229,6 +2342,9 @@ fn load_track(
                             solids: first..world.solids.len(),
                             object: None,
                             source: *source,
+                            // A parked one stays put till it is driven.
+                            driven: *source == traffic::PARKED,
+                            model: model.model.clone(),
                         });
                     }
                     eprintln!("{} scripted vehicles", traffic.cars.len());
@@ -2356,6 +2472,7 @@ fn load_track(
             }
         }
     }
+    let aircraft = drive::aircraft(objects.animated.iter().map(|a| a.model.as_str()));
     Ok(Track {
         terrain,
         terrain_textures,
@@ -2395,6 +2512,7 @@ fn load_track(
         spectators,
         water,
         sounds: scene_sounds,
+        aircraft,
     })
 }
 
@@ -3637,6 +3755,8 @@ struct Film {
     next: f32,
     shot: usize,
     log: Option<(PathBuf, String)>,
+    /// The vehicle the player drives, if any.
+    drive: Option<drive::Drive>,
 }
 
 impl Film {
@@ -3646,7 +3766,7 @@ impl Film {
         let log = std::env::var("MM2_WRECK_LOG")
             .ok()
             .map(|f| (PathBuf::from(f), String::from("t,stage,motion,x,y,z,xx,xy,xz,yx,yy,yz,zx,zy,zz\n")));
-        Ok(Film { device, queue, renderer, dir, from, size, next: from, shot: 0, log })
+        Ok(Film { device, queue, renderer, dir, from, size, next: from, shot: 0, log, drive: None })
     }
 
     /// Poses the race at `clock` s into the ride, and films it.
@@ -3654,6 +3774,9 @@ impl Film {
         let eye = renderer::from_game(chase.0);
         show(race, track, &mut self.renderer, eye, None);
         feel_wrecks(race, &self.renderer);
+        if let Some(d) = &self.drive {
+            drive_show(d, race, track, &mut self.renderer);
+        }
         if let (Some((_, text)), race::Bike::Player(b)) = (&mut self.log, &race.racers[race.player].bike) {
             if let Some(w) = &b.wreck {
                 use std::fmt::Write as _;
@@ -4057,6 +4180,11 @@ struct App {
     fps_shown: Option<u32>,
     start: Instant,
     race: Option<Race>,
+    /// The player out of the saddle, at the wheel of one of the track's
+    /// vehicles (crate::drive).
+    drive: Option<drive::Drive>,
+    /// The driven vehicle's engine and tyres.
+    drive_sound: drive_sound::DriveSound,
     /// The camera follows the bike rather than flying free.
     follow: bool,
     /// The window title last set, to change it only when the race status
@@ -4239,6 +4367,8 @@ impl App {
             start: Instant::now(),
             follow: race.is_some(),
             race,
+            drive: None,
+            drive_sound: drive_sound::DriveSound::new(),
             title: String::new(),
             front,
             loading: None,
@@ -4696,6 +4826,7 @@ impl App {
     /// three of a finished race and the Podiums option is on (0x45f610,
     /// 0x45e490); Esc again leaves it.
     fn end_race(&mut self) {
+        self.leave_vehicle(false);
         let (Some(r), Some(track), Some(f)) = (&mut self.race, &self.track, &self.front) else {
             return self.back_to_menu();
         };
@@ -4731,6 +4862,7 @@ impl App {
     }
 
     fn back_to_menu(&mut self) {
+        self.leave_vehicle(false);
         self.note_playtime();
         self.net = None;
         self.remote.clear();
@@ -5113,6 +5245,69 @@ impl App {
     }
 
     /// The fork's quick get-up, riding (not watching a replay or flying).
+    /// V: into the nearest of the track's vehicles, or the nearest craft
+    /// in its sky, or out again onto the bike (Extras, Drive the scenery;
+    /// in Practice and free roam).
+    fn toggle_drive(&mut self) {
+        if self.drive.is_some() {
+            self.leave_vehicle(true);
+            return;
+        }
+        if !self.follow || self.replay.is_some() || !tweaks::more().drive_vehicles {
+            return;
+        }
+        let practice = self.front.is_none() || self.race.as_ref().is_some_and(|r| r.practice);
+        let (Some(r), Some(track)) = (&mut self.race, &mut self.track) else { return };
+        let say = |hud: &mut Option<(ui::Ui, hud::Hud)>, text: &str| {
+            if let Some((_, hud)) = hud {
+                hud.say(text);
+            }
+        };
+        if !practice {
+            say(&mut self.hud, "Vehicles are for Practice and free roam.");
+            return;
+        }
+        let d = pick_vehicle(r, track, false);
+        let Some(d) = d else {
+            say(&mut self.hud, "No vehicle near enough to get in, and nothing flying here.");
+            return;
+        };
+        if let drive::Seat::Air(o) = d.seat {
+            pin_craft(track.objects.animated.get_mut(o), Some(&d));
+            pin_craft(self.state.as_mut().and_then(|s| s.renderer.as_mut()).and_then(|r| r.animated_mut(o)), Some(&d));
+        }
+        say(&mut self.hud, &d.hint());
+        eprintln!("drive: in the {} ({:?})", d.name, d.kind);
+        self.drive = Some(d);
+    }
+
+    /// Out of the vehicle the player is in, if any; with `onto_bike` the
+    /// bike waits beside it.
+    fn leave_vehicle(&mut self, onto_bike: bool) {
+        let Some(d) = self.drive.take() else { return };
+        let Some(track) = &mut self.track else { return };
+        d.leave(&mut track.traffic);
+        if let drive::Seat::Air(o) = d.seat {
+            for a in [track.objects.animated.get_mut(o), self.state.as_mut().and_then(|s| s.renderer.as_mut()).and_then(|r| r.animated_mut(o))].into_iter().flatten() {
+                a.pin = None;
+                a.set_place(d.home);
+            }
+        }
+        if !onto_bike {
+            return;
+        }
+        let (at, way) = d.way_out(&track.terrain);
+        if let Some(r) = &mut self.race {
+            let me = r.player;
+            if let race::Bike::Player(b) = &mut r.racers[me].bike {
+                b.reset(&track.ground(), at, way);
+            }
+        }
+        if let Some((_, hud)) = &mut self.hud {
+            hud.say("Back on the bike.");
+        }
+    }
+
     fn get_back_on(&mut self) {
         if !self.follow || self.replay.is_some() {
             return;
@@ -5466,12 +5661,17 @@ impl App {
         if !self.in_menus() {
             // Buttons the map leaves free: Back (DirectInput's button 6)
             // the fork's quick get-up, Start (7) out of the race as
-            // Escape, the D-pad's up the next camera view and its right
-            // the Helmet Cam.
+            // Escape, the D-pad's up the next camera view, its right
+            // the Helmet Cam and its down a vehicle (drive.rs).
             let free = |b: i32| presses.contains(&pad::Press::Button(b)) && !self.pad_map.iter().any(|&(k, c)| k == 2 && c == b);
             let (back, start, view, helmet) = (free(6), free(7), free(pad::DPAD_UP), free(pad::DPAD_RIGHT));
+            let vehicle = free(pad::DPAD_DOWN);
             if back {
                 self.get_back_on();
+            }
+            // The D-pad's down: into or out of a vehicle, as V (Extras).
+            if vehicle {
+                self.toggle_drive();
             }
             if start && self.front.is_some() && self.loading.is_none() {
                 self.end_race();
@@ -5623,7 +5823,23 @@ impl App {
             if let Some(track) = &mut self.track {
                 track.run_traffic(dt);
             }
+        } else if self.drive.is_some() {
+            self.leave_vehicle(false);
         }
+        let gas = controls.throttle;
+        // At the wheel, the bike waits with its brake on.
+        let controls = match (&mut self.drive, &mut self.track) {
+            (Some(d), Some(track)) => {
+                d.update(controls, &track.terrain, &track.world, &mut track.traffic, dt);
+                if let drive::Seat::Air(o) = d.seat {
+                    if let Some(a) = track.objects.animated.get_mut(o) {
+                        a.set_place(d.place());
+                    }
+                }
+                Controls { brake: 1.0, ..Controls::default() }
+            }
+            _ => controls,
+        };
         let acts = self.actions_held();
         let Some(track) = &self.track else { return };
         let Some(state) = &mut self.state else { return };
@@ -5679,6 +5895,10 @@ impl App {
                     [false; 2]
                 };
                 let (eye, target) = r.update(&track.ground(), controls, dt);
+                let (eye, target) = match &mut self.drive {
+                    Some(d) => d.camera(&track.terrain, dt),
+                    None => (eye, target),
+                };
                 let mut splashes = Vec::new();
                 if let Some(renderer) = &mut state.renderer {
                     throw_dirt(r, &track.ground(), &mut renderer.particles, dt);
@@ -5712,8 +5932,15 @@ impl App {
                     }
                 }
                 if let Some(sounds) = &mut self.sounds {
-                    let l = listener(r, eye, target);
+                    let mut l = listener(r, eye, target);
+                    // The camera goes with the vehicle the player drives.
+                    if let Some(d) = &self.drive {
+                        l.velocity = d.velocity();
+                    }
+                    // The bike is quiet while the player drives something else.
+                    sounds.hush = self.drive.is_some().then_some(r.player);
                     sounds.update(&self.audio, r, &l, dt);
+                    self.drive_sound.update(&self.audio, sounds.gain(), self.drive.as_ref(), gas, &l, dt);
                     sounds.ambient(&self.audio, &l, |site| track.site(site, r.time), dt);
                     for (at, amount) in &splashes {
                         sounds.splash(&self.audio, &l, *at, *amount, dt);
@@ -5733,6 +5960,9 @@ impl App {
                     let view = cues::Eye { at: eye, target, fov: r.fov(), aspect: renderer.aspect() };
                     show(r, track, renderer, eye, Some(view));
                     feel_wrecks(r, renderer);
+                    if let Some(d) = &self.drive {
+                        drive_show(d, r, track, renderer);
+                    }
                 }
                 let status = r.status();
                 if status != self.title {
@@ -6182,6 +6412,7 @@ impl ApplicationHandler for App {
                         match code {
                             KeyCode::Tab => self.follow = !self.follow && self.race.is_some(),
                             KeyCode::KeyR => {
+                                self.leave_vehicle(false);
                                 if let (Some(r), Some(t)) = (&mut self.race, &self.track) {
                                     r.restart(&t.ground());
                                 }
@@ -6240,6 +6471,8 @@ impl ApplicationHandler for App {
                             KeyCode::KeyG | KeyCode::KeyB if self.ctrl() => self.flip_gyro(code == KeyCode::KeyG),
                             // G alone: the fork's quick get-up.
                             KeyCode::KeyG => self.get_back_on(),
+                            // V alone: into or out of a vehicle (Extras).
+                            KeyCode::KeyV => self.toggle_drive(),
                             KeyCode::Digit0
                             | KeyCode::Digit1
                             | KeyCode::Digit2

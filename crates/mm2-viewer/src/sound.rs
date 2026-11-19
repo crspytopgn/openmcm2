@@ -621,6 +621,9 @@ pub struct RaceSounds {
     /// recording the engine note on its own, as the game's engine buffer
     /// is captured to compare with).
     pub engines_only: bool,
+    /// A racer whose engine is not heard: the player's, while they drive
+    /// something else (crate::drive).
+    pub hush: Option<usize>,
 }
 
 impl RaceSounds {
@@ -712,6 +715,7 @@ impl RaceSounds {
             emitters: Vec::new(),
             splash_wait: 0.0,
             engines_only: false,
+            hush: None,
         };
         // The crowd loops from the start, flat (0x4e81a0).
         if crowd_present {
@@ -735,6 +739,11 @@ impl RaceSounds {
         self.banks[class]
             .as_ref()
             .and_then(|b| b.list(list).get(k).cloned())
+    }
+
+    /// The sound effects' volume now (0 with the sounds off).
+    pub fn gain(&self) -> f32 {
+        self.options.gain
     }
 
     /// Ctrl+S: the race's sounds off or on again (0x4e9250); off, every
@@ -877,7 +886,7 @@ impl RaceSounds {
             let mut e = std::mem::take(&mut self.engines[i]);
             let was_airborne = e.airborne;
             e.airborne = bike.airborne();
-            let heard = near.iter().any(|n| n.0 == i);
+            let heard = near.iter().any(|n| n.0 == i) && self.hush != Some(i);
 
             // The engine's state machine (0x4e8720), for every bike.
             let gas = !bike.crashed() && r.controls.throttle > 0.1;
