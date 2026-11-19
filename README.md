@@ -169,6 +169,9 @@ moves the pointer, A clicks, B goes back and the shoulders switch tabs.
 The launcher works with a pad too. With several plugged in, the one last
 touched rides, and a stick or trigger that rests away from the middle is
 ignored until it comes back, so nothing steers or leans on its own.
+In the browser version, press any button on the pad once the page is open:
+browsers only show a pad to a page after that. The start page says when
+the pad is found, and the game says so when one connects mid-ride.
 
 **Optional extras**, off unless asked for:
 

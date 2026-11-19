@@ -288,7 +288,7 @@ impl Pads {
         });
         Some(PadInfo {
             family,
-            name: pad.name().to_string(),
+            name: plain_name(pad.name()),
             device: self.device(),
             rumble: pad.is_ff_supported(),
         })
@@ -412,6 +412,28 @@ fn motors(gilrs: &mut Gilrs, id: GamepadId) -> Option<[Effect; 2]> {
         motor(BaseEffectType::Strong { magnitude: u16::MAX })?,
         motor(BaseEffectType::Weak { magnitude: u16::MAX })?,
     ])
+}
+
+/// A pad's name as people know it. Browsers add their own tags: Chrome
+/// "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product:
+/// 0b13)", Firefox "045e-0b13-Xbox Wireless Controller".
+fn plain_name(name: &str) -> String {
+    let mut n = name.trim();
+    if let Some(at) = n.rfind(" (") {
+        let tag = &n[at..];
+        if tag.contains("Vendor:") || tag.contains("STANDARD GAMEPAD") || tag.contains("XInput") {
+            n = n[..at].trim_end();
+        }
+    }
+    let b = n.as_bytes();
+    if b.len() > 10
+        && b[4] == b'-'
+        && b[9] == b'-'
+        && b[..4].iter().chain(&b[5..9]).all(u8::is_ascii_hexdigit)
+    {
+        n = &n[10..];
+    }
+    n.trim().to_string()
 }
 
 /// Whether gilrs knows the pad's layout (an Xbox, PlayStation, Switch or
@@ -584,5 +606,16 @@ mod tests {
             assert_eq!(raw_axis_place((3 << 16) | 2), Some(2));
             assert_eq!(raw_axis_place((3 << 16) | 0x10), None);
         }
+    }
+
+    #[test]
+    fn browser_names() {
+        assert_eq!(
+            plain_name("Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)"),
+            "Xbox Wireless Controller"
+        );
+        assert_eq!(plain_name("054c-05c4-Wireless Controller"), "Wireless Controller");
+        assert_eq!(plain_name("Xbox 360 Controller (XInput STANDARD GAMEPAD)"), "Xbox 360 Controller");
+        assert_eq!(plain_name("Logitech Extreme 3D (rev 2)"), "Logitech Extreme 3D (rev 2)");
     }
 }
