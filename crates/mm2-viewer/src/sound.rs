@@ -431,7 +431,14 @@ impl Bank {
                     .collect()
             })
             .collect();
-        let loops = Loops::load(dir);
+        // Whole recorded samples, when the class has them, play as the
+        // original's do. The steady loops are only for a class without
+        // them: one loop pitched across the whole rev range sounds like a
+        // siren close up, on your own bike, though a bike going by hides it.
+        let whole = [List::Idle, List::PowerBand, List::Decel]
+            .iter()
+            .all(|&l| !lists[LISTS.iter().position(|(k, _)| *k == l).unwrap_or(0)].is_empty());
+        let loops = if whole { None } else { Loops::load(dir) };
         if lists.iter().all(|l| l.is_empty()) && loops.is_none() {
             return None;
         }
@@ -1307,6 +1314,48 @@ mod tests {
         let half = Bank::load(&res, true, "250", 2, false).unwrap();
         assert_eq!(half.list(List::LowTorque).len(), 4);
         assert_eq!(half.list(List::Idle).len(), 1);
+    }
+
+    /// A free class with whole recorded samples plays them, even beside
+    /// an `engine.ini` of steady loops; the loops are only for a class
+    /// without them.
+    #[test]
+    fn whole_samples_win_over_loops() {
+        fn wav() -> Vec<u8> {
+            let data = vec![0u8; 400];
+            let mut b = Vec::new();
+            b.extend(b"RIFF");
+            b.extend((36 + data.len() as u32).to_le_bytes());
+            b.extend(b"WAVEfmt ");
+            b.extend(16u32.to_le_bytes());
+            b.extend(1u16.to_le_bytes());
+            b.extend(1u16.to_le_bytes());
+            b.extend(22050u32.to_le_bytes());
+            b.extend(44100u32.to_le_bytes());
+            b.extend(2u16.to_le_bytes());
+            b.extend(16u16.to_le_bytes());
+            b.extend(b"data");
+            b.extend((data.len() as u32).to_le_bytes());
+            b.extend(data);
+            b
+        }
+        let dir = std::env::temp_dir().join(format!("mm2-whole-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ini = "[Engine]\nOnLoop=OnLoop.wav\nOffLoop=OffLoop.wav\nIdleLoop=IdleLoop.wav\nOnLoopRpm=5000\nOffLoopRpm=5000\nIdleLoopRpm=1500\n";
+        std::fs::write(dir.join("engine.ini"), ini).unwrap();
+        for name in ["OnLoop", "OffLoop", "IdleLoop"] {
+            std::fs::write(dir.join(format!("{name}.wav")), wav()).unwrap();
+        }
+        // Loops alone: played by revs.
+        assert!(Bank::load_dir(&dir, 1).unwrap().loops.is_some());
+        for name in ["Idle01", "LowTorque01", "PowerBand01", "Decel01", "Sputter01"] {
+            std::fs::write(dir.join(format!("{name}.wav")), wav()).unwrap();
+        }
+        let bank = Bank::load_dir(&dir, 1).unwrap();
+        assert!(bank.loops.is_none());
+        assert_eq!(bank.list(List::PowerBand).len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
