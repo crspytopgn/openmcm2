@@ -223,6 +223,11 @@ fn unzip_under(zip: &mut zip::ZipArchive<std::fs::File>, names: &[String], root:
     finish(&tmp, dest)
 }
 
+/// Whether `dir` holds the new look menus: their art and layout.
+pub fn has_menus(dir: &Path) -> bool {
+    dir.join("ui").is_dir() && dir.join("menus").is_dir()
+}
+
 /// Whether `dir` is a free pack: its `stockmap.toml` is there.
 pub fn is_pack(dir: &Path) -> bool {
     dir.join("stockmap.toml").is_file()
