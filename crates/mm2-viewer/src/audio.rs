@@ -28,6 +28,25 @@ struct Playing {
     looping: bool,
     /// What plays on, in turn and without a gap, when this sound ends.
     then: VecDeque<(Arc<Sound>, bool)>,
+    /// Seconds each sound fades into the next over (0: straight on, as
+    /// the game's own samples are cut to follow each other).
+    blend: f32,
+    /// The sound fading out under this one, where it is, and how far the
+    /// fade has gone, 0 to 1.
+    fading: Option<(Arc<Sound>, f64, bool)>,
+    faded: f32,
+}
+
+/// One frame of `sound` at `pos`, left and right.
+fn frame_at(sound: &Sound, pos: f64) -> (f32, f32) {
+    let ch = sound.channels as usize;
+    let i = (pos as usize).min(sound.frames().saturating_sub(1));
+    let s = &sound.samples[i * ch..];
+    if ch == 1 {
+        (s[0], s[0])
+    } else {
+        (s[0], s[1])
+    }
 }
 
 /// Without an output device, the most voices kept before the oldest
@@ -61,7 +80,24 @@ impl Mixer {
             }
             let step = (v.frequency * v.pitch) as f64 / rate;
             let (left, right) = ((1.0 - v.pan.max(0.0)), (1.0 + v.pan.min(0.0)));
+            let blend_frames = (v.blend as f64 * rate).max(1.0);
             for frame in out.chunks_exact_mut(2) {
+                // Fading into the next sound as this one nears its end.
+                if v.blend > 0.0
+                    && v.fading.is_none()
+                    && !v.then.is_empty()
+                    && v.sound.frames() as f64 - v.pos <= blend_frames * step
+                {
+                    let (next, looping) = v.then.pop_front().unwrap();
+                    let old = std::mem::replace(&mut v.sound, next);
+                    v.fading = Some((old, v.pos, false));
+                    v.faded = 0.0;
+                    v.pos = 0.0;
+                    v.looping = looping;
+                    if v.sound.frames() == 0 {
+                        return false;
+                    }
+                }
                 if v.pos >= v.sound.frames() as f64 {
                     if let Some((next, looping)) = v.then.pop_front() {
                         v.pos -= v.sound.frames() as f64;
@@ -76,10 +112,27 @@ impl Mixer {
                         v.pos %= v.sound.frames() as f64;
                     }
                 }
-                let ch = v.sound.channels as usize;
-                let i = v.pos as usize;
-                let s = &v.sound.samples[i * ch..];
-                let (l, r) = if ch == 1 { (s[0], s[0]) } else { (s[0], s[1]) };
+                let (mut l, mut r) = frame_at(&v.sound, v.pos);
+                if let Some((old, at, looping)) = &mut v.fading {
+                    // Equal power: the new sound comes up as the old goes.
+                    let t = v.faded * std::f32::consts::FRAC_PI_2;
+                    let (gain_in, gain_out) = (t.sin(), t.cos());
+                    l *= gain_in;
+                    r *= gain_in;
+                    if *looping && *at >= old.frames() as f64 {
+                        *at %= old.frames() as f64;
+                    }
+                    if *at < old.frames() as f64 {
+                        let (ol, or) = frame_at(old, *at);
+                        l += ol * gain_out;
+                        r += or * gain_out;
+                    }
+                    *at += step;
+                    v.faded += (1.0 / blend_frames) as f32;
+                    if v.faded >= 1.0 {
+                        v.fading = None;
+                    }
+                }
                 frame[0] += l * v.volume * left;
                 frame[1] += r * v.volume * right;
                 v.pos += step;
@@ -179,6 +232,9 @@ impl Audio {
             pan: 0.0,
             looping,
             then: VecDeque::new(),
+            blend: 0.0,
+            fading: None,
+            faded: 0.0,
         });
         if m.silent && m.voices.len() > SILENT_KEPT {
             // The oldest one-shot sounds would long have ended.
@@ -197,11 +253,27 @@ impl Audio {
     pub fn switch(&self, voice: Voice, sound: &Arc<Sound>, looping: bool) {
         let mut m = self.mixer.lock().unwrap();
         if let Some(v) = m.voices.iter_mut().find(|v| v.id == voice.0) {
+            if v.blend > 0.0 {
+                // The sound playing fades out under the new one.
+                let old = std::mem::replace(&mut v.sound, sound.clone());
+                v.fading = Some((old, v.pos, v.looping));
+                v.faded = 0.0;
+            }
             v.sound = sound.clone();
             v.pos = 0.0;
             v.frequency = sound.rate as f32;
             v.looping = looping;
             v.then.clear();
+        }
+    }
+
+    /// Fade each sound on `voice` into the next over `seconds`, both when
+    /// one runs on into the next and at a [`Audio::switch`]: for
+    /// recordings not cut to follow each other.
+    pub fn set_blend(&self, voice: Voice, seconds: f32) {
+        let mut m = self.mixer.lock().unwrap();
+        if let Some(v) = m.voices.iter_mut().find(|v| v.id == voice.0) {
+            v.blend = seconds.max(0.0);
         }
     }
 
@@ -336,6 +408,9 @@ mod tests {
             pan: 0.0,
             looping: false,
             then: VecDeque::new(),
+            blend: 0.0,
+            fading: None,
+            faded: 0.0,
         });
         let mut out = [0.0; 6];
         m.mix(&mut out);
@@ -357,10 +432,42 @@ mod tests {
             pan: 0.0,
             looping: false,
             then: VecDeque::from([(one(0.25), true)]),
+            blend: 0.0,
+            fading: None,
+            faded: 0.0,
         });
         let mut out = [0.0; 6];
         m.mix(&mut out);
         assert_eq!(out, [0.5, 0.5, 0.25, 0.25, 0.25, 0.25]);
+    }
+
+    #[test]
+    fn blends_into_the_next_sound() {
+        let flat = |x, n| Arc::new(Sound { rate: 100, channels: 1, samples: vec![x; n] });
+        let mut m = Mixer { rate: 100.0, ..Default::default() };
+        m.voices.push(Playing {
+            id: 1,
+            sound: flat(1.0, 10),
+            pos: 0.0,
+            frequency: 100.0,
+            pitch: 1.0,
+            volume: 1.0,
+            pan: 0.0,
+            looping: false,
+            then: VecDeque::from([(flat(0.5, 10), false)]),
+            blend: 0.04,
+            fading: None,
+            faded: 0.0,
+        });
+        let mut out = [0.0; 28];
+        m.mix(&mut out);
+        let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+        // The first plays alone, then both are heard over four frames,
+        // then the second alone: no gap and no jump.
+        assert_eq!(left[0], 1.0);
+        assert!(left[6..10].iter().all(|&x| x > 0.5 && x < 1.3), "{left:?}");
+        assert_eq!(left[11], 0.5);
+        assert!(left.iter().all(|&x| x > 0.0));
     }
 
     #[test]
