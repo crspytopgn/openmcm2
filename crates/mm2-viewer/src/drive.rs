@@ -322,6 +322,16 @@ pub fn model_yaw(model: &str) -> f32 {
     TURNED.iter().find(|t| m.starts_with(t.0)).map_or(0.0, |t| t.1)
 }
 
+/// The stick's lean as a craft reads it. One thumb steers and leans
+/// on a pad, so a hard turn pushes the stick a little forward or back
+/// too, and a worn stick sits a little off the middle: neither should
+/// tip the nose. The lean has a dead middle that widens as the stick
+/// is pushed to the side, and the edge is still full.
+fn flight_lean(lean: f32, steer: f32) -> f32 {
+    let dead = 0.15 + 0.4 * steer.abs().min(1.0);
+    lean.signum() * ((lean.abs() - dead) / (1.0 - dead)).clamp(0.0, 1.0)
+}
+
 /// The frames that spin on the craft models (the original's, and the free
 /// pack's split out to match, freepack::split_blades): each one's name,
 /// the axis it turns about and how fast, rad/s.
@@ -569,6 +579,10 @@ impl Drive {
     pub fn update(&mut self, controls: Controls, terrain: &Terrain, world: &World, traffic: &mut Traffic, dt: f32) {
         let dt = dt.clamp(0.0, 0.1);
         self.time += dt;
+        let controls = match self.kind {
+            Kind::Plane | Kind::Hover => Controls { lean: flight_lean(controls.lean, controls.steer), ..controls },
+            _ => controls,
+        };
         match self.kind {
             Kind::Car => {
                 // Small steps, for stiff springs.
@@ -1022,5 +1036,14 @@ mod tests {
         let found = aircraft(models.iter().copied());
         let kinds: Vec<_> = found.iter().map(|c| (c.object, c.kind)).collect();
         assert_eq!(kinds, [(1, Kind::Plane), (2, Kind::Hover), (3, Kind::Plane)]);
+    }
+
+    #[test]
+    fn steering_hard_does_not_tip_the_nose() {
+        assert_eq!(flight_lean(0.12, 0.0), 0.0);
+        assert_eq!(flight_lean(-0.4, 1.0), 0.0);
+        assert!(flight_lean(-0.6, 0.0) < -0.5);
+        assert_eq!(flight_lean(1.0, 1.0), 1.0);
+        assert_eq!(flight_lean(-1.0, 0.0), -1.0);
     }
 }
