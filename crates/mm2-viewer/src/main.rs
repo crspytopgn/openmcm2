@@ -3135,6 +3135,14 @@ fn net_race(
         } = &h
         {
             tag_heard(n, race, *racer, *kind, data);
+            // A jump's score, from the machine that rides the racer.
+            if let (mm2_formats::vcr::STUNT, Some(score), false) =
+                (*kind, stunt_score(data), owned(n, *racer as usize))
+            {
+                if let Some(r) = race.racers.get_mut(*racer as usize) {
+                    r.heard_stunt(score);
+                }
+            }
         }
         if let net::Heard::Bike {
             racer,
@@ -3177,6 +3185,28 @@ fn net_race(
         }
     }
     tag_say(race);
+    // Each jump our riders score goes to the others as the game's stunt
+    // packet (type 10), so every scoreboard shows the same points.
+    let mut scores = Vec::new();
+    for (i, r) in race.racers.iter_mut().enumerate() {
+        for score in r.unsent.drain(..) {
+            if owned(n, i) {
+                scores.push(net::Msg::Bike {
+                    racer: i as u8,
+                    time: race.time,
+                    kind: mm2_formats::vcr::STUNT,
+                    data: stunt_packet(i, score),
+                });
+            }
+        }
+    }
+    if !scores.is_empty() {
+        net::with(|s| {
+            for m in scores {
+                s.say(m);
+            }
+        });
+    }
     *wait -= dt;
     if *wait > 0.0 {
         return chat;
@@ -3223,6 +3253,20 @@ fn net_race(
         }
     });
     chat
+}
+
+/// The game's stunt packet (type 10, as on its tapes): the bike in byte
+/// 1 and the jump's score, a whole number, in bytes 4..8.
+fn stunt_packet(bike: usize, score: f32) -> Vec<u8> {
+    let mut d = vec![0u8; 8];
+    d[1] = bike as u8;
+    d[4..8].copy_from_slice(&(score.round() as u32).to_le_bytes());
+    d
+}
+
+fn stunt_score(data: &[u8]) -> Option<f32> {
+    let b: [u8; 4] = data.get(4..8)?.try_into().ok()?;
+    Some(u32::from_le_bytes(b) as f32)
 }
 
 /// How often a free roam bike is sent, by how far the nearest other

@@ -1028,6 +1028,13 @@ pub struct Racer {
     /// for one jump (`LargestSingleStuntPoints`).
     pub stunt_points: f32,
     pub best_stunt: f32,
+    /// In a network race: jump scores this machine worked out for the
+    /// rider and not yet sent (the game's type 10 packet), whether the
+    /// machine that rides this racer sends its scores, and what this
+    /// machine scored for it from its replayed bike before hearing one.
+    pub unsent: Vec<f32>,
+    pub scores_heard: bool,
+    mirrored: f32,
     /// Repair, medical and stunt money units run up this race (bike
     /// +0x7ac, +0x7b0, +0x7b4), for the Pro Circuit payout.
     pub repair: f32,
@@ -1119,6 +1126,9 @@ impl Racer {
             held: [false; 2],
             stunt_points: 0.0,
             best_stunt: 0.0,
+            unsent: Vec::new(),
+            scores_heard: false,
+            mirrored: 0.0,
             repair: 0.0,
             medical: 0.0,
             stunt_units: 0.0,
@@ -1221,9 +1231,37 @@ impl Racer {
             // After the flag a jump no longer counts (0x496e00).
             return None;
         }
+        if self.scores_heard {
+            // Another machine rides this racer and sends its scores
+            // (`heard_stunt`): the bike seen here, a few packets behind,
+            // can't tell its holds and tricks apart.
+            return None;
+        }
         self.stunt_points += score;
         self.best_stunt = self.best_stunt.max(score);
+        if matches!(self.bike, Bike::Taped(_)) {
+            self.mirrored += score;
+        }
+        if score > 0.0 {
+            if self.unsent.len() >= 16 {
+                self.unsent.remove(0);
+            }
+            self.unsent.push(score);
+        }
         (base > 0.0).then_some((base, m))
+    }
+
+    /// A jump's score from the machine that rides this racer (the game's
+    /// type 10 packet). The first one drops what this machine guessed
+    /// from the replayed bike; from then on only the sent scores count.
+    pub fn heard_stunt(&mut self, score: f32) {
+        if !self.scores_heard {
+            self.scores_heard = true;
+            self.stunt_points = (self.stunt_points - self.mirrored).max(0.0);
+            self.mirrored = 0.0;
+        }
+        self.stunt_points += score;
+        self.best_stunt = self.best_stunt.max(score);
     }
 
     /// Taunting (0x48f230, 0x48fe50): with the key down in the air, well
@@ -2836,6 +2874,25 @@ mod tests {
         // HeelClicker's 1.667 s at 2500 a second, to the hundred below.
         assert_eq!((base, m), (4100.0, 1.0));
         assert_eq!(r.stunt_points, 4100.0);
+        // Waiting to go to the other machines in a network race.
+        assert_eq!(r.unsent, [4100.0]);
+        // Another machine's rider: its own scores count, not ours.
+        r.unsent.clear();
+        r.stunt_points = 6500.0;
+        r.mirrored = 2400.0;
+        r.heard_stunt(4100.0);
+        assert_eq!((r.stunt_points, r.scores_heard, r.mirrored), (8200.0, true, 0.0));
+        r.heard_stunt(300.0);
+        assert_eq!(r.stunt_points, 8500.0);
+        fly(&mut r, true);
+        r.tricks(gas, [false; 2], &motions, dt, None);
+        r.tricks(gas, [true, false], &motions, dt, None);
+        for _ in 0..120 {
+            r.tricks(gas, [false; 2], &motions, dt, None);
+        }
+        fly(&mut r, false);
+        assert_eq!(r.tricks(gas, [false; 2], &motions, dt, None), None);
+        assert_eq!((r.stunt_points, r.unsent.len()), (8500.0, 0));
 
         // Down mid-trick: thrown.
         fly(&mut r, true);

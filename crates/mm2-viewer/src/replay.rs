@@ -277,6 +277,10 @@ impl Recording {
                 let score = r.stunt_points - self.points[i];
                 self.rec.stunt(i, score as u32);
                 self.points[i] = r.stunt_points;
+            } else if r.stunt_points < self.points[i] {
+                // A network rider's guessed points dropped for the ones
+                // their own machine sent.
+                self.points[i] = r.stunt_points;
             }
         }
         self.wait -= dt;
