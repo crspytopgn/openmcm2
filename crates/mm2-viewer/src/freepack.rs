@@ -423,6 +423,15 @@ pub fn animated(name: &str) -> Option<(&'static str, String)> {
     Some((template, shape))
 }
 
+/// For an animated model of the game's (`30SecMan.mcf`) that is missing,
+/// as without the game: the pack's stand-in of the same name, to stand
+/// still where the game's would have played its motions.
+pub fn still_stand_in(name: &str) -> Option<String> {
+    let stem = stem_of(name.trim());
+    name.trim().to_ascii_lowercase().ends_with(".mcf").then_some(())?;
+    stockmap().contains_key(&stem).then_some(stem)
+}
+
 /// The pack's supercross start gate, which the free tracks place as a
 /// still model (mm2-course free.rs), and the animation the viewer makes
 /// of it so that it drops as the original's `StartGate.mcf` does.
