@@ -2128,16 +2128,23 @@ impl Bike {
     /// The collision points against solid objects (0x52fc60, 0x439e10):
     /// each point that passed through a face from its front since the
     /// last step is pushed back out along the face, and the bike bounces
-    /// off at their middle (0x405fb0 → 0x5050b0).
+    /// off each object it hit (0x405fb0 → 0x5050b0).
     fn hit_objects(&mut self, ground: &dyn Ground, mass: f32, bounce: f32) {
         let (Some(hull), Some((was_at, was_turned))) = (self.hull.clone(), self.previous) else {
             return;
         };
         let place = |at: Vec3, turned: Mat3, p: Vec3| at + turned * (p - COM);
         let mut out = Vec3::ZERO;
-        let (mut middle, mut count) = (Vec3::ZERO, 0);
-        let mut normals: Vec<Vec3> = Vec::new();
-        let mut moving = Vec3::ZERO;
+        // Per object hit: its crossings, by the bike's part (hull, front
+        // wheel, rear wheel), and its distinct face normals.
+        struct ObjectHit {
+            object: u64,
+            parts: [(Vec3, u32); 3],
+            normals: Vec<Vec3>,
+            moving: Vec3,
+        }
+        let mut hits: Vec<ObjectHit> = Vec::new();
+        let mut all = (Vec3::ZERO, 0u32);
         // A wheel the probe has put on an object rides it on its tyre.
         // The probe is taken again where the step has moved the bike to
         // (0x519c30 runs ahead of the 0x52fc60 sweep): a tyre that has
@@ -2163,7 +2170,7 @@ impl Bike {
                 if on_object[i] { &none } else { &hull.wheels[i] },
             )
         });
-        for (offset, points) in [(Vec3::ZERO, &hull.body)].into_iter().chain(wheels) {
+        for (part, (offset, points)) in [(Vec3::ZERO, &hull.body)].into_iter().chain(wheels).enumerate() {
             for &p in points {
                 let from = place(was_at, was_turned, p + offset);
                 let to = place(self.position, self.orientation, p + offset);
@@ -2172,42 +2179,67 @@ impl Bike {
                         break;
                     };
                     out += c.normal * c.depth;
-                    middle += c.point;
-                    moving = c.velocity;
-                    count += 1;
-                    if !normals.iter().any(|n| n.distance(c.normal) < 1e-4) {
-                        normals.push(c.normal);
+                    all.0 += c.point;
+                    all.1 += 1;
+                    let k = match hits.iter().position(|h| h.object == c.object) {
+                        Some(k) => k,
+                        None => {
+                            hits.push(ObjectHit {
+                                object: c.object,
+                                parts: [(Vec3::ZERO, 0); 3],
+                                normals: Vec::new(),
+                                moving: c.velocity,
+                            });
+                            hits.len() - 1
+                        }
+                    };
+                    let h = &mut hits[k];
+                    h.parts[part].0 += c.point;
+                    h.parts[part].1 += 1;
+                    h.moving = c.velocity;
+                    if !h.normals.iter().any(|n| n.distance(c.normal) < 1e-4) {
+                        h.normals.push(c.normal);
                     }
                 }
             }
         }
-        if count == 0 {
+        if all.1 == 0 {
             return;
         }
-        self.hit = Some(middle / count as f32);
-        let normal = normals.iter().sum::<Vec3>().normalize_or_zero();
-        let r = middle / count as f32 - self.position;
-        self.position += out + out.normalize_or_zero() * PUSH_MARGIN;
-        // The same impulse as a bottomed tyre's (0x52bb10 → 0x5050b0):
-        // ridden, only 0.3, 0.1, 0.3 of the spin counts, in the contact's
-        // speed (world axes) and in the change (body axes).
-        let scale = if self.crash.is_some() {
-            Vec3::ONE
-        } else {
-            Vec3::new(0.3, 0.1, 0.3)
-        };
-        let w = (self.orientation * self.spin) * scale;
-        // Against a moving vehicle it is the speed into it that bounces.
-        let into = normal.dot(self.velocity + w.cross(r) - moving);
-        if into < 0.0 {
-            let box2 = if self.crash.is_some() { CRASHED_INERTIA } else { INERTIA };
-            let inertia = box2 * mass / 12.0;
-            let twist = self.orientation.transpose() * r.cross(normal) / inertia;
-            let turn = (self.orientation * twist).cross(r).dot(normal);
-            let j = -(1.0 + bounce) * into / (1.0 / mass + turn);
-            self.velocity += normal * j / mass;
-            self.spin += twist * scale * j;
+        self.hit = Some(all.0 / all.1 as f32);
+        // One impulse per object, at once as each is found (0x439e10 calls
+        // 0x406af0 → 0x405fb0 before the push of 0x435cb0): at the mean
+        // over the bike's parts that met it of each part's mean crossing
+        // (0x4376c0, 0x438bc0), along its faces' summed normal (0x435b70).
+        // The object callback passes a spin scale of (1, 1, 1), ridden or
+        // crashed (0x405fb0 → 0x48eba0 → 0x52bb10 → 0x5050b0): the whole
+        // spin counts in the contact's speed and the whole change is kept.
+        // (Only the frame and bottomed-tyre points of 0x52ffb0 pass 0.3,
+        // 0.1, 0.3 while ridden.) The sx10 wall and the taps bale memory
+        // watches match this to 1 %.
+        let box2 = if self.crash.is_some() { CRASHED_INERTIA } else { INERTIA };
+        let inertia = box2 * mass / 12.0;
+        for h in &hits {
+            let (sum, n) = h
+                .parts
+                .iter()
+                .filter(|(_, n)| *n > 0)
+                .fold((Vec3::ZERO, 0.0), |(s, k), (p, n)| (s + *p / *n as f32, k + 1.0));
+            let contact = sum / n;
+            let normal = h.normals.iter().sum::<Vec3>().normalize_or_zero();
+            let r = contact - self.position;
+            let w = self.orientation * self.spin;
+            // Against a moving vehicle it is the speed into it that bounces.
+            let into = normal.dot(self.velocity + w.cross(r) - h.moving);
+            if into < 0.0 {
+                let twist = self.orientation.transpose() * r.cross(normal) / inertia;
+                let turn = (self.orientation * twist).cross(r).dot(normal);
+                let j = -(1.0 + bounce) * into / (1.0 / mass + turn);
+                self.velocity += normal * j / mass;
+                self.spin += twist * j;
+            }
         }
+        self.position += out + out.normalize_or_zero() * PUSH_MARGIN;
     }
 
     /// Within 105 ft of the world's edge (0x48edd0), the bike is flung

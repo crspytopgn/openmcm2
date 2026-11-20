@@ -53,6 +53,9 @@ pub struct Crossing {
     pub along: f32,
     /// How fast the solid itself moves (zero but for scripted vehicles).
     pub velocity: Vec3,
+    /// Which object was crossed: the bike takes one impulse per object
+    /// (0x439e10 calls back once for each object it hit).
+    pub object: u64,
 }
 
 impl Solid {
@@ -236,6 +239,7 @@ impl Solid {
                             point: at,
                             along,
                             velocity: Vec3::ZERO,
+                            object: 0,
                         });
                     }
                 }
@@ -306,6 +310,7 @@ impl Trunk {
             point: Vec3::new(self.base.x, to.y, self.base.z) + normal * self.radius,
             along: (da - self.radius) / (da - db).max(1e-5),
             velocity: Vec3::ZERO,
+            object: (1 << 63) | ((self.base.x.to_bits() as u64) << 31) ^ self.base.z.to_bits() as u64,
         })
     }
 }
@@ -401,7 +406,8 @@ impl World {
     pub fn crossing(&self, from: Vec3, to: Vec3) -> Option<Crossing> {
         self.solids
             .iter()
-            .filter_map(|s| s.crossing(from, to))
+            .enumerate()
+            .filter_map(|(i, s)| s.crossing(from, to).map(|c| Crossing { object: i as u64, ..c }))
             .chain(self.trunks.crossing(from, to))
             .min_by(|a, b| a.along.total_cmp(&b.along))
     }
