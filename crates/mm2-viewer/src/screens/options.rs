@@ -65,15 +65,22 @@ pub fn engine_classes(game: &Path) -> [EngineClass; 5] {
                 .find(|e| e.name.eq_ignore_ascii_case("presets.pb"))?;
             Some(String::from_utf8_lossy(ar.data(e)).into_owned())
         });
+    // Without the file (the Free Pack alone), the same numbers the bikes
+    // ride with built in (`Spec::stock`), so the garage's curve is each
+    // class's own and not a flat 10 hp.
     let Some(text) = text else {
-        return std::array::from_fn(|_| EngineClass {
-            rpm_low: 5000,
-            rpm_high: 10000,
-            total: 100,
-            least: 0,
-            most: 40,
-            limits: [40; 11],
-            stock: [[10; 11]; 3],
+        return std::array::from_fn(|c| {
+            let spec = mm2_physics::spec::Spec::stock(c);
+            let curve: [i32; 11] = spec.power.map(|hp| hp.round() as i32);
+            EngineClass {
+                rpm_low: spec.rpm_low as i32,
+                rpm_high: spec.rpm_high as i32,
+                total: curve.iter().sum(),
+                least: 0,
+                most: curve.iter().copied().max().unwrap_or(40),
+                limits: curve,
+                stock: [curve; 3],
+            }
         });
     };
     let ini = mm2_formats::scn::Ini::parse(&text);
@@ -1697,6 +1704,24 @@ mod tests {
         assert_eq!(step_difficulty(5, -1), 4);
         assert_eq!(step_difficulty(1, -1), 1);
         assert_eq!(step_difficulty(10, 1), 10);
+    }
+
+    #[test]
+    fn free_pack_classes_ride_their_own_curves() {
+        // No presets.pb (the Free Pack alone): each class's own stock
+        // curve and revs, so a 125 doesn't ride a flat 10 hp.
+        let c = engine_classes(Path::new("/nowhere"));
+        for (k, class) in c.iter().enumerate() {
+            let spec = mm2_physics::spec::Spec::stock(k);
+            assert_eq!(class.rpm_high, spec.rpm_high as i32);
+            assert_eq!(class.stock[0], spec.power.map(|hp| hp.round() as i32));
+        }
+        // A garage last on a 250 puts the 125's curve under a 125.
+        let mut garage = crate::profile::Garage::default();
+        ride_bike(&mut garage, &c, 250);
+        ride_bike(&mut garage, &c, 125);
+        assert_eq!(garage.ride_power, c[0].stock[garage.curve[0]]);
+        assert_eq!(garage.ride_rpm[1], c[0].rpm_high);
     }
 
     #[test]
