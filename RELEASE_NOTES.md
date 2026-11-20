@@ -1,3 +1,15 @@
+# OpenMCM2 0.6.10
+
+* **A new free rider.** Playing with free graphics, you get a whole new
+  rider in a fun 2000s factory kit: jagged shards, checker strips,
+  halftone dots and a big 00 on the back, with a vented MX helmet,
+  goggles, gloves and boots. All 12 colours and Kit & Paint work as
+  before. This comes with a Free Pack update the launcher fetches by
+  itself.
+* **Rides like a racer.** The free rider now sits down into the seat
+  and leans over the bars, further when standing up, and both hands
+  close properly round the grips on the Ridgeback and the Kestrel.
+
 # OpenMCM2 0.6.9
 
 * **Lighter, nicer dust.** Enhanced dust clouds are about six times
