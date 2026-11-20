@@ -2240,7 +2240,11 @@ impl Race {
                             r.off_course = 0.0;
                         }
                     }
-                    if !crashed && (self.wreck_reset || i != self.player) {
+                    // A gate race (Baja, Enduro) is open country: as in the
+                    // original, whose gate courses have no width, a crash
+                    // gets the rider up where the wreck lies, not back on
+                    // the free tracks' course line.
+                    if !crashed && self.gates.is_empty() && (self.wreck_reset || i != self.player) {
                         if let Some(place) = course.place(r.bike.position(), r.target) {
                             if let Bike::Player(b) = &mut r.bike {
                                 b.reset_to = Some(place);

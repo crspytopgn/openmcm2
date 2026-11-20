@@ -845,14 +845,15 @@ impl Shape {
 
     /// The same jump with faces long enough to ride like the original
     /// game's: the takeoff's lip no steeper than an original jump of its
-    /// height (about 20 degrees at 3 ft up to 33 at 13 ft and over), and
-    /// landings and table downs at most 24 degrees. Measured along the
-    /// originals' course lines (`jump_angles` example).
+    /// height, made more forgiving (about 17 degrees at 3 ft up to 27 at
+    /// 13 ft and over, against the originals' 20 to 33), and landings and
+    /// table downs at most 20 degrees (the originals' 24). Originals
+    /// measured along their course lines (`jump_angles` example).
     fn tamed(self) -> Shape {
         // The face rises as (s/up)^1.4, so its lip slope is 1.4 h / up;
         // a smoothstep down falls at most 1.5 h / down.
-        let lip = |h: f32| ((17.0 + 1.2 * h).min(33.0)).to_radians().tan();
-        let land = 24f32.to_radians().tan();
+        let lip = |h: f32| ((14.0 + 1.0 * h).min(27.0)).to_radians().tan();
+        let land = 20f32.to_radians().tan();
         let up_for = |up: f32, h: f32| up.max(1.4 * h / lip(h));
         let down_for = |down: f32, h: f32| down.max(1.5 * h / land);
         match self {
@@ -1201,6 +1202,22 @@ impl Land {
     /// turn alike; 1 builds some up into big berms, leaves some flat and
     /// tips a few the wrong way, off-camber.
     #[allow(clippy::too_many_arguments)]
+    /// Eases the ground toward `profile` near a course, most on its line
+    /// and fading out by `reach` ft: steps and drops smoothed so it can be
+    /// ridden, the lie of the land kept, nothing painted.
+    fn grade(&mut self, course: &Course, reach: f32, profile: &dyn Fn(f32) -> f32) {
+        let n = self.size;
+        for z in 0..n {
+            for x in 0..n {
+                let p = [x as f32 * self.scale, z as f32 * self.scale];
+                let Some(near) = course.near(p, reach) else { continue };
+                let i = z * n + x;
+                let w = 0.8 * (1.0 - smooth(near.distance / reach));
+                self.heights[i] = lerp(self.heights[i], profile(near.along), w);
+            }
+        }
+    }
+
     fn carve(&mut self, course: &Course, half: f32, blend: f32, profile: &dyn Fn(f32) -> f32, features: &Features, bank: f32, sculpt: f32, calm: Option<(f32, f32)>, twist: f32) {
         let n = self.size;
         let reach = half + blend;
@@ -2326,7 +2343,7 @@ fn national(def: &Def) -> Made {
     if std::env::var_os("FT_DEBUG").is_some() {
         eprintln!("{} features: {:?}", features.0.len(), features.0.iter().map(|f| format!("{:.0}:{:?}", f.0, f.1)).collect::<Vec<_>>());
     }
-    let half = 17.0;
+    let half = 20.0;
     {
         let profile = profile_fn(&course, raw);
         land.carve(&course, half, cell / 2.0 - half, &profile, &features, 5.0, 1.0, Some(((line - 80.0).rem_euclid(course.length), 80.0 + (sl * 0.7).min(320.0))), 1.0);
@@ -2753,7 +2770,7 @@ fn supercross(def: &Def) -> Made {
     // The finish arch up the straight, past the gate.
     let finish = (line + (run - 60.0).clamp(30.0, 120.0)) % course.length;
     let features = fill_straights(&course, &runs, &mut rng, &mut |r, room| pick_shape(r, room, SX_JUMPS), 24.0, 20.0, (8.0, 22.0), Some(((line - 40.0).rem_euclid(course.length), 200.0)));
-    let half = 12.0;
+    let half = 13.5;
     land.carve(&course, half, 6.0, &|_| floor + 0.3, &features, 3.0, 0.0, None, 0.0);
     land.widen_start(&course, line, half, SX_START_HALF, 4.0, &|_| floor + 0.3);
     land.compute_steep();
@@ -2978,7 +2995,7 @@ fn open_country(def: &Def) -> Made {
     // Three courses, of different sizes, round the middle.
     let names = race_names(def);
     let mut courses = Vec::new();
-    let half = if desert { 16.0 } else { 9.0 };
+    let half = if desert { 16.0 } else { 11.0 };
     for (k, name) in names.into_iter().enumerate() {
         let off = [rng.range(-0.08, 0.08) * span, rng.range(-0.08, 0.08) * span];
         let size = [0.24, 0.31, 0.37][k] * span * rng.range(0.9, 1.05);
@@ -3051,6 +3068,13 @@ fn open_country(def: &Def) -> Made {
             _ => Shape::Table { up: r.range(30.0, 40.0), top: r.range(30.0, 50.0), down: r.range(40.0, 60.0), height: r.range(6.0, 10.0) },
         };
         let features = place_features(course, &mut rng, &mut make, 400.0, 300.0, 600.0);
+        if def.kind == Kind::Baja {
+            // Baja is open country, as the original's: no road, only the
+            // gates to find. The ground along the way is eased so it stays
+            // rideable, with nothing cut or painted into it.
+            land.grade(course, 90.0, &profile);
+            continue;
+        }
         land.carve(course, *half, if desert { 40.0 } else { 26.0 }, &profile, &features, 3.0, 0.0, None, 0.0);
         let start_s = *gates.last().unwrap_or(&0.0);
         land.widen_start(course, start_s, *half, START_HALF, if desert { 40.0 } else { 20.0 }, &profile);
@@ -3066,7 +3090,19 @@ fn open_country(def: &Def) -> Made {
     };
     flatten(&mut land, camp, 60.0, 30.0, LOOSE as u8);
     scatter_props(&land, camp, 55.0, 0.0, &mut rng, &["tent01", "nattrailer01", "toilet"], 6, &mut models);
-    Made { land, courses, lap_lines: None, start, models, keep: vec![(camp, 80.0)], podium: None, infield: None }
+    let mut keep = vec![(camp, 80.0)];
+    if def.kind == Kind::Baja {
+        // No road to keep plants off: a narrow way along each course is
+        // left clear instead, so nobody racing it meets a cactus head on.
+        for (course, ..) in &courses {
+            let mut s = 0.0;
+            while s < course.length {
+                keep.push((course.at(s).0, 9.0));
+                s += 12.0;
+            }
+        }
+    }
+    Made { land, courses, lap_lines: None, start, models, keep, podium: None, infield: None }
 }
 
 pub fn race_names(def: &Def) -> Vec<String> {
@@ -3112,7 +3148,7 @@ fn quarry(def: &Def) -> Made {
     {
         let raw = land.profile(&course, 200.0);
         let profile = profile_fn(&course, raw);
-        land.carve(&course, 16.0, 30.0, &profile, &features, 4.0, 0.6, None, 0.5);
+        land.carve(&course, 18.0, 30.0, &profile, &features, 4.0, 0.6, None, 0.5);
     }
     let mut models = Vec::new();
     for k in 0..rng.range(4.0, 8.0) as usize {
@@ -3261,7 +3297,7 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
     let land = &made.land;
     let surfaces: Vec<u8> = (0..land.size * land.size)
         .map(|i| {
-            if land.track[i] > 0.5 {
+            if land.track[i] > 0.5 || def.kind == Kind::Baja && land.steep[i] <= 0.5 {
                 0
             } else if land.steep[i] > 0.5 || land.patch[i].0 as usize == CONCRETE && land.patch[i].1 > 0.5 {
                 2
@@ -3311,7 +3347,7 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
 /// Which making of the recipes a built track is from (its `.made` file):
 /// a track built by an older one is built again. Change it whenever a
 /// change here moves anything on an existing track.
-pub const MADE: &str = "6";
+pub const MADE: &str = "7";
 
 /// The free track whose file is `stem` (`FPNAT01`), any case.
 pub fn find(stem: &str) -> Option<&'static Def> {
