@@ -811,6 +811,38 @@ impl Bike {
     }
 }
 
+/// The computer riders' frame due after `dt` more seconds on `clock`: its
+/// length (0 for none), the rest kept on the clock. A frame takes
+/// `frame` and the rest waits for the next, so they come evenly; with
+/// two or more owed (under half the frame rate, or a hitch) one frame
+/// takes the lot. With `frame` 0 every update is a frame.
+fn ai_due(clock: &mut f32, frame: f32, dt: f32) -> f32 {
+    *clock += dt;
+    if frame <= 0.0 || *clock >= frame * 2.0 {
+        std::mem::take(clock)
+    } else if *clock >= frame * 0.999 {
+        *clock = (*clock - frame).max(0.0);
+        frame
+    } else {
+        0.0
+    }
+}
+
+/// How far through their last frame (`span` long) the computer riders are
+/// drawn, 0 to 1, with `clock` since it: a steady `frame` behind. After a
+/// frame that took the whole clock (a slow screen, under 36 fps, or a
+/// hitch) the frame is longer than `frame`, and reading the clock as a
+/// share of `frame` alone put the bikes back at its start: a jerk back
+/// and on again every few frames at 30 fps. At the usual frame (`span` =
+/// `frame`) it is just `clock / frame`.
+fn ai_share(span: f32, frame: f32, clock: f32) -> f32 {
+    if frame > 0.0 && span > 0.0 {
+        ((span - frame + clock) / span).clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
 /// A computer rider's bike: the game's two-wheel model, and after a crash
 /// the full model until the reset (0x414000 runs only uncrashed computer
 /// riders; a crashed bike goes through Vehicle::Simulate like the
@@ -1821,6 +1853,9 @@ pub struct Race {
     /// once each update (scripted runs, at a tape's own frames).
     pub ai_frame: f32,
     ai_clock: f32,
+    /// How long the computer riders' last frame was, s: `ai_frame`, or
+    /// more when a slow screen frame took the whole clock at once.
+    ai_span: f32,
     pub course: Option<Course>,
     pub laps: u32,
     /// The checkpoint gates of a Baja or Enduro course; none in a lap race,
@@ -1969,6 +2004,7 @@ impl Race {
             fixed_step: true,
             ai_frame: AI_FRAME,
             ai_clock: 0.0,
+            ai_span: AI_FRAME,
             course,
             laps,
             gates,
@@ -2064,15 +2100,10 @@ impl Race {
         // since the last) moves the bikes on evenly: taking the whole of
         // the clock made the bikes jump on and stall in turn at 60 fps.
         // Under half the frame rate, one frame takes the lot.
-        self.ai_clock += dt;
-        let ai_dt = if self.ai_frame <= 0.0 || self.ai_clock >= self.ai_frame * 2.0 {
-            std::mem::take(&mut self.ai_clock)
-        } else if self.ai_clock >= self.ai_frame * 0.999 {
-            self.ai_clock = (self.ai_clock - self.ai_frame).max(0.0);
-            self.ai_frame
-        } else {
-            0.0
-        };
+        let ai_dt = ai_due(&mut self.ai_clock, self.ai_frame, dt);
+        if ai_dt > 0.0 {
+            self.ai_span = ai_dt;
+        }
         let mut left = dt;
         while left > 0.0 {
             let first = left == dt;
@@ -2263,11 +2294,7 @@ impl Race {
             }
             left -= step;
         }
-        let blend = if self.ai_frame > 0.0 {
-            (self.ai_clock / self.ai_frame).min(1.0)
-        } else {
-            1.0
-        };
+        let blend = ai_share(self.ai_span, self.ai_frame, self.ai_clock);
         for r in &mut self.racers {
             if let Bike::Computer(c) = &mut r.bike {
                 c.blend = blend;
@@ -2902,6 +2929,34 @@ mod tests {
         fly(&mut r, false);
         assert_eq!(r.tricks(gas, [false; 2], &motions, dt, None), None);
         assert!(r.bike.crashed());
+    }
+
+    /// Where the computer riders are drawn, in time along their frames,
+    /// moves on as the screen does at any frame rate: at 30 fps one frame
+    /// in a few takes the whole clock, and the bikes used to jump back.
+    #[test]
+    fn computer_riders_drawn_evenly_at_any_frame_rate() {
+        for fps in [24.0, 30.0, 45.0, 60.0, 144.0] {
+            let dt = 1.0 / fps;
+            let (mut clock, mut span, mut end, mut was) = (0.0f32, AI_FRAME, 0.0f32, None);
+            for k in 0..600 {
+                let due = ai_due(&mut clock, AI_FRAME, dt);
+                if due > 0.0 {
+                    span = due;
+                    end += due;
+                }
+                // The time the bikes are drawn at: so far through the last
+                // frame, which ran from end − span to end.
+                let drawn = end - span + span * ai_share(span, AI_FRAME, clock);
+                if let Some(w) = was {
+                    let step: f32 = drawn - w;
+                    assert!((step - dt).abs() < 1e-4, "{fps} fps, frame {k}: drawn moved {step} s, not {dt}");
+                }
+                was = Some(drawn);
+            }
+        }
+        // At the usual frame, as before: the clock's share of it.
+        assert_eq!(ai_share(AI_FRAME, AI_FRAME, 0.01), 0.01 / AI_FRAME);
     }
 
     #[test]

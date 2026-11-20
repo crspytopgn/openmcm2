@@ -1302,6 +1302,15 @@ const FOCAL: f32 = 415.69;
 
 /// Where each bike's tyres touch the ground, game coordinates (none for a
 /// tyre in the air), for the enhanced drawing's ruts.
+/// A computer rider's tyres, front and back, where its bike is drawn
+/// (between its frames, `race::Computer::drawn_place`) rather than where
+/// its last frame left it, so the dust and the tracks come off the bike
+/// on the screen and not up to a frame ahead of it.
+fn drawn_ends(place: Mat4) -> [Vec3; 2] {
+    let (at, look) = (place.w_axis.truncate(), place.z_axis.truncate().normalize_or(Vec3::Z));
+    [at + look * 2.5, at - look * 2.5]
+}
+
 fn tyre_places(race: &Race, ground: &TrackGround) -> Vec<([Option<Vec3>; 2], dust::Kick)> {
     // Whether the ground here raises dust, as the game's own trail asks.
     let dusty = |at: Option<(Vec3, bool)>| at.is_some_and(|(at, on)| if on { ground.zones[7].dust } else { ground.zone(at).dust });
@@ -1323,7 +1332,7 @@ fn tyre_places(race: &Race, ground: &TrackGround) -> Vec<([Option<Vec3>; 2], dus
                 Some(_) => ([None; 2], dust::Kick::default()),
                 None => {
                     let rd = &c.rider;
-                    let ends = [rd.position + rd.look * 2.5, rd.position - rd.look * 2.5];
+                    let ends = drawn_ends(r.bike.place());
                     let at = [0, 1].map(|k| rd.down[k].then_some(ends[k]));
                     let kick = dust::Kick {
                         dusty: at.iter().flatten().any(|&p| dusty(Some((p, false)))),
@@ -1410,7 +1419,7 @@ fn throw_dirt(race: &Race, ground: &TrackGround, dirt: &mut particles::Particles
                     // The computer's bikes keep their tyres' traction at 1
                     // and spin at 0: dust, but no chunks.
                     let rd = &c.rider;
-                    let ends = [rd.position + rd.look * 2.5, rd.position - rd.look * 2.5];
+                    let ends = drawn_ends(r.bike.place());
                     particles::Feed {
                         tyres: [0, 1].map(|k| rd.down[k].then(|| tyre(ends[k], false))),
                         traction: 1.0,
@@ -1518,9 +1527,11 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
                 return (Vec3::new(0.0, -1.0e5, 0.0), Vec3::Y);
             }
             let ahead = r.bike.forward().normalize_or(Vec3::Z);
-            let up = r.bike.place().transform_vector3(Vec3::Y).normalize_or(Vec3::Y);
-            // Aimed a little down, at the track ahead.
-            (r.bike.position() + ahead * HEADLIGHT_AHEAD + up * HEADLIGHT_UP, (ahead - up * 0.12).normalize())
+            let place = r.bike.place();
+            let up = place.transform_vector3(Vec3::Y).normalize_or(Vec3::Y);
+            // Aimed a little down, at the track ahead, from where the bike
+            // is drawn.
+            (place.w_axis.truncate() + ahead * HEADLIGHT_AHEAD + up * HEADLIGHT_UP, (ahead - up * 0.12).normalize())
         })
         .collect();
     renderer.set_headlights(&lamps);
