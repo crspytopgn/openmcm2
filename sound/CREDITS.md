@@ -4,11 +4,11 @@ Every Freesound recording used in `engine/` and `fx/`. CC0 clips need no credit 
 
 ## Engines 125, 250 and 500: YouTube recordings
 
-These three classes are untouched stretches of real onboard recordings, cut into the original game's engine slots (LowTorque, MidTorque, HighTorque, PowerBand, Sputter, Decel, Idle, Rev). The only edits are cuts, 10 ms fades, loudness matching and, for the 250 and 500 Idle01, a 0.1 s loop crossfade. The 125 Idle01 is the one exception: the video has no parked idle without the rider talking, so it is built from 15 single engine cycles (about 1,350-1,500 rpm) taken from a 0.75 s voice-free slow roll at 0:19 of the video, laid end to end in a shuffled order with 3 ms crossfades. They have no engine.ini, so the game plays them as whole samples the way MM2 does. The Freesound table below no longer applies to these three folders except where noted here.
+These three classes are untouched stretches of real onboard recordings, cut into the original game's engine slots (LowTorque, MidTorque, HighTorque, PowerBand, Sputter, Decel, Idle, Rev). The only edits are cuts, 10 ms fades, loudness matching and, for the 125, 250 and 500 Idle01, a 0.1 s loop crossfade. The 125 Idle01 is from 5:40.6-5:43.2 of its video (the bike rolling slowly with the throttle shut, about 1,450-1,600 rpm), with the same 0.1 s loop crossfade. They have no engine.ini, so the game plays them as whole samples the way MM2 does. The Freesound table below no longer applies to these three folders except where noted here.
 
 | Class | Recording | Uploader | Licence | Files |
 |---|---|---|---|---|
-| 125 | [2023 CR125 2 Stroke, Raw GoPro, Field Of Dreams NJ](https://www.youtube.com/watch?v=eFumQsGcKjE) (0:19-0:20 for Idle01, 0:35-1:05 for the rest) | The Moto Academy | YouTube Standard Licence | all but Rev01 |
+| 125 | [2023 CR125 2 Stroke, Raw GoPro, Field Of Dreams NJ](https://www.youtube.com/watch?v=eFumQsGcKjE) (5:40-5:43 for Idle01, 0:35-1:05 for the rest) | The Moto Academy | YouTube Standard Licence | all but Rev01 |
 | 250 | [HONDA CR250 TOP SPEED RUN](https://www.youtube.com/watch?v=DE5nSP9d78U) | Matt McHugh | YouTube Standard Licence | all |
 | 500 | [HELMET CAM: 500cc / Tyler Wozney, Tale Of The 2 Stroke 2.0 Shoot](https://www.youtube.com/watch?v=akMqExb8EWs) (0:35-1:15) | MXPTV | YouTube Standard Licence | all but Rev01 |
 | 125 Rev01, 500 Rev01 | ["motorbike crm 250cc kick start rev engine.wav"](https://freesound.org/people/martian/sounds/148855/) | martian | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | kept from the Freesound set |
