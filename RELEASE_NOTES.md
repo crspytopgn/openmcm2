@@ -9,6 +9,9 @@
 * **Rides like a racer.** The free rider now sits down into the seat
   and leans over the bars, further when standing up, and both hands
   close properly round the grips on the Ridgeback and the Kestrel.
+* **Stunt scores agree in network races.** Every player's scoreboard
+  now shows the same stunt points (the game sends each jump's score, as
+  the original did).
 
 # OpenMCM2 0.6.9
 
