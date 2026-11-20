@@ -106,6 +106,7 @@ fn vs_main(@builtin(vertex_index) vi: u32, @location(0) place: vec4<f32>, @locat
         let v = look.yzw - to_eye * dot(look.yzw, to_eye);
         let along = select(up, normalize(v), length(v) > 1e-3);
         let across = normalize(cross(along, to_eye));
+        // (A drop as at a 50th of a second, grit and clods a 120th.)
         let reach = place.w + length(v) * select(0.02, 0.008, kind > 1.5);
         side = across * corner.x + along * corner.y;
         world = place.xyz + across * corner.x * place.w + along * corner.y * reach;
@@ -120,10 +121,14 @@ fn vs_main(@builtin(vertex_index) vi: u32, @location(0) place: vec4<f32>, @locat
     let g = ground_colour(home.xy);
     let grey = vec3<f32>(dot(g, vec3<f32>(0.3, 0.59, 0.11)));
     out.colour = mix(grey, g, 0.8) * 2.3 + vec3<f32>(0.06, 0.05, 0.035);
-    if (kind > 1.5) {
-        // A clod: the dirt under the surface, darker and richer than the
-        // dry top the dust comes off.
-        out.colour = mix(grey, g, 1.2) * 0.95;
+    if (kind > 2.5) {
+        // Grit: the ground's own dirt, a little lighter for being dry and
+        // broken up, as a cloud of it is.
+        out.colour = mix(grey, g, 0.9) * 1.25 + vec3<f32>(0.02, 0.016, 0.01);
+    } else if (kind > 1.5) {
+        // A clod: the ground's dirt, a shade darker and damper from just
+        // under its top.
+        out.colour = mix(grey, g, 0.95) * 0.85;
     } else if (kind > 0.5) {
         // Muddy water: the ground's colour, a little darker.
         out.colour = g * 0.7;
@@ -137,7 +142,7 @@ fn vs_main(@builtin(vertex_index) vi: u32, @location(0) place: vec4<f32>, @locat
     // clod tumbles (dust.rs works out its turn).
     let s = select(look.y, fract(home.w * 7.31), kind > 0.5);
     let n = 8.0;
-    if (kind > 1.5) {
+    if (kind > 1.5 && kind < 2.5) {
         out.shape = vec4<f32>(floor(home.w), floor(home.w), fract(home.w) * 6.2831853, 0.0);
         out.blend = 0.0;
     } else {
@@ -151,7 +156,7 @@ fn vs_main(@builtin(vertex_index) vi: u32, @location(0) place: vec4<f32>, @locat
     // this corner and the sun, its own included, so a cloud is bright on
     // the sun's side and dim beneath and behind.
     var sun = 1.0;
-    if (kind < 1.5) {
+    if (kind < 1.5 || kind > 2.5) {
         let top = place.xyz + vec3<f32>(0.0, place.w * 0.5, 0.0);
         sun = sun_point(top);
         if (sun < 0.0) {
@@ -247,6 +252,18 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
     }
     let l = globals.to_sun.xyz;
     let up = cross(in.to_eye, in.right);
+    if (in.kind > 2.5) {
+        // Grit: a small soft streak, lit by the sun and the sky; too fine
+        // to be seen alone up close, so it thins out near the eye.
+        let r = length(in.uv);
+        if (r > 1.0) {
+            discard;
+        }
+        let a = (1.0 - smoothstep(0.35, 1.0, r)) * in.look.x * smoothstep(1.2, 3.5, dist);
+        let lit = globals.ambient.rgb * 1.05 + globals.sun.rgb * in.sun * 0.75;
+        let c = in.colour * pow(soft_clamp(lit), vec3<f32>(2.2));
+        return vec4<f32>(apply_haze(c, in.centre, dist) * a, a);
+    }
     if (in.kind > 1.5) {
         // A clod: a solid lump cut from the picture's thickest part, lit
         // as a little rough stone, a hard edge softened by a pixel.

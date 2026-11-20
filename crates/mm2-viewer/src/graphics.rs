@@ -166,7 +166,8 @@ impl Default for Enhanced {
             clouds: false,
             ruts: false,
             dust: true,
-            roost: true,
+            // Off until Michael approves the reworked look.
+            roost: false,
             dust_amount: 1.0,
             bikes: false,
             shafts: true,

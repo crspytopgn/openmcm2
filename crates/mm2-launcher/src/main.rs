@@ -2089,7 +2089,7 @@ fn effect_about(name: &str) -> &'static str {
         "grass" => "Grass growing on the grassy ground near you.",
         "smooth" => "The hills round you smoothed, not faceted.",
         "dust" => "Soft clouds of dust the colour of the ground behind the bikes: thicker when you pull hard or spin, a ring of it when you land a jump, and on a dry track a thin haze that hangs and drifts on the wind. The clouds are lit by the sun and cast shadows. Fewer, bigger puffs on Low and Medium, so it stays light on frame rate (Steam Deck included).",
-        "roost" => "Real roost: dirt flung off the back tyre as you pull hard, spin it or slide through a turn, a fan of crumbs and clods that arcs back and falls, some landing in a little puff. Mud in the rain. Replaces the original's tiny dirt specks. Cheap: a few hundred tiny pieces at most, fewer on Low.",
+        "roost" => "Real roost: while the back tyre spins (or you pull hard, or slide through a turn) it throws a low jet of fine grit, crumbs and a few clods out from under it, with a brown plume of dirt hanging behind. The harder it spins, the more it throws. It all falls fast. Only on dirt; mud in the rain. Replaces the original's tiny dirt specks. Light on frame rate, and fewer pieces on Low.",
         "mud" => "Mud and spray caking bikes and riders.",
         "bikes" => "Shiny paint and metal, and smoother riders.",
         "shafts" => "Beams of sunlight past hills, trees and riders.",

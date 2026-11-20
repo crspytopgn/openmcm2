@@ -34,7 +34,7 @@ export const UPGRADES = [
   ["filmic", "Film-like colour (free graphics)", true, "With the free graphics: bright skies and sunlit metal roll off softly to white, as on film. The original game's art keeps its own colours."],
   ["air", "Sunlit haze", true, "Distant haze glows toward the sun and thins higher up, so far hilltops stand clearer. Open-air tracks only."],
   ["nightlights", "Stadium lights at night", true, "With the time of day set to Night, a stadium is lit by its own lamp banks: the floor, bikes and riders lit from above, with soft shadows from each bank."],
-  ["roost", "Flying dirt (roost)", true, "Dirt flung off the back tyre as you pull hard, spin it or slide through a turn: crumbs and clods that arc back and fall, some landing in a little puff. Mud in the rain. Replaces the original's tiny dirt specks. Cheap: fewer on Low."],
+  ["roost", "Flying dirt (roost)", false, "Real roost: while the back tyre spins (or you pull hard, or slide) it throws a low jet of fine grit, crumbs and clods with a brown plume of dirt behind, all falling fast. Only on dirt; mud in the rain. Fewer pieces on Low."],
 ];
 
 // In a browser, Ultra draws as High does (the game caps both: see
