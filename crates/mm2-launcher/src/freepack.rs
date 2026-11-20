@@ -26,6 +26,13 @@ use std::time::Duration;
 const MANIFEST_URL: &str = "https://github.com/crspytopgn/openmcm2/releases/download/freepack/freepack.json";
 /// The manifest the pack's folder was last brought up to date with.
 const LOCAL: &str = "freepack.json";
+/// Where a download keeps its parts until it's done.
+const STAGING: &str = ".download";
+/// In `STAGING`: the part zips already unpacked by a download that then
+/// stopped (their names hold a hash of what's in them, so a name is
+/// enough), and the list the folder had before it started.
+const DONE: &str = "done.txt";
+const BEFORE: &str = "before.json";
 /// The most a part may be.
 const MAX_PART: u64 = 2 << 30;
 
@@ -119,23 +126,31 @@ fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(3600)))
         .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_recv_response(Some(Duration::from_secs(60)))
+        // A stalled try ends, and the next one carries on from the bytes
+        // already on disk, so even a slow line gets there.
+        .timeout_recv_body(Some(Duration::from_secs(300)))
         .user_agent(concat!("OpenMCM2-launcher/", env!("CARGO_PKG_VERSION")))
         .build()
         .into()
 }
 
-/// The newest manifest.
+/// The newest manifest, asked for up to three times.
 pub fn fetch() -> Result<Manifest, String> {
-    let text = agent()
-        .get(&manifest_url())
-        .call()
-        .map_err(|e| format!("couldn't reach the Free Pack download: {e}"))?
-        .body_mut()
-        .with_config()
-        .limit(32 << 20)
-        .read_to_string()
-        .map_err(|e| format!("couldn't read the Free Pack's list: {e}"))?;
-    Manifest::parse(&text)
+    let mut last = String::new();
+    for wait in [0, 2, 5] {
+        std::thread::sleep(Duration::from_secs(wait));
+        let got = agent()
+            .get(&manifest_url())
+            .call()
+            .map_err(|e| format!("couldn't reach the Free Pack download: {e}"))
+            .and_then(|mut r| r.body_mut().with_config().limit(32 << 20).read_to_string().map_err(|e| format!("couldn't read the Free Pack's list: {e}")));
+        match got {
+            Ok(text) => return Manifest::parse(&text),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
 }
 
 /// The manifest the pack in `dir` was kept up to date with.
@@ -195,7 +210,11 @@ fn start(dir: PathBuf, menus: bool) -> Arc<Progress> {
     let q = p.clone();
     std::thread::spawn(move || {
         let r = run(&dir, &q, menus).map(|_| dir.clone());
-        let _ = fs::remove_dir_all(dir.join(".download"));
+        // After a failure the half-downloaded part and the list of finished
+        // ones stay, so trying again carries on where it stopped.
+        if r.is_ok() {
+            let _ = fs::remove_dir_all(dir.join(STAGING));
+        }
         *q.result.lock().unwrap() = Some(r);
     });
     p
@@ -204,23 +223,32 @@ fn start(dir: PathBuf, menus: bool) -> Arc<Progress> {
 fn run(dir: &Path, p: &Progress, menus: bool) -> Result<(), String> {
     let what = if menus { "the new look menus" } else { "the Free Pack" };
     *p.stage.lock().unwrap() = format!("Checking {what}…");
-    let have = local(dir);
+    let staging = dir.join(STAGING);
+    fs::create_dir_all(&staging).map_err(|e| format!("{}: {e}", staging.display()))?;
+    // The folder's list moves aside while it's being changed (a stopped
+    // update isn't taken for a finished one), and is read back from there
+    // when trying again.
+    if let Ok(text) = fs::read_to_string(dir.join(LOCAL)) {
+        fs::write(staging.join(BEFORE), text).map_err(|e| format!("{}: {e}", staging.display()))?;
+    }
+    let _ = fs::remove_file(dir.join(LOCAL));
+    let have = fs::read_to_string(staging.join(BEFORE)).ok().and_then(|t| Manifest::parse(&t).ok());
     let new = newest_for(have.as_ref(), menus)?;
-    let parts = new.needed(have.as_ref(), dir);
+    let done: HashSet<String> = fs::read_to_string(staging.join(DONE)).unwrap_or_default().lines().map(str::to_string).collect();
+    let parts: Vec<Part> = new.needed(have.as_ref(), dir).into_iter().filter(|x| !done.contains(&x.file)).collect();
     let base = manifest_url();
     let base = base.rsplit_once('/').map_or(base.as_str(), |(b, _)| b).to_string();
     let wanted: HashMap<&str, &Entry> = new.files.iter().map(|f| (f.path.as_str(), f)).collect();
     p.total.store(parts.iter().map(|x| x.size).sum::<u64>().max(1), Ordering::Relaxed);
-    let staging = dir.join(".download");
-    fs::create_dir_all(&staging).map_err(|e| format!("{}: {e}", staging.display()))?;
-    // The old list goes first: a stopped update then starts over cleanly.
-    let _ = fs::remove_file(dir.join(LOCAL));
     for (i, part) in parts.iter().enumerate() {
-        *p.stage.lock().unwrap() = format!("Downloading {what} {}: part {} of {}…", new.version, i + 1, parts.len());
+        let stage = format!("Downloading {what} {}: part {} of {}", new.version, i + 1, parts.len());
+        *p.stage.lock().unwrap() = format!("{stage}…");
         let zip = staging.join(&part.file);
-        download(&format!("{base}/{}", part.file), part, &zip, p)?;
+        download(&format!("{base}/{}", part.file), part, &zip, p, &stage)?;
         unpack(&zip, dir, &wanted)?;
         let _ = fs::remove_file(&zip);
+        let mut list = fs::OpenOptions::new().create(true).append(true).open(staging.join(DONE)).map_err(|e| format!("{}: {e}", staging.display()))?;
+        writeln!(list, "{}", part.file).map_err(|e| format!("{}: {e}", staging.display()))?;
     }
     // Files the pack no longer has.
     if let Some(have) = &have {
@@ -241,29 +269,111 @@ fn json_of(m: &Manifest) -> serde_json::Value {
     })
 }
 
-fn download(url: &str, part: &Part, to: &Path, p: &Progress) -> Result<(), String> {
+/// Why a try at a part stopped: worth trying again, or not.
+enum Fail {
+    Again(String),
+    Stop(String),
+}
+
+/// Downloads a part into `to`, checked against its hash. A dropped or
+/// stalled connection, a busy server or a damaged download is tried again
+/// with growing waits (about two and a half minutes in all), each try
+/// carrying on from the bytes already on disk.
+fn download(url: &str, part: &Part, to: &Path, p: &Progress, stage: &str) -> Result<(), String> {
     if part.size > MAX_PART {
         return Err("a Free Pack part is far bigger than it should be".into());
     }
-    let mut response = agent().get(url).call().map_err(|e| format!("download failed: {e}"))?;
-    let mut body = response.body_mut().with_config().limit(MAX_PART).reader();
-    let mut file = fs::File::create(to).map_err(|e| format!("{}: {e}", to.display()))?;
+    let base = p.done.load(Ordering::Relaxed);
+    let waits = [2u64, 5, 10, 20, 40, 60];
+    let mut last = String::new();
+    for attempt in 0..=waits.len() {
+        if attempt > 0 {
+            let wait = waits[attempt - 1];
+            *p.stage.lock().unwrap() = format!("{stage}: {last}. Trying again in {wait} s…");
+            for _ in 0..wait * 10 {
+                if p.cancel.load(Ordering::Relaxed) {
+                    return Err("download cancelled".into());
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            *p.stage.lock().unwrap() = format!("{stage}…");
+        }
+        match try_download(url, part, to, p, base) {
+            Ok(()) => return Ok(()),
+            Err(Fail::Stop(e)) => return Err(e),
+            Err(Fail::Again(e)) => last = e,
+        }
+    }
+    Err(format!(
+        "{} kept failing to download ({last}), even after trying again for a few minutes. Check your internet connection and try again: what already came down is kept, so it carries on where it stopped.",
+        part.file
+    ))
+}
+
+fn try_download(url: &str, part: &Part, to: &Path, p: &Progress, base: u64) -> Result<(), Fail> {
+    let disk = |e: std::io::Error| Fail::Stop(format!("{}: {e}", to.display()));
+    let mut have = fs::metadata(to).map(|m| m.len()).unwrap_or(0);
+    if have > part.size {
+        fs::remove_file(to).map_err(disk)?;
+        have = 0;
+    }
+    p.done.store(base + have, Ordering::Relaxed);
+    if have < part.size {
+        let mut req = agent().get(url);
+        if have > 0 {
+            req = req.header("Range", format!("bytes={have}-"));
+        }
+        let mut response = match req.call() {
+            Ok(r) => r,
+            Err(ureq::Error::StatusCode(404)) => {
+                return Err(Fail::Stop(format!(
+                    "{} isn't on the download server. A new version of the pack may be on its way up: wait a few minutes and try again.",
+                    part.file
+                )))
+            }
+            // The bytes kept don't fit what the server has: start the part over.
+            Err(ureq::Error::StatusCode(416)) => {
+                let _ = fs::remove_file(to);
+                return Err(Fail::Again("the download had to start over".into()));
+            }
+            Err(e) => return Err(Fail::Again(e.to_string())),
+        };
+        // A server that ignores the range sends the whole part again.
+        let resumed = have > 0 && response.status().as_u16() == 206;
+        if !resumed {
+            have = 0;
+            p.done.store(base, Ordering::Relaxed);
+        }
+        let mut file = fs::OpenOptions::new().create(true).write(true).append(resumed).truncate(!resumed).open(to).map_err(disk)?;
+        let mut body = response.body_mut().with_config().limit(MAX_PART).reader();
+        let mut buf = vec![0u8; 1 << 16];
+        loop {
+            if p.cancel.load(Ordering::Relaxed) {
+                return Err(Fail::Stop("download cancelled".into()));
+            }
+            let n = body.read(&mut buf).map_err(|e| Fail::Again(e.to_string()))?;
+            if n == 0 {
+                break;
+            }
+            file.write_all(&buf[..n]).map_err(disk)?;
+            have += n as u64;
+            p.done.store(base + have, Ordering::Relaxed);
+        }
+    }
     let mut hash = Sha256::new();
+    let mut file = fs::File::open(to).map_err(disk)?;
     let mut buf = vec![0u8; 1 << 16];
     loop {
-        if p.cancel.load(Ordering::Relaxed) {
-            return Err("download cancelled".into());
-        }
-        let n = body.read(&mut buf).map_err(|e| format!("download failed: {e}"))?;
+        let n = file.read(&mut buf).map_err(disk)?;
         if n == 0 {
             break;
         }
         hash.update(&buf[..n]);
-        file.write_all(&buf[..n]).map_err(|e| format!("{}: {e}", to.display()))?;
-        p.done.fetch_add(n as u64, Ordering::Relaxed);
     }
     if hex(hash.finalize().as_slice()) != part.sha256 {
-        return Err(format!("{} doesn't match its checksum, so it wasn't used", part.file));
+        let _ = fs::remove_file(to);
+        p.done.store(base, Ordering::Relaxed);
+        return Err(Fail::Again(format!("{} came down damaged (wrong checksum)", part.file)));
     }
     Ok(())
 }

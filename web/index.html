@@ -1218,6 +1218,92 @@ async function sha256(buffer) {
   const hash = await crypto.subtle.digest("SHA-256", buffer);
   return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+// What stopped a Free Pack download: kind "space" (no room in this
+// browser), "missing" (the host doesn't have a file) or "net" (the file
+// kept failing to come down), with the file's path for the message.
+class PackError extends Error {
+  constructor(kind, path, why) {
+    super(path ? `${path}: ${why}` : why);
+    Object.assign(this, { kind, path, why });
+  }
+}
+const isQuota = (e) => e?.name === "QuotaExceededError" || /quota/i.test(String(e?.message || ""));
+const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
+// Stops a pack download that can't fit, before it starts. Browsers only
+// guess their quota, so this errs on the side of trying.
+async function roomFor(bytes) {
+  const est = await navigator.storage?.estimate?.().catch(() => null);
+  if (!est?.quota) return;
+  const free = est.quota - (est.usage || 0);
+  if (free < bytes + 20 * 1048576)
+    throw new PackError("space", "", `the pack needs ${MB(bytes)} MB and this browser has room for ${MB(Math.max(0, free))} MB`);
+}
+// Waits up to `ms` for the browser to come back online.
+const online = (ms) =>
+  navigator.onLine
+    ? Promise.resolve()
+    : new Promise((ok) => {
+        const done = () => (removeEventListener("online", done), clearTimeout(t), ok());
+        const t = setTimeout(done, ms);
+        addEventListener("online", done);
+      });
+// When any download is told to slow down (429/503), they all wait.
+let packCalmUntil = 0;
+// One file of the pack, as a checked Blob. A dropped connection, a
+// stalled one (nothing for 30 s), a busy host or a bad checksum is tried
+// again with growing waits, about three minutes in all, so one blip
+// doesn't end a 600 MB download. `got(n)` counts bytes as they arrive
+// (and takes them back if a try fails); `note(text)` says it's retrying.
+async function fetchPackFile(f, got, note) {
+  const waits = [1, 2, 4, 8, 15, 25, 40, 60];
+  for (let attempt = 0; ; attempt++) {
+    const calm = packCalmUntil - Date.now();
+    if (calm > 0) await pause(calm);
+    const stop = new AbortController();
+    let stall = 0;
+    const alive = () => (clearTimeout(stall), (stall = setTimeout(() => stop.abort(), 30000)));
+    let size = 0;
+    let missing = false;
+    try {
+      alive();
+      const r = await fetch(PACK_URL + "files/" + f.sha256, { signal: stop.signal });
+      if (!r.ok) {
+        if (r.status === 429 || r.status === 503) {
+          const after = Number(r.headers.get("Retry-After"));
+          packCalmUntil = Math.max(packCalmUntil, Date.now() + (after > 0 ? Math.min(after, 120) : waits[Math.min(attempt, 4)]) * 1000);
+        }
+        missing = r.status === 404 || r.status === 403;
+        throw new Error(r.status === 429 ? "the download server is busy (429)" : `the download answered ${r.status}`);
+      }
+      const reader = r.body.getReader();
+      const parts = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        alive();
+        parts.push(value);
+        size += value.length;
+        got(value.length);
+      }
+      clearTimeout(stall);
+      const data = await new Blob(parts).arrayBuffer();
+      if ((await sha256(data)) !== f.sha256) throw new Error("it came down damaged (wrong checksum)");
+      if (attempt) note("");
+      return new Blob([data]);
+    } catch (err) {
+      clearTimeout(stall);
+      got(-size);
+      const why = stop.signal.aborted ? "it stopped arriving for 30 seconds" : err.name === "TypeError" ? "the connection dropped" : String(err.message || err);
+      // A file the host doesn't have won't turn up: a couple of tries
+      // covers a pack that's being published right now.
+      if (attempt >= (missing ? 2 : waits.length - 1)) throw new PackError(missing ? "missing" : "net", f.path, why);
+      const wait = Math.round(waits[attempt] * (0.8 + Math.random() * 0.4));
+      note(`${f.path.split("/").pop()}: ${why}. Trying again in ${wait} s…`);
+      await pause(wait * 1000);
+      await online(120000);
+    }
+  }
+}
 // Brings the pack in this browser up to date (when online), and gives its
 // files as [path, blob] under /freepack, or null if there's none.
 // The pack's files this browser uses. Its 28 tracks (TERAFORM, 1.4 GB)
@@ -1249,37 +1335,37 @@ async function syncPack(fetchNew, pick) {
           : "Already up to date."
       );
       const note = total < all ? ` · the other ${MB(all - total)} MB is already here` : "";
+      let retrying = "";
       const show = () =>
-        loader.progress(fetched / total, `${MB(fetched)} of ${MB(total)} MB · ${Math.floor((fetched / total) * 100)}%${note}`);
+        loader.progress(
+          fetched / total,
+          `${MB(fetched)} of ${MB(total)} MB · ${Math.floor((fetched / total) * 100)}%${note}${retrying ? `\n${retrying}` : ""}`
+        );
       if (missing.length) show();
+      // Asks for staying room first, then checks there's space: a pack
+      // that can't fit stops now with a clear reason, not part way.
+      await navigator.storage?.persist?.().catch(() => false);
+      if (missing.length) await roomFor(total);
       let next = 0;
+      let failed = null;
       const worker = async () => {
-        while (next < missing.length) {
+        while (next < missing.length && !failed) {
           const f = missing[next++];
-          const got = await fetch(PACK_URL + "files/" + f.sha256);
-          if (!got.ok) throw new Error(`${f.path}: the download answered ${got.status}`);
-          // Counted as it arrives, so big files move the bar too.
-          const parts = [];
-          let size = 0;
-          const reader = got.body.getReader();
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            parts.push(value);
-            size += value.length;
-            fetched += value.length;
-            show();
+          try {
+            const blob = await fetchPackFile(f, (n) => ((fetched += n), show()), (why) => ((retrying = why), show()));
+            await fs.packPut(f.sha256, blob).catch((e) => {
+              throw isQuota(e) ? new PackError("space", f.path, "the browser ran out of storage space") : e;
+            });
+          } catch (err) {
+            // The other downloads finish the file they're on (it's kept),
+            // then stop: the next try only fetches what's still missing.
+            failed ||= err instanceof PackError ? err : new PackError("net", f.path, String(err.message || err));
           }
-          const data = await new Blob(parts).arrayBuffer();
-          if ((await sha256(data)) !== f.sha256) {
-            fetched -= size;
-            throw new Error(`${f.path} didn't match its checksum, so it wasn't used`);
-          }
-          await fs.packPut(f.sha256, new Blob([data]));
         }
       };
-      navigator.storage?.persist?.();
-      await Promise.all(Array.from({ length: 6 }, worker));
+      // Four at once: the download host turns away bigger bursts.
+      await Promise.all(Array.from({ length: 4 }, worker));
+      if (failed) throw failed;
       await fs.packPut(key, latest);
       // Files no version needs any more (after a whole pack's update).
       if (!pick) {
@@ -1314,11 +1400,19 @@ async function downloadAndPlay() {
   } catch (err) {
     console.warn(err);
     const offline = !navigator.onLine;
+    const kept = "The files that already came down are kept, so trying again carries on where it stopped.";
+    const why = offline
+      ? "This browser is offline. Connect to the internet and try again. " + kept
+      : err.kind === "space"
+        ? `There isn't enough storage space in this browser for the Free Pack: ${err.why}.\n\nFree some disk space, or use a normal (not private) window, which gets more room. ${kept}`
+        : err.kind === "missing"
+          ? `The download server doesn't have ${err.path} (${err.why}). A new version of the pack may be on its way up: wait a few minutes and try again. ${kept}`
+          : err.kind === "net"
+            ? `${err.path} kept failing to download (${err.why}), even after trying again for a few minutes. Check your internet connection and try again. ${kept}`
+            : "The download stopped part way. Check your internet connection and try again. " + kept;
     loader.fail(
       "Couldn't download the Free Pack",
-      offline
-        ? "This browser is offline. Connect to the internet and try again."
-        : "The download stopped part way. Check your internet connection and try again: the files that already came down are kept, so it carries on where it stopped.\n\nIf it keeps failing, the browser may be out of storage space for the pack (about 2 GB).",
+      why,
       String(err.stack || err),
       [["Try the download again", () => { loader.hide(); downloadAndPlay(); }]],
       "Download failed"
