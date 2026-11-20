@@ -1,3 +1,13 @@
+# OpenMCM2 0.6.11
+
+* **Free Pack downloads that don't give up.** The browser version and
+  the launcher now keep going when the connection drops, stalls or the
+  download server is busy: each file is tried again after a short wait,
+  and a half-finished part carries on from where it stopped. If it
+  still can't finish, everything that came down is kept, and the
+  message says which file failed and why (no space left, missing on
+  the server, or the connection).
+
 # OpenMCM2 0.6.10
 
 * **A new free rider.** Playing with free graphics, you get a whole new
