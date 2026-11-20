@@ -259,6 +259,25 @@ impl Hull {
     /// convex shell round each part's points, the frame's in model space
     /// and each wheel's about its axle, rounded off by taking the farthest
     /// point along 98 even directions.
+    /// A wheel's collision points as the original's shared hull has
+    /// them (`honda.col`, both tyres alike): two rings of nine, every 40°
+    /// from straight ahead, 0.2 ft either side of the centre, and the
+    /// hub. No point sits straight under the axle, so a bottomed tyre
+    /// pushes back through the ones ahead of and behind it, which is how
+    /// a squeezed fork lifts the bike on a jump face; a round shell of
+    /// the tyre's mesh kicked the nose 6° higher off the same face.
+    pub fn ring_wheel(radius: f32) -> Vec<Vec3> {
+        let mut out = Vec::with_capacity(20);
+        for k in 0..9 {
+            let a = (k as f32 * 40.0).to_radians();
+            for x in [0.201f32, -0.201] {
+                out.push(Vec3::new(x, a.sin() * radius, a.cos() * radius));
+            }
+        }
+        out.extend([Vec3::new(0.201, 0.0, 0.0), Vec3::new(-0.201, 0.0, 0.0)]);
+        out
+    }
+
     pub fn from_points(body: &[Vec3], wheels: [&[Vec3]; 2]) -> Self {
         let parts = [(1, body), (7, wheels[0]), (8, wheels[1])];
         let col = mm2_formats::col::Collision {
@@ -2429,6 +2448,16 @@ mod tests {
         steer: 0.0,
         lean: 0.0,
     };
+
+    #[test]
+    fn ring_wheels_are_shaped_like_the_originals() {
+        let ring = Hull::ring_wheel(1.17);
+        assert_eq!(ring.len(), 20);
+        // Every 40° from straight ahead: none straight under the axle.
+        let lowest = ring.iter().map(|p| p.y).fold(f32::MAX, f32::min);
+        assert!((lowest + 1.17 * 80f32.to_radians().sin()).abs() < 1e-4, "{lowest}");
+        assert!(ring.iter().all(|p| p.x.abs() > 0.2));
+    }
 
     #[test]
     fn stands_still_on_its_springs() {
