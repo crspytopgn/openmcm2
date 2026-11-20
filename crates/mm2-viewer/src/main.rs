@@ -953,6 +953,31 @@ fn run(app: App) -> Result<(), BoxError> {
     Ok(())
 }
 
+/// The size the game draws its picture at in a window of `w`×`h`: the
+/// window's own, or with `--max-pixels=N` (the browser's light mode for
+/// phones) no more than N pixels, the same shape, which the browser then
+/// stretches over the screen. A phone's sharp screen otherwise has its
+/// graphics chip fill three million pixels or more every frame.
+fn drawn_size(w: u32, h: u32) -> (u32, u32) {
+    static MOST: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    let most = *MOST.get_or_init(|| {
+        crate::args()
+            .find_map(|a| a.strip_prefix("--max-pixels=").and_then(|n| n.parse::<u64>().ok()))
+            .filter(|&n| n >= 320 * 240)
+    });
+    fit_pixels(w.max(1), h.max(1), most)
+}
+
+fn fit_pixels(w: u32, h: u32, most: Option<u64>) -> (u32, u32) {
+    match most {
+        Some(most) if w as u64 * h as u64 > most => {
+            let k = (most as f64 / (w as f64 * h as f64)).sqrt();
+            (((w as f64 * k) as u32).max(1), ((h as f64 * k) as u32).max(1))
+        }
+        _ => (w, h),
+    }
+}
+
 /// At the screen's refresh, or as fast as the machine can with the VSync
 /// tweak off (`--no-vsync`). Either way the bike steps once a frame, as
 /// the game does.
@@ -4404,8 +4429,7 @@ impl State {
     /// is out.
     fn fit_surface(&mut self) {
         let size = self.window.inner_size();
-        self.config.width = size.width.max(1);
-        self.config.height = size.height.max(1);
+        (self.config.width, self.config.height) = drawn_size(size.width, size.height);
         self.surface.configure(&self.device, &self.config);
     }
 }
@@ -4567,8 +4591,9 @@ impl App {
         (adapter, device, queue): (wgpu::Adapter, wgpu::Device, wgpu::Queue),
     ) -> Result<State, BoxError> {
         let size = window.inner_size();
+        let (w, h) = drawn_size(size.width, size.height);
         let mut config = surface
-            .get_default_config(&adapter, size.width.max(1), size.height.max(1))
+            .get_default_config(&adapter, w, h)
             .ok_or("this GPU cannot draw to the window")?;
         let caps = surface.get_capabilities(&adapter);
         config.format = caps
@@ -6378,8 +6403,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Resized(size) => {
                 if let Some(s) = &mut self.state {
-                    s.config.width = size.width.max(1);
-                    s.config.height = size.height.max(1);
+                    (s.config.width, s.config.height) = drawn_size(size.width, size.height);
                     s.surface.configure(&s.device, &s.config);
                 }
             }
@@ -6397,9 +6421,16 @@ impl ApplicationHandler for App {
                 };
                 self.window_event(event_loop, id, WindowEvent::MouseInput { device_id, state, button: MouseButton::Left });
             }
-            WindowEvent::CursorMoved { position, .. } => {
+            WindowEvent::CursorMoved { mut position, .. } => {
                 if let Some(s) = &self.state {
                     let size = (s.config.width, s.config.height);
+                    // The picture may be drawn smaller than the window
+                    // (`--max-pixels`) and stretched over it.
+                    let window = s.window.inner_size();
+                    if window.width > 0 && window.height > 0 {
+                        position.x *= size.0 as f64 / window.width as f64;
+                        position.y *= size.1 as f64 / window.height as f64;
+                    }
                     // The replay player is drawn stretched over the window,
                     // or over the race between black bars.
                     let stretch = self.replay.is_some() && !self.in_menus();
@@ -6823,4 +6854,16 @@ fn menu_wheel_lines(delta: winit::event::MouseScrollDelta) -> i32 {
         w.set(total);
         lines as i32
     })
+}
+
+#[cfg(test)]
+mod drawn_size_tests {
+    use super::fit_pixels;
+
+    #[test]
+    fn a_phone_screen_is_drawn_smaller_in_the_same_shape() {
+        assert_eq!(fit_pixels(2532, 1170, Some(1280 * 720)), (1412, 652));
+        assert_eq!(fit_pixels(1280, 720, Some(1280 * 720)), (1280, 720));
+        assert_eq!(fit_pixels(2532, 1170, None), (2532, 1170));
+    }
 }
