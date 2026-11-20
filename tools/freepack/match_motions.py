@@ -72,12 +72,58 @@ def two_bone(A, T, L1, L2, knee):
 def weight(d, full, none):
     return float(np.clip((none - d) / (none - full), 0.0, 1.0))
 
-def refit(tree, W, grips):
+# The free bike's seat is lower than the original's: a rider on it sits
+# this much lower (ft, game axes) and leans the upper body forward this
+# many degrees, over the bars, with the head kept up by most of it; the
+# elbows bend out and up. Fades out as the pelvis leaves the seat
+# (tricks, crashes).
+SEAT_DROP = np.array([0.0, -0.7, 0.05])
+# ...but never with the hips below this height (ft) over the ground.
+SEAT_HIP = 3.5
+SEAT_LEAN = 18.0
+# Standing up over the tank (the pelvis forward of this, ft) leans this
+# much more: the attack position, chest over the bars.
+ATTACK_Z, ATTACK_LEAN = -1.0, 22.0
+HEAD_KEEP = 0.8
+ELBOW_BIAS = np.array([0.4, 0.2, 0.0])
+
+def _axis_angle(a, deg):
+    a = a / np.linalg.norm(a); t = math.radians(deg); c, s = math.cos(t), math.sin(t)
+    K = np.array([[0, -a[2], a[1]], [a[2], 0, -a[0]], [-a[1], a[0], 0]])
+    return np.eye(3) + s * K + (1 - c) * K @ K
+
+def settle(tree, W, home):
+    """Sits the rider down onto the free bike's seat (see SEAT_DROP)."""
+    idx = {f['name']: i for i, f in enumerate(tree)}
+    w = weight(np.linalg.norm(W[idx['Pelvis']][1] - home), 0.6, 1.6)
+    if w <= 0:
+        return list(W)
+    y = W[idx['Pelvis']][1][1]
+    d = SEAT_DROP * w
+    d[1] = -min(-SEAT_DROP[1], max(0.0, y - SEAT_HIP)) * w
+    W = [(R, t + d) for R, t in W]
+    kids = {i: [j for j, f in enumerate(tree) if f['parent'] == i] for i in range(len(tree))}
+    def sub(i):
+        yield i
+        for j in kids[i]:
+            yield from sub(j)
+    lt = idx['LwrTorso']
+    z = W[idx['Pelvis']][1][2]
+    lean = SEAT_LEAN * w + ATTACK_LEAN * float(np.clip((z - ATTACK_Z) / 0.6, 0.0, 1.0)) * (w > 0)
+    Q = _axis_angle(W[lt][0][:, 0], lean); j = W[idx['UprTorso']][1]
+    for i in sub(idx['UprTorso']):
+        R, t = W[i]; W[i] = (Q @ R, j + Q @ (t - j))
+    h = idx['Head']
+    W[h] = (_axis_angle(W[lt][0][:, 0], -lean * HEAD_KEEP) @ W[h][0], W[h][1])
+    return W
+
+def refit(tree, W, grips, pre=None):
     """Moves the feet near the original's pegs and the hands near the
-    original's grips onto the free bike's, re-bending the limbs."""
+    original's grips onto the free bike's, re-bending the limbs. `pre`:
+    the pose before settle(), whose hands and feet say where they go."""
     idx = {f['name']: i for i, f in enumerate(tree)}
     free_ankle = np.array(SEATED['ankle'], float)
-    W = list(W)
+    W = list(W); pre = W if pre is None else pre
     for s, sx in (('L', -1), ('R', 1)):
         for upper, lower, end, orig, new, full, none in (
             ('UprLeg', 'LwrLeg', 'Foot', ORIG_ANKLE * [sx, 1, 1], free_ankle * [sx, 1, 1], 0.45, 1.0),
@@ -85,14 +131,16 @@ def refit(tree, W, grips):
         ):
             iu, il, ie = idx[upper + s], idx[lower + s], idx[end + s]
             A, K, T = W[iu][1], W[il][1], W[ie][1]
-            w = weight(np.linalg.norm(T - orig), full, none)
+            Tp = pre[ie][1]
+            w = weight(np.linalg.norm(Tp - orig), full, none)
             if w <= 0:
                 continue
-            T2 = T + (new - orig) * w
+            T2 = T + (Tp + (new - orig) - T) * w
             L1, L2 = np.linalg.norm(K - A), np.linalg.norm(T - K)
-            K2, T2 = two_bone(A, T2, L1, L2, K)
+            bias = ELBOW_BIAS * [sx, 1, 1] * w if upper == 'UprArm' else 0
+            K2, T2 = two_bone(A, T2, L1, L2, K + bias)
             clear = SEATED.get('knee_clear') if upper == 'UprLeg' else None
-            hint = K.copy()
+            hint = K + bias
             for _ in range(12):
                 # Knees kept outside the bike's shrouds: the bend turned
                 # outward until the knee clears.
@@ -118,10 +166,12 @@ def match(rider, bike, timing, dumps):
     from free_motions import pose
     free_grip = pose(None)['HandR'][1]
     grips = (np.array(orig_grip), np.array(free_grip))
+    home = np.array(centre[ORDER.index('Pelvis')][1])
     info = {}
     for d, kind in ((R, 'Rider'), (UR, 'UIRider')):
         for name, frames in d['motions'].items():
-            rider[name] = [to_keys(tree, refit(tree, world(tree, k), grips)) for k in frames]
+            rider[name] = [to_keys(tree, refit(tree, settle(tree, world(tree, k), home), grips, world(tree, k)))
+                           for k in frames]
             info[name] = d.get('info', {}).get(name)
     for d in (B, UB):
         btree = d['frames']

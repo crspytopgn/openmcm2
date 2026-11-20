@@ -98,6 +98,8 @@ These models were refitted to the game's bike and rider frames, recoloured and g
 | Ridgeback four-stroke (logos removed, split into moving parts, repainted) | [(FREE) Honda CRF 450](https://sketchfab.com/3d-models/c80f0e732e844580af412958c9d67315) | Jacobdesigns |
 | Kestrel two-stroke (split into moving parts, repainted) | [2 stroke dirt-bike](https://sketchfab.com/3d-models/703c2391f70c47bea4f86412c8b4738b) | moto man 135 |
 | Rider, track-side people and stadium crowd base body | [Hight Quality Realistic Man Character](https://sketchfab.com/3d-models/10cbeabee635483fae932f9e49f3cf7b) | hammer.gamedev |
+| Free rider body (all prints replaced with our own kit) | "race driver" | [BELAZ](https://sketchfab.com/BELAZ) |
+| Free rider MX helmet (all prints replaced with our own kit) | "Motocross Helmet (Final)" | [Sharpsterman](https://sketchfab.com/Sharpsterman) |
 | Skid steer (bobcat) | [Skid Steer Digger](https://sketchfab.com/3d-models/d1b7c5cba07a4f278267fca69c821cb7) | MitchellBr |
 | Tractor | [Tractor](https://sketchfab.com/3d-models/e9e844f2f9364044a181ce8f38a83dc3) | sheldon.bean |
 | Old tractor | [Weathered Tractor](https://sketchfab.com/3d-models/d891c103cddd44b69d1357c832d9ad56) | ArtDmitriyK |

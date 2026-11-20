@@ -78,10 +78,11 @@ def locals_(W):
 # (the OpenMX bikes' shrouds are the widest, the enduro's engine and pipe the
 # lowest): boots out to 0.78 on the pegs, knees turned out against the
 # shrouds. `knee_clear` is the least knee x (game units) any pose should keep,
-# for poses that turn the bars or lean, where the inside knee comes in.
+# for poses that turn the bars or lean, where the inside knee comes in. `grip` is
+# the Ridgeback's grip (the Kestrel's bars are raised to the same place).
 SEATED = dict(pelvis=(0, 3.62, -1.02), pelvis_pitch=14, lower_pitch=12, upper_pitch=16, head_pitch=-6,
               ankle=(0.78, 1.64, -0.80), knee_out=0.8, knee_clear=0.95, foot_yaw=6, foot_pitch=-8,
-              grip=(1.10, 3.89, 0.70), wrist_from_grip=(0.0, 0.10, -0.30), elbow_out=1.0, hand_roll=0)
+              grip=(0.99, 4.10, 0.58), wrist_from_grip=(0.0, 0.10, -0.30), elbow_out=1.0, hand_roll=0)
 if __name__ == '__main__':
     W = solve(SEATED); L = locals_(W)
     json.dump(L, open(sys.argv[1] if len(sys.argv) > 1 else '/home/user/work/pose/seated.json', 'w'), indent=1)
