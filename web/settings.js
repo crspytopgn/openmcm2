@@ -18,7 +18,7 @@ export const UPGRADES = [
   ["ground", "Detailed ground", true, "The ground re-made from photo materials."],
   ["grass", "3D grass", true, "Grass growing on the grassy ground near you."],
   ["smooth", "Smooth hills", true, "The hills round you smoothed, not faceted."],
-  ["dust", "Dust clouds", true, "Clouds of dust behind the bikes, casting shadows."],
+  ["dust", "Dust clouds", true, "Soft clouds of dust the colour of the ground behind the bikes: thicker when you pull hard or spin, a ring of it when you land, and on a dry track a thin haze that hangs on the wind. Fewer, bigger puffs on Low and Medium, so it stays light."],
   ["mud", "Mud and spray", true, "Mud and spray caking bikes and riders."],
   ["bikes", "Glossier bikes", false, "Shiny paint and metal, and smoother riders."],
   ["shafts", "Light shafts", true, "Beams of sunlight past hills, trees and riders. Not in a browser: too heavy."],
@@ -34,6 +34,7 @@ export const UPGRADES = [
   ["filmic", "Film-like colour (free graphics)", true, "With the free graphics: bright skies and sunlit metal roll off softly to white, as on film. The original game's art keeps its own colours."],
   ["air", "Sunlit haze", true, "Distant haze glows toward the sun and thins higher up, so far hilltops stand clearer. Open-air tracks only."],
   ["nightlights", "Stadium lights at night", true, "With the time of day set to Night, a stadium is lit by its own lamp banks: the floor, bikes and riders lit from above, with soft shadows from each bank."],
+  ["roost", "Flying dirt (roost)", true, "Dirt flung off the back tyre as you pull hard, spin it or slide through a turn: crumbs and clods that arc back and fall, some landing in a little puff. Mud in the rain. Replaces the original's tiny dirt specks. Cheap: fewer on Low."],
 ];
 
 // In a browser, Ultra draws as High does (the game caps both: see

@@ -41,6 +41,9 @@ const COLOURED: u32 = 0x800;
 /// The port's own mark on the tyres' dust trail, which the enhanced
 /// drawing's dust clouds can stand in for.
 const TRAIL: u32 = 0x1_0000;
+/// The port's own mark on the spinning tyre's dirt chunks, which the
+/// enhanced drawing's flying dirt (crate::dust) can stand in for.
+const CHUNK: u32 = 0x2_0000;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -271,6 +274,9 @@ pub struct Particles {
     /// Leaves the tyres' dust trail undrawn (still made, so the rest is
     /// as the game has it), for the enhanced drawing's dust.
     pub hide_trail: bool,
+    /// Leaves the spinning tyre's dirt chunks undrawn (still made), for
+    /// the enhanced drawing's flying dirt.
+    pub hide_chunks: bool,
 }
 
 struct Gpu {
@@ -290,6 +296,7 @@ impl Particles {
             light: [Vec3::ONE; 4],
             gpu: None,
             hide_trail: false,
+            hide_chunks: false,
         }
     }
 
@@ -463,7 +470,7 @@ impl Particles {
                 life: spec.life,
                 size,
                 growth: size + size,
-                flags: MOVES | FALLS,
+                flags: MOVES | FALLS | spec.mark,
             });
             t.cell = if t.cell >= spec.cells.1 { spec.cells.0 } else { t.cell + 1 };
             t.scale_at = if t.scale_at >= 32 { 0 } else { t.scale_at + 1 };
@@ -490,6 +497,7 @@ impl Particles {
                 life: 375.0,
                 cells: (29, 44),
                 own_velocity: false,
+                mark: CHUNK,
             },
         );
     }
@@ -517,6 +525,7 @@ impl Particles {
                 life: 500.0,
                 cells: (45, 60),
                 own_velocity: true,
+                mark: 0,
             },
         );
         t.active = false;
@@ -758,7 +767,7 @@ impl Particles {
         let mut order: Vec<(f32, &Particle)> = self
             .list
             .iter()
-            .filter(|p| !(self.hide_trail && p.flags & TRAIL != 0))
+            .filter(|p| !(self.hide_trail && p.flags & TRAIL != 0) && !(self.hide_chunks && p.flags & CHUNK != 0))
             .map(|p| ((from_game(p.position) - eye).dot(back), p))
             .collect();
         order.sort_by(|a, b| a.0.total_cmp(&b.0).reverse());
@@ -812,6 +821,8 @@ struct Throw {
     life: f32,
     cells: (usize, usize),
     own_velocity: bool,
+    /// The port's own mark on what it throws.
+    mark: u32,
 }
 
 /// 0x52f430: the driven tyre on dusty ground, its puffs scaled by its spin

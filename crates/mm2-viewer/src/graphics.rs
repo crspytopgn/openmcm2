@@ -42,6 +42,12 @@ pub struct Enhanced {
     /// behind the bikes.
     pub ruts: bool,
     pub dust: bool,
+    /// Dirt flung off the rear tyres as they pull hard, spin or slide
+    /// (crate::dust), in place of the game's little chunks.
+    pub roost: bool,
+    /// How much dust and dirt flies, about 1 (High): fewer, bigger puffs
+    /// on Low (0.5) and Medium (0.75), more on Ultra and Max (1.25).
+    pub dust_amount: f32,
     /// Shiny paint and metal on the bikes, and smoother riders.
     pub bikes: bool,
     /// Shafts of sunlight past hills, trees and riders.
@@ -160,6 +166,8 @@ impl Default for Enhanced {
             clouds: false,
             ruts: false,
             dust: true,
+            roost: true,
+            dust_amount: 1.0,
             bikes: false,
             shafts: true,
             cinematic: false,
@@ -220,6 +228,9 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             // The plain 3×3 filter on the shadows' edges: the soft one's
             // 32 taps a pixel were a third of the frame.
             e.soft_shadows = false;
+            // Half the dust, in bigger puffs, without the hanging haze or
+            // the dust's own shadows.
+            e.dust_amount = 0.5;
             e.pixels = Some(1280 * 720);
         }
         // Temporal anti-aliasing in place of MSAA: about as cheap as 2x, and
@@ -231,6 +242,7 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             e.smooth = false;
             e.gtao = false;
             e.ssr = false;
+            e.dust_amount = 0.75;
             e.pixels = Some(1920 * 1080);
         }
         // Every effect that is on unless turned off. (The trackside props
@@ -249,6 +261,7 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             e.msaa = 8;
             e.pixels = None;
             e.ruts = true;
+            e.dust_amount = 1.25;
             // Twice the shadow maps' texels a side: crisper edges near
             // the rider, for four times the memory (200 MB).
             e.shadow_side = 2 * crate::enhance::SHADOW_SIDE;
@@ -413,6 +426,7 @@ impl Enhanced {
                 "clouds" => e.clouds = on,
                 "ruts" => e.ruts = on,
                 "dust" => e.dust = on,
+                "roost" | "dirt" => e.roost = on,
                 "bikes" => e.bikes = on,
                 "shafts" => e.shafts = on,
                 "cinematic" | "blur" => e.cinematic = on,
@@ -440,7 +454,7 @@ impl Enhanced {
                 "far" | "far-detail" => e.far = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-dynamic, raytracing, taa, supersample, far, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra/max, resolution=1080p or 85%, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-roost, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-dynamic, raytracing, taa, supersample, far, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra/max, resolution=1080p or 85%, weather=rain or time=dusk"
                     ))
                 }
             }
@@ -709,7 +723,8 @@ impl Enhanced {
     /// least seen first: 1 the soft shadow edges, smooth hills, horizon
     /// occlusion, reflections and light shafts (about Medium); 2 also the
     /// grass, occlusion and contact shadows (about Low); 3 also the sun's
-    /// shadows and the dust clouds. Only turned off, never on, so nothing
+    /// shadows and the dust clouds and flying dirt (with fewer puffs from
+    /// step 2). Only turned off, never on, so nothing
     /// is needed that was not made when the race loaded; and the
     /// anti-aliasing and the scene's size are left to dynamic resolution.
     pub fn shed_to(mut self, n: u8) -> Enhanced {
@@ -723,6 +738,7 @@ impl Enhanced {
             self.supersample = false;
         }
         if n >= 2 {
+            self.dust_amount = self.dust_amount.min(0.5);
             self.grass = false;
             self.ao = false;
             self.contact = false;
@@ -730,6 +746,7 @@ impl Enhanced {
         if n >= 3 {
             self.shadows = false;
             self.dust = false;
+            self.roost = false;
         }
         self
     }

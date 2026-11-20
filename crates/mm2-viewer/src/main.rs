@@ -651,6 +651,11 @@ fn main() -> Result<(), BoxError> {
                 throw_dirt(&r, &track.ground(), &mut dirt, frame);
                 splash_water(&r, &track.water, &mut dirt, frame);
                 ride_tyres.push((tyre_places(&r, &track.ground()), frame));
+                // A film shows the dust and dirt too, fed as it goes.
+                if let Some(f) = &mut film {
+                    f.renderer.tyres(ride_tyres.last().map_or(&[][..], |t| &t.0[..]), frame);
+                    throw_dirt(&r, &track.ground(), &mut f.renderer.particles, frame);
+                }
                 if let Some(out) = &mut ai_csv {
                     use std::fmt::Write as _;
                     for (i, rc) in r.racers.iter().enumerate() {
@@ -1300,6 +1305,8 @@ const FOCAL: f32 = 415.69;
 fn tyre_places(race: &Race, ground: &TrackGround) -> Vec<([Option<Vec3>; 2], dust::Kick)> {
     // Whether the ground here raises dust, as the game's own trail asks.
     let dusty = |at: Option<(Vec3, bool)>| at.is_some_and(|(at, on)| if on { ground.zones[7].dust } else { ground.zone(at).dust });
+    // And whether it is dirt that flies off a spinning tyre.
+    let dirt = |at: Option<Vec3>| at.is_some_and(|at| ground.zone(at).dirt);
     race.racers
         .iter()
         .map(|r| match &r.bike {
@@ -1308,6 +1315,7 @@ fn tyre_places(race: &Race, ground: &TrackGround) -> Vec<([Option<Vec3>; 2], dus
                 let kick = dust::Kick {
                     dusty: dusty(at[1]) || dusty(at[0]),
                     spin: b.roost().1,
+                    dirt: at[1].is_some_and(|(p, on)| !on && dirt(Some(p))),
                 };
                 (at.map(|t| t.map(|(at, _)| at)), kick)
             }
@@ -1320,6 +1328,7 @@ fn tyre_places(race: &Race, ground: &TrackGround) -> Vec<([Option<Vec3>; 2], dus
                     let kick = dust::Kick {
                         dusty: at.iter().flatten().any(|&p| dusty(Some((p, false)))),
                         spin: 0.0,
+                        dirt: dirt(at[1]),
                     };
                     (at, kick)
                 }
@@ -1331,6 +1340,7 @@ fn tyre_places(race: &Race, ground: &TrackGround) -> Vec<([Option<Vec3>; 2], dus
                 let kick = dust::Kick {
                     dusty: at.iter().flatten().any(|&p| dusty(Some((p, false)))),
                     spin: 0.0,
+                    dirt: dirt(at[1]),
                 };
                 (at, kick)
             }
@@ -3800,6 +3810,21 @@ impl Film {
 
     /// Poses the race at `clock` s into the ride, and films it.
     fn frame(&mut self, race: &mut Race, track: &Track, chase: (Vec3, Vec3), clock: f32) -> Result<(), BoxError> {
+        // MM2_FILM_WATCH=i: filmed from behind rider i, as `--watch` is;
+        // MM2_FILM_SIDE=1: from the player's right, as `--side` is.
+        let chase = match (std::env::var("MM2_FILM_WATCH").ok().and_then(|w| w.parse::<usize>().ok()), std::env::var_os("MM2_FILM_SIDE")) {
+            (Some(w), _) => {
+                let b = &race.racers[w.min(race.racers.len() - 1)].bike;
+                let (at, f) = (b.position(), b.forward());
+                (at - f * 16.0 + Vec3::Y * 7.0, at + Vec3::Y * 3.0)
+            }
+            (None, Some(_)) => {
+                let b = &race.racers[race.player].bike;
+                let at = b.position();
+                (at + b.forward().cross(Vec3::Y) * 8.0 + Vec3::Y * 3.0, at + Vec3::Y * 2.5)
+            }
+            _ => chase,
+        };
         let eye = renderer::from_game(chase.0);
         show(race, track, &mut self.renderer, eye, None);
         feel_wrecks(race, &self.renderer);
