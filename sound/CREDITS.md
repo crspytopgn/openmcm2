@@ -8,7 +8,7 @@ These three classes are untouched stretches of real onboard recordings, cut into
 
 | Class | Recording | Uploader | Licence | Files |
 |---|---|---|---|---|
-| 125 | [2023 CR125 2 Stroke, Raw GoPro, Field Of Dreams NJ](https://www.youtube.com/watch?v=eFumQsGcKjE) (5:38-5:43 for the idles, 0:35-1:05 for the rest) | The Moto Academy | YouTube Standard Licence | all but Rev01 |
+| 125 | [2023 CR125 2 Stroke, Raw GoPro, Field Of Dreams NJ](https://www.youtube.com/watch?v=eFumQsGcKjE) (riding 1:28-5:21, idles 5:38-5:43, all from stretches with no talking) | The Moto Academy | YouTube Standard Licence | all but Rev01 |
 | 250 | [HONDA CR250 TOP SPEED RUN](https://www.youtube.com/watch?v=DE5nSP9d78U) | Matt McHugh | YouTube Standard Licence | all |
 | 500 | [HELMET CAM: 500cc / Tyler Wozney, Tale Of The 2 Stroke 2.0 Shoot](https://www.youtube.com/watch?v=akMqExb8EWs) (0:35-1:15) | MXPTV | YouTube Standard Licence | all but Rev01 |
 | 125 Rev01, 500 Rev01 | ["motorbike crm 250cc kick start rev engine.wav"](https://freesound.org/people/martian/sounds/148855/) | martian | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | kept from the Freesound set |
