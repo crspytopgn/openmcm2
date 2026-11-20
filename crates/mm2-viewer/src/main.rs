@@ -441,7 +441,19 @@ fn main() -> Result<(), BoxError> {
                     Vec::new(),
                     vec![mm2_formats::vcr::Rider::default()],
                 );
-                replay::Ghost::new(1, tape, None, 0.0)
+                // A saved ghost to ride against (`--ghost-file FILE`).
+                let saved = flag("--ghost-file").and_then(|f| mm2_formats::vcr::Tape::parse(&crate::fs::read(f).ok()?).ok());
+                replay::Ghost::new(1, tape, saved, 0.0)
+            });
+            // The player's laps taped as the online ghosts tape them, the
+            // fastest written to `--lap-ghost FILE`.
+            let mut lap_tapes = flag("--lap-ghost").map(|_| {
+                let mut h = mm2_formats::vcr::Tape::new(Vec::new(), vec![mm2_formats::vcr::Rider::default()]);
+                h.set_track(path.file_stem().and_then(|s| s.to_str()).unwrap_or_default());
+                let sx = path.parent().and_then(|p| p.file_name()).is_some_and(|n| n.eq_ignore_ascii_case("SX"));
+                h.set_setting(mm2_formats::vcr::setting::EVENT, if sx { 3 } else { 2 });
+                h.set_setting(mm2_formats::vcr::setting::MODE, frontend::GHOST);
+                replay::LapTapes::new(h)
             });
             // The ride on tape, written to `--record`.
             let mut rec = flag("--record").map(|_| {
@@ -722,6 +734,9 @@ fn main() -> Result<(), BoxError> {
                 if let Some(g) = &mut ghost {
                     g.tick(&mut r, &track.terrain, frame);
                 }
+                if let Some(t) = &mut lap_tapes {
+                    t.tick(&r, frame);
+                }
                 air += r.racers[r.player].bike.airborne() as usize;
             }
             if let (Some((_, _, out, _)), Some(path)) = (&engine_wav, flag("--engine-wav")) {
@@ -746,6 +761,17 @@ fn main() -> Result<(), BoxError> {
                 let best = g.best().map(|t| t.length);
                 let shown = !r.racers[1].bike.place().x_axis.abs().max_element().eq(&0.0);
                 eprintln!("ghost: best lap {best:?}, showing {shown}");
+            }
+            if let (Some(mut t), Some(out)) = (lap_tapes, flag("--lap-ghost")) {
+                let me = &r.racers[r.player];
+                let fastest = me.lap_times.iter().enumerate().skip(1).min_by(|a, b| a.1.total_cmp(b.1)).map(|(i, _)| i);
+                match fastest.and_then(|i| t.take(i)) {
+                    Some(tape) => {
+                        crate::fs::write(out, tape.write())?;
+                        eprintln!("lap ghost: lap {:?} of {:.2}s, {} records, to {out}", fastest, tape.length, tape.records.len());
+                    }
+                    None => eprintln!("lap ghost: no lap taped"),
+                }
             }
             if let (Some(text), Some(out)) = (ai_csv, flag("--ai-csv")) {
                 crate::fs::write(out, text)?;
@@ -4320,6 +4346,8 @@ struct App {
     /// The lap leaderboard this race's laps go on (the extra), and the
     /// player's rider name for it.
     lap_board: Option<(mm2_settings::laps::Board, String)>,
+    /// The player's laps on tape, for the online ghosts (the extra).
+    lap_tapes: Option<replay::LapTapes>,
     /// A network race: whose bikes are whose, the other machines' bikes
     /// as they arrive, and the wait to send ours again.
     net: Option<frontend::NetRace>,
@@ -4485,6 +4513,7 @@ impl App {
             event: None,
             records: None,
             lap_board: None,
+            lap_tapes: None,
             net: None,
             remote: Vec::new(),
             send_wait: 0.0,
@@ -4741,6 +4770,17 @@ impl App {
                     (mm2_settings::laps::Board::new(&setup.track, setup.event as u32, setup.course as u32, cc), setup.name.clone())
                 });
                 self.race = make_race_as(&track, laps, setup.net.map_or(PLAYER, |n| n.me));
+                // The online ghosts: the player's laps on tape, so the
+                // best can go up with its lap.
+                self.lap_tapes = match (&self.race, &self.lap_board) {
+                    (Some(r), Some(_)) if tweaks::more().online_ghosts && crate::online::address().is_some() => {
+                        let mut h = heading(&setup, r);
+                        h.riders = h.riders.into_iter().nth(r.player).into_iter().collect();
+                        h.mode = frontend::GHOST;
+                        Some(replay::LapTapes::new(replay::header(h)))
+                    }
+                    _ => None,
+                };
                 self.replay = self.tape.take();
                 self.remote.clear();
                 if let (Some(n), Some(r)) = (self.net, &mut self.race) {
@@ -4992,28 +5032,41 @@ impl App {
             let me = &race.racers[race.player];
             let kept_on = mm2_settings::laps::keeps_on_course(board.event);
             let rider = rider_name(race, ui, race.player);
-            let laps: Vec<_> = me
+            let indexed: Vec<_> = me
                 .lap_times
                 .iter()
                 .enumerate()
                 .skip(1)
                 .filter(|&(i, _)| !kept_on || me.lap_off.get(i).is_none_or(|&off| off <= mm2_settings::laps::MOST_OFF_COURSE))
-                .map(|(_, &t)| mm2_settings::laps::Lap { board: board.clone(), rider: rider.clone(), ms: (t * 1000.0).round() as u32, title: title.clone() })
-                .filter(|l| l.ms >= mm2_settings::laps::SHORTEST)
+                .map(|(i, &t)| (i, mm2_settings::laps::Lap { board: board.clone(), rider: rider.clone(), ms: (t * 1000.0).round() as u32, title: title.clone() }))
+                .filter(|(_, l)| l.ms >= mm2_settings::laps::SHORTEST)
                 .collect();
+            let laps: Vec<_> = indexed.iter().map(|(_, l)| l.clone()).collect();
             if !laps.is_empty() {
                 let dir = &f.user().store.dir;
                 let old = |n: &str| crate::fs::read_to_string(dir.join(n)).unwrap_or_default();
                 if let Some((best, pending)) = mm2_settings::laps::enter(&old(mm2_settings::laps::BEST), &old(mm2_settings::laps::PENDING), &laps) {
                     let _ = crate::fs::create_dir_all(dir);
-                    for (n, t) in [(mm2_settings::laps::BEST, best), (mm2_settings::laps::PENDING, pending)] {
+                    for (n, t) in [(mm2_settings::laps::BEST, best.clone()), (mm2_settings::laps::PENDING, pending)] {
                         if let Err(e) = crate::fs::write(dir.join(n), t) {
                             eprintln!("the lap leaderboards: {e}");
+                        }
+                    }
+                    // The online ghosts: a new best lap goes up with its
+                    // ghost, if it was taped.
+                    let fastest = indexed.iter().min_by_key(|(_, l)| l.ms);
+                    if let (Some((i, lap)), Some(tapes)) = (fastest, &mut self.lap_tapes) {
+                        let is_best = mm2_settings::laps::parse_all(&best).contains(lap);
+                        if let (true, Some(tape)) = (is_best, tapes.take(*i)) {
+                            if let Err(e) = crate::online::keep_ghost(dir, lap, &tape) {
+                                eprintln!("the online ghosts: {e}");
+                            }
                         }
                     }
                 }
             }
         }
+        self.lap_tapes = None;
         // New laps and playtime go to the leaderboard server now (the
         // browser has no launcher to send them).
         crate::online::send_saved(&self.play_dir());
@@ -6014,6 +6067,9 @@ impl App {
                 }
                 if let Some(rec) = &mut self.recording {
                     rec.tick(r, dt);
+                }
+                if let Some(t) = &mut self.lap_tapes {
+                    t.tick(r, dt);
                 }
                 if let Some(log) = &mut self.ride_log {
                     log_ride(log, r, &acts, dt);

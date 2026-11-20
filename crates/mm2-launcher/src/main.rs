@@ -1542,6 +1542,13 @@ impl Launcher {
                 ui.add(egui::TextEdit::singleline(&mut m.leaderboard_url).hint_text("https://…").desired_width(360.0));
             });
             ui.label(look::weak("Your best laps go on the OpenMCM2 leaderboard under your rider name, and Board shows everyone's. Clear the address to keep them on this computer only."));
+            look::switch_tile(
+                ui,
+                &mut m.online_ghosts,
+                "Race the leaderboard ghosts",
+                "Off unless you turn it on. Your best lap goes up with its ghost (where the bike was, a few times a second), and the server keeps the ghost of the fastest lap on each track. In the game, Replays, Saved Ghost Race Files lists the online ghosts for your tracks under your own: pick one and Start to race it as a ghost race.",
+                ui.available_width(),
+            );
             let url = m.leaderboard_url.trim().to_string();
             if let Some(note) = &self.boards.note {
                 ui.label(look::weak(note));
