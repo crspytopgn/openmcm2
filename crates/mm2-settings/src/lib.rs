@@ -281,7 +281,7 @@ pub const UPGRADES: [(&str, &str, bool); 28] = [
     // The Max preset's own.
     ("supersample", "Supersampling (sharper than the screen)", false),
     ("far", "Detail reaching further", false),
-    ("roost", "Flying dirt (roost)", false),
+    ("roost", "Flying dirt (roost)", true),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
