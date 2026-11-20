@@ -1,3 +1,18 @@
+# OpenMCM2 0.6.9
+
+* **Lighter, nicer dust.** Enhanced dust clouds are about six times
+  cheaper to draw and now follow your graphics preset, so Low and Medium
+  (and the Steam Deck) go easy on them. Dry tracks get a thin haze that
+  drifts on the wind.
+* **Flying dirt.** Pull hard, spin the back tyre or slide through a turn
+  and the bike throws real clods of dirt, mud in the rain. It's on in
+  Enhanced, with its own switch to turn it off.
+* **New paint for the free bikes.** The Ridgeback and the Kestrel get
+  full graphics kits: a jagged ridge band and white plates on the
+  Ridgeback, a sweeping band with flame licks on the Kestrel, much
+  sharper than before. All 12 colours and Kit & Paint work as before.
+  This comes with a Free Pack update the launcher fetches by itself.
+
 # OpenMCM2 0.6.8
 
 * **New look menus without the Free Pack.** If you play with MM2
