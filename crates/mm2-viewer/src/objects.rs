@@ -4,6 +4,7 @@
 
 use crate::hires::{self, HiRes, Image};
 use crate::morph::Morphs;
+use crate::skin::Skin;
 use crate::renderer::from_game;
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3, Vec4};
@@ -160,6 +161,9 @@ pub struct AnimatedModel {
     /// The rider's morphs, the first of its vertices in the mesh and those
     /// vertices at rest.
     morph: Option<(Arc<Morphs>, u32, Arc<Vec<Vertex>>)>,
+    /// A free rider's smooth joints (crate::skin), the first of its
+    /// vertices in the mesh and those vertices at rest.
+    skin: Option<(Arc<Skin>, u32, Arc<Vec<Vertex>>)>,
     /// Frames turned about their own x axis on top of the motion, rad: a
     /// bike's wheels (0x518c40).
     spins: Vec<(usize, f32)>,
@@ -715,6 +719,10 @@ impl ObjectMesh {
                     let rest = mesh.vertices[first_vertex..].to_vec();
                     (shared, first_vertex as u32, Arc::new(rest))
                 });
+            let skin = match (&morph, crate::freepack::ridden(&a.model)) {
+                (None, Some(true)) => mesh.smooth_joints(&model, first_vertex, first_node),
+                _ => None,
+            };
             mesh.sources.push(i);
             mesh.animated.push(AnimatedModel {
                 frames: model
@@ -739,6 +747,7 @@ impl ObjectMesh {
                 unseen: false,
                 mud: 0.0,
                 morph,
+                skin,
                 spins: Vec::new(),
                 turns: Vec::new(),
                 slides: Vec::new(),
@@ -782,6 +791,7 @@ impl ObjectMesh {
                 unseen: false,
                 mud: 0.0,
                 morph: None,
+                skin: None,
                 spins: Vec::new(),
                 turns: Vec::new(),
                 slides: Vec::new(),
@@ -997,6 +1007,44 @@ impl ObjectMesh {
         if !self.missing_models.iter().any(|m| m == name) {
             self.missing_models.push(name.to_string());
         }
+    }
+
+    /// A free rider's smooth joints (crate::skin) for its vertices from
+    /// `first_vertex`, which follow its frames' nodes from `first_node`;
+    /// the bending vertices' smoothed normals are dropped, since the
+    /// skinned normal is already smooth across the joint. `MM2_RIGID_RIDER=1`
+    /// keeps the stiff parts (to compare).
+    fn smooth_joints(&mut self, model: &slb::Model, first_vertex: usize, first_node: u32) -> Option<(Arc<Skin>, u32, Arc<Vec<Vertex>>)> {
+        if std::env::var_os("MM2_RIGID_RIDER").is_some_and(|v| !v.is_empty() && v != "0") {
+            return None;
+        }
+        let frames: Vec<(Mat4, Option<usize>)> =
+            model.frames.iter().map(|f| (Mat4::from_cols_array(&f.matrix), f.parent)).collect();
+        let names: Vec<String> = model.frames.iter().map(|f| f.name.clone()).collect();
+        let vertices = &self.vertices[first_vertex..];
+        let positions: Vec<Vec3> = vertices.iter().map(|v| Vec3::from(v.position)).collect();
+        let normals: Vec<Vec3> = vertices.iter().map(|v| Vec3::from(v.normal)).collect();
+        let owners: Vec<usize> = vertices
+            .iter()
+            .map(|v| ((v.node & NODE).saturating_sub(first_node) as usize).min(frames.len().saturating_sub(1)))
+            .collect();
+        // The fitting pose: the first frame of the pack's own seated motion.
+        let motions = crate::freepack::own_motions(true);
+        let pose = motions.iter().find(|m| m.0.eq_ignore_ascii_case(crate::skin::BIND_MOTION))?.1.frames.first()?.clone();
+        let mut bind: Vec<Option<Mat4>> = vec![None; frames.len()];
+        for k in &pose {
+            if let Some(b) = bind.get_mut(k.frame) {
+                *b = Some(orientation(k.look, k.up, Vec3::ONE, k.position));
+            }
+        }
+        let skin = Skin::new(&frames, &names, &positions, &normals, &owners, &bind)?;
+        for v in skin.vertices() {
+            if let Some(e) = self.extras.get_mut(first_vertex + v as usize) {
+                e.smooth = [0.0; 3];
+            }
+        }
+        let rest = Arc::new(self.vertices[first_vertex..].to_vec());
+        Some((Arc::new(skin), first_vertex as u32, rest))
     }
 
     /// Adds a model's most detailed LOD. With `place`, the model is static
@@ -2058,6 +2106,33 @@ impl ObjectRenderer {
                     .collect();
                 let at = *first as u64 * std::mem::size_of::<Vertex>() as u64;
                 queue.write_buffer(&self.vertices, at, bytemuck::cast_slice(&moved));
+            }
+            if let Some((skin, first, rest)) = &a.skin {
+                // Only the runs that bend: each run's vertices at rest, one
+                // after another, with the bending ones moved.
+                let mut starts = Vec::with_capacity(skin.spans.len());
+                let mut moved: Vec<Vertex> = Vec::new();
+                for span in &skin.spans {
+                    starts.push(moved.len());
+                    moved.extend_from_slice(rest.get(span.start as usize..span.end as usize).unwrap_or(&[]));
+                }
+                skin.apply(&world, |v, p, n| {
+                    let k = skin.spans.partition_point(|s| s.end <= v);
+                    if let (Some(span), Some(&at)) = (skin.spans.get(k), starts.get(k)) {
+                        if let Some(m) = moved.get_mut(at + (v - span.start) as usize) {
+                            m.position = p.into();
+                            m.normal = n.into();
+                        }
+                    }
+                });
+                let size = std::mem::size_of::<Vertex>() as u64;
+                for (span, &at) in skin.spans.iter().zip(&starts) {
+                    let len = span.len().min(moved.len() - at);
+                    if len > 0 {
+                        let to = (*first as u64 + span.start as u64) * size;
+                        queue.write_buffer(&self.vertices, to, bytemuck::cast_slice(&moved[at..at + len]));
+                    }
+                }
             }
         }
         write_nodes(queue, &self.nodes, &nodes);

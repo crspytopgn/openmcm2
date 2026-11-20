@@ -108,6 +108,7 @@ mod input;
 #[cfg(feature = "gamepad")]
 mod pad;
 mod morph;
+mod skin;
 mod movie;
 mod net;
 mod objects;
