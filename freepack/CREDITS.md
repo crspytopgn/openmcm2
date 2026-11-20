@@ -171,4 +171,4 @@ The full list of which file each went into is in the pack's `sound/CREDITS.md`.
 | [bicycle braking on dirt road or gravel recorded with Sony PCM D100](https://freesound.org/people/Garuda1982/sounds/524276/) | Garuda1982 | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
 | [Abrupt stopping on gravel road 2.wav](https://freesound.org/people/Vendarro/sounds/584323/) | Vendarro | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/) |
 
-The menu chimes, the crowd's ooh and boo, and the out-of-bounds slide whistle (`tools/freepack/make_whistle.py`) are made in code.
+The menu chimes, the crowd's ooh and boo, the checkpoint clapper (`tools/freepack/make_waypoint.py`) and the out-of-bounds slide whistle (`tools/freepack/make_whistle.py`) are made in code.
