@@ -442,6 +442,9 @@ pub struct More {
     /// Drive the scenery: in Practice and free roam, V gets in the
     /// track's cars, trucks, trains and aircraft (`--drive-vehicles`).
     pub drive_vehicles: bool,
+    /// A cartoon slide whistle as a free-mode rider is thrown back off
+    /// the world's edge; on unless turned off (`--no-whistle`).
+    pub whistle: bool,
 }
 
 /// The game's own pad dead zone, %.
@@ -473,6 +476,7 @@ impl Default for More {
             builder_menu: true,
             freshen_engines: false,
             drive_vehicles: false,
+            whistle: true,
         }
     }
 }
@@ -511,6 +515,7 @@ impl More {
             "builder_menu" => self.builder_menu = yes,
             "freshen_engines" => self.freshen_engines = yes,
             "drive_vehicles" => self.drive_vehicles = yes,
+            "whistle" => self.whistle = yes,
             _ => return false,
         }
         true
@@ -519,7 +524,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfreshen_engines={}\ndrive_vehicles={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfreshen_engines={}\ndrive_vehicles={}\nwhistle={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -539,6 +544,7 @@ impl More {
             b(self.builder_menu),
             b(self.freshen_engines),
             b(self.drive_vehicles),
+            b(self.whistle),
         )
     }
 
@@ -559,6 +565,7 @@ impl More {
             (!self.builder_menu, "--no-builder-menu"),
             (self.freshen_engines, "--freshen-engines"),
             (self.drive_vehicles, "--drive-vehicles"),
+            (!self.whistle, "--no-whistle"),
         ] {
             if on {
                 a.push(flag.to_string());
@@ -601,6 +608,7 @@ impl More {
             builder_menu: !has("--no-builder-menu"),
             freshen_engines: has("--freshen-engines"),
             drive_vehicles: has("--drive-vehicles"),
+            whistle: !has("--no-whistle"),
             ..d.clone()
         };
         for (flag, key) in [
@@ -721,6 +729,7 @@ impl Settings {
             lobby_downloads: m.lobby_downloads,
             list_races: m.list_races,
             builder_menu: m.builder_menu,
+            whistle: m.whistle,
             ..More::default()
         };
     }
@@ -1186,6 +1195,7 @@ mod tests {
             builder_menu: false,
             freshen_engines: true,
             drive_vehicles: true,
+            whistle: false,
         };
         s.free_graphics = true;
         s.freepack = Some("/packs/free".into());

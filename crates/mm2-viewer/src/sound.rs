@@ -83,6 +83,11 @@ const OH_WAIT: f32 = 30.0;
 const APPLAUSE_WAIT: f32 = 15.0;
 /// A stunt worth this many points rings the bonus (0x555bfc).
 const BONUS_POINTS: f32 = 10000.0;
+/// The Free Pack's out-of-bounds slide whistle, up as the rider is thrown
+/// back off the world's edge and down as they fall (tools/freepack/
+/// make_whistle.py).
+const WHISTLE_UP: &str = "whistle_up.wav";
+const WHISTLE_DOWN: &str = "whistle_down.wav";
 
 /// The engine class of a bike of `cc` (0x4e7160).
 pub fn class(cc: u32, four_stroke: bool) -> usize {
@@ -641,6 +646,11 @@ pub struct RaceSounds {
     /// A racer whose engine is not heard: the player's, while they drive
     /// something else (crate::drive).
     pub hush: Option<usize>,
+    /// The out-of-bounds whistle (Extras, on unless turned off): a free
+    /// track's own, none of the game's. Set by the race once loaded.
+    pub whistle: bool,
+    /// The whistle playing, and whether it is on the way down yet.
+    whistling: Option<(Voice, bool)>,
 }
 
 impl RaceSounds {
@@ -733,6 +743,8 @@ impl RaceSounds {
             splash_wait: 0.0,
             engines_only: false,
             hush: None,
+            whistle: false,
+            whistling: None,
         };
         // The crowd loops from the start, flat (0x4e81a0).
         if crowd_present {
@@ -806,6 +818,13 @@ impl RaceSounds {
             .get(name)
             .filter(|_| self.options.gain > 0.0 && !self.engines_only)
             .map(|s| audio.play(s, self.options.gain, looping))
+    }
+
+    /// Cuts off the out-of-bounds whistle, if it is still going.
+    fn stop_whistle(&mut self, audio: &Audio) {
+        if let Some((v, _)) = self.whistling.take() {
+            audio.stop(v);
+        }
     }
 
     /// One of the crowd's reactions, which only a scene with a crowd has.
@@ -989,6 +1008,21 @@ impl RaceSounds {
                 // launch (0x4e8720, crash 0xc).
                 if !e.crashed && i == player && bike.launched() {
                     self.play(audio, "launch.wav", false);
+                    // On a free track, a cartoon slide whistle up as the
+                    // rider is thrown back in (the Free Pack's own).
+                    if self.whistle {
+                        self.stop_whistle(audio);
+                        self.whistling = self.play(audio, WHISTLE_UP, false).map(|v| (v, false));
+                    }
+                }
+                // ... and down once the throw tops out and they fall.
+                if i == player && bike.launched() {
+                    if let Some((up, false)) = self.whistling {
+                        if bike.velocity().y < 0.0 {
+                            audio.stop(up);
+                            self.whistling = self.play(audio, WHISTLE_DOWN, false).map(|v| (v, true));
+                        }
+                    }
                 }
                 if !e.crashed && i == player && self.event == EventKind::Supercross {
                     let place = race.position();
