@@ -79,6 +79,19 @@ pub enum Biome {
     Alpine,
     Pit,
     Arena,
+    /// Sandy coast: deep sand, dune grass and pines.
+    Coast,
+    /// Wind-blown sand dunes in long ridges, tufts of grass between.
+    Dunes,
+}
+
+/// How a track's land is shaped, past what its event and biome give.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Style {
+    /// As the first free tracks are.
+    Classic,
+    /// A national laid over a big hillside: long climbs and drops.
+    Hillside,
 }
 
 /// The ground materials, by index; each one's file name in the ground
@@ -109,6 +122,7 @@ const FOREST: usize = 8;
 const CLAY: usize = 9;
 const CONCRETE: usize = 10;
 
+#[derive(Clone, Copy)]
 pub struct Def {
     pub file: &'static str,
     pub name: &'static str,
@@ -116,10 +130,15 @@ pub struct Def {
     pub biome: Biome,
     pub sky: Option<&'static str>,
     pub seed: u32,
+    pub style: Style,
 }
 
 const fn def(file: &'static str, name: &'static str, kind: Kind, biome: Biome, sky: Option<&'static str>, seed: u32) -> Def {
-    Def { file, name, kind, biome, sky, seed }
+    Def { file, name, kind, biome, sky, seed, style: Style::Classic }
+}
+
+const fn styled(file: &'static str, name: &'static str, kind: Kind, biome: Biome, sky: Option<&'static str>, seed: u32, style: Style) -> Def {
+    Def { file, name, kind, biome, sky, seed, style }
 }
 
 /// The free tracks. File names start `FP` so they sort apart from any
@@ -132,20 +151,30 @@ pub const SET: &[Def] = &[
     def("FPNAT05", "Granite Flats", Kind::National, Biome::Alpine, Some("terra01.cub"), 15),
     def("FPNAT06", "Sundown Valley", Kind::National, Biome::DryHills, Some("terra16.cub"), 16),
     def("FPNAT07", "Willow Run", Kind::National, Biome::Meadow, Some("wind01.cub"), 17),
+    def("FPNAT08", "Pinewood Sands", Kind::National, Biome::Coast, Some("terra12.cub"), 18),
+    styled("FPNAT09", "Thunder Hill", Kind::National, Biome::Autumn, Some("terra18.cub"), 19, Style::Hillside),
+    styled("FPNAT10", "Juniper Mesa", Kind::National, Biome::DryHills, Some("terra06.cub"), 71, Style::Hillside),
     def("FPSX01", "Harbor City Arena", Kind::Supercross, Biome::Arena, None, 21),
     def("FPSX02", "Ironworks Dome", Kind::Supercross, Biome::Arena, None, 22),
     def("FPSX03", "Lakeside Coliseum", Kind::Supercross, Biome::Arena, None, 23),
     def("FPSX04", "Northgate Stadium", Kind::Supercross, Biome::Arena, None, 24),
     def("FPSX05", "Riverside Bowl", Kind::Supercross, Biome::Arena, None, 25),
     def("FPSX06", "Summit Center", Kind::Supercross, Biome::Arena, None, 26),
+    def("FPSX07", "Bayfront Arena", Kind::Supercross, Biome::Arena, None, 27),
+    def("FPSX08", "Foundry Park", Kind::Supercross, Biome::Arena, None, 78),
+    def("FPSX09", "Prairie Dome", Kind::Supercross, Biome::Arena, None, 29),
     def("FPBAJA01", "Saltbush Basin", Kind::Baja, Biome::Desert, Some("terra12.cub"), 31),
     def("FPBAJA02", "Dry Lake Crossing", Kind::Baja, Biome::Desert, Some("terra06.cub"), 32),
     def("FPBAJA03", "Coyote Wash", Kind::Baja, Biome::DryHills, Some("terra11.cub"), 33),
     def("FPBAJA04", "Sandstone Canyon", Kind::Baja, Biome::Desert, Some("terra09.cub"), 34),
+    def("FPBAJA05", "Pelican Dunes", Kind::Baja, Biome::Dunes, Some("terra12.cub"), 35),
+    def("FPBAJA06", "Painted Flats", Kind::Baja, Biome::DryHills, Some("terra16.cub"), 36),
     def("FPEND01", "Timberline Trails", Kind::Enduro, Biome::Forest, Some("terra03.cub"), 41),
     def("FPEND02", "Foxglove Woods", Kind::Enduro, Biome::Autumn, Some("terra01.cub"), 42),
     def("FPEND03", "Cedar Hollow", Kind::Enduro, Biome::Forest, Some("terra01.cub"), 43),
     def("FPEND04", "High Pass", Kind::Enduro, Biome::Alpine, Some("terra18.cub"), 44),
+    def("FPEND05", "Heather Moor", Kind::Enduro, Biome::Meadow, Some("wind01.cub"), 45),
+    def("FPEND06", "Juniper Ridge", Kind::Enduro, Biome::DryHills, Some("terra09.cub"), 46),
     def("FPQUAR01", "Blackrock Pit", Kind::Quarry, Biome::Pit, Some("terra06.cub"), 51),
     def("FPQUAR02", "Limestone Bowl", Kind::Quarry, Biome::Pit, Some("terra12.cub"), 52),
     def("FPQUAR03", "Gravel Works", Kind::Quarry, Biome::Pit, Some("terra17.cub"), 53),
@@ -1356,6 +1385,8 @@ fn flora(biome: Biome) -> Vec<Species> {
         Biome::Alpine => vec![tree("pine02", 46.0, 13.0, 0.9, 4.0), tree("pine03", 52.0, 14.0, 1.0, 3.0), tree("snowpine01", 42.0, 13.0, 0.9, 0.5), tree("aspen02", 28.0, 11.0, 0.7, 1.5), bush("shrub03", 3.0, 5.0, 3.0), bush("grass02", 1.5, 4.0, 4.0)],
         Biome::Pit => vec![bush("drytumbleweed03", 3.0, 3.0, 2.0), bush("shrub02", 3.5, 6.0, 2.0), tree("pine01", 40.0, 13.0, 0.9, 1.0), bush("grass03", 2.0, 5.0, 2.0)],
         Biome::Arena => Vec::new(),
+        Biome::Dunes => vec![bush("grass02", 2.0, 5.0, 6.0), bush("grass03", 2.0, 5.0, 4.0), bush("drytumbleweed02", 3.0, 3.0, 2.0), bush("tumbleweed01", 3.0, 3.0, 1.0), tree("drymesquite01", 12.0, 12.0, 0.5, 0.6), tree("cypress01", 28.0, 8.0, 0.6, 0.3)],
+        Biome::Coast => vec![tree("pine01", 42.0, 14.0, 0.9, 2.0), tree("pine02", 46.0, 15.0, 0.9, 1.5), tree("cypress01", 30.0, 8.0, 0.6, 1.0), bush("grass02", 2.0, 5.0, 7.0), bush("grass03", 2.0, 5.0, 4.0), bush("shrub01", 3.5, 6.0, 2.0), bush("drytumbleweed01", 3.0, 3.0, 1.0)],
     }
 }
 
@@ -1370,6 +1401,8 @@ fn plant_density(kind: Kind, biome: Biome) -> f32 {
         Biome::Desert => 1.0 / 600.0,
         Biome::Pit => 1.0 / 2600.0,
         Biome::Arena => 0.0,
+        Biome::Coast => 1.0 / 700.0,
+        Biome::Dunes => 1.0 / 1500.0,
     };
     if kind == Kind::Enduro {
         base * 1.2
@@ -1612,6 +1645,8 @@ fn biome_ground(biome: Biome) -> (usize, usize, usize) {
         Biome::Alpine => (GRASS, GRAVEL, ROCK),
         Biome::Pit => (GRAVEL, LOOSE, ROCK),
         Biome::Arena => (CLAY, LOOSE, CLAY),
+        Biome::Coast => (GRASS, SAND, DRYGRASS),
+        Biome::Dunes => (SAND, SAND, DRYGRASS),
     }
 }
 
@@ -1620,10 +1655,19 @@ fn track_ground(kind: Kind, biome: Biome) -> (usize, usize) {
     match (kind, biome) {
         (Kind::Supercross | Kind::Tag, _) => (LOOSE, CLAY),
         (_, Biome::Desert) => (LOOSE, TRACKDIRT),
+        // Deep sand, darker where it's churned and damp.
+        (_, Biome::Coast) => (SAND, LOOSE),
+        (_, Biome::Dunes) => (LOOSE, TRACKDIRT),
         (_, Biome::Pit) => (GRAVEL, TRACKDIRT),
         (_, Biome::Forest | Biome::Autumn) => (LOOSE, MUD),
         _ => (LOOSE, TRACKDIRT),
     }
+}
+
+/// Whether steep ground shows bare rock (not a stadium's floor, nor
+/// dunes, whose slopes are sand all the way).
+fn rocky(biome: Biome) -> bool {
+    !matches!(biome, Biome::Arena | Biome::Dunes)
 }
 
 /// The most textures a track may have (the browser's texture array limit).
@@ -1682,7 +1726,7 @@ fn paint(land: &Land, kind: Kind, biome: Biome, ground: &Ground, seed: u32) -> (
                     if land.track[i] > 0.0 || land.wear[i] > 0.0 {
                         return u32::MAX;
                     }
-                    if land.patch[i].1 > 0.0 || (land.steep[i] > 0.02 && biome != Biome::Arena) {
+                    if land.patch[i].1 > 0.0 || (land.steep[i] > 0.02 && rocky(biome)) {
                         score += 1;
                     }
                 }
@@ -1728,7 +1772,7 @@ fn paint(land: &Land, kind: Kind, biome: Biome, ground: &Ground, seed: u32) -> (
                         c = std::array::from_fn(|q| lerp(c[q], cp[q], t));
                     }
                     let steep = land.sample(&land.steep, x, z);
-                    if steep > 0.0 && biome != Biome::Arena {
+                    if steep > 0.0 && rocky(biome) {
                         let cr = ground.color(ROCK, x, z, fpp, seed);
                         let t = smooth((steep + (fbm(x / 14.0, z / 14.0, seed + 8) - 0.5) * 0.6) / 0.8);
                         c = std::array::from_fn(|q| lerp(c[q], cr[q], t));
@@ -1866,7 +1910,7 @@ fn ground_map(land: &Land, kind: Kind, biome: Biome, seed: u32) -> Vec<u8> {
                 over(&mut w, pm as usize, smooth((pw + rag - 0.15) / 0.5));
             }
             let steep = land.steep[j * n + i];
-            if steep > 0.0 && biome != Biome::Arena {
+            if steep > 0.0 && rocky(biome) {
                 over(
                     &mut w,
                     ROCK,
@@ -1985,7 +2029,7 @@ fn light(biome: Biome, sky: Option<&str>) -> ([u8; 3], [u8; 3], [f32; 3], [u8; 3
         ([105, 98, 100], [205, 170, 135], [0.9, 0.35, 0.3], [178, 160, 150])
     } else if overcast {
         ([125, 125, 130], [165, 165, 165], [0.4, 1.0, 0.5], [170, 174, 180])
-    } else if biome == Biome::Desert {
+    } else if matches!(biome, Biome::Desert | Biome::Dunes) {
         ([118, 112, 108], [205, 198, 182], [0.5, 1.0, 0.3], [196, 190, 182])
     } else {
         ([112, 114, 120], [196, 192, 182], [0.6, 1.0, 0.4], [180, 186, 196])
@@ -2237,13 +2281,18 @@ fn national(def: &Def) -> Made {
         Biome::Alpine => 240.0,
         Biome::Forest | Biome::Autumn => 160.0,
         Biome::DryHills => 150.0,
+        Biome::Coast => 90.0,
         _ => 110.0,
     };
     // The track sits on a hillside: a long slope across it, a mound or
     // two, and bigger hills further out.
     let slope_dir = rng.range(0.0, TAU);
     let (sd, cd) = slope_dir.sin_cos();
-    let climb = rng.range(35.0, 75.0);
+    let mut climb = rng.range(35.0, 75.0);
+    // A hillside track climbs and drops two or three times as far.
+    if def.style == Style::Hillside {
+        climb *= 2.2;
+    }
     let mound = [centre[0] + rng.range(-250.0, 250.0), centre[1] + rng.range(-250.0, 250.0)];
     let mound_h = rng.range(15.0, 35.0);
     let n = land.size;
@@ -2894,13 +2943,25 @@ fn open_country(def: &Def) -> Made {
     let span = land.span();
     let seed = def.seed;
     let n = land.size;
-    let desert = def.biome == Biome::Desert;
+    // Sandy open ground (desert or coast): wide roads, long loops.
+    let desert = matches!(def.biome, Biome::Desert | Biome::Coast | Biome::Dunes);
+    // Dunes lie in long ridges across the wind.
+    let wind = (def.seed as f32 * 2.399).rem_euclid(TAU);
+    let (ws, wc) = wind.sin_cos();
     for z in 0..n {
         for x in 0..n {
             let (fx, fz) = (x as f32 * land.scale, z as f32 * land.scale);
             let big = fbm(fx / 3000.0, fz / 3000.0, seed);
             let mid = fbm(fx / 900.0, fz / 900.0, seed + 1);
-            let h = if desert {
+            let h = if def.biome == Biome::Dunes {
+                // Long ridges, stretched along the wind's cross line and
+                // broken by the noise, on a gentle swell.
+                let (u, v) = (fx * wc + fz * ws, -fx * ws + fz * wc);
+                let warp = (fbm(fx / 700.0, fz / 700.0, seed + 5) - 0.5) * 500.0;
+                let ridge = ridged((u + warp) / 1400.0, v / 380.0, seed + 3);
+                let field = smooth(fbm(fx / 2200.0, fz / 2200.0, seed + 6) * 1.6 - 0.3);
+                ridge * ridge * 95.0 * (0.35 + 0.65 * field) + big * 80.0 + mid * 8.0
+            } else if desert {
                 // Mesas: flat tops and steps, and dry washes cut in.
                 let m = fbm(fx / 1800.0, fz / 1800.0, seed + 3);
                 let steps = (m * 5.0).floor() + smooth((m * 5.0).fract() * 3.0 - 2.0);
@@ -3278,6 +3339,11 @@ pub fn build_one(def: &Def, game: &Path, ground_dir: Option<&Path>) -> Result<Pa
 pub fn build(game: &Path, ground: Option<&Path>, only: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     for def in SET {
         if only.is_some_and(|o| !def.file.eq_ignore_ascii_case(o) && !def.kind.folder().eq_ignore_ascii_case(o)) {
+            continue;
+        }
+        // `FT_SEED=N` tries another seed for the track (for picking one).
+        if let Some(seed) = std::env::var("FT_SEED").ok().and_then(|s| s.parse().ok()) {
+            build_one(&Def { seed, ..*def }, game, ground)?;
             continue;
         }
         build_one(def, game, ground)?;
