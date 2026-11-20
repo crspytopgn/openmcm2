@@ -2122,7 +2122,7 @@ fn write_scene(s: &Scene) -> String {
     let _ = write!(o, "\r\n[Fog]\r\nColorRGB={},{},{}\r\n\r\n[Sounds]\r\nCrowdPresent={}\r\n", fog[0], fog[1], fog[2], if matches!(d.kind, Kind::Supercross | Kind::National) { "T" } else { "F" });
     // Zone 1: the track (dust and dirt); 2: the open ground; 3: rock and
     // concrete (no dust).
-    let _ = write!(o, "\r\n[TerrainZone1]\r\nGenerateDust=T\r\nGenerateDirt=T\r\n[TerrainZone2]\r\nSurfaceFriction=1.0\r\nSurfaceDrag=1.1\r\nSurfaceTraction=0.9\r\nGenerateDust=F\r\nGenerateDirt=T\r\n[TerrainZone3]\r\nSurfaceFriction=1.0\r\nSurfaceDrag=1.0\r\nSurfaceTraction=0.95\r\nGenerateDust=F\r\nGenerateDirt=F\r\n");
+    let _ = write!(o, "\r\n[TerrainZone1]\r\nGenerateDust=T\r\nGenerateDirt=T\r\n[TerrainZone2]\r\nSurfaceFriction=1.0\r\nSurfaceDrag=1.0\r\nSurfaceTraction=1.0\r\nGenerateDust=F\r\nGenerateDirt=T\r\n[TerrainZone3]\r\nSurfaceFriction=1.0\r\nSurfaceDrag=1.0\r\nSurfaceTraction=1.0\r\nGenerateDust=F\r\nGenerateDirt=F\r\n");
     if !s.models.is_empty() {
         let _ = write!(o, "\r\n[StaticModels]\r\nNumberOfStaticModels={}\r\n", s.models.len());
         for (k, m) in s.models.iter().enumerate() {
@@ -2329,7 +2329,9 @@ fn national(def: &Def) -> Made {
             land.heights[z * n + x] = hill + m + gentle + big * relief * rim + fbm(fx / 90.0, fz / 90.0, seed + 3) * 3.0 * rim;
         }
     }
-    land.valley(&[&course], 26.0, 270.0, relief * 0.7, 20.0, relief * 0.8, seed);
+    // Open, gently rolling ground round the track (the hills start a
+    // good way off it), so it isn't sunk in a trench of its own.
+    land.valley(&[&course], 70.0, 340.0, relief * 0.7, 20.0, relief * 0.8, seed);
     land.mountains(&[&course], 260.0, 850.0, 420.0, seed);
     land.soften(&[&course], 40.0, 2, 3);
     let raw = land.profile(&course, 120.0);
