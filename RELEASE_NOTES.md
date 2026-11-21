@@ -1,3 +1,19 @@
+# OpenMCM2 0.7.1
+
+* **The demo's other tracks, rebuilt** (Extras, off by default, only with
+  the free MM2 demo). The demo lists 27 more tracks that it won't let you
+  ride. It keeps their route, scenery and menu pictures, but not their
+  ground. Turn on *Rebuilt demo tracks* and they join each event's list,
+  marked "(Rebuilt)". Each one is rebuilt the first time you ride it,
+  which takes a few seconds: the original route and scenery on new
+  ground, with jumps of our own. The Stunt Quarry and Tag arenas have no
+  route in the demo, so they aren't included.
+* **Scenery sits on the ground** on the rebuilt tracks. Hay bales no
+  longer sink into the floor, and billboards, light poles, trailers and
+  signs no longer float above it. Stacked crates and bales, power and
+  ski-lift wires, and the rails over the trestle stay with whatever holds
+  them up.
+
 # OpenMCM2 0.7.0
 
 * **No game? Start with the free MM2 demo.** The launcher's *Get the free
