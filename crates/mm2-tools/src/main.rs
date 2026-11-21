@@ -47,6 +47,7 @@ fn main() -> ExitCode {
         ["freetracks", game, ground, only] => freetracks::build(Path::new(game), Some(Path::new(ground)).filter(|g| g.as_os_str() != "-"), Some(only)).map_err(|e| e.to_string().into()),
         ["dialog", file, out] => dialog(file, Some(out)),
         ["course", from, out] => course(from, Path::new(out)),
+        ["rebuild", from, out] => rebuild(from, Path::new(out)),
         ["preview", env, out] => preview(env, out),
         ["free-previews", ground, out] => free_previews(Path::new(ground), Path::new(out)),
         ["free-menus", ui, text, out] => free_menus(Path::new(ui), Path::new(text), Path::new(out)),
@@ -65,6 +66,34 @@ fn main() -> ExitCode {
 }
 
 type BoxResult = Result<(), Box<dyn std::error::Error>>;
+
+/// Rebuilds a demo track that has no ground (`mm2_course::rebuild`),
+/// painted from `MM2_GROUND=<dir>` like `course`.
+fn rebuild(from: &str, out: &Path) -> BoxResult {
+    let t = std::time::Instant::now();
+    let name = Path::new(from).file_name().map_or(from.to_string(), |n| n.to_string_lossy().to_string());
+    let env = mm2_course::rebuild::rebuild_env(&read(from)?, &name, &ground_pictures()?)?;
+    std::fs::write(out, &env)?;
+    eprintln!("{}: {:.1} MB in {:.1} s", out.display(), env.len() as f32 / 1e6, t.elapsed().as_secs_f32());
+    Ok(())
+}
+
+/// The free pack's ground pictures from `MM2_GROUND=<dir>`, if set.
+fn ground_pictures() -> Result<mm2_course::env::Pictures, Box<dyn std::error::Error>> {
+    let mut pictures = mm2_course::env::Pictures::default();
+    if let Some(dir) = std::env::var_os("MM2_GROUND") {
+        for (name, _) in mm2_course::env::GROUND {
+            let Ok(bytes) = std::fs::read(Path::new(&dir).join(format!("{name}.png"))) else { continue };
+            let (w, h, rgb) = freetracks::decode_png(&bytes)?;
+            if w != h {
+                continue;
+            }
+            let rgb = rgb.chunks_exact(3).map(|p| [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0]).collect();
+            pictures.by_name.insert(name.to_string(), std::sync::Arc::new(mm2_course::env::Picture { side: w, rgb }));
+        }
+    }
+    Ok(pictures)
+}
 
 /// Bakes a Course Builder file (or a new track of a mode) into an `.ENV`.
 fn course(from: &str, out: &Path) -> BoxResult {

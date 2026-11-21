@@ -15,6 +15,7 @@
 pub mod auto;
 pub mod bake;
 pub mod copy;
+pub mod rebuild;
 pub mod env;
 pub mod flight;
 pub mod free;
@@ -62,6 +63,11 @@ pub struct Course {
     /// That track, read in (not saved: read again from `base`).
     #[serde(skip)]
     pub source: Option<std::sync::Arc<copy::Source>>,
+    /// Bare land to lay the track on instead of the land recipe's: heights
+    /// (ft) at each of the mode's samples, rows along +z (a rebuilt track,
+    /// [`rebuild`]). Not saved.
+    #[serde(skip)]
+    pub ground: Option<std::sync::Arc<Vec<f32>>>,
 }
 
 impl Default for Course {
@@ -677,6 +683,7 @@ impl Course {
             dress,
             base: None,
             source: None,
+            ground: None,
         };
         // A few jumps spread round the loop, clear of the start.
         let length = course.path().length;

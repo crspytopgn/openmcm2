@@ -78,6 +78,18 @@ pub fn land(course: &Course, every: usize) -> Vec<f32> {
         });
         return out;
     }
+    // Land given whole (a rebuilt track).
+    if let Some(g) = &course.ground {
+        let full = course.mode.samples();
+        if g.len() == full * full {
+            rows(&mut out, n, |z, row| {
+                for (x, h) in row.iter_mut().enumerate() {
+                    *h = g[(z * every).min(full - 1) * full + (x * every).min(full - 1)];
+                }
+            });
+            return out;
+        }
+    }
     rows(&mut out, n, |z, row| {
         for (x, h) in row.iter_mut().enumerate() {
             *h = land::height(&land, side, x as f32 * step, z as f32 * step);
