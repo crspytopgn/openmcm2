@@ -30,7 +30,9 @@ use glam::Vec3;
 /// Puffs in the air at most, at an amount of 1 ([`Budget::amount`]).
 const MOST: usize = 2400;
 /// Room in the buffer: for the most at the largest amount.
-const ROOM: usize = 3200;
+const ROOM: usize = 4400;
+/// The roost's pieces in the air at most, at an amount of 1.
+const ROOST: usize = 1000;
 /// The baked pictures of dust: how many, and their side, texels.
 const LAYERS: u32 = 8;
 const SIDE: u32 = 128;
@@ -121,6 +123,8 @@ struct Track {
     owed: f32,
     clods: f32,
     haze: f32,
+    /// The roost's plume puffs owed.
+    plume: f32,
     /// How hard it pulls away, smoothed (0 to 1.5), and the way it ran
     /// (level, unit) for how fast it turns.
     pull: f32,
@@ -134,6 +138,9 @@ enum Kind {
     Drop,
     /// A clod of dirt: small, solid, tumbles and falls.
     Clod,
+    /// A grain of grit thrown off a spinning tyre: tiny, fast, streaked
+    /// as it flies, and soon slowed by the air and down.
+    Grain,
 }
 
 struct Puff {
@@ -150,6 +157,8 @@ struct Puff {
     swell: f32,
     /// A clod that lands on dry, dusty ground raises a little puff.
     dusty: bool,
+    /// Thrown by the roost (shown with it, not with the dust).
+    roost: bool,
 }
 
 pub struct DustRenderer {
@@ -162,11 +171,397 @@ pub struct DustRenderer {
     /// The baked pictures of dust, for this pipeline's own group.
     atlas_group: wgpu::BindGroup,
     count: u32,
+    cloud: Cloud,
+}
+
+/// What is in the air: the puffs, drops, grit and clods, and what each
+/// bike left the step before.
+struct Cloud {
     puffs: std::collections::VecDeque<Puff>,
-    /// The most puffs at once, by the amount.
+    /// The most puffs at once, by the amount, and how many are the
+    /// roost's grit and clods.
     most: usize,
+    roosted: usize,
     bikes: Vec<Track>,
     random: u32,
+}
+
+impl Cloud {
+    fn new() -> Cloud {
+        Cloud {
+            puffs: std::collections::VecDeque::new(),
+            most: MOST,
+            roosted: 0,
+            bikes: Vec::new(),
+            random: 0x9e37_79b9,
+        }
+    }
+
+    fn random(&mut self) -> f32 {
+        self.random ^= self.random << 13;
+        self.random ^= self.random >> 17;
+        self.random ^= self.random << 5;
+        (self.random >> 8) as f32 / (1u32 << 24) as f32
+    }
+
+    /// Each bike's tyres on the ground this step (game coordinates) and
+    /// how they kick up dust, the step, s, whether the ground is wet, and
+    /// what may fly: the rear ones throw up dust (or spray) and dirt as
+    /// they run, and what is in the air moves on.
+    fn step(&mut self, feed: &[([Option<Vec3>; 2], Kick)], dt: f32, wet: bool, budget: Budget) {
+        if dt <= 0.0 {
+            return;
+        }
+        let amount = budget.amount.clamp(0.25, 1.5);
+        self.most = ((MOST as f32 * amount) as usize + (ROOST as f32 * amount) as usize).min(ROOM);
+        self.bikes.resize(feed.len(), Track::default());
+        for (i, (tyres, kick)) in feed.iter().enumerate() {
+            let rear = tyres[1].map(crate::renderer::from_game);
+            let mut track = self.bikes[i];
+            match (track.last, rear) {
+                (Some(a), Some(b)) => {
+                    let velocity = (b - a) / dt;
+                    let speed = velocity.length();
+                    if speed < 200.0 {
+                        // How hard it pulls away, smoothed over about a
+                        // tenth of a second (the tyre's place jitters).
+                        // (None the first step: there is no speed before.)
+                        let pull = if track.speed > 0.0 { ((speed - track.speed) / dt / 20.0).clamp(0.0, 1.5) } else { 0.0 };
+                        let k = 1.0 - (-dt / 0.1).exp();
+                        track.pull += (pull - track.pull) * k;
+                        if budget.dust {
+                            if wet {
+                                self.spray(&mut track, b, velocity, dt);
+                            } else if kick.dusty {
+                                self.dust(&mut track, b, velocity, *kick, dt, amount);
+                            }
+                        }
+                        if budget.roost && kick.dirt {
+                            self.roost(&mut track, b, velocity, *kick, dt, amount, wet);
+                        }
+                    }
+                    track.speed = speed;
+                    track.air = 0.0;
+                }
+                (None, Some(b)) => {
+                    // Down again after a jump: a ring of dust thrown out
+                    // round the tyre, by how long it flew and how fast.
+                    if budget.dust && !wet && kick.dusty && track.air > 0.3 && track.speed > 12.0 {
+                        let n = (((track.air * 10.0).min(12.0) + track.speed * 0.15) * amount.sqrt()) as usize;
+                        for k in 0..n {
+                            let (r1, r2, r3, seed) = (self.random(), self.random(), self.random(), self.random());
+                            let angle = (k as f32 + r1) / n as f32 * std::f32::consts::TAU;
+                            let out = Vec3::new(angle.cos(), 0.0, angle.sin());
+                            self.add(Puff {
+                                at: b + out * 0.8 + Vec3::Y * 0.2,
+                                home: b,
+                                velocity: out * (6.0 + 8.0 * r2) + Vec3::Y * (1.0 + 2.0 * r3),
+                                age: 0.0,
+                                life: 1.6 + 1.4 * r3,
+                                seed,
+                                thick: 0.32 + 0.2 * r2,
+                                kind: Kind::Puff,
+                                size: 0.5 + 0.4 * r1,
+                                swell: (1.4 + 1.2 * r2) / amount.sqrt(),
+                                dusty: false,
+                                roost: false,
+                            });
+                        }
+                    }
+                    track.air = 0.0;
+                    track.pull = 0.0;
+                }
+                (_, None) => track.air += dt,
+            }
+            track.last = rear;
+            self.bikes[i] = track;
+        }
+        let mut landed: Vec<(Vec3, f32)> = Vec::new();
+        for p in &mut self.puffs {
+            p.age += dt;
+            match p.kind {
+                Kind::Drop => {
+                    // A drop falls, a little slowed by the air.
+                    p.velocity = p.velocity * (-dt * 0.6).exp() - Vec3::Y * 32.0 * dt;
+                    p.at += p.velocity * dt;
+                }
+                Kind::Grain => {
+                    // Grit is slowed hard by the air and drops fast.
+                    p.velocity = p.velocity * (-dt * 1.6).exp() - Vec3::Y * 32.0 * dt;
+                    p.at += p.velocity * dt;
+                    if p.velocity.y < 0.0 && p.at.y < p.home.y - 0.05 {
+                        p.age = p.life;
+                    }
+                }
+                Kind::Clod => {
+                    // A clod falls as a stone does, and lands about as low
+                    // as the tyre that threw it (it stops at the ground
+                    // before that where the ground rises, hidden by it).
+                    p.velocity = p.velocity * (-dt * 0.25).exp() - Vec3::Y * 32.0 * dt;
+                    p.at += p.velocity * dt;
+                    if p.velocity.y < 0.0 && p.at.y < p.home.y - 0.1 {
+                        if p.dusty {
+                            landed.push((p.at, p.size));
+                        }
+                        p.age = p.life;
+                    }
+                }
+                Kind::Puff => {
+                    // Slowed hard by the air toward the wind, so it hangs
+                    // low rather than rising as smoke does.
+                    let drag = (-dt * 2.2).exp();
+                    p.velocity = WIND + (p.velocity - WIND) * drag + Vec3::Y * 0.3 * dt;
+                    p.at += p.velocity * dt;
+                }
+            }
+        }
+        self.puffs.retain(|p| p.age < p.life);
+        self.roosted = self.puffs.iter().filter(|p| matches!(p.kind, Kind::Grain | Kind::Clod)).count();
+        // The bigger clods landing on dry ground raise a little dust.
+        for (at, size) in landed {
+            let (r1, r2, seed) = (self.random(), self.random(), self.random());
+            if r1 > 0.25 + size * 2.0 {
+                continue;
+            }
+            self.add(Puff {
+                at: at + Vec3::Y * 0.1,
+                home: at,
+                velocity: Vec3::new(r2 - 0.5, 1.2, seed - 0.5) * 2.0,
+                age: 0.0,
+                life: 0.9 + 0.8 * r2,
+                seed,
+                thick: 0.3,
+                kind: Kind::Puff,
+                size: 0.15 + size,
+                swell: 0.6 + 0.6 * r2,
+                dusty: false,
+                roost: true,
+            });
+        }
+    }
+
+    fn add(&mut self, puff: Puff) {
+        while self.puffs.len() >= self.most {
+            self.puffs.pop_front();
+        }
+        self.puffs.push_back(puff);
+    }
+
+    /// A rear tyre running at `b` on dusty ground: a little dust always,
+    /// more and thicker as it spins or the bike pulls away, and a thin
+    /// haze that hangs over the track long after (not on Low).
+    fn dust(&mut self, track: &mut Track, b: Vec3, velocity: Vec3, kick: Kick, dt: f32, amount: f32) {
+        let speed = velocity.length();
+        if speed < 4.0 {
+            return;
+        }
+        let pull = ((speed - track.speed) / dt / 20.0).clamp(0.0, 1.5);
+        let spin = (kick.spin * 4.0).clamp(0.0, 1.5);
+        let hard = pull.max(spin);
+        // Fewer puffs on a lower preset, each a little bigger, so the
+        // cloud looks much the same.
+        track.owed += (3.0 + speed * 0.18) * (1.0 + 1.5 * hard) * dt * amount;
+        let bigger = 1.0 / amount.sqrt();
+        let back = -velocity / speed;
+        let side = back.cross(Vec3::Y).normalize_or(Vec3::X);
+        while track.owed >= 1.0 {
+            track.owed -= 1.0;
+            let (r1, r2, r3, r4, seed) = (self.random(), self.random(), self.random(), self.random(), self.random());
+            // Kicked up and back off the tyre, fanning out to the sides; a
+            // spinning tyre throws it further back.
+            let thrown = velocity * (0.05 + 0.1 * r1) + back * speed * (0.06 + 0.12 * hard * r3) + side * (r2 - 0.5) * (6.0 + speed * 0.12) + Vec3::Y * (1.5 + 3.0 * r3 + 2.0 * hard);
+            self.add(Puff {
+                at: b + back * 0.8 + side * (r4 - 0.5) * 0.8 + Vec3::Y * 0.3,
+                home: b,
+                velocity: thrown,
+                age: 0.0,
+                life: 2.2 + 2.0 * r4,
+                seed,
+                thick: (0.5 + speed / 60.0 * 0.25 + hard * 0.2).min(0.9),
+                kind: Kind::Puff,
+                size: (0.4 + 0.3 * r1) * bigger,
+                swell: (1.2 + speed * 0.02 + 0.8 * hard) * (0.7 + 0.6 * r2) * bigger,
+                dusty: false,
+                roost: false,
+            });
+        }
+        // The fine dust that hangs in the air over a dry track and drifts
+        // off on the wind, thin and wide: a few big, faint puffs.
+        if amount < 0.6 || speed < 12.0 {
+            return;
+        }
+        track.haze += (speed / 40.0).min(1.5) * (1.0 + hard) * 0.9 * dt * amount;
+        while track.haze >= 1.0 {
+            track.haze -= 1.0;
+            let (r1, r2, r3, seed) = (self.random(), self.random(), self.random(), self.random());
+            self.add(Puff {
+                at: b + back * 3.0 + side * (r1 - 0.5) * 2.0 + Vec3::Y * 0.6,
+                home: b,
+                velocity: velocity * 0.05 + side * (r2 - 0.5) * 3.0 + Vec3::Y * 0.8,
+                age: 0.0,
+                life: 7.0 + 5.0 * r3,
+                seed,
+                thick: 0.07 + 0.05 * r2,
+                kind: Kind::Puff,
+                size: 1.5,
+                swell: 6.0 + 5.0 * r1,
+                dusty: false,
+                roost: false,
+            });
+        }
+    }
+
+    /// A rear tyre on dirt at `b`: the roost, as a real one is. While the
+    /// tyre spins (or the bike pulls hard, or slides through a turn) it
+    /// throws a tight, low jet out of the contact patch: mostly fine grit,
+    /// streaking as it flies, with crumbs and a few clods among it, and a
+    /// brown plume of the finest dirt hanging behind. The harder it spins,
+    /// the faster, thicker and further. All of it falls fast and is gone
+    /// in well under a second, the plume in about one. Wet, it is mud:
+    /// heavier lumps, darker, and no plume.
+    #[allow(clippy::too_many_arguments)]
+    fn roost(&mut self, track: &mut Track, b: Vec3, velocity: Vec3, kick: Kick, dt: f32, amount: f32, wet: bool) {
+        let speed = velocity.length();
+        let level = Vec3::new(velocity.x, 0.0, velocity.z);
+        let heading = level.normalize_or_zero();
+        // How fast it turns, and so how hard the tyre slides out.
+        let turning = if track.heading != Vec3::ZERO && heading != Vec3::ZERO {
+            track.heading.cross(heading).y.clamp(-1.0, 1.0).asin() / dt
+        } else {
+            0.0
+        };
+        if heading != Vec3::ZERO {
+            track.heading = heading;
+        }
+        if speed < 2.0 {
+            return;
+        }
+        // The tyre's slip drives it: its spin most, a hard pull or a slide
+        // less (the computer's riders have no spin of their own).
+        let spin = (kick.spin * 3.0).clamp(0.0, 1.2);
+        let slide = ((level.length() * turning.abs() - 30.0) / 45.0).clamp(0.0, 1.0);
+        let hard = spin.max(track.pull * 0.7).max(slide * 0.7);
+        if hard < 0.12 {
+            return;
+        }
+        let back = -velocity / speed;
+        let side = back.cross(Vec3::Y).normalize_or(Vec3::X);
+        // Out of the turn: the tyre steps out that way.
+        let out = side * -turning.signum() * slide;
+        // How fast the tread throws it back off the ground, ft/s.
+        let jet = 14.0 + 30.0 * hard + speed * 0.25;
+        let room = (ROOST as f32 * amount) as usize;
+        track.clods += (250.0 + 900.0 * hard) * dt * amount;
+        while track.clods >= 1.0 {
+            track.clods -= 1.0;
+            if self.roosted >= room {
+                track.clods = 0.0;
+                break;
+            }
+            self.roosted += 1;
+            let (r1, r2, r3, r4, seed) = (self.random(), self.random(), self.random(), self.random(), self.random());
+            // A tight jet, low (8 to 32 degrees), a little wider when it
+            // slides; the grit fastest, lumps slower.
+            let lump = r4 < if wet { 0.4 } else { 0.18 };
+            let rise = 0.14 + 0.42 * r2;
+            let fling = back * rise.cos() + Vec3::Y * rise.sin() + side * (r3 - 0.5) * (0.22 + 0.3 * slide) + out * 0.8;
+            let pace = jet * if lump { 0.55 + 0.35 * r1 } else { 0.7 + 0.5 * r1 };
+            self.add(Puff {
+                at: b + back * (0.35 + 0.2 * r1) + side * (r3 - 0.5) * 0.35 + Vec3::Y * 0.15,
+                home: b,
+                // Thrown off a tyre moving with the bike.
+                velocity: velocity + fling * pace,
+                age: 0.0,
+                life: 1.0,
+                seed,
+                thick: if wet { 0.95 } else { 0.85 + 0.15 * r2 },
+                kind: if lump { Kind::Clod } else { Kind::Grain },
+                size: if lump {
+                    (0.03 + 0.07 * r1 * r1) * if wet { 1.3 } else { 1.0 }
+                } else {
+                    0.012 + 0.018 * r1 * r1
+                },
+                swell: 0.0,
+                dusty: lump && !wet,
+                roost: true,
+            });
+        }
+        // The plume: the finest dirt, thrown back with the jet and hanging
+        // a moment as a brown cloud low behind the tyre.
+        if wet {
+            return;
+        }
+        track.plume += (10.0 + 30.0 * hard) * dt * amount.sqrt();
+        while track.plume >= 1.0 {
+            track.plume -= 1.0;
+            let (r1, r2, r3, seed) = (self.random(), self.random(), self.random(), self.random());
+            let rise = 0.1 + 0.3 * r2;
+            let fling = back * rise.cos() + Vec3::Y * rise.sin() + side * (r3 - 0.5) * 0.3 + out * 0.6;
+            self.add(Puff {
+                at: b + back * 0.6 + Vec3::Y * 0.3,
+                home: b,
+                velocity: velocity * 0.6 + fling * jet * (0.35 + 0.3 * r1),
+                age: 0.0,
+                life: 0.8 + 0.6 * r2,
+                seed,
+                thick: (0.35 + 0.3 * hard).min(0.7),
+                kind: Kind::Puff,
+                size: 0.25 + 0.2 * r1,
+                swell: (0.8 + 0.9 * hard) / amount.sqrt(),
+                dusty: false,
+                roost: true,
+            });
+        }
+    }
+
+    /// A rear tyre running at `b` on wet ground: a rooster tail of muddy
+    /// drops, and now and then a wisp of mist.
+    fn spray(&mut self, track: &mut Track, b: Vec3, velocity: Vec3, dt: f32) {
+        let speed = velocity.length();
+        if speed < 4.0 {
+            return;
+        }
+        track.owed += (40.0 + speed * 3.0) * dt;
+        let back = -velocity / speed;
+        let side = back.cross(Vec3::Y).normalize_or(Vec3::X);
+        while track.owed >= 1.0 {
+            track.owed -= 1.0;
+            let (r1, r2, r3, r4, seed) = (self.random(), self.random(), self.random(), self.random(), self.random());
+            // Flung up off the back of the tyre in a rooster tail, fanning
+            // out to the sides.
+            let thrown = velocity * (0.2 + 0.2 * r1) + back * speed * (0.1 + 0.15 * r3) + side * (r2 - 0.5) * (4.0 + speed * 0.2) + Vec3::Y * (5.0 + 9.0 * r4 + speed * 0.1);
+            self.add(Puff {
+                at: b + back * 0.6 + Vec3::Y * 0.4,
+                home: b,
+                velocity: thrown,
+                age: 0.0,
+                life: 0.5 + 0.5 * r1,
+                seed,
+                thick: 0.6 + 0.3 * r2,
+                kind: Kind::Drop,
+                size: 0.0,
+                swell: 0.0,
+                dusty: false,
+                roost: false,
+            });
+            if seed < 0.06 {
+                self.add(Puff {
+                    at: b + back * 0.8 + Vec3::Y * 0.3,
+                    home: b,
+                    velocity: velocity * 0.1 + back * speed * 0.05 + Vec3::Y * 2.0,
+                    age: 0.0,
+                    life: 1.0 + r3,
+                    seed: r4,
+                    thick: 0.22,
+                    kind: Kind::Puff,
+                    size: 1.0,
+                    swell: 4.5,
+                    dusty: false,
+                    roost: false,
+                });
+            }
+        }
+    }
 }
 
 impl DustRenderer {
@@ -360,324 +755,25 @@ impl DustRenderer {
             instances,
             atlas_group,
             count: 0,
-            puffs: std::collections::VecDeque::new(),
-            most: MOST,
-            bikes: Vec::new(),
-            random: 0x9e37_79b9,
+            cloud: Cloud::new(),
         }
-    }
-
-    fn random(&mut self) -> f32 {
-        self.random ^= self.random << 13;
-        self.random ^= self.random >> 17;
-        self.random ^= self.random << 5;
-        (self.random >> 8) as f32 / (1u32 << 24) as f32
     }
 
     /// Each bike's tyres on the ground this step (game coordinates) and
     /// how they kick up dust, the step, s, whether the ground is wet, and
-    /// what may fly: the rear ones throw up dust (or spray) and dirt as
-    /// they run, and what is in the air moves on.
+    /// what may fly (see [`Cloud::step`]).
     pub fn step(&mut self, feed: &[([Option<Vec3>; 2], Kick)], dt: f32, wet: bool, budget: Budget) {
-        if dt <= 0.0 {
-            return;
-        }
-        let amount = budget.amount.clamp(0.25, 1.5);
-        self.most = ((MOST as f32 * amount) as usize).min(ROOM);
-        self.bikes.resize(feed.len(), Track::default());
-        for (i, (tyres, kick)) in feed.iter().enumerate() {
-            let rear = tyres[1].map(crate::renderer::from_game);
-            let mut track = self.bikes[i];
-            match (track.last, rear) {
-                (Some(a), Some(b)) => {
-                    let velocity = (b - a) / dt;
-                    let speed = velocity.length();
-                    if speed < 200.0 {
-                        // How hard it pulls away, smoothed over about a
-                        // tenth of a second (the tyre's place jitters).
-                        let pull = ((speed - track.speed) / dt / 20.0).clamp(0.0, 1.5);
-                        let k = 1.0 - (-dt / 0.1).exp();
-                        track.pull += (pull - track.pull) * k;
-                        if budget.dust {
-                            if wet {
-                                self.spray(&mut track, b, velocity, dt);
-                            } else if kick.dusty {
-                                self.dust(&mut track, b, velocity, *kick, dt, amount);
-                            }
-                        }
-                        if budget.roost && kick.dirt {
-                            self.roost(&mut track, b, velocity, *kick, dt, amount, wet);
-                        }
-                    }
-                    track.speed = speed;
-                    track.air = 0.0;
-                }
-                (None, Some(b)) => {
-                    // Down again after a jump: a ring of dust thrown out
-                    // round the tyre, by how long it flew and how fast.
-                    if budget.dust && !wet && kick.dusty && track.air > 0.3 && track.speed > 12.0 {
-                        let n = (((track.air * 10.0).min(12.0) + track.speed * 0.15) * amount.sqrt()) as usize;
-                        for k in 0..n {
-                            let (r1, r2, r3, seed) = (self.random(), self.random(), self.random(), self.random());
-                            let angle = (k as f32 + r1) / n as f32 * std::f32::consts::TAU;
-                            let out = Vec3::new(angle.cos(), 0.0, angle.sin());
-                            self.add(Puff {
-                                at: b + out * 0.8 + Vec3::Y * 0.2,
-                                home: b,
-                                velocity: out * (6.0 + 8.0 * r2) + Vec3::Y * (1.0 + 2.0 * r3),
-                                age: 0.0,
-                                life: 1.6 + 1.4 * r3,
-                                seed,
-                                thick: 0.32 + 0.2 * r2,
-                                kind: Kind::Puff,
-                                size: 0.5 + 0.4 * r1,
-                                swell: (1.4 + 1.2 * r2) / amount.sqrt(),
-                                dusty: false,
-                            });
-                        }
-                    }
-                    track.air = 0.0;
-                    track.pull = 0.0;
-                }
-                (_, None) => track.air += dt,
-            }
-            track.last = rear;
-            self.bikes[i] = track;
-        }
-        let mut landed: Vec<(Vec3, f32)> = Vec::new();
-        for p in &mut self.puffs {
-            p.age += dt;
-            match p.kind {
-                Kind::Drop => {
-                    // A drop falls, a little slowed by the air.
-                    p.velocity = p.velocity * (-dt * 0.6).exp() - Vec3::Y * 32.0 * dt;
-                    p.at += p.velocity * dt;
-                }
-                Kind::Clod => {
-                    // A clod falls as a stone does, and lands about as low
-                    // as the tyre that threw it (it stops at the ground
-                    // before that where the ground rises, hidden by it).
-                    p.velocity = p.velocity * (-dt * 0.25).exp() - Vec3::Y * 32.0 * dt;
-                    p.at += p.velocity * dt;
-                    if p.velocity.y < 0.0 && p.at.y < p.home.y - 0.1 {
-                        if p.dusty {
-                            landed.push((p.at, p.size));
-                        }
-                        p.age = p.life;
-                    }
-                }
-                Kind::Puff => {
-                    // Slowed hard by the air toward the wind, so it hangs
-                    // low rather than rising as smoke does.
-                    let drag = (-dt * 2.2).exp();
-                    p.velocity = WIND + (p.velocity - WIND) * drag + Vec3::Y * 0.3 * dt;
-                    p.at += p.velocity * dt;
-                }
-            }
-        }
-        self.puffs.retain(|p| p.age < p.life);
-        // The bigger clods landing on dry ground raise a little dust.
-        for (at, size) in landed {
-            let (r1, r2, seed) = (self.random(), self.random(), self.random());
-            if r1 > 0.25 + size * 2.0 {
-                continue;
-            }
-            self.add(Puff {
-                at: at + Vec3::Y * 0.1,
-                home: at,
-                velocity: Vec3::new(r2 - 0.5, 1.2, seed - 0.5) * 2.0,
-                age: 0.0,
-                life: 0.9 + 0.8 * r2,
-                seed,
-                thick: 0.3,
-                kind: Kind::Puff,
-                size: 0.15 + size,
-                swell: 0.6 + 0.6 * r2,
-                dusty: false,
-            });
-        }
-    }
-
-    fn add(&mut self, puff: Puff) {
-        while self.puffs.len() >= self.most {
-            self.puffs.pop_front();
-        }
-        self.puffs.push_back(puff);
-    }
-
-    /// A rear tyre running at `b` on dusty ground: a little dust always,
-    /// more and thicker as it spins or the bike pulls away, and a thin
-    /// haze that hangs over the track long after (not on Low).
-    fn dust(&mut self, track: &mut Track, b: Vec3, velocity: Vec3, kick: Kick, dt: f32, amount: f32) {
-        let speed = velocity.length();
-        if speed < 4.0 {
-            return;
-        }
-        let pull = ((speed - track.speed) / dt / 20.0).clamp(0.0, 1.5);
-        let spin = (kick.spin * 4.0).clamp(0.0, 1.5);
-        let hard = pull.max(spin);
-        // Fewer puffs on a lower preset, each a little bigger, so the
-        // cloud looks much the same.
-        track.owed += (3.0 + speed * 0.18) * (1.0 + 1.5 * hard) * dt * amount;
-        let bigger = 1.0 / amount.sqrt();
-        let back = -velocity / speed;
-        let side = back.cross(Vec3::Y).normalize_or(Vec3::X);
-        while track.owed >= 1.0 {
-            track.owed -= 1.0;
-            let (r1, r2, r3, r4, seed) = (self.random(), self.random(), self.random(), self.random(), self.random());
-            // Kicked up and back off the tyre, fanning out to the sides; a
-            // spinning tyre throws it further back.
-            let thrown = velocity * (0.05 + 0.1 * r1) + back * speed * (0.06 + 0.12 * hard * r3) + side * (r2 - 0.5) * (6.0 + speed * 0.12) + Vec3::Y * (1.5 + 3.0 * r3 + 2.0 * hard);
-            self.add(Puff {
-                at: b + back * 0.8 + side * (r4 - 0.5) * 0.8 + Vec3::Y * 0.3,
-                home: b,
-                velocity: thrown,
-                age: 0.0,
-                life: 2.2 + 2.0 * r4,
-                seed,
-                thick: (0.5 + speed / 60.0 * 0.25 + hard * 0.2).min(0.9),
-                kind: Kind::Puff,
-                size: (0.4 + 0.3 * r1) * bigger,
-                swell: (1.2 + speed * 0.02 + 0.8 * hard) * (0.7 + 0.6 * r2) * bigger,
-                dusty: false,
-            });
-        }
-        // The fine dust that hangs in the air over a dry track and drifts
-        // off on the wind, thin and wide: a few big, faint puffs.
-        if amount < 0.6 || speed < 12.0 {
-            return;
-        }
-        track.haze += (speed / 40.0).min(1.5) * (1.0 + hard) * 0.9 * dt * amount;
-        while track.haze >= 1.0 {
-            track.haze -= 1.0;
-            let (r1, r2, r3, seed) = (self.random(), self.random(), self.random(), self.random());
-            self.add(Puff {
-                at: b + back * 3.0 + side * (r1 - 0.5) * 2.0 + Vec3::Y * 0.6,
-                home: b,
-                velocity: velocity * 0.05 + side * (r2 - 0.5) * 3.0 + Vec3::Y * 0.8,
-                age: 0.0,
-                life: 7.0 + 5.0 * r3,
-                seed,
-                thick: 0.07 + 0.05 * r2,
-                kind: Kind::Puff,
-                size: 1.5,
-                swell: 6.0 + 5.0 * r1,
-                dusty: false,
-            });
-        }
-    }
-
-    /// A rear tyre on dirt at `b`: the roost. Pulling hard or spinning, it
-    /// throws a fan of clods back and up (further the harder); sliding
-    /// through a turn, out to the side away from it. Wet, the clods are
-    /// mud.
-    #[allow(clippy::too_many_arguments)]
-    fn roost(&mut self, track: &mut Track, b: Vec3, velocity: Vec3, kick: Kick, dt: f32, amount: f32, wet: bool) {
-        let speed = velocity.length();
-        let level = Vec3::new(velocity.x, 0.0, velocity.z);
-        let heading = level.normalize_or_zero();
-        // How fast it turns, and so how hard the tyre slides out.
-        let turning = if track.heading != Vec3::ZERO && heading != Vec3::ZERO {
-            track.heading.cross(heading).y.clamp(-1.0, 1.0).asin() / dt
-        } else {
-            0.0
-        };
-        if heading != Vec3::ZERO {
-            track.heading = heading;
-        }
-        if speed < 3.0 {
-            return;
-        }
-        let spin = (kick.spin * 4.0).clamp(0.0, 1.5);
-        let slide = ((level.length() * turning.abs() - 30.0) / 45.0).clamp(0.0, 1.0);
-        let hard = track.pull.max(spin).max(slide * 0.8);
-        if hard < 0.15 {
-            return;
-        }
-        track.clods += (45.0 + 250.0 * hard) * (speed / 15.0 + 0.3).min(1.0) * dt * amount;
-        let back = -velocity / speed;
-        let side = back.cross(Vec3::Y).normalize_or(Vec3::X);
-        // Out of the turn: the tyre steps out that way.
-        let out = side * -turning.signum() * slide;
-        while track.clods >= 1.0 {
-            track.clods -= 1.0;
-            let (r1, r2, r3, r4, seed) = (self.random(), self.random(), self.random(), self.random(), self.random());
-            let eject = (8.0 + speed * 0.4 + 16.0 * hard) * (0.5 + 0.6 * r1);
-            // Up at between 10 and 38 degrees, spreading to the sides: a
-            // low fan, seldom higher than the rider's head.
-            let rise = 0.18 + 0.48 * r2;
-            let fling = back * rise.cos() + Vec3::Y * rise.sin() + side * (r3 - 0.5) * 0.45 + out * 0.9;
-            self.add(Puff {
-                at: b + back * 0.9 + side * (r4 - 0.5) * 0.4 + Vec3::Y * 0.35,
-                home: b,
-                velocity: velocity * 0.85 + fling * eject,
-                age: 0.0,
-                life: 1.8,
-                seed,
-                thick: if wet { 0.95 } else { 0.9 },
-                kind: Kind::Clod,
-                // Mostly crumbs, a few lumps.
-                size: 0.03 + 0.11 * r4 * r4 * r1,
-                swell: 0.0,
-                dusty: !wet,
-            });
-        }
-    }
-
-    /// A rear tyre running at `b` on wet ground: a rooster tail of muddy
-    /// drops, and now and then a wisp of mist.
-    fn spray(&mut self, track: &mut Track, b: Vec3, velocity: Vec3, dt: f32) {
-        let speed = velocity.length();
-        if speed < 4.0 {
-            return;
-        }
-        track.owed += (40.0 + speed * 3.0) * dt;
-        let back = -velocity / speed;
-        let side = back.cross(Vec3::Y).normalize_or(Vec3::X);
-        while track.owed >= 1.0 {
-            track.owed -= 1.0;
-            let (r1, r2, r3, r4, seed) = (self.random(), self.random(), self.random(), self.random(), self.random());
-            // Flung up off the back of the tyre in a rooster tail, fanning
-            // out to the sides.
-            let thrown = velocity * (0.2 + 0.2 * r1) + back * speed * (0.1 + 0.15 * r3) + side * (r2 - 0.5) * (4.0 + speed * 0.2) + Vec3::Y * (5.0 + 9.0 * r4 + speed * 0.1);
-            self.add(Puff {
-                at: b + back * 0.6 + Vec3::Y * 0.4,
-                home: b,
-                velocity: thrown,
-                age: 0.0,
-                life: 0.5 + 0.5 * r1,
-                seed,
-                thick: 0.6 + 0.3 * r2,
-                kind: Kind::Drop,
-                size: 0.0,
-                swell: 0.0,
-                dusty: false,
-            });
-            if seed < 0.06 {
-                self.add(Puff {
-                    at: b + back * 0.8 + Vec3::Y * 0.3,
-                    home: b,
-                    velocity: velocity * 0.1 + back * speed * 0.05 + Vec3::Y * 2.0,
-                    age: 0.0,
-                    life: 1.0 + r3,
-                    seed: r4,
-                    thick: 0.22,
-                    kind: Kind::Puff,
-                    size: 1.0,
-                    swell: 4.5,
-                    dusty: false,
-                });
-            }
-        }
+        self.cloud.step(feed, dt, wet, budget);
     }
 
     /// Puts the puffs in the buffer, furthest first, for the eye at `eye`:
     /// only the dust, only the dirt, or both.
     pub fn prepare(&mut self, queue: &wgpu::Queue, eye: Vec3, dust: bool, roost: bool) {
         let mut order: Vec<(f32, &Puff)> = self
+            .cloud
             .puffs
             .iter()
-            .filter(|p| if p.kind == Kind::Clod { roost } else { dust })
+            .filter(|p| if p.roost || matches!(p.kind, Kind::Clod | Kind::Grain) { roost } else { dust })
             .map(|p| (p.at.distance_squared(eye), p))
             .collect();
         order.sort_by(|a, b| b.0.total_cmp(&a.0));
@@ -705,6 +801,13 @@ impl DustRenderer {
                             home: [p.home.x, p.home.z, 2.0, picture + turn.min(0.999)],
                         };
                     }
+                    Kind::Grain => {
+                        return Instance {
+                            place: [p.at.x, p.at.y, p.at.z, p.size],
+                            look: [p.thick * (1.0 - (t * 3.0 - 2.0).max(0.0)), p.velocity.x, p.velocity.y, p.velocity.z],
+                            home: [p.home.x, p.home.z, 3.0, 0.0],
+                        };
+                    }
                     Kind::Puff => {}
                 }
                 // Swells fast then slowly; fades in quickly and out slowly,
@@ -730,7 +833,7 @@ impl DustRenderer {
     /// coordinates), if any: what the dust's shadow map spans.
     pub fn bounds(&self, eye: Vec3) -> Option<(Vec3, Vec3)> {
         let mut out: Option<(Vec3, Vec3)> = None;
-        for p in self.puffs.iter().filter(|p| p.kind == Kind::Puff && p.at.distance_squared(eye) < SHADOWED * SHADOWED) {
+        for p in self.cloud.puffs.iter().filter(|p| p.kind == Kind::Puff && p.at.distance_squared(eye) < SHADOWED * SHADOWED) {
             // As prepare draws it: swollen, and raised by half its size.
             let size = p.size + p.swell + p.age * 0.25;
             let r = Vec3::splat(size * 1.2);
@@ -873,6 +976,38 @@ pub fn puff_atlas(side: usize, layers: usize, mips: usize) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bike going `speed` ft/s along +z at step `k`, its rear tyre
+    /// spinning by `spin`.
+    fn ride(d: &mut Cloud, k: usize, speed: f32, spin: f32) {
+        let at = Vec3::new(0.0, 0.0, k as f32 * speed * 0.02);
+        let kick = Kick { dusty: true, spin, dirt: true };
+        let budget = Budget { dust: true, roost: true, amount: 1.0 };
+        d.step(&[([Some(at), Some(at - Vec3::Z * 4.5)], kick)], 0.02, false, budget);
+    }
+
+    #[test]
+    fn a_spinning_tyre_roosts_and_it_falls_fast() {
+        let mut d = Cloud::new();
+        for k in 0..20 {
+            ride(&mut d, k, 30.0, 0.4);
+        }
+        assert!(d.roosted > 50, "{}", d.roosted);
+        // Thrown back and down within a second.
+        for k in 20..80 {
+            ride(&mut d, k, 30.0, 0.0);
+        }
+        assert_eq!(d.roosted, 0);
+    }
+
+    #[test]
+    fn a_gripping_tyre_cruising_throws_no_roost() {
+        let mut d = Cloud::new();
+        for k in 0..40 {
+            ride(&mut d, k, 30.0, 0.0);
+        }
+        assert_eq!(d.roosted, 0);
+    }
 
     #[test]
     fn the_pictures_are_round_puffs() {
