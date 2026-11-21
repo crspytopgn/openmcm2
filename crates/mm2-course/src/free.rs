@@ -2133,6 +2133,16 @@ fn write_scene(s: &Scene) -> String {
             );
         }
     }
+    // The 30-second board man, as every one of the game's Nationals and
+    // Supercross tracks has him: the race then counts down his 8.2 s walk
+    // as the game's do (the viewer stands him in front of the player).
+    if matches!(d.kind, Kind::Supercross | Kind::National) {
+        let _ = write!(
+            o,
+            "\r\n[Animations]\r\nNumberOfAnimations=1\r\nNumberOfRandomSets=0\r\n\r\n[Animation1]\r\nMCF=30SecMan.mcf\r\nOffset={:.1},{:.1},{:.1}\r\nUseLighting=T\r\nUseBlendedKeys=T\r\nNumberOfMotions=1\r\nMotionToPlay1=WalkIn\r\n\r\nNumberInSequence=1\r\nMotionSequence=1\r\n",
+            p[0], p[1], p[2]
+        );
+    }
     o
 }
 
@@ -3349,7 +3359,7 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
 /// Which making of the recipes a built track is from (its `.made` file):
 /// a track built by an older one is built again. Change it whenever a
 /// change here moves anything on an existing track.
-pub const MADE: &str = "7";
+pub const MADE: &str = "8";
 
 /// The free track whose file is `stem` (`FPNAT01`), any case.
 pub fn find(stem: &str) -> Option<&'static Def> {

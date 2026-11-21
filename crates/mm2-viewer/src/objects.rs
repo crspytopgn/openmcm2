@@ -659,7 +659,9 @@ impl ObjectMesh {
             // The pack's start gate, made to drop (freepack::gate_drop).
             let gate = crate::freepack::is_gate(&a.model);
             let still_gate = || gate.then(|| Mcf { model: crate::freepack::GATE.into(), motions: Vec::new() });
-            let Some(mcf) = find(&a.model).and_then(|b| Mcf::parse(b).ok()).or_else(free).or_else(still_gate) else {
+            // Without the game, a model of its the pack has stands in, still.
+            let still = || crate::freepack::still_stand_in(&a.model).map(|model| Mcf { model, motions: Vec::new() });
+            let Some(mcf) = find(&a.model).and_then(|b| Mcf::parse(b).ok()).or_else(free).or_else(still_gate).or_else(still) else {
                 mesh.missing(&a.model);
                 continue;
             };
