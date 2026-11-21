@@ -101,6 +101,21 @@ export const EXTRAS = [
   ]],
 ];
 
+/// Phones and tablets: `touch` shows the light mode's switch, and `phone`
+/// has it on unless turned off (the page sets these from web/touch.js).
+let device = { touch: false, phone: false };
+export function setDevice(d) {
+  device = d;
+}
+/// The light mode for phones: the picture drawn at most about 720p's worth
+/// of pixels (the browser stretches it over the screen) and, in the
+/// enhanced look under Auto, the Low effects.
+export const LIGHT_PIXELS = 1280 * 720;
+const ABOUT_LIGHT = "For phones and smaller tablets: the game draws its picture at about 720p and the screen stretches it, instead of the three million or more pixels of a phone's sharp screen, so it runs smoother, cooler and longer on a charge. In the enhanced look with Auto quality it also uses the Low effects. The riding is the same. On unless you untick it on a phone.";
+export function light(s) {
+  return s.light ?? device.phone;
+}
+
 /// With Auto: how many steps of the costliest effects the game found it
 /// had to set aside on this computer (0 to 3), kept for the next start.
 const SHED_KEY = "mm2shed";
@@ -178,15 +193,18 @@ export function original(s) {
 /// (Settings::args).
 export function args(s) {
   const a = [];
+  const lite = light(s);
+  if (lite) a.push(`max-pixels=${LIGHT_PIXELS}`);
   if (s.enhanced) {
-    const list = [`quality=${s.quality}`];
+    // The light mode: Auto is Low.
+    const list = [`quality=${lite && s.quality === "auto" ? "low" : s.quality}`];
     // Auto picks the effects itself.
     if (s.quality !== "auto") for (const [n] of UPGRADES) {
       if (!!s.upgrades[n] !== presetHas(s.quality, n)) list.push(s.upgrades[n] ? n : `no-${n}`);
     }
     // Auto: the effects this computer needed set aside last time
     // (the game tells the page, mm2page.autoShed), so it starts there.
-    if (s.quality === "auto") {
+    if (s.quality === "auto" && !lite) {
       const shed = learnedShed();
       if (shed > 0) list.push(`shed=${shed}`);
     }
@@ -259,6 +277,9 @@ export function render(lookBox, box, s, changed) {
     const r = el("input", { type: "radio", name: "look", checked: s.enhanced === v });
     r.addEventListener("change", () => set("enhanced", v, true));
     look.append(el("label", { title: about }, r, " ", el("b", { textContent: b }), text));
+  }
+  if (device.touch) {
+    look.append(checkbox("Light mode for phones", ABOUT_LIGHT, light(s), (on) => set("light", on, true)));
   }
   look.append(el("p", { className: "hint", textContent: "While racing, the button at the top left (or F3) switches between the two. The riding is the same either way." }));
   if (s.enhanced) {

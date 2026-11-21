@@ -35,6 +35,7 @@
     opacity: .9; transition: opacity .6s; }
   #heart.faded { opacity: 0; }
   body.building #heart, body.building #look { display: none; }
+  body.riding #heart, body.riding #look { display: none; }
   #heart:hover { opacity: 1; }
   #update { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); padding: .4rem .5rem .4rem 1rem;
     background: rgba(0,0,0,.8); border: 1px solid var(--accent); border-radius: 8px; font-size: .9rem; }
@@ -517,6 +518,8 @@ if (NativeAudio) {
 // The settings, as the desktop launcher has them, kept in this browser.
 // "?enhanced" in the address picks the enhanced look.
 const settings = await import(fresh("./settings.js"));
+// Phones and tablets: the light mode's switch (and on a phone, the light mode).
+settings.setDevice({ touch: touch.wanted(), phone: touch.phone() });
 const params = new URLSearchParams(location.search);
 const s = settings.load();
 if ([...params.keys()].some((k) => k.startsWith("enhanced"))) s.enhanced = true;
@@ -526,7 +529,7 @@ settings.render($("lookbox"), $("settings"), s, () => (look = s.enhanced ? "enha
 // The game reads its options from the address: the settings' options,
 // and whatever else the address holds (such as a race to join).
 function setLookInAddress() {
-  const known = new Set(["enhanced", "show-fps", ...settings.EXTRAS.flatMap(([, l]) => l.map((e) => e.flag))]);
+  const known = new Set(["enhanced", "show-fps", "max-pixels", ...settings.EXTRAS.flatMap(([, l]) => l.map((e) => e.flag))]);
   const kept = location.search
     .slice(1)
     .split("&")
@@ -623,6 +626,7 @@ globalThis.mm2page = {
     $("setup").hidden = true;
     $("mm2").focus();
     pad?.show(false);
+    pad?.playing(true);
     gamepad.started({ touch: !!pad });
     net.invite();
     // Shown for a moment, then only when the pointer is on it.
@@ -661,6 +665,8 @@ globalThis.mm2page = {
   racing(on) {
     racingNow = on;
     pad?.show(on && !gamepad.found());
+    // On a touch screen the faded corner buttons would catch the thumbs.
+    if (pad) document.body.classList.toggle("riding", on);
   },
   // The browser reset the graphics card under the game (Safari does when
   // it runs short of graphics memory): nothing can be drawn again, so
@@ -1309,7 +1315,45 @@ async function fetchPackFile(f, got, note) {
 // The pack's files this browser uses. Its 28 tracks (TERAFORM, 1.4 GB)
 // stay out for now: nothing in the browser opens them yet (without MM2
 // the free graphics open the Course Builder), so they'd only take space.
-const wanted = (m) => m.files.filter((f) => !/^TERAFORM\//i.test(f.path));
+// Nor do the computer version's bigger bikes and riders, where the pack
+// has lighter ones for the browser (the stockmap's web_model, web_livery
+// and web_outfit, which are all the browser loads), with their paint
+// masks: m.desktopOnly, worked out when the pack is downloaded.
+const wanted = (m) => {
+  const skip = new Set(m.desktopOnly || []);
+  return m.files.filter((f) => !/^TERAFORM\//i.test(f.path) && !skip.has(f.path));
+};
+// The files of `manifest` that only the computer version reads, from its
+// stockmap.toml (`text`): a ride's model and paint where it names lighter
+// web ones, unless something else uses them too, and the paint masks
+// beside them that have twins in a web/ folder.
+function desktopOnly(manifest, text) {
+  const full = new Set();
+  const used = new Set();
+  for (const line of text.split("\n")) {
+    const fields = [...line.matchAll(/(\w+)\s*=\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]);
+    const lighter = fields.some(([k]) => k.startsWith("web_"));
+    for (const [k, v] of fields) {
+      if (lighter && (k === "model" || k === "livery" || k === "outfit")) full.add(v);
+      else used.add(v);
+    }
+  }
+  const paths = new Set(manifest.files.map((f) => f.path));
+  const skip = [...full].filter((p) => !used.has(p) && paths.has(p));
+  for (const p of paths) {
+    const m = /^(.*\/)([^/]+\.(?:mask|base)\.png)$/.exec(p);
+    if (m && !m[1].endsWith("/web/") && paths.has(m[1] + "web/" + m[2])) skip.push(p);
+  }
+  return skip;
+}
+// The pack's stockmap.toml, from this browser's copy or the download.
+async function stockmapOf(manifest) {
+  const f = manifest.files.find((x) => x.path === "stockmap.toml");
+  if (!f) return null;
+  const kept = await fs.packGet(f.sha256).catch(() => null);
+  const blob = kept || (await fetchPackFile(f, () => {}, () => {}));
+  return blob.text();
+}
 // With `pick`, only the files whose path it takes (the menus alone).
 async function syncPack(fetchNew, pick) {
   const key = pick ? "menusmanifest" : "manifest";
@@ -1323,6 +1367,12 @@ async function syncPack(fetchNew, pick) {
       if (!r.ok) throw new Error(`the Free Pack download answered ${r.status}`);
       const latest = await r.json();
       if (latest.format !== 1) throw new Error("this Free Pack needs a newer OpenMCM2: reload the page");
+      if (!pick) {
+        // Leaving out what the browser never reads: a broken stockmap just
+        // means downloading everything, as before.
+        const text = await stockmapOf(latest).catch(() => null);
+        if (text) latest.desktopOnly = desktopOnly(latest, text);
+      }
       const have = await fs.packStored();
       const missing = [...new Map(want(latest).filter((f) => !have.has(f.sha256)).map((f) => [f.sha256, f])).values()];
       const total = missing.reduce((n, f) => n + f.size, 0);
