@@ -76,7 +76,6 @@ const CSS = `
 #typing { position: fixed; top: 10px; left: calc(50% - 22px); width: 44px; height: 44px; border-radius: 8px;
   background: rgba(20,20,20,.5); color: #fff; border: 2px solid rgba(255,255,255,.4); font-size: 22px;
   padding: 0; touch-action: manipulation; }
-#typing.want { background: rgba(163,194,74,.6); border-color: rgba(220,240,160,.9); }
 /* Kept on the screen (a phone may not open its keyboard for a box off it),
    16px so the phone doesn't zoom in on it, and see-through. */
 #typed { position: fixed; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0;
@@ -307,6 +306,7 @@ export function setup(canvas) {
     } catch {}
   };
   let wanted = null; // what the game's box holds, or null
+  let riding = false;
   const open = () => {
     reset();
     typed.focus({ preventScroll: true });
@@ -386,7 +386,8 @@ export function setup(canvas) {
   return {
     show(on) {
       pad.hidden = !on;
-      typing.hidden = on;
+      riding = on;
+      typing.hidden = on || wanted === null;
       if (on) typed.blur();
       // Let go of everything when the race ends.
       if (!on) releaseAll();
@@ -395,7 +396,8 @@ export function setup(canvas) {
     typing(text) {
       wanted = text ?? null;
       shown.textContent = wanted ?? "";
-      typing.classList.toggle("want", wanted !== null);
+      // The ⌨ button is there only while a box wants typing.
+      typing.hidden = riding || wanted === null;
       if (wanted === null && document.activeElement === typed) typed.blur();
       showBar();
     },
