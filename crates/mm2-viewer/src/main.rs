@@ -2139,9 +2139,11 @@ fn load_track(
                 .and_then(|c| c.finish)
                 .filter(|l| l.direction[0] != 0.0 || l.direction[2] != 0.0)
                 .filter(|_| gate_list.is_empty());
+            // Without the game, the pack's arch (and its flag girl) stand in.
             let arch_width = rs2::Archive::parse(&model_files[0])
                 .ok()
                 .and_then(|ar| mm2_formats::slb::parse(ar.get("MetalArch.slb")?).ok())
+                .or_else(|| freepack::model_shape("metalarch"))
                 .map(|m| {
                     let x = m.lods.iter().take(1).flat_map(|l| &l.surfaces);
                     2.0 * x.flat_map(|s| &s.positions).fold(0.0f32, |w, p| w.max(p[0].abs()))
