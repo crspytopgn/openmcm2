@@ -16,7 +16,10 @@ pub const LABEL: &str = "(Rebuilt)";
 
 /// Which making of the rebuild a track is from: changed whenever the
 /// rebuild changes, so tracks built before are built again.
-pub const MADE: &str = "1";
+/// Scenery lifted less than this (feet) over the old ground stands on the new ground.
+const GROUNDED: f32 = 6.0;
+
+pub const MADE: &str = "2";
 
 /// The name of the scene file in `files`, and its text.
 fn scene_of(files: &[(String, Vec<u8>)]) -> Option<(&str, String)> {
@@ -538,7 +541,12 @@ pub fn rebuild(files: &[(String, Vec<u8>)], pictures: &Pictures) -> Result<Vec<(
             _ => (x, z),
         };
         let ground = baked.field.height(x, z);
-        let y = if y.abs() < 0.01 || near.is_some() { ground } else { y + ground - base_at(x, z) };
+        // Scenery within a few feet of the ground it stood on (hay bales,
+        // fences, signs) sits on the new ground: the fitted ground is only
+        // close to the old one, so keeping its small offset sinks it or
+        // floats it. Only what stood well above the ground keeps its lift.
+        let lift = y - base_at(x, z);
+        let y = if y.abs() < 0.01 || near.is_some() || lift < GROUNDED { ground } else { ground + lift };
         [x, y, z]
     };
 
