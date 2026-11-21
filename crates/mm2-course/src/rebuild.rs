@@ -21,7 +21,7 @@ const GROUNDED: f32 = 6.0;
 /// How much higher (feet) scenery must sit than what's under it to be on it.
 const STACKED: f32 = 2.5;
 
-pub const MADE: &str = "3";
+pub const MADE: &str = "5";
 
 /// The name of the scene file in `files`, and its text.
 fn scene_of(files: &[(String, Vec<u8>)]) -> Option<(&str, String)> {
@@ -405,8 +405,6 @@ fn lifted(line: &str, key: &str, place: &dyn Fn(f32, f32, f32) -> [f32; 3]) -> O
     Some(format!("{}={:.3},{:.3},{:.3}\r\n", k.trim(), x, y, z))
 }
 
-/// Whether scenery named `model` is ridden through or under (a culvert,
-/// a bridge, an arch, a start gate), so it may stand on the route.
 /// Scenery that hangs from or sits up on other scenery: wires, aerials,
 /// the rails over a trestle, crates on a loading dock.
 fn held_up(model: &str) -> bool {
@@ -422,6 +420,202 @@ fn holds_up(model: &str) -> bool {
     WORDS.iter().any(|w| m.contains(w))
 }
 
+/// The ground plan of the buildings and other big solid scenery the
+/// demo's tracks use: half its width and half its depth (feet), from the
+/// Free Pack's stand-ins. A route through the gates goes round them.
+const SOLID: &[(&str, f32, f32)] = &[
+    ("aircraftq", 44.0, 58.0),
+    ("billboard01", 21.0, 4.0),
+    ("boxcarclosed", 5.0, 19.0),
+    ("boxcaropen", 5.0, 23.0),
+    ("cabin", 24.0, 18.0),
+    ("caboose", 5.0, 14.0),
+    ("cameraplatform01", 9.0, 6.0),
+    ("cargowreck_body", 16.0, 43.0),
+    ("cargowreck_lwing", 32.0, 9.0),
+    ("cargowreck_nose", 9.0, 16.0),
+    ("carport01", 12.0, 5.0),
+    ("cattlecar", 5.0, 23.0),
+    ("co_opbrick", 38.0, 19.0),
+    ("coalcar", 4.0, 17.0),
+    ("combine", 19.0, 29.0),
+    ("container01", 15.0, 5.0),
+    ("dc-3", 48.0, 34.0),
+    ("duckblind", 7.0, 8.0),
+    ("dumptruck", 9.0, 27.0),
+    ("engine", 5.0, 24.0),
+    ("farmhouse", 28.0, 18.0),
+    ("feduptruck", 4.0, 10.0),
+    ("fence_chlink", 17.0, 0.0),
+    ("fence_chlinkshort", 9.0, 0.0),
+    ("firetruck", 5.0, 15.0),
+    ("garage01", 27.0, 27.0),
+    ("garage02", 27.0, 27.0),
+    ("gasstation", 19.0, 27.0),
+    ("gianttire01", 29.0, 7.0),
+    ("goalpost", 14.0, 0.0),
+    ("greyhound", 5.0, 19.0),
+    ("hanger", 64.0, 80.0),
+    ("haywagon", 9.0, 21.0),
+    ("hopper", 3.0, 8.0),
+    ("ht_tower", 32.0, 15.0),
+    ("ht_tower02", 22.0, 11.0),
+    ("hut", 21.0, 24.0),
+    ("loadingramp", 59.0, 22.0),
+    ("lodge", 167.0, 60.0),
+    ("main_office", 30.0, 49.0),
+    ("miningbldg01", 19.0, 25.0),
+    ("miningshack01", 18.0, 16.0),
+    ("miningshed01", 8.0, 9.0),
+    ("missilesilo", 122.0, 87.0),
+    ("nattrailer01", 21.0, 16.0),
+    ("observatorycone", 65.0, 66.0),
+    ("office01", 21.0, 19.0),
+    ("pit_trailer", 15.0, 20.0),
+    ("pumpshack", 7.0, 9.0),
+    ("pyramid", 124.0, 124.0),
+    ("quonset", 24.0, 34.0),
+    ("radiostation", 21.0, 30.0),
+    ("rangerstation", 27.0, 16.0),
+    ("rangerstationnosnow", 27.0, 16.0),
+    ("retainwall01", 71.0, 2.0),
+    ("rrt_elev", 6.0, 28.0),
+    ("rrt_elevradius", 12.0, 28.0),
+    ("ruin_ziggurat", 20.0, 20.0),
+    ("schoolbus", 9.0, 15.0),
+    ("scraper", 9.0, 32.0),
+    ("semicab", 5.0, 11.0),
+    ("semitrailer", 6.0, 31.0),
+    ("silo", 94.0, 45.0),
+    ("skijump", 13.0, 127.0),
+    ("skiliftpost", 14.0, 5.0),
+    ("station", 31.0, 36.0),
+    ("support", 6.0, 15.0),
+    ("switchyard", 40.0, 24.0),
+    ("tent01", 17.0, 12.0),
+    ("tent02", 17.0, 12.0),
+    ("tm_head", 26.0, 24.0),
+    ("tractor", 6.0, 9.0),
+    ("trailer01", 7.0, 16.0),
+    ("trailer02", 3.0, 12.0),
+    ("trailer03", 6.0, 24.0),
+    ("trailer04", 5.0, 13.0),
+    ("trailer05", 6.0, 24.0),
+    ("trailer06", 4.0, 16.0),
+    ("trailer07", 9.0, 25.0),
+    ("trailer08", 4.0, 14.0),
+    ("trailer09", 5.0, 19.0),
+    ("trailer10", 6.0, 14.0),
+    ("trailer11", 5.0, 22.0),
+    ("trailer12", 7.0, 26.0),
+    ("trailer13", 9.0, 25.0),
+    ("trailer14", 5.0, 17.0),
+    ("trailer15", 7.0, 25.0),
+    ("trailer16", 9.0, 25.0),
+    ("trailer17", 5.0, 17.0),
+    ("trailer18", 5.0, 17.0),
+    ("watertank01", 19.0, 19.0),
+    ("watertower", 9.0, 9.0),
+    ("watertruck", 4.0, 10.0),
+];
+
+/// The half width and depth of `model` when it is a building or other
+/// big solid scenery.
+fn solid(model: &str) -> Option<(f32, f32)> {
+    let m = model.to_ascii_lowercase();
+    let m = m.strip_suffix(".slt").or_else(|| m.strip_suffix(".mcf")).unwrap_or(&m);
+    SOLID.iter().find(|(n, _, _)| *n == m).map(|&(_, w, d)| (w, d))
+}
+
+/// The route `points` bent round the solid scenery in `scene`, so a
+/// straight line from gate to gate doesn't run through a building.
+fn round_solids(points: &mut Vec<Point>, scene: &scn::Scene) {
+    let mut boxes: Vec<([f32; 2], [f32; 2], f32, f32)> = Vec::new();
+    for m in &scene.models {
+        let Some((w, d)) = solid(&m.model) else { continue };
+        let f = [m.look[0], m.look[2]];
+        let len = f[0].hypot(f[1]);
+        let f = if len > 1e-3 { [f[0] / len, f[1] / len] } else { [0.0, 1.0] };
+        let (sx, sz) = (m.scale[0].abs().max(0.1), m.scale[2].abs().max(0.1));
+        boxes.push(([m.position[0], m.position[2]], f, w * sx, d * sz));
+    }
+    if boxes.is_empty() || points.len() < 2 {
+        return;
+    }
+    // Every 15 ft, so a building can't slip between two points.
+    let mut dense: Vec<Point> = Vec::new();
+    for pair in points.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let steps = ((b.x - a.x).hypot(b.z - a.z) / 15.0).ceil().max(1.0) as usize;
+        for i in 0..steps {
+            let t = i as f32 / steps as f32;
+            dense.push(Point { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, width: a.width });
+        }
+    }
+    dense.push(*points.last().unwrap());
+    for round in 0..6 {
+        // Smoothed a little so the bend is a curve (not after the last
+        // push, which could undo it).
+        if round > 0 {
+            let old = dense.clone();
+            for i in 1..dense.len() - 1 {
+                dense[i].x = (old[i - 1].x + 2.0 * old[i].x + old[i + 1].x) / 4.0;
+                dense[i].z = (old[i - 1].z + 2.0 * old[i].z + old[i + 1].z) / 4.0;
+            }
+        }
+        let old = dense.clone();
+        for (i, p) in dense.iter_mut().enumerate() {
+            // The way the route runs here.
+            let (a, b) = (old[i.saturating_sub(1)], old[(i + 1).min(old.len() - 1)]);
+            let run = [b.x - a.x, b.z - a.z];
+            for &(c, f, w, d) in &boxes {
+                // In the building's own frame: x across it, z along it.
+                let r = [f[1], -f[0]];
+                let (dx, dz) = (p.x - c[0], p.z - c[1]);
+                let (lx, lz) = (dx * r[0] + dz * r[1], dx * f[0] + dz * f[1]);
+                let pad = p.width / 2.0 + 10.0;
+                let (ex, ez) = (w + pad, d + pad);
+                if lx.abs() >= ex || lz.abs() >= ez {
+                    continue;
+                }
+                // Out to the side, across the way the route runs: round
+                // the building, not back the way it came.
+                let along_x = (run[0] * r[0] + run[1] * r[1]).abs() >= (run[0] * f[0] + run[1] * f[1]).abs();
+                let side = |v: f32| if v >= 0.0 { 1.0 } else { -1.0 };
+                let (lx, lz) = if along_x { (lx, ez * side(lz)) } else { (ex * side(lx), lz) };
+                p.x = c[0] + lx * r[0] + lz * f[0];
+                p.z = c[1] + lx * r[1] + lz * f[1];
+            }
+        }
+    }
+    // Back to points 40 ft or more apart, keeping the ends.
+    let mut out: Vec<Point> = vec![dense[0]];
+    for p in &dense[1..dense.len() - 1] {
+        let q = out.last().unwrap();
+        if (p.x - q.x).hypot(p.z - q.z) >= 40.0 {
+            out.push(*p);
+        }
+    }
+    out.push(*dense.last().unwrap());
+    *points = out;
+}
+
+/// How far (feet) the route runs over a culvert's middle.
+const CULVERT: f32 = 14.0;
+
+/// Scenery the route runs over: a culvert.
+fn passed_over(model: &str) -> bool {
+    model.to_ascii_lowercase().contains("culvert")
+}
+
+/// Scenery the route runs under: a bridge, an overpass, a trestle.
+fn passed_under(model: &str) -> bool {
+    let m = model.to_ascii_lowercase();
+    ["bridge", "overpass", "trestle", "tunnel"].iter().any(|w| m.contains(w))
+}
+
+/// Whether scenery named `model` is ridden through or under (a culvert,
+/// a bridge, an arch, a start gate), so it may stand on the route.
 fn ridden_through(model: &str) -> bool {
     const WORDS: [&str; 10] = ["culvert", "bridge", "arch", "gate", "start", "finish", "banner", "tunnel", "overpass", "trestle"];
     let m = model.to_ascii_lowercase();
@@ -505,6 +699,7 @@ pub fn rebuild(files: &[(String, Vec<u8>)], pictures: &Pictures) -> Result<Vec<(
             }
             points.push(Point { x: p[0], z: p[1], width });
         }
+        round_solids(&mut points, &scene);
         c.line.points = points;
         c.line.closed = false;
         c.line.start = 0.0;
@@ -526,8 +721,10 @@ pub fn rebuild(files: &[(String, Vec<u8>)], pictures: &Pictures) -> Result<Vec<(
     let anchors: Vec<(f32, f32)> = models
         .iter()
         .zip(&names)
-        .filter(|(p, name)| p[1].abs() >= 0.01 && ridden_through(name))
+        .filter(|(p, name)| p[1].abs() >= 0.01 && ridden_through(name) && !passed_over(name) && !passed_under(name))
         .filter_map(|(p, _)| on_route(p[0], p[2]).map(|near| (near.s, p[1])))
+        // A culvert is under the route: the route goes over its top.
+        .chain(models.iter().zip(&names).filter(|(p, name)| p[1].abs() >= 0.01 && passed_over(name)).filter_map(|(p, _)| on_route(p[0], p[2]).map(|near| (near.s, p[1] + CULVERT))))
         .collect();
     c.ground = Some(std::sync::Arc::new(conform(&c, &base, &anchors)));
     let baked = crate::env::write_with(&c, pictures);
@@ -545,7 +742,7 @@ pub fn rebuild(files: &[(String, Vec<u8>)], pictures: &Pictures) -> Result<Vec<(
     let beside = |model: &str, x: f32, z: f32| {
         let near = on_route(x, z);
         let (x, z) = match near {
-            Some(near) if !ridden_through(model) => {
+            Some(near) if !ridden_through(model) && solid(model).is_none() => {
                 let d = path.dir[near.i];
                 let q = path.pts[near.i];
                 let out = path.width[near.i] / 2.0 + 8.0;
@@ -588,7 +785,11 @@ pub fn rebuild(files: &[(String, Vec<u8>)], pictures: &Pictures) -> Result<Vec<(
             .map(|&i| (i, (models[i][0] - x).hypot(models[i][2] - z)))
             .filter(|&(_, d)| !alone && d < if up { 80.0 } else { 4.0 })
             .min_by(|a, b| a.1.total_cmp(&b.1));
-        let ny = if y.abs() < 0.01 || on {
+        let ny = if on && passed_over(name) {
+            ground - CULVERT
+        } else if on && passed_under(name) {
+            loose(x, y, z, ground)
+        } else if y.abs() < 0.01 || on {
             ground
         } else if let Some((i, _)) = support {
             (placed[i].map_or(ground, |p| p[1]) + y - models[i][1]).max(ground)
@@ -758,6 +959,20 @@ pub fn rebuild_env(bytes: &[u8], file_name: &str, pictures: &Pictures) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn routes_go_round_buildings() {
+        let text = "[SceneInfo]\r\nSceneName=t\r\n[Environment]\r\nTerrainFile=a.trn\r\n[StaticModels]\r\nNumberOfStaticModels=1\r\n[Model1]\r\nSLT=Pyramid.slt\r\nPosition=500,0,0\r\n";
+        let scene = scn::Scene::parse(text.as_bytes()).unwrap();
+        let mut points: Vec<Point> = [0.0, 1000.0].iter().map(|&x| Point { x, z: 0.0, width: 30.0 }).collect();
+        round_solids(&mut points, &scene);
+        assert!(points.len() > 2);
+        // Nowhere inside the pyramid's 248 ft square.
+        for p in &points {
+            assert!((p.x - 500.0).abs() >= 124.0 || p.z.abs() >= 124.0, "{p:?}");
+        }
+        assert_eq!((points[0].x, points.last().unwrap().x), (0.0, 1000.0));
+    }
 
     #[test]
     fn reads_gates() {

@@ -49,7 +49,7 @@ fox03 = { file = "objects/fox03.glb", kind = "single_bale" }
 fox04 = { file = "objects/fox04.glb", kind = "single_bale" }
 foxhb = { file = "objects/foxhb.glb", kind = "single_bale" }
 gianttire01 = { file = "objects/gianttire01.glb", kind = "giant_tyre" }
-haybale = { file = "objects/haybale.glb", kind = "bale_stack" }
+haybale = { file = "objects/haybale.glb", kind = "round_bale" }
 haybale_barn = { file = "objects/haybale_barn.glb", kind = "single_bale" }
 haybale_dock = { file = "objects/haybale_dock.glb", kind = "single_bale" }
 mechanixwearhb = { file = "objects/mechanixwearhb.glb", kind = "single_bale" }
