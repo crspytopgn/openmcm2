@@ -49,6 +49,12 @@ The YouTube recordings are not openly licensed; the project owner chose to inclu
 
 All edits (trimming, time-warping to a steady pitch, pitch-shifting, loudness matching, fades, loop crossfades) are by the OpenMCM2 project.
 
+## Made in code
+
+`fx/whistle_up.wav` and `fx/whistle_down.wav`, the out-of-bounds slide whistle, are OpenMCM2's own, synthesised by `tools/freepack/make_whistle.py` on the main branch (CC0). No recording is used.
+
+`fx/waypoint.wav`, the checkpoint sound (a wooden clapper and a flag snap), is made the same way by `tools/freepack/make_waypoint.py PACK clack`. It replaces the old two-note chime.
+
 Attribution line for CC BY sources, e.g. in the game credits:
 
 
