@@ -891,7 +891,17 @@ function gameRoot(paths) {
   return null;
 }
 
-async function readAll(list) {
+// The Free Pack's scenery models and ground pictures: over half the pack,
+// and only a race (or the Course Builder) draws them, so the game starts
+// without them and they are read in while the menus are up.
+const READ_LATER = /^\/freepack\/(objects|eco|ground)\//i;
+async function readAll(all) {
+  const list = all.filter(([p]) => !READ_LATER.test(p));
+  const rest = all.filter(([p]) => READ_LATER.test(p));
+  if (rest.length) {
+    // Asked for now, but run after the files the start needs.
+    readRest = () => fs.later(rest).then(() => console.log(`read in the last ${rest.length} files`));
+  }
   const total = list.reduce((n, [, b]) => n + b.size, 0);
   let read = 0;
   let next = 0;
@@ -904,7 +914,9 @@ async function readAll(list) {
     }
   }
   await Promise.all(Array.from({ length: 8 }, worker));
+  readRest?.();
 }
+let readRest = null;
 
 // Which browsers run it, said for the one in use.
 function noWebGPU() {
@@ -932,7 +944,8 @@ function noWebGPU() {
 
 // The engine, with a progress bar: about 12 MB to download, more once
 // the browser unpacks it.
-async function fetchEngine() {
+async function fetchEngine(quiet) {
+  const say = (share, text) => quiet || loader.progress(share, text);
   const r = await fetch(fresh("./pkg/mm2-viewer_bg.wasm"));
   if (!r.ok) throw new Error(`the engine download answered ${r.status} ${r.statusText}`);
   // A compressed download's length is the compressed one, and the stream
@@ -941,7 +954,7 @@ async function fetchEngine() {
   const total = built.engine || (!packed && +r.headers.get("content-length")) || 0;
   const size = packed || total;
   if (!r.body || !total) {
-    loader.progress(null, size ? `${MB(size)} MB` : "");
+    say(null, size ? `${MB(size)} MB` : "");
     return new Uint8Array(await r.arrayBuffer());
   }
   const out = new Uint8Array(total);
@@ -955,7 +968,7 @@ async function fetchEngine() {
     else parts.push(value);
     got += value.length;
     const share = Math.min(1, got / total);
-    loader.progress(share, `${MB(share * size)} of ${MB(size)} MB`);
+    say(share, `${MB(share * size)} of ${MB(size)} MB`);
   }
   if (got === total && !parts.length) return out;
   // The build's size was off: put it together as it came.
@@ -990,6 +1003,14 @@ async function start(list) {
   $("why").textContent = "";
   if (!(await checkBrowser())) return;
   const at = { step: "files" };
+  // The engine downloads and gets ready while the files are read (it's
+  // usually kept by the browser, and getting it ready takes a phone a
+  // few seconds).
+  const engine = Promise.all([import(fresh("./pkg/mm2-viewer.js")), fetchEngine(true)]).then(([game, bytes]) => [
+    game,
+    WebAssembly.compile(bytes),
+  ]);
+  engine.catch(() => {});
   try {
     loader.step("files");
     await readAll(list);
@@ -1004,11 +1025,11 @@ async function start(list) {
     setLookInAddress();
     at.step = "engine";
     loader.step("engine", "");
-    const [game, bytes] = await Promise.all([import(fresh("./pkg/mm2-viewer.js")), fetchEngine()]);
+    const [game, compiled] = await engine;
     at.step = "compile";
     loader.step("compile");
     await loader.painted();
-    const module = await WebAssembly.compile(bytes);
+    const module = await compiled;
     at.step = "start";
     loader.step("start");
     await loader.painted();
@@ -1620,8 +1641,10 @@ async function syncPack(fetchNew, pick) {
   }
   if (!manifest) return null;
   const list = [];
-  for (const f of want(manifest)) {
-    const blob = await fs.packGet(f.sha256);
+  const files = want(manifest);
+  const blobs = await fs.packGetMany(files.map((f) => f.sha256));
+  for (const f of files) {
+    const blob = blobs.get(f.sha256);
     if (!blob) return null;
     list.push(["/freepack/" + f.path, blob]);
   }

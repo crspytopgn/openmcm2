@@ -20,6 +20,11 @@ mod paths {
     pub fn found(p: impl AsRef<Path>) -> bool {
         p.as_ref().exists()
     }
+
+    /// Every file is there to read (see the browser's).
+    pub fn all_read() -> bool {
+        true
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -50,6 +55,17 @@ mod paths {
         /// Puts a file in the game folder for this visit.
         #[wasm_bindgen(js_name = putGame)]
         fn js_put_game(path: &str, data: &[u8]) -> bool;
+        /// Whether the page has read every file in yet.
+        #[wasm_bindgen(js_name = ready, catch)]
+        fn js_ready() -> Result<bool, JsValue>;
+    }
+
+    /// Whether every file is in memory. The page starts the game before
+    /// the biggest of the Free Pack's files (the scenery and ground a
+    /// race uses, not the menus) are read, and reads them while the menus
+    /// are up: what rides a track waits for this.
+    pub fn all_read() -> bool {
+        js_ready().unwrap_or(true)
     }
 
     /// Puts a file into the game folder in memory (the demo's, unpacked).
