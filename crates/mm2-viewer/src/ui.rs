@@ -88,6 +88,7 @@ impl Pack {
         if !crate::fs::is_file(path) {
             let stem = path.file_stem()?.to_string_lossy().to_ascii_uppercase();
             if let Some(dtm) = crate::freepack::menu_layout(&stem) {
+                crate::freepack::mark_filled(&stem);
                 return Some(Pack { bytes: Vec::new(), dialog: dtm::parse(&dtm) });
             }
         }
@@ -432,6 +433,15 @@ impl Ui {
         if lang.is_empty() {
             lang = crate::freepack::game_strings();
         }
+        // The screens the pack fills in (the demo's missing ones): its
+        // words for what the game's text lacks.
+        let (fill_menu, fill_lang) = crate::freepack::fill_strings();
+        for (id, t) in fill_menu {
+            menu_strings.entry(id).or_insert(t);
+        }
+        for (id, t) in fill_lang {
+            lang.entry(id).or_insert(t);
+        }
         Ui {
             global: Pack::load(&dir.join("GLOBAL.DAT")),
             dir,
@@ -719,7 +729,7 @@ impl Ui {
             });
         // The free pack's picture in its place: drawn at twice the
         // resolution, or covering the size the pack gives.
-        let tex = match crate::freepack::ui_image(&stem, &file) {
+        let tex = match crate::freepack::ui_image_in(pack, &stem, &file) {
             Some((img, size)) => {
                 let logical = size.unwrap_or(((img.width / 2).max(1), (img.height / 2).max(1)));
                 Some(gfx.sprites.upload_covering(gfx.device, gfx.queue, &img, logical))

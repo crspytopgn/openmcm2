@@ -901,13 +901,17 @@ impl Settings {
                 }
             }
             // The demo with the original look, the Free Pack filling in its
-            // missing tracks, bikes and screens (the new look menus: the
-            // demo has only some of the original's).
+            // missing tracks, bikes and the few screens it doesn't have.
+            // Its own menus unless the new look is picked.
             (Some(f), Some(g)) if is_demo(g) => {
                 a.push(g.display().to_string());
                 a.push("--fill-from".into());
                 a.push(f.display().to_string());
-                a.push(format!("--new-menus={}", f.display()));
+                if self.new_menus {
+                    a.push(format!("--new-menus={}", f.display()));
+                } else {
+                    a.push("--original-menus".into());
+                }
             }
             (pack, Some(g)) => {
                 a.push(g.display().to_string());

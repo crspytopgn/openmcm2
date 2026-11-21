@@ -1262,38 +1262,73 @@ pub struct NewControl {
 
 fn ui_art() -> Option<&'static UiArt> {
     static ART: std::sync::OnceLock<Option<UiArt>> = std::sync::OnceLock::new();
-    ART.get_or_init(|| {
-        let dir = ui_root()?.join("ui");
-        let mut art = UiArt { files: Default::default(), rects: Default::default(), no_text: Default::default(), sizes: Default::default(), added: Default::default() };
-        let mut stack = vec![dir.clone()];
-        while let Some(d) = stack.pop() {
-            for e in crate::fs::read_dir(&d).into_iter().flatten().flatten() {
-                let p = e.path();
-                if crate::fs::is_dir(&p) {
-                    stack.push(p);
-                    continue;
+    ART.get_or_init(|| load_art(ui_root()?.join("ui"))).as_ref()
+}
+
+/// The pack's menu art for the screens the game lacks (the demo's), with
+/// the original menus.
+fn fill_art() -> Option<&'static UiArt> {
+    static ART: std::sync::OnceLock<Option<UiArt>> = std::sync::OnceLock::new();
+    ART.get_or_init(|| load_art(screens_root()?.join("ui"))).as_ref()
+}
+
+/// The dialogs the game has no `UI/*.DAT` for, standing in from the pack.
+static FILLED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Notes that dialog `stem` comes from the pack's layout, so its pictures
+/// and places do too even with the original menus.
+pub fn mark_filled(stem: &str) {
+    let stem = stem.to_ascii_lowercase();
+    let mut f = FILLED.lock().unwrap();
+    if !f.contains(&stem) {
+        f.push(stem);
+    }
+}
+
+/// The art dialog `stem` wears: the new look's, or for a filled-in dialog
+/// with the original menus, the pack's.
+fn art_for(stem: &str) -> Option<&'static UiArt> {
+    ui_art().or_else(|| {
+        let filled = FILLED.lock().unwrap().contains(&stem.to_ascii_lowercase());
+        filled.then(fill_art).flatten()
+    })
+}
+
+/// Where the pack's screens come from: the new look's pack, or with the
+/// original menus, the pack filling in a game that lacks some (the demo).
+fn screens_root() -> Option<PathBuf> {
+    ui_root().or_else(|| FILL.get().cloned().filter(|d| crate::fs::is_dir(d)))
+}
+
+fn load_art(dir: PathBuf) -> Option<UiArt> {
+    let mut art = UiArt { files: Default::default(), rects: Default::default(), no_text: Default::default(), sizes: Default::default(), added: Default::default() };
+    let mut stack = vec![dir.clone()];
+    while let Some(d) = stack.pop() {
+        for e in crate::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if crate::fs::is_dir(&p) {
+                stack.push(p);
+                continue;
+            }
+            let Ok(rel) = p.strip_prefix(&dir) else { continue };
+            let rel = rel.to_string_lossy().replace('\\', "/").to_ascii_lowercase();
+            if rel.ends_with(".png") {
+                art.files.insert(rel, p);
+            } else if let Some(stem) = rel.strip_suffix(".toml").filter(|s| !s.contains('/')) {
+                let text = crate::fs::read_to_string(&p).unwrap_or_default();
+                let (rects, sizes) = parse_layout(&text);
+                let added = parse_added(&text);
+                if !added.is_empty() {
+                    art.added.insert(stem.to_string(), added);
                 }
-                let Ok(rel) = p.strip_prefix(&dir) else { continue };
-                let rel = rel.to_string_lossy().replace('\\', "/").to_ascii_lowercase();
-                if rel.ends_with(".png") {
-                    art.files.insert(rel, p);
-                } else if let Some(stem) = rel.strip_suffix(".toml").filter(|s| !s.contains('/')) {
-                    let text = crate::fs::read_to_string(&p).unwrap_or_default();
-                    let (rects, sizes) = parse_layout(&text);
-                    let added = parse_added(&text);
-                    if !added.is_empty() {
-                        art.added.insert(stem.to_string(), added);
-                    }
-                    art.rects.extend(rects.into_iter().map(|(name, r)| ((stem.to_string(), name), r)));
-                    art.no_text.extend(parse_no_text(&text).into_iter().map(|name| (stem.to_string(), name)));
-                    art.sizes.extend(sizes.into_iter().map(|(path, size)| (format!("{stem}/{path}"), size)));
-                }
+                art.rects.extend(rects.into_iter().map(|(name, r)| ((stem.to_string(), name), r)));
+                art.no_text.extend(parse_no_text(&text).into_iter().map(|name| (stem.to_string(), name)));
+                art.sizes.extend(sizes.into_iter().map(|(path, size)| (format!("{stem}/{path}"), size)));
             }
         }
-        eprintln!("free pack: {} menu pictures", art.files.len());
-        Some(art)
-    })
-    .as_ref()
+    }
+    eprintln!("free pack: {} menu pictures", art.files.len());
+    Some(art)
 }
 
 /// A layout file's control rects (by lower-case name) and picture sizes
@@ -1418,7 +1453,7 @@ fn parse_added(text: &str) -> Vec<NewControl> {
 
 /// The buttons the pack adds to dialog `stem`.
 pub fn ui_added(stem: &str) -> &'static [NewControl] {
-    ui_art().and_then(|a| a.added.get(&stem.to_ascii_lowercase())).map_or(&[], |v| v.as_slice())
+    art_for(stem).and_then(|a| a.added.get(&stem.to_ascii_lowercase())).map_or(&[], |v| v.as_slice())
 }
 
 /// What a button the pack added to dialog `stem` does when clicked.
@@ -1429,7 +1464,13 @@ pub fn ui_action(stem: &str, name: &str) -> Option<&'static str> {
 /// The pack's picture for `file` in the dialog archive `stem`, and the
 /// size it should cover when the pack sets one.
 pub fn ui_image(stem: &str, file: &str) -> Option<(mm2_formats::tga::Image, Option<(u32, u32)>)> {
-    let art = ui_art()?;
+    ui_image_in(stem, stem, file)
+}
+
+/// [`ui_image`] for a picture dialog `dialog` shows (one of GLOBAL's in a
+/// dialog the pack fills in wears the pack's art, like the rest of it).
+pub fn ui_image_in(dialog: &str, stem: &str, file: &str) -> Option<(mm2_formats::tga::Image, Option<(u32, u32)>)> {
+    let art = art_for(dialog)?;
     let path = file.replace('\\', "/").to_ascii_lowercase();
     let path = path.rsplit_once('.').map_or(path.as_str(), |(p, _)| p).to_string();
     let key = format!("{}/{path}", stem.to_ascii_lowercase());
@@ -1477,11 +1518,11 @@ pub fn ui_art_on() -> bool {
 
 /// Whether the pack's picture for control `name` already shows its label.
 pub fn ui_no_text(stem: &str, name: &str) -> bool {
-    ui_art().is_some_and(|a| a.no_text.contains(&(stem.to_ascii_lowercase(), name.to_ascii_lowercase())))
+    art_for(stem).is_some_and(|a| a.no_text.contains(&(stem.to_ascii_lowercase(), name.to_ascii_lowercase())))
 }
 
 pub fn ui_rect(stem: &str, name: &str) -> Option<[i32; 4]> {
-    ui_art()?.rects.get(&(stem.to_ascii_lowercase(), name.to_ascii_lowercase())).copied()
+    art_for(stem)?.rects.get(&(stem.to_ascii_lowercase(), name.to_ascii_lowercase())).copied()
 }
 
 #[cfg(test)]
@@ -1611,7 +1652,7 @@ mod tests {
 /// The pack's own layout of the front-end dialog `name` (`MAINMENU`), from
 /// `menus/<NAME>.dtm`: the menus with no game files.
 pub fn menu_layout(name: &str) -> Option<Vec<u8>> {
-    let dir = ui_root()?.join("menus");
+    let dir = screens_root()?.join("menus");
     let want = format!("{name}.dtm");
     crate::fs::read(dir.join(&want)).ok().or_else(|| {
         // Any case.
@@ -1643,8 +1684,21 @@ pub fn game_strings() -> std::collections::HashMap<u32, String> {
     menu_text("lang.txt")
 }
 
+/// The pack's words for the menus and the game, for the screens it fills
+/// in: what the game's own `UILANG.DLL` and `LANG.DLL` lack.
+pub fn fill_strings() -> (std::collections::HashMap<u32, String>, std::collections::HashMap<u32, String>) {
+    if ui_root().is_some() || FILL.get().is_none() {
+        return Default::default();
+    }
+    (menu_text_in(screens_root(), "strings.txt"), menu_text_in(screens_root(), "lang.txt"))
+}
+
 fn menu_text(name: &str) -> std::collections::HashMap<u32, String> {
-    let Some(root) = ui_root() else { return Default::default() };
+    menu_text_in(ui_root(), name)
+}
+
+fn menu_text_in(root: Option<PathBuf>, name: &str) -> std::collections::HashMap<u32, String> {
+    let Some(root) = root else { return Default::default() };
     let text = crate::fs::read_to_string(root.join("menus").join(name)).unwrap_or_default();
     text.lines()
         .filter_map(|l| {
@@ -1656,11 +1710,11 @@ fn menu_text(name: &str) -> std::collections::HashMap<u32, String> {
 
 /// One of the free menus' own files (`menus/pc-schedule.txt`), as text.
 pub fn menu_file(name: &str) -> Option<String> {
-    crate::fs::read_to_string(ui_root()?.join("menus").join(name)).ok()
+    crate::fs::read_to_string(screens_root()?.join("menus").join(name)).ok()
 }
 
 /// The credits to roll with no credits movie (`menus/credits.txt`).
 pub fn credits() -> Option<Vec<String>> {
-    let text = crate::fs::read_to_string(ui_root()?.join("menus").join("credits.txt")).ok()?;
+    let text = crate::fs::read_to_string(screens_root()?.join("menus").join("credits.txt")).ok()?;
     Some(text.lines().map(str::to_string).collect())
 }

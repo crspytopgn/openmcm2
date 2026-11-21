@@ -1131,15 +1131,17 @@ try {
   newMenus = localStorage.getItem("mm2menus") === "new";
 } catch {}
 let haveGame = false;
-const menusNew = () => newMenus || !haveGame;
+// The demo has the original's menus too.
+let haveMenus = false;
+const menusNew = () => newMenus || !haveMenus;
 function showMenus() {
   $("picknewmenus").setAttribute("aria-checked", String(menusNew()));
   $("pickoldmenus").setAttribute("aria-checked", String(!menusNew()));
-  $("pickoldmenus").setAttribute("aria-disabled", String(!haveGame));
+  $("pickoldmenus").setAttribute("aria-disabled", String(!haveMenus));
 }
 for (const [id, n] of [["picknewmenus", true], ["pickoldmenus", false]]) {
   $(id).addEventListener("click", () => {
-    if (!n && !haveGame) {
+    if (!n && !haveMenus) {
       $("why").textContent = "The original menus come from your MM2 files: pick them under MM2 graphics first.";
       return;
     }
@@ -1167,14 +1169,16 @@ function setParam(name, value) {
 // the menus picked: the new look's from the pack (with MM2 graphics, only
 // the menus' part of it), the original's from the MM2 files.
 async function go(list, withPack) {
-  // The demo: its own look, with the whole Free Pack filling in.
+  // The demo: its own look and its own menus (unless the new look is
+  // picked), with the whole Free Pack filling in what it lacks.
   if (!withPack && isDemo(list)) {
     const pack = await demoPack();
     if (!pack) return;
+    const newLook = menusNew();
     setParam("freepack", null);
     setParam("fill-from", "/freepack");
-    setParam("new-menus", "/freepack");
-    setParam("original-menus", null);
+    setParam("new-menus", newLook ? "/freepack" : null);
+    setParam("original-menus", newLook ? null : "");
     return start(list.concat(pack));
   }
   setParam("fill-from", null);
@@ -1554,6 +1558,7 @@ let menusKept = !keptPack && !downloaded && (await fs.packGet("menusmanifest").c
 function showReady() {
   // The demo has only some of the original menus: it wears the new look.
   haveGame = !!kept && !isDemo(kept);
+  haveMenus = !!kept;
   showMenus();
   $("oldmenustate").textContent = kept ? "Your MM2 files are here" : "Needs your MM2 files";
   $("oldmenustate").classList.toggle("ready", !!kept);
