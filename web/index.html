@@ -818,6 +818,11 @@ globalThis.mm2page = {
     }, "image/png");
     return true;
   },
+  // A box in the menus wants typing (what it holds), or none (null):
+  // on a touch screen the next tap brings up the keyboard.
+  typing(text) {
+    pad?.typing(text);
+  },
   // A race started or ended: the touch buttons come and go with it.
   racing(on) {
     racingNow = on;
@@ -871,7 +876,9 @@ gamepad.onChange((found) => {
 if (pad) {
   $("mm2").addEventListener("pointerdown", () => {
     if (document.fullscreenElement) return;
-    document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.("landscape")).catch(() => {});
+    // An iPhone has no full screen for pages (the Home Screen app is).
+    const asked = document.documentElement.requestFullscreen?.();
+    asked?.then(() => screen.orientation?.lock?.("landscape")).catch(() => {});
   });
 }
 

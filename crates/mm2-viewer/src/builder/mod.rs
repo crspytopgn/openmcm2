@@ -827,6 +827,12 @@ impl Builder {
         }
     }
 
+    /// The course's name while it is being typed (a phone shows its
+    /// keyboard for it).
+    pub fn typing_text(&self) -> Option<String> {
+        self.naming.then(|| if self.name_fresh { String::new() } else { self.course.name.clone() })
+    }
+
     pub fn key(&mut self, code: winit::keyboard::KeyCode, down: bool, text: Option<&str>) {
         use winit::keyboard::KeyCode as K;
         match code {

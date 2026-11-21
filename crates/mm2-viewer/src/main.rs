@@ -5235,6 +5235,22 @@ impl App {
     }
 
     /// The menus are showing (not a race, nor a track loading).
+    /// What the box being typed in holds: a chat line, or one of the
+    /// menus' boxes.
+    #[cfg(target_arch = "wasm32")]
+    fn typing_text(&mut self) -> Option<String> {
+        if let Some(line) = &self.chat {
+            return Some(line.clone());
+        }
+        if self.in_builder() {
+            return self.builder.as_ref().and_then(|b| b.typing_text());
+        }
+        if !self.in_menus() {
+            return None;
+        }
+        self.front.as_mut().and_then(|f| f.typing_text())
+    }
+
     fn in_menus(&self) -> bool {
         self.front.is_some() && self.track.is_none() && self.loading.is_none() && self.builder.is_none()
     }
@@ -6648,6 +6664,11 @@ impl ApplicationHandler for App {
                     TouchPhase::Moved => return,
                 };
                 self.window_event(event_loop, id, WindowEvent::MouseInput { device_id, state, button: MouseButton::Left });
+                // Told now, not at the next frame: the page opens the
+                // phone's keyboard as this same tap ends, which is the
+                // only time a phone lets it.
+                #[cfg(target_arch = "wasm32")]
+                web::typing(self.typing_text());
             }
             WindowEvent::CursorMoved { mut position, .. } => {
                 if let Some(s) = &self.state {
@@ -7013,6 +7034,8 @@ impl ApplicationHandler for App {
                 web::racing(self.race.is_some() && self.replay.is_none() && !self.in_menus());
                 #[cfg(target_arch = "wasm32")]
                 web::building(self.in_builder());
+                #[cfg(target_arch = "wasm32")]
+                web::typing(self.typing_text());
                 if tweaks::get().show_fps != self.fps.is_some() {
                     self.fps = self.fps.is_none().then(|| (Instant::now(), 0, 0.0));
                     self.fps_shown = None;

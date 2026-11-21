@@ -53,6 +53,10 @@ extern "C" {
     #[wasm_bindgen(js_name = canRumble, catch)]
     fn js_can_rumble(id: &str) -> Result<bool, JsValue>;
     /// Saves the canvas as a PNG to the downloads; false if it can't.
+    /// A box is being typed in (its text), or none (null): a phone's
+    /// keyboard comes up for it.
+    #[wasm_bindgen(js_name = typing, catch)]
+    fn js_typing(text: Option<String>) -> Result<(), JsValue>;
     #[wasm_bindgen(js_name = savePicture, catch)]
     fn js_save_picture() -> Result<bool, JsValue>;
 }
@@ -153,6 +157,16 @@ pub fn building(on: bool) {
 pub fn racing(on: bool) {
     if RACING.with(|r| r.replace(on)) != on {
         js_racing(on);
+    }
+}
+
+/// Tells the page when a box wants typing and what it holds, as it
+/// changes.
+pub fn typing(text: Option<String>) {
+    thread_local!(static WAS: RefCell<Option<String>> = const { RefCell::new(None) });
+    if WAS.with(|w| *w.borrow() != text) {
+        WAS.with(|w| *w.borrow_mut() = text.clone());
+        let _ = js_typing(text);
     }
 }
 
