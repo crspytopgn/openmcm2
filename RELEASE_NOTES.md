@@ -1,3 +1,52 @@
+# OpenMCM2 0.7.0
+
+* **No game? Start with the free MM2 demo.** The launcher's *Get the free
+  MM2 demo* and the browser's *Play the free MM2 demo* fetch Microsoft's
+  free 2000 demo from the Internet Archive when you ask. Its two tracks,
+  Voodoo Basin and Donner Pass, play with the original graphics, and the
+  Free Pack fills in every other event, bike and screen.
+* **A Tools page.** Look inside the game in any browser: browse every
+  file with previews (save models as .glb, pictures as .png, sounds as
+  .wav), turn the bikes and riders through all their animations, fly
+  round any track, and paint your own bike or rider skin in 3D. Nothing
+  is uploaded.
+* **Phones and tablets.** The browser version has touch controls: a
+  thumb stick to steer and lean, gas and brake you can slide between,
+  stunts, clutch and the camera. A light mode keeps phones smooth. Add
+  the page to your Home Screen to play full screen, and once played it
+  starts without the internet too. If something goes wrong, a button
+  copies a bug report for you to paste into an issue, and a "Not
+  loading?" box gives tips if a step takes too long.
+* **Photo mode** (Extras, off by default). Press F in a race, or click
+  both sticks, to freeze it with the race display hidden, fly the camera
+  anywhere and press Enter to save a picture.
+* **Race the leaderboard ghosts** (Extras, off by default). Your best
+  laps go up with their ghost, and Replays > Saved Ghost Race Files
+  offers the fastest online lap on each track to race against.
+* **Pad vibration in the browser**, following your Force Feedback setting.
+* **Free mode feels more like the original.** The free tracks now start
+  with the 30-second board man and the original's 8.2 second countdown,
+  every lap race has the finish arch and flag girl, and the race display
+  uses bolted panels in the original's style. Ten new free tracks join
+  the Free Pack (sandy coast, big autumn hills, dunes, moorland and new
+  stadiums), Baja is open country, and tracks are wider with gentler
+  jumps. Free bikes take off and land like the original's, and the free
+  rider stands up through the turns and bends smoothly at the joints.
+* **Free 125 engine:** no more rider's voice, and a real low idle.
+* **Out-of-bounds slide whistle.** Ride off the edge of a free track and
+  a cartoon whistle plays as you're thrown back in. It has an off switch.
+* **Wrecks tumble like the original** after hitting walls, bales and
+  trees, and each bike now always rides with its own class's power.
+* **Smoother computer riders** when the frame rate drops below 36.
+* **Steadier frame rate.** Every preset now draws a touch softer only
+  while frames come late, and Ultra uses 4x anti-aliasing on screens
+  bigger than 1440p, which runs far better on a 4K TV.
+* **Flying dirt, rebuilt.** The roost is now a tight jet of grit, crumbs
+  and clods from the back tyre. It's off by default for now, with its
+  switch in Enhanced.
+
+The Free Pack updates by itself in the launcher and the browser.
+
 # OpenMCM2 0.6.11
 
 * **Free Pack downloads that don't give up.** The browser version and
