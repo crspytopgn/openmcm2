@@ -14,7 +14,7 @@ tracks, models, textures, sounds and menus from a copy of the game that you
 own. Point it at the folder of your install (or the CD's `GAME` folder).
 **No copy? Play with the free graphics** (see below).
 
-Project page: https://crspytopgn.github.io/openmcm2/ · Play in your browser: https://crspytopgn.github.io/openmcm2/play/
+Project page: https://crspytopgn.github.io/openmcm2/ · Play in your browser: https://crspytopgn.github.io/openmcm2/play/ · Tools: https://crspytopgn.github.io/openmcm2/tools/
 
 ## New in 0.6: build your own tracks
 
@@ -132,6 +132,28 @@ cargo install wasm-bindgen-cli --version 0.2.129   # the wasm-bindgen in Cargo.l
 sh tools/build-web.sh
 python3 -m http.server -d web 8000                 # then open http://localhost:8000
 ```
+
+### Tools
+
+The site's **[Tools page](https://crspytopgn.github.io/openmcm2/tools/)**
+runs in any recent browser (no WebGPU needed) on the same file readers as
+the game, built small for the web (`crates/mm2-webtools`):
+
+- **Files**: look through every file of your game, its CD image or the
+  Free Pack, archives opened like folders, with previews of models,
+  pictures, sky boxes and sounds. Save models as `.glb` (with their
+  animations), pictures as `.png` and sounds as `.wav`.
+- **Bikes & riders**: the bikes and riders in 3D with their paints,
+  outfits and every motion the game has (and the Free Pack's own).
+- **Tracks**: any track's ground, objects, trees, sky and racing line,
+  with free fly. Add tracks of your own, such as MDX Racing's.
+- **Skin painter**: paint a bike or a rider in 3D and save it as a `.tga`
+  for your game's `BIKES` or `RIDERS` folder (the browser version can
+  keep it too), or a Free Pack paint as a `.png`.
+
+Your files are read in the browser and never uploaded. To try it locally:
+`sh tools/build-web-tools.sh`, copy `web/*.js` into `site/play/`, then
+`python3 -m http.server -d site 8000` and open http://localhost:8000/tools/.
 
 Options go in the address: `?enhanced` for the enhanced look.
 

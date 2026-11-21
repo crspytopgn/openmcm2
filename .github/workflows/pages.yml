@@ -38,6 +38,10 @@ jobs:
           sh tools/build-web.sh
           mkdir -p site/play
           cp -R web/. site/play/
+      # The Tools page's file readers (site/tools reads the player's own
+      # files in the browser, like the browser version).
+      - name: Build the Tools page
+        run: sh tools/build-web-tools.sh
       - name: Show the latest release's version
         env:
           GH_TOKEN: ${{ github.token }}
