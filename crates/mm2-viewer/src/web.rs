@@ -46,6 +46,43 @@ extern "C" {
     /// start with next time; a page without it is left alone.
     #[wasm_bindgen(js_name = autoShed, catch)]
     fn js_auto_shed(steps: u32) -> Result<(), JsValue>;
+    /// The pad named `id` (or the first that can) runs its heavy and
+    /// light motors at these strengths, 0 to 1.
+    #[wasm_bindgen(js_name = rumble, catch)]
+    fn js_rumble(id: &str, strong: f32, weak: f32) -> Result<(), JsValue>;
+    #[wasm_bindgen(js_name = canRumble, catch)]
+    fn js_can_rumble(id: &str) -> Result<bool, JsValue>;
+    /// Saves the canvas as a PNG to the downloads; false if it can't.
+    #[wasm_bindgen(js_name = savePicture, catch)]
+    fn js_save_picture() -> Result<bool, JsValue>;
+}
+
+/// Whether the browser can vibrate the pad named `id` (gilrs can't here).
+pub fn can_rumble(id: &str) -> bool {
+    js_can_rumble(id).unwrap_or(false)
+}
+
+/// Runs the pad's motors, telling the page only when the strengths change.
+pub fn rumble(id: Option<&str>, strength: [f32; 2]) {
+    thread_local!(static WAS: Cell<[f32; 2]> = const { Cell::new([0.0; 2]) });
+    let Some(id) = id else {
+        if WAS.with(|w| w.replace([0.0; 2])) != [0.0; 2] {
+            let _ = js_rumble("", 0.0, 0.0);
+        }
+        return;
+    };
+    let was = WAS.with(Cell::get);
+    let off = strength == [0.0; 2];
+    let moved = strength.iter().zip(was).any(|(s, w)| (s - w).abs() > 0.02);
+    if moved || (off && was != [0.0; 2]) {
+        WAS.with(|w| w.set(strength));
+        let _ = js_rumble(id, strength[0], strength[1]);
+    }
+}
+
+/// Photo mode's picture: the canvas just shown, to the downloads.
+pub fn save_picture() -> bool {
+    js_save_picture().unwrap_or(false)
 }
 
 /// Tells the page how many steps of effects to set aside from the start
