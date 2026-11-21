@@ -6,7 +6,7 @@
 # OpenMCM2
 
 An open-source engine for Motocross Madness 2 (Rainbow Studios, 2000),
-rebuilt from scratch in Rust from a study of the original game. It runs
+written from scratch in Rust from a study of the original game. It runs
 natively on macOS (Metal), Windows (DX12/Vulkan) and Linux (Vulkan).
 
 **This repository contains no game files.** Like OpenMW, the engine reads the
@@ -16,7 +16,18 @@ own. Point it at the folder of your install (or the CD's `GAME` folder).
 
 Project page: https://crspytopgn.github.io/openmcm2/ · Play in your browser: https://crspytopgn.github.io/openmcm2/play/ · Tools: https://crspytopgn.github.io/openmcm2/tools/
 
-## New in 0.6: build your own tracks
+## New in 0.7
+
+| | |
+|---|---|
+| ![Racing Voodoo Basin from the free MM2 demo](assets/readme/new-demo.jpg) | ![The 30-second board man at the start of a free track](assets/readme/new-free-start.jpg) |
+| **Start with the free MM2 demo.** No copy of the game? The launcher and the browser page fetch Microsoft's free 2000 demo for you. Its two tracks play with the original graphics and menus, and the Free Pack opens up everything else. | **Free mode, closer to the original.** The 30-second board man, the finish arch and flag girl, a race display in the original's style, and ten more free tracks. |
+| ![Touch controls on a phone](assets/readme/new-phone.jpg) | ![A free bike and rider on the Tools page](assets/readme/new-tools.jpg) |
+| **Phones and tablets.** Touch controls in the browser, a light mode for phones, Add to Home Screen, and it starts offline once played. | **The [Tools page](https://crspytopgn.github.io/openmcm2/tools/).** Browse the game's files, turn the bikes and riders through every animation, fly round tracks and paint your own skins. |
+
+Also new: **photo mode** and **race the leaderboard ghosts** (both in Extras, off by default), a steadier frame rate on every preset (Ultra runs far better on a 4K TV), smoother computer riders, wrecks that tumble like the original's, pad rumble in the browser, a real idle for the free 125 and an out-of-bounds slide whistle. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the full list.
+
+## Build your own tracks
 
 ![The Course Builder: draw a line, add jumps, paint the ground and ride it](assets/readme/course-builder.gif)
 
@@ -34,7 +45,7 @@ runs in the browser too. (A switch in the launcher's Extras takes it off the men
 | ![The free supercross stadium at night](assets/readme/free-sx-night.jpg) | ![A full gate leaving the start on a free national track](assets/readme/free-national.jpg) |
 
 The **Free Pack** is a whole set of new art made for OpenMCM2: bikes and
-riders, a supercross stadium with lights for night races, 28 new tracks
+riders, a supercross stadium with lights for night races, 38 new tracks
 across every event, skies, trees, trucks and planes. It's all our own work or
 openly licensed (see [freepack/CREDITS.md](freepack/CREDITS.md)), so anyone
 can download it and ride. The launcher and the browser page both ask

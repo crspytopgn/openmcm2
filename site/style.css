@@ -159,3 +159,12 @@ footer { max-width: 1120px; margin: 72px auto 0; padding: 24px 24px 48px; border
 .strip.three-up img { aspect-ratio: 16 / 9; }
 @media (max-width: 700px) { .strip.three-up { grid-template-columns: 1fr; } }
 .video-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+/* New in this version: big pictures with a short note under each. */
+.new-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 18px; }
+.new-grid figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.new-grid img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; cursor: zoom-in; }
+.new-grid figcaption { padding: 14px 18px 18px; }
+.new-grid h3 { font-size: 18px; margin: 0 0 6px; }
+.new-grid p { margin: 0; font-size: 16px; }
+@media (max-width: 760px) { .new-grid { grid-template-columns: 1fr; } }
