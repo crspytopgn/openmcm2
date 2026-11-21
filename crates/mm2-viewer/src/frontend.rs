@@ -2150,7 +2150,23 @@ pub fn list_tracks(folder: &Path, event: EventKind) -> Vec<TrackEntry> {
     let (teraform, name) = (folder.parent(), folder.file_name().and_then(|n| n.to_str()));
     let free = teraform.zip(name).map(|(t, n)| crate::free_tracks::listed(t, n)).unwrap_or_default();
     files.retain(|p| !free.iter().any(|(f, _)| f.file_name().is_some_and(|n| p.file_name().is_some_and(|m| m.eq_ignore_ascii_case(n)))));
-    let extra: Vec<TrackEntry> = free.iter().flat_map(|(path, def)| free_entries(path, def, event)).collect();
+    // The demo's other tracks, rebuilt the first time they are ridden
+    // (an extra); once built, still listed only as that.
+    let rebuilt = crate::demo_tracks::listed(folder);
+    files.retain(|p| !crate::fs::is_file(&p.with_extension("rebuilt")));
+    let mut extra: Vec<TrackEntry> = rebuilt
+        .iter()
+        .flat_map(|t| {
+            let stem = t.path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+            t.names.iter().enumerate().map(move |(c, name)| TrackEntry {
+                path: t.path.clone(),
+                course: c,
+                name: name.clone(),
+                preview: if event.courses() { format!("{stem}{:02}.tga", c + 1) } else { format!("{stem}.tga") },
+            })
+        })
+        .collect();
+    extra.extend(free.iter().flat_map(|(path, def)| free_entries(path, def, event)));
     for path in files {
         let Ok(bytes) = crate::read_archive(&path) else {
             continue;
@@ -2207,11 +2223,16 @@ pub fn list_tracks(folder: &Path, event: EventKind) -> Vec<TrackEntry> {
 }
 
 pub fn preview_image(t: &TrackEntry) -> Option<tga::Image> {
-    own_preview(t).or_else(|| {
-        // A free track not built yet: the picture the Free Pack carries.
-        let path = crate::freepack::root()?.join("previews").join(&t.preview);
-        tga::parse(&crate::fs::read(path).ok()?).ok()
-    })
+    own_preview(t)
+        .or_else(|| {
+            // A rebuilt demo track not built yet: the demo's own picture.
+            tga::parse(&crate::demo_tracks::preview(&t.path, &t.preview)?).ok()
+        })
+        .or_else(|| {
+            // A free track not built yet: the picture the Free Pack carries.
+            let path = crate::freepack::root()?.join("previews").join(&t.preview);
+            tga::parse(&crate::fs::read(path).ok()?).ok()
+        })
 }
 
 /// The picture a track's own files give (see [`preview_image`]).

@@ -5,8 +5,9 @@
 //! for every other track, only its scene and course, without the ground.
 //!
 //! [`unpack`] turns the installer into a game folder the port can read,
-//! with the names in upper case like the CD's, and leaves out the tracks
-//! that have no ground. Nothing of the demo is shipped with the port: the
+//! with the names in upper case like the CD's. The tracks that have no
+//! ground go under [`STUBS`] rather than `TERAFORM`, out of the game's
+//! track lists; the port can rebuild them (`mm2_course::rebuild`). Nothing of the demo is shipped with the port: the
 //! launcher and the browser page fetch it from [`URL`] when the player
 //! asks, and check it against [`SIZE`] and [`SHA256`].
 
@@ -21,6 +22,10 @@ pub const BROWSER_URL: &str = "https://cors.archive.org/cors/MotocrossMadness2De
 pub const SIZE: u64 = 42_954_810;
 /// Its SHA-256, in lower-case hex.
 pub const SHA256: &str = "383eae1ccac90b478d89864c0a6142407fab6b151c7b84d7f7db52121ac4125a";
+
+/// Where an unpacked demo keeps the tracks it has no ground for, as
+/// `DEMO/TERAFORM/<event>/<NAME>.ENV`.
+pub const STUBS: &str = "DEMO";
 
 /// The file an unpacked demo folder has, which tells the game that it is
 /// the demo (`DEMO.TXT`).
@@ -95,9 +100,11 @@ pub fn unpack(exe: &[u8], mut progress: impl FnMut(usize, usize)) -> Result<Vec<
                 .read_file(name)
                 .and_then(|mut r| r.read_to_end(&mut bytes))
                 .map_err(|_| Error::Corrupt("the demo's cabinet is damaged"))?;
-            if path.ends_with(".ENV") && !has_ground(&bytes, path.rsplit('/').next().unwrap_or(&path)) {
-                continue;
-            }
+            let path = if path.ends_with(".ENV") && !has_ground(&bytes, path.rsplit('/').next().unwrap_or(&path)) {
+                format!("{STUBS}/{path}")
+            } else {
+                path
+            };
             out.push((path, bytes));
         }
         progress(names.len(), names.len());
@@ -128,7 +135,7 @@ mod tests {
     }
 
     /// With `MM2_DEMO` naming a copy of `MCM2PCG.exe`: the two whole
-    /// tracks come out, the ones without ground don't.
+    /// tracks come out, the ones without ground go aside.
     #[test]
     fn unpacks_the_demo() {
         let Some(path) = std::env::var_os("MM2_DEMO") else {
@@ -139,7 +146,7 @@ mod tests {
         let has = |p: &str| files.iter().any(|(n, _)| n == p);
         assert!(has("UI/MAINMENU.DAT") && has("RES/ENGINE.RES") && has(MARKER));
         assert!(has("TERAFORM/NATIONAL/NAT04.ENV") && has("TERAFORM/QUARRIES/QUARRY01.ENV"));
-        assert!(!has("TERAFORM/SX/SX01.ENV"));
+        assert!(!has("TERAFORM/SX/SX01.ENV") && has("DEMO/TERAFORM/SX/SX01.ENV"));
         assert!(!files.iter().any(|(n, _)| n.starts_with("SETUP")));
     }
 }

@@ -455,6 +455,9 @@ pub struct More {
     /// Photo mode: in a race, F freezes it with the display hidden, the
     /// camera flies free and Enter saves a picture (`--photo-mode`).
     pub photo_mode: bool,
+    /// With the MM2 demo: its other tracks rebuilt, the original's route
+    /// and scenery on new ground (`--demo-tracks`).
+    pub demo_tracks: bool,
 }
 
 /// The game's own pad dead zone, %.
@@ -489,6 +492,7 @@ impl Default for More {
             online_ghosts: false,
             whistle: true,
             photo_mode: false,
+            demo_tracks: false,
         }
     }
 }
@@ -530,6 +534,7 @@ impl More {
             "online_ghosts" => self.online_ghosts = yes,
             "whistle" => self.whistle = yes,
             "photo_mode" => self.photo_mode = yes,
+            "demo_tracks" => self.demo_tracks = yes,
             _ => return false,
         }
         true
@@ -538,7 +543,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfreshen_engines={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfreshen_engines={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\ndemo_tracks={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -561,6 +566,7 @@ impl More {
             b(self.online_ghosts),
             b(self.whistle),
             b(self.photo_mode),
+            b(self.demo_tracks),
         )
     }
 
@@ -584,6 +590,7 @@ impl More {
             (self.online_ghosts, "--online-ghosts"),
             (!self.whistle, "--no-whistle"),
             (self.photo_mode, "--photo-mode"),
+            (self.demo_tracks, "--demo-tracks"),
         ] {
             if on {
                 a.push(flag.to_string());
@@ -629,6 +636,7 @@ impl More {
             online_ghosts: has("--online-ghosts"),
             whistle: !has("--no-whistle"),
             photo_mode: has("--photo-mode"),
+            demo_tracks: has("--demo-tracks"),
             ..d.clone()
         };
         for (flag, key) in [
@@ -1231,6 +1239,7 @@ mod tests {
             online_ghosts: true,
             whistle: false,
             photo_mode: true,
+            demo_tracks: true,
         };
         s.free_graphics = true;
         s.freepack = Some("/packs/free".into());

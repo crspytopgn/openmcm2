@@ -66,6 +66,9 @@ demo** on the browser page, and OpenMCM2 fetches it from there (43 MB),
 checks it and plays its two tracks, Voodoo Basin and Donner Pass, with the
 original graphics. The Free Pack fills in every other track, bike and
 screen, so every event is open. The demo never comes with OpenMCM2 itself.
+For the demo's other tracks it keeps only the route and the scenery, so the
+**Rebuilt demo tracks** extra (off unless you turn it on) lays new ground
+under them: the original route and scenery, with hills and jumps of our own.
 
 [![OpenMCM2 showcase video](https://img.youtube.com/vi/rP0TEnWLzNo/maxresdefault.jpg)](https://youtu.be/rP0TEnWLzNo)
 

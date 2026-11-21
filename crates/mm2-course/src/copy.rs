@@ -90,7 +90,7 @@ impl Source {
 
 /// Opens the archive in an `.ENV` file's bytes (the game's own are
 /// scrambled, keyed on the file's name).
-fn open(bytes: &[u8], file_name: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
+pub(crate) fn open(bytes: &[u8], file_name: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
     let plain = match Container::detect(bytes) {
         Container::Faoe => faoe::decode(bytes, file_name).map_err(|e| e.to_string())?,
         _ => bytes.to_vec(),
@@ -223,7 +223,7 @@ fn colours(n: usize, textures: &[(u32, Vec<u16>)], tiles: &[Option<u16>]) -> Vec
 
 /// The line through the course's cross-sections: its first node, in
 /// driving order, with the course's width at each.
-fn line_of(def: &tdf::TrackDef, mode: Mode) -> (Vec<Point>, bool) {
+pub(crate) fn line_of(def: &tdf::TrackDef, mode: Mode) -> (Vec<Point>, bool) {
     // The lap: the longest node that leads back into itself (Supercross
     // tracks start on a chute of their own that joins it).
     let looping = def

@@ -54,6 +54,7 @@
 mod gpu_free;
 mod free_text;
 mod demo;
+mod demo_tracks;
 mod drive;
 mod drive_sound;
 mod help;
@@ -1979,6 +1980,8 @@ fn load_track(
     load_step();
     // A Free Pack track is built from its recipe the first time.
     free_tracks::ensure(path)?;
+    // A demo track rebuilt the first time (an extra).
+    demo_tracks::ensure(path)?;
     let track_bytes = read_archive(path)?;
     let archive = rs2::Archive::parse(&track_bytes)?;
     let find = |ext: &str| {
