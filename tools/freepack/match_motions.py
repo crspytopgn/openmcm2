@@ -80,6 +80,9 @@ def weight(d, full, none):
 SEAT_DROP = np.array([0.0, -0.7, 0.05])
 # ...but never with the hips below this height (ft) over the ground.
 SEAT_HIP = 3.5
+# On the seat with the pelvis behind SEAT_BACK (ft, model z), off it
+# (standing forward over the tank) ahead of SEAT_FRONT.
+SEAT_BACK, SEAT_FRONT = -1.0, -0.6
 SEAT_LEAN = 18.0
 # Standing up over the tank (the pelvis forward of this, ft) leans this
 # much more: the attack position, chest over the bars.
@@ -98,9 +101,13 @@ def settle(tree, W, home):
     w = weight(np.linalg.norm(W[idx['Pelvis']][1] - home), 0.6, 1.6)
     if w <= 0:
         return list(W)
+    # Only a rider on the seat sits down onto it: one forward over the
+    # tank is standing on the pegs, as the original rides most turns
+    # (Turn1D), and keeps the original's height.
+    sit = w * weight(-W[idx['Pelvis']][1][2], -SEAT_BACK, -SEAT_FRONT)
     y = W[idx['Pelvis']][1][1]
-    d = SEAT_DROP * w
-    d[1] = -min(-SEAT_DROP[1], max(0.0, y - SEAT_HIP)) * w
+    d = SEAT_DROP * sit
+    d[1] = -min(-SEAT_DROP[1], max(0.0, y - SEAT_HIP)) * sit
     W = [(R, t + d) for R, t in W]
     kids = {i: [j for j, f in enumerate(tree) if f['parent'] == i] for i in range(len(tree))}
     def sub(i):

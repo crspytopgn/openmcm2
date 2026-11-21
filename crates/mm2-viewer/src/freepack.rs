@@ -816,10 +816,18 @@ fn shape(stem: &str) -> Option<(mm2_formats::slb::Model, Vec<mm2_formats::glb::I
     Some((model, images, path))
 }
 
-/// The collision hull of the pack's bike `name` (it has no `.col`): the
-/// frame's shell round every part but the wheels, in model space, and
-/// each wheel's round its own centre.
+/// The lowest a free bike's frame reaches for the collision hull, ft
+/// above the ground between the tyres: the original's shared `honda.col`
+/// frame goes no lower than 1.29.
+const BELLY: f32 = 1.25;
+
+/// The collision hull of the pack's bike `name` (it has no `.col`), shaped
+/// like the original's shared one so the pack's bikes ride as the game's
+/// do: the frame's shell round its parts above the belly line, in model
+/// space, and each wheel the original's ring of points at the tyre's own
+/// size.
 pub fn bike_hull(name: &str) -> Option<mm2_physics::bike::Hull> {
+    use mm2_physics::bike::Hull;
     let stem = stem_of(name);
     if rides().shapes.get(&stem)?.1 {
         return None;
@@ -842,11 +850,23 @@ pub fn bike_hull(name: &str) -> Option<mm2_physics::bike::Hull> {
                 f if f == body || f == bars => (0, [0.0; 16]),
                 _ => continue,
             };
+            // Nothing of the frame hangs below the shared hull's belly: the
+            // pack's models carry the chain, brake and swingarm ends on the
+            // frame (the Ridgeback's reach 0.63 ft, under the rear axle),
+            // which met the ground whenever the rear shock squeezed.
+            if list == 0 && p[1] < BELLY {
+                continue;
+            }
             parts[list].push(p - glam::Vec3::new(centre[12], centre[13], centre[14]));
         }
     }
     let [frame, a, b] = &parts;
-    Some(mm2_physics::bike::Hull::from_points(frame, [a, b]))
+    // A round shell of the tyre's mesh pushed a bottomed fork back
+    // differently from the original's ring, launching the Ridgeback 6-9°
+    // more nose-up off a 20° face.
+    let radius = |w: &[glam::Vec3]| w.iter().map(|p| p.y.hypot(p.z)).fold(0.0f32, f32::max);
+    let (a, b) = (Hull::ring_wheel(radius(a)), Hull::ring_wheel(radius(b)));
+    Some(Hull::from_points(frame, [&a, &b]))
 }
 
 /// The race markers drawn over the riders and the course: the sign over
