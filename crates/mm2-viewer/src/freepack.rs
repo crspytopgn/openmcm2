@@ -1472,6 +1472,30 @@ pub fn global_image(name: &str) -> Option<mm2_formats::tga::Image> {
     Some(mm2_formats::tga::Image { width, height, rgba })
 }
 
+/// The race display's pictures the pack draws in the game's layout, each
+/// the size of the game's own (640x480 pixels), the pack's at any
+/// multiple of that.
+const HUD: [(&str, (u32, u32)); 3] = [("instr1", (128, 128)), ("bajascore", (128, 128)), ("radar128", (128, 128))];
+
+/// The pack's own picture for the race display's `name` (`instr1.tga`,
+/// `BajaScore.tga`, `radar128.tga`), for playing without the game's
+/// `RES/GLOBAL.RES`: the image and the size it covers.
+pub fn hud_image(name: &str) -> Option<(mm2_formats::tga::Image, (u32, u32))> {
+    let stem = name.rsplit_once('.').map_or(name, |(s, _)| s).to_ascii_lowercase();
+    let size = HUD.iter().find(|(n, _)| *n == stem)?.1;
+    let png = root()?.join("hud").join(format!("{stem}.png"));
+    let bytes = crate::fs::read(&png).ok()?;
+    let (width, height, rgba) = crate::hires::decode_png(&bytes)
+        .map_err(|e| eprintln!("{}: {e}", png.display()))
+        .ok()?;
+    Some((mm2_formats::tga::Image { width, height, rgba }, size))
+}
+
+/// Whether the pack has all of the race display's pictures.
+pub fn has_hud() -> bool {
+    root().is_some_and(|r| HUD.iter().all(|(n, _)| crate::fs::is_file(&r.join("hud").join(format!("{n}.png")))))
+}
+
 /// A grey detail noise's turn into the terrain's detail: the earth colour
 /// it darkens towards, and how its grey becomes the blend (the pack's
 /// greys, 70 to 175 about a middle of 127, to the game's 0 to 150 about 67).

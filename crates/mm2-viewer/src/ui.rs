@@ -556,11 +556,17 @@ impl Ui {
             edit(&mut img);
             Some(img)
         };
-        let tex = load().map(|img| {
-            let big = smooth_upscale(&img, k);
-            gfx.sprites
-                .upload_covering(gfx.device, gfx.queue, &big, (img.width, img.height))
-        });
+        let tex = match load() {
+            Some(img) => {
+                let big = smooth_upscale(&img, k);
+                Some(gfx.sprites.upload_covering(gfx.device, gfx.queue, &big, (img.width, img.height)))
+            }
+            // Without the game's pictures, the Free Pack's own (drawn at
+            // four texels a pixel, in the same places).
+            None if version.is_empty() => crate::freepack::hud_image(name)
+                .map(|(img, size)| gfx.sprites.upload_covering(gfx.device, gfx.queue, &img, size)),
+            None => None,
+        };
         self.images.insert(key, tex);
         tex
     }
