@@ -120,6 +120,10 @@ pub struct Governor {
     /// Kept time with nothing more set aside than the race was loaded
     /// with, long enough to say the next start can set one fewer aside.
     pub spare: bool,
+    /// Whether effects may be set aside, and the scene drawn past the
+    /// preset's size (crate::graphics::Enhanced::sheds): not for a preset
+    /// picked by hand, which only ever draws its own size or smaller.
+    pub sheds: bool,
 }
 
 impl Default for Governor {
@@ -137,6 +141,7 @@ impl Default for Governor {
             give_back: GIVE_BACK,
             since_given: f32::MAX,
             spare: false,
+            sheds: true,
         }
     }
 }
@@ -176,7 +181,9 @@ impl Governor {
             self.trying = true;
             self.changed();
         }
-        self.effects(real);
+        if self.sheds {
+            self.effects(real);
+        }
         STEPS[self.step]
     }
 
@@ -221,10 +228,12 @@ impl Governor {
     pub fn apply(&mut self, real: f32, wanted: f32) {
         // Set aside in an earlier race, or at the start.
         let (now, least) = (crate::graphics::shed(), crate::graphics::enhanced().map_or(0, |e| e.shed));
+        self.sheds = crate::graphics::enhanced().is_some_and(|e| e.sheds);
         self.least_shed = least;
         self.shed = self.shed.max(now).max(least);
         let spare = self.spare;
-        let k = self.frame(real, wanted, room());
+        let room = if self.sheds { room() } else { room().min(1.0) };
+        let k = self.frame(real, wanted, room);
         if k != scale() {
             set_scale(k);
         }
@@ -331,6 +340,15 @@ mod tests {
         let mut g = Governor { shed: 2, least_shed: 2, ..Governor::default() };
         run(&mut g, 120.0, BEAT * 0.3, 1.0);
         assert!(g.spare && g.shed == 2);
+    }
+
+    #[test]
+    fn a_preset_picked_by_hand_only_gets_softer_never_loses_effects() {
+        let mut g = Governor { sheds: false, ..Governor::default() };
+        run(&mut g, 60.0, BEAT * 3.0, 1.0);
+        assert_eq!(g.shed, 0);
+        assert_eq!(STEPS[g.step], 0.6);
+        assert_eq!(run(&mut g, 120.0, BEAT * 0.5, 1.0).0, 1.0);
     }
 
     #[test]

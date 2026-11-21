@@ -3584,6 +3584,7 @@ async fn gpu_from(
         .await?;
     // `quality=auto`: the preset for this card and screen.
     graphics::pick_auto(&adapter.get_info());
+    graphics::fit_screen();
     // The enhanced drawing reads depth textures, which OpenGL cannot.
     if adapter.get_info().backend == wgpu::Backend::Gl && graphics::enhanced().is_some() {
         eprintln!("enhanced graphics need Vulkan, Metal or DirectX 12: drawing the original look on OpenGL");

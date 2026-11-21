@@ -133,8 +133,21 @@ pub struct Enhanced {
     /// place of `pixels` (`resolution=85%`).
     pub scale: Option<f32>,
     /// Draws the scene smaller while frames come late, and back up once
-    /// they keep time (crate::dynres): on with `quality=auto`.
+    /// they keep time (crate::dynres): on with every preset, so a frame
+    /// rate the graphics card can't keep at the preset's size is held by
+    /// drawing a little softer for a while, not by stuttering. While
+    /// frames keep time the scene is the preset's own size, as without it.
     pub dynamic: bool,
+    /// With [`Enhanced::dynamic`], effects may be set aside too (and the
+    /// scene drawn past the preset's size when there is time to spare):
+    /// only for `quality=auto` (or `dynamic` asked for by name), so a
+    /// preset picked by hand keeps every effect it shows.
+    pub sheds: bool,
+    /// Ultra's 8x anti-aliasing drops to 4x on a screen with more pixels
+    /// than 1440p ([`fit_screen`]): there each pixel is already small, 4x
+    /// looks the same, and 8x samples of a 4K scene are half a gigabyte
+    /// to write and resolve every frame.
+    pub fewer_samples_past_qhd: bool,
     /// The effects already set aside for this computer when the game
     /// starts (`shed=N`, 0 to [`MOST_SHED`]): what a browser learned last
     /// time it played, so it starts where it ends up anyway.
@@ -200,7 +213,9 @@ impl Default for Enhanced {
             time: None,
             pixels: Some(QHD),
             scale: None,
-            dynamic: false,
+            dynamic: true,
+            sheds: false,
+            fewer_samples_past_qhd: false,
             shed: 0,
         }
     }
@@ -260,6 +275,7 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
         // can), with lasting ruts.
         "ultra" => {
             e.msaa = 8;
+            e.fewer_samples_past_qhd = true;
             e.pixels = None;
             e.ruts = true;
             e.dust_amount = 1.25;
@@ -284,6 +300,7 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
         "auto" => {
             preset(e, "medium")?;
             e.dynamic = true;
+            e.sheds = true;
         }
         _ => return Err(format!("quality must be auto, low, medium, high, raytraced, ultra or max, not {name}")),
     }
@@ -410,6 +427,7 @@ impl Enhanced {
                     Ok(n @ (1 | 2 | 4 | 8)) => n,
                     _ => return Err(format!("msaa must be 1, 2, 4 or 8, not {n}")),
                 };
+                e.fewer_samples_past_qhd = false;
                 continue;
             }
             let on = !off;
@@ -450,7 +468,10 @@ impl Enhanced {
                 "air" => e.air = on,
                 "raytracing" | "rt" => e.raytracing = on,
                 "taa" | "temporal" => e.taa = on,
-                "dynamic" | "dynamic-resolution" => e.dynamic = on,
+                "dynamic" | "dynamic-resolution" => {
+                    e.dynamic = on;
+                    e.sheds = on;
+                }
                 "supersample" | "ssaa" => e.supersample = on,
                 "far" | "far-detail" => e.far = on,
                 _ => {
@@ -572,6 +593,19 @@ pub fn enable_list(list: &str) -> Result<(), String> {
 /// Notes the screen the game opened on, for [`pick_auto`].
 pub fn set_screen(pixels: (u32, u32)) {
     *SCREEN.lock().unwrap() = Some(pixels);
+}
+
+/// Once the screen is known, before anything is drawn: Ultra's 8x
+/// anti-aliasing is 4x on a screen bigger than 1440p
+/// ([`Enhanced::fewer_samples_past_qhd`]).
+pub fn fit_screen() {
+    let Some((w, h)) = *SCREEN.lock().unwrap() else { return };
+    let mut guard = ENHANCED.write().unwrap();
+    let Some(e) = guard.as_mut() else { return };
+    if e.fewer_samples_past_qhd && e.msaa > 4 && w as u64 * h as u64 > QHD as u64 * 11 / 10 {
+        e.msaa = 4;
+        eprintln!("enhanced graphics: 4x anti-aliasing on this {w}x{h} screen (8x up to 1440p)");
+    }
 }
 
 /// With `quality=auto`: picks Low, Medium or High for this graphics card

@@ -2082,6 +2082,7 @@ fn effect_about(name: &str) -> &'static str {
         "ssr" => "In the rain, puddles and wet ground mirror the bikes, riders and trees on screen. Off when ray tracing draws the reflections.",
         "skylight" => "The sky's light worked out over the land when a track loads: a little dimmer in dips, under banks and between hills.",
         "pbr" => "Materials lit as real ones are, as modern games do: metal and paint, rough and smooth surfaces, fine bumps and dents from their maps, and the sky and sun reflected in them. The free art uses it fully; the original's models only take the sky's light round about, gently, keeping their look.",
+        "dynamic" => "Keeps the game smooth: when a busy moment is more than the graphics card can draw in time, the 3D scene is drawn a little softer until it can keep up again, instead of stuttering or dropping to half the frame rate. While the card keeps up you see the preset's full sharpness. The menus and race display always stay sharp.",
         "filmic" => "With the free graphics: colours shaded as a film camera would, so bright skies and sunlit metal roll off softly to white instead of clipping, and shadows keep a gentle depth. The original game's art keeps its own colours.",
         "air" => "The haze over distant land behaves like real air: it glows a little brighter and warmer looking toward the sun, thins higher up so far hilltops stand clearer, and cools far hills a touch. Open-air tracks only.",
         "nightlights" => "Only when the time of day is set to Night: a stadium is lit by its own lamp banks high under the roof. The floor, bikes and riders are lit from above, each bank casting a soft shadow, and the lamps glow. Off, a stadium at night keeps its daytime light.",
@@ -2124,6 +2125,9 @@ fn preset_text(q: Quality) -> String {
         Quality::Max => "for the strongest graphics cards: Ultra's effects drawn finer, the scene supersampled (drawn with more pixels than the screen and shrunk to it) and the grass, smooth hills and shadows reaching further; the same light and colours as High, without lasting ruts",
     };
     let msaa = ANTIALIASING.iter().find(|a| a.0 == q.antialiasing()).map_or("", |a| a.1);
+    // Past 1440p each pixel is small enough that 4x looks the same, for
+    // half the work (mm2-viewer graphics::fit_screen).
+    let msaa = if q == Quality::Ultra { format!("{msaa} (4× on screens bigger than 1440p)") } else { msaa.to_string() };
     format!("{}: {effects}; anti-aliasing {msaa}; scene resolution {}.", q.label(), q.most_pixels())
 }
 

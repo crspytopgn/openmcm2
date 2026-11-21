@@ -251,7 +251,7 @@ pub fn parse_difficulty(text: &str) -> Option<[[u32; 3]; 4]> {
     (n.len() == 12 && n.iter().all(|v| (1..=MOST_STEP).contains(v))).then_some(t)
 }
 
-pub const UPGRADES: [(&str, &str, bool); 28] = [
+pub const UPGRADES: [(&str, &str, bool); 29] = [
     ("lighting", "Per-pixel lighting", true),
     ("shadows", "Sun shadows", true),
     ("distance", "Far draw distance and haze", true),
@@ -282,6 +282,9 @@ pub const UPGRADES: [(&str, &str, bool); 28] = [
     ("supersample", "Supersampling (sharper than the screen)", false),
     ("far", "Detail reaching further", false),
     ("roost", "Flying dirt (roost)", false),
+    // Holds the frame rate by drawing the scene a little softer while
+    // frames come late; the preset's own size while they keep time.
+    ("dynamic", "Keep the frame rate (dynamic resolution)", true),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
