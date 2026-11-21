@@ -122,9 +122,19 @@ impl Stored {
     }
 
     /// Turns stored pixels into 16-bit ones; the 1-, 3- and 4-byte
-    /// layouts lose their low bits.
-    fn pixels(&self, data: &[u8]) -> Vec<u16> {
+    /// layouts lose their low bits. One-byte pixels are grey, or with a
+    /// palette (an early terrain's, see [`parse`]) its colours' indices.
+    fn pixels(&self, data: &[u8], palette: Option<&[u8]>) -> Vec<u16> {
         match self.bytes {
+            1 if palette.is_some() => {
+                let pal = palette.unwrap();
+                data.iter()
+                    .map(|&c| {
+                        let p = &pal[c as usize * 3..c as usize * 3 + 3];
+                        u16::from(p[0] >> 3) << 11 | u16::from(p[1] >> 2) << 5 | u16::from(p[2] >> 3)
+                    })
+                    .collect()
+            }
             1 => data
                 .iter()
                 .map(|&c| u16::from(c >> 3) << 11 | u16::from(c >> 2) << 5 | u16::from(c >> 3))
@@ -214,9 +224,9 @@ pub fn parse(bytes: &[u8]) -> Result<Terrain> {
     if r.u32("version")? != 5 {
         return Err(Error::Corrupt("unsupported TRN version"));
     }
-    if r.u32("palette flag")? != 0 {
-        skip_palette(&mut r)?;
-    }
+    // The demo's terrains keep their textures as indices into a palette
+    // of 256 colours; the shipped game's are all 16-bit.
+    let palette = if r.u32("palette flag")? != 0 { read_palette(&mut r)? } else { None };
     r.u32("unknown")?;
     let scale = r.f32("scale")?;
     let depth = r.u32("depth")?;
@@ -247,7 +257,7 @@ pub fn parse(bytes: &[u8]) -> Result<Terrain> {
 
     let textures = texture_offsets[..texture_count]
         .iter()
-        .map(|&o| read_texture(&mut Reader::new(bytes, o)))
+        .map(|&o| read_texture(&mut Reader::new(bytes, o), palette.as_deref()))
         .collect::<Result<Vec<_>>>()?;
 
     let mut tree = Tree {
@@ -341,22 +351,40 @@ fn block(r: &mut Reader, len: usize) -> Result<Vec<u8>> {
     }
 }
 
-fn skip_palette(r: &mut Reader) -> Result<()> {
+/// The palette block: 256 RGB colours (8 bits each), then two colour
+/// lookups the game draws with and the port doesn't need. Each block is
+/// LZW packed (its own length first) when the packing flag is set.
+fn read_palette(r: &mut Reader) -> Result<Option<Vec<u8>>> {
     r.u32("palette start")?;
     r.u32("palette colours")?;
     let packed = r.u32("palette packing")? != 0;
+    let mut colours = None;
     for len in [0x300, 0x8000, 0x10000] {
-        if packed {
-            let size = r.u32("palette block size")? as usize;
-            r.take(size, "palette block")?;
+        let block = if packed {
+            // The length word, then that many packed bytes; the
+            // decompressor wants the word in front of them.
+            let size = r.u32("palette block size")?;
+            let raw = r.take(size as usize, "palette block")?;
+            if len == 0x300 && raw.len() == len {
+                Some(raw.to_vec())
+            } else if len == 0x300 {
+                let stream: Vec<u8> = size.to_be_bytes().into_iter().chain(raw.iter().copied()).collect();
+                lzw::decompress(&stream, len).ok()
+            } else {
+                None
+            }
         } else {
-            r.take(len, "palette block")?;
+            let raw = r.take(len, "palette block")?;
+            (len == 0x300).then(|| raw.to_vec())
+        };
+        if len == 0x300 {
+            colours = block.filter(|b| b.len() >= 0x300);
         }
     }
-    Ok(())
+    Ok(colours)
 }
 
-fn read_texture(r: &mut Reader) -> Result<Texture> {
+fn read_texture(r: &mut Reader, palette: Option<&[u8]>) -> Result<Texture> {
     let size = r.u32("texture width")?;
     let height = r.u32("texture height")?;
     let code = r.u32("texture format")?;
@@ -364,14 +392,18 @@ fn read_texture(r: &mut Reader) -> Result<Texture> {
         return Err(Error::Corrupt("texture is not square"));
     }
     let stored = Stored::from_code(code).ok_or(Error::Corrupt("unknown terrain texture format"))?;
-    read_image(r, size, stored)
+    read_image_in(r, size, stored, palette)
 }
 
 /// Reads a texture as its format code says (0x4ca7d0): a mip chain, or
 /// one level with the smaller ones made from it.
 pub(crate) fn read_image(r: &mut Reader, size: u32, stored: Stored) -> Result<Texture> {
+    read_image_in(r, size, stored, None)
+}
+
+fn read_image_in(r: &mut Reader, size: u32, stored: Stored, palette: Option<&[u8]>) -> Result<Texture> {
     if stored.mipped {
-        return read_stored_mips(r, size, stored);
+        return read_stored_mips(r, size, stored, palette);
     }
     if !size.is_power_of_two() || size > 1024 {
         return Err(Error::Corrupt("texture size is not a power of two"));
@@ -386,7 +418,7 @@ pub(crate) fn read_image(r: &mut Reader, size: u32, stored: Stored) -> Result<Te
     } else {
         r.take(len, "texture level")?.to_vec()
     };
-    let mut levels = vec![stored.pixels(&data)];
+    let mut levels = vec![stored.pixels(&data, palette)];
     while levels.len() <= size.trailing_zeros() as usize {
         let side = (size >> levels.len()) as usize;
         levels.push(halve(levels.last().unwrap(), side, stored.format));
@@ -439,10 +471,10 @@ pub(crate) fn read_mips(r: &mut Reader, size: u32, format: PixelFormat) -> Resul
         mipped: true,
         packed: true,
     };
-    read_stored_mips(r, size, stored)
+    read_stored_mips(r, size, stored, None)
 }
 
-fn read_stored_mips(r: &mut Reader, size: u32, stored: Stored) -> Result<Texture> {
+fn read_stored_mips(r: &mut Reader, size: u32, stored: Stored, palette: Option<&[u8]>) -> Result<Texture> {
     if !size.is_power_of_two() || size > 1024 {
         return Err(Error::Corrupt("texture size is not a power of two"));
     }
@@ -465,7 +497,7 @@ fn read_stored_mips(r: &mut Reader, size: u32, stored: Stored) -> Result<Texture
         } else {
             lzw::decompress(src, len)?
         };
-        levels.push(stored.pixels(&data));
+        levels.push(stored.pixels(&data, palette));
     }
     levels.reverse();
     Ok(Texture {
@@ -766,5 +798,25 @@ mod write_tests {
             assert_eq!(t.tiles.len(), tiles.len());
             assert_eq!(t.textures[1].levels[0][0], 0x03e0);
         }
+    }
+}
+
+#[cfg(test)]
+mod palette_tests {
+    use super::*;
+
+    /// The demo's one-byte pixels are colours of the terrain's palette,
+    /// not greys.
+    #[test]
+    fn one_byte_pixels_take_the_palette() {
+        let stored = Stored::from_code(0x15).unwrap();
+        assert_eq!(stored.bytes, 1);
+        let mut palette = vec![0u8; 0x300];
+        palette[3..6].copy_from_slice(&[0xf8, 0x80, 0x08]);
+        let px = stored.pixels(&[1, 0], Some(&palette));
+        assert_eq!(px[0], 31 << 11 | 32 << 5 | 1);
+        assert_eq!(px[1], 0);
+        // Without one, still grey.
+        assert_eq!(stored.pixels(&[0xff], None)[0], 31 << 11 | 63 << 5 | 31);
     }
 }

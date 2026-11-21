@@ -44,6 +44,16 @@ pub fn set_root(dir: PathBuf) {
     let _ = GIVEN.set(dir);
 }
 
+/// The pack that fills in what a cut-down game lacks (`--fill-from DIR`):
+/// the demo's missing tracks, bikes, menus and sounds, under the
+/// original graphics. The same as `MM2_FREEPACK`, which a browser can't set.
+static FILL: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Uses the pack in `dir` beside the game's own files (`--fill-from`).
+pub fn set_fill(dir: PathBuf) {
+    let _ = FILL.set(dir);
+}
+
 /// Whether the player picked the free graphics (`--freepack`), rather
 /// than a pack set up beside the original's files.
 pub fn chosen() -> bool {
@@ -82,7 +92,7 @@ pub fn ui_root() -> Option<PathBuf> {
 
 /// The free pack's folder, when one is in use.
 pub fn root() -> Option<PathBuf> {
-    let dir = match GIVEN.get() {
+    let dir = match GIVEN.get().or(FILL.get()) {
         Some(dir) => dir.clone(),
         None => PathBuf::from(std::env::var_os("MM2_FREEPACK")?),
     };

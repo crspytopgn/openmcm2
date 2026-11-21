@@ -48,6 +48,14 @@ redrawn. Own the game? Pick **New look** or **Original menus** beside the
 graphics choice. The new look with your own MM2 graphics needs only the
 menus, a small download, not the whole Free Pack.
 
+**Or try the original look with the free demo.** Microsoft gave away a
+Motocross Madness 2 demo in 2000, and the Internet Archive still keeps it.
+Press **Get the free MM2 demo** in the launcher, or **Play the free MM2
+demo** on the browser page, and OpenMCM2 fetches it from there (43 MB),
+checks it and plays its two tracks, Voodoo Basin and Donner Pass, with the
+original graphics. The Free Pack fills in every other track, bike and
+screen, so every event is open. The demo never comes with OpenMCM2 itself.
+
 [![OpenMCM2 showcase video](https://img.youtube.com/vi/rP0TEnWLzNo/maxresdefault.jpg)](https://youtu.be/rP0TEnWLzNo)
 
 Watch the showcase video: https://youtu.be/rP0TEnWLzNo
@@ -79,7 +87,8 @@ the game's `GAME` folder into the port's user folder
 (`~/Library/Application Support/MM2/GAME` on a Mac, `%APPDATA%\MM2\GAME` on
 Windows, `~/.local/share/mm2/GAME` on Linux). Then pick the look, effects,
 full screen, window size and vsync, and press Play. The game itself is
-never downloaded: OpenMCM2 ships without any game data.
+never downloaded (only Microsoft's free demo, from the Internet Archive,
+when you ask for it): OpenMCM2 ships without any game data.
 
 **On Linux, a Steam Deck or a Steam Machine**, the `.AppImage` download is
 the whole thing in one file: make it executable and open it. To play it

@@ -239,4 +239,13 @@ function remove(path) {
   return found;
 }
 
-globalThis.mm2fs = { read, list, kind, write, remove };
+// The game folder unpacked from the demo's installer (in the game, at its
+// start): kept in memory for this visit, like a picked folder.
+function putGame(path, data) {
+  path = norm(path);
+  if (!path.toLowerCase().startsWith("/game/")) return false;
+  put(path, new Uint8Array(data));
+  return true;
+}
+
+globalThis.mm2fs = { read, list, kind, write, remove, putGame };

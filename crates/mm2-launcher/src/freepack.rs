@@ -279,7 +279,7 @@ enum Fail {
 /// stalled connection, a busy server or a damaged download is tried again
 /// with growing waits (about two and a half minutes in all), each try
 /// carrying on from the bytes already on disk.
-fn download(url: &str, part: &Part, to: &Path, p: &Progress, stage: &str) -> Result<(), String> {
+pub fn download(url: &str, part: &Part, to: &Path, p: &Progress, stage: &str) -> Result<(), String> {
     if part.size > MAX_PART {
         return Err("a Free Pack part is far bigger than it should be".into());
     }

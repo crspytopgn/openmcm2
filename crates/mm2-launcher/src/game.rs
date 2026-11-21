@@ -1,6 +1,7 @@
 //! Finding the game data in the player's own copy of Motocross Madness 2
-//! and copying it where the port reads it. Nothing is ever downloaded:
-//! the data comes only from a CD, CD image or install the player has.
+//! and copying it where the port reads it. Nothing of the game is
+//! downloaded here: the data comes only from a CD, CD image or install the
+//! player has (the free demo is `demo.rs`, fetched only when asked for).
 
 use crate::iso::Image;
 use std::io;
