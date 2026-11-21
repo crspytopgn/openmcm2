@@ -922,11 +922,24 @@ impl Settings {
                 a.push("--freepack".into());
                 a.push(f.display().to_string());
                 match game {
-                    Some(g) if !self.new_menus => {
+                    Some(g) if !self.new_menus && !is_demo(g) => {
                         a.push(g.display().to_string());
                         a.push("--original-menus".into());
                     }
                     _ => a.push("--new-menus".into()),
+                }
+            }
+            // The demo with the original look, the Free Pack filling in its
+            // missing tracks, bikes and the few screens it doesn't have.
+            // Its own menus unless the new look is picked.
+            (Some(f), Some(g)) if is_demo(g) => {
+                a.push(g.display().to_string());
+                a.push("--fill-from".into());
+                a.push(f.display().to_string());
+                if self.new_menus {
+                    a.push(format!("--new-menus={}", f.display()));
+                } else {
+                    a.push("--original-menus".into());
                 }
             }
             (pack, Some(g)) => {
@@ -1272,4 +1285,13 @@ mod tests {
         let args = s.args();
         assert_eq!(&args[args.len() - 1..], ["--vibration=off"]);
     }
+}
+
+/// The file an unpacked Motocross Madness 2 demo has in its folder
+/// (`mm2_formats::demo::MARKER`).
+pub const DEMO_MARKER: &str = "DEMO.TXT";
+
+/// Whether the game folder `game` is the unpacked demo.
+pub fn is_demo(game: &std::path::Path) -> bool {
+    game.join(DEMO_MARKER).is_file()
 }

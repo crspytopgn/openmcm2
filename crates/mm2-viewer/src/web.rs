@@ -85,6 +85,11 @@ pub fn save_picture() -> bool {
     js_save_picture().unwrap_or(false)
 }
 
+/// The loading screen's step, for one the game takes itself.
+pub fn stage(step: &str) {
+    js_stage(step);
+}
+
 /// Tells the page how many steps of effects to set aside from the start
 /// next time (`shed=` with `quality=auto`).
 pub fn auto_shed(steps: u8) {

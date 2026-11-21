@@ -11,6 +11,7 @@ pub mod anim;
 pub mod avi;
 pub mod col;
 pub mod cub;
+pub mod demo;
 pub mod dtm;
 pub mod esb;
 pub mod faoe;

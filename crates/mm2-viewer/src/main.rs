@@ -53,6 +53,7 @@
 
 mod gpu_free;
 mod free_text;
+mod demo;
 mod drive;
 mod drive_sound;
 mod help;
@@ -173,6 +174,9 @@ fn main() -> Result<(), BoxError> {
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook::set_once();
     let args: Vec<String> = crate::args().skip(1).collect();
+    // The demo the browser page downloaded: its game folder, unpacked.
+    #[cfg(target_arch = "wasm32")]
+    demo::unpack_in_browser();
     // Started with nothing (a shortcut, a double-click): as the launcher
     // starts it, with its saved settings.
     if args.is_empty() && play_with_launcher_settings() {
@@ -194,6 +198,10 @@ fn main() -> Result<(), BoxError> {
     if let Some(dir) = flag("--freepack").map(String::as_str).or_else(|| args.iter().find_map(|a| a.strip_prefix("--freepack="))) {
         freepack::set_root(PathBuf::from(dir));
     }
+    // The pack beside a cut-down game (the demo), filling in what it lacks.
+    if let Some(dir) = flag("--fill-from").map(String::as_str).or_else(|| args.iter().find_map(|a| a.strip_prefix("--fill-from="))) {
+        freepack::set_fill(PathBuf::from(dir));
+    }
     // The menus' look: the new one (`--new-menus`, or `--new-menus=DIR`
     // for the pack's menus over the original graphics) or the original's.
     if let Some(arg) = args.iter().find(|a| *a == "--new-menus" || a.starts_with("--new-menus=")) {
@@ -203,9 +211,14 @@ fn main() -> Result<(), BoxError> {
         freepack::set_menus(false, None);
     }
     let args: Vec<String> = {
-        // The pack's folder isn't the game's.
+        // The packs' folders aren't the game's.
         let at = args.iter().position(|a| a == "--freepack");
-        args.iter().enumerate().filter(|(i, _)| at.is_none_or(|at| *i != at + 1)).map(|(_, a)| a.clone()).collect()
+        let fill = args.iter().position(|a| a == "--fill-from");
+        args.iter()
+            .enumerate()
+            .filter(|(i, _)| at.is_none_or(|at| *i != at + 1) && fill.is_none_or(|f| *i != f + 1))
+            .map(|(_, a)| a.clone())
+            .collect()
     };
     let flag = |name: &str| {
         args.iter()
@@ -270,6 +283,7 @@ fn main() -> Result<(), BoxError> {
             );
             std::process::exit(2);
         };
+        demo::note(&game);
         if let Some(out) = flag("--screenshot") {
             let clicks = flag("--clicks").map(String::as_str).unwrap_or("");
             return pollster::block_on(menu_screenshot(&game, clicks, Path::new(out), None));

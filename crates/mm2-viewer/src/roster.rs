@@ -48,7 +48,7 @@ pub struct Roster {
 /// (the amateurs' kit), and 10 is the award bike, shown once the career is
 /// won (0x450630). The "all gear" extra shows the amateurs' kit too.
 fn offered(availability: i32) -> bool {
-    matches!(availability, 2 | 3) || (availability == 1 && crate::tweaks::more().all_gear)
+    matches!(availability, 2 | 3) || (availability == 1 && (crate::tweaks::more().all_gear || crate::demo::active()))
 }
 
 /// The model a paint from the `BIKES` folder goes on: the game's template
@@ -112,6 +112,15 @@ impl Roster {
             bikes: text("bikes.pb").map(|t| bikes(&t)).unwrap_or_default(),
             outfits: text("riders.pb").map(|t| outfits(&t)).unwrap_or_default(),
         };
+        // The demo's lists name the whole game's bikes and outfits, but it
+        // has the models and paints of only a few: the rest are left out.
+        if crate::demo::active() {
+            if let Some(have) = crate::demo::bike_files(game) {
+                let has = |f: &str| have.contains(&f.to_ascii_lowercase());
+                roster.bikes.retain(|b| has(&b.model) && has(&b.ui_model) && (b.texture.is_empty() || has(&b.texture)));
+                roster.outfits.retain(|o| has(&o.file));
+            }
+        }
         roster.add_own(game);
         roster.add_free();
         roster

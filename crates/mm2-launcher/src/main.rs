@@ -7,6 +7,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod boards;
+mod demo;
 mod freepack;
 mod game;
 mod iso;
@@ -136,6 +137,8 @@ struct Launcher {
     pack_import: Option<Arc<game::Progress>>,
     /// The Free Pack being downloaded or updated.
     pack_download: Option<Arc<freepack::Progress>>,
+    /// The Motocross Madness 2 demo being downloaded and unpacked.
+    demo_download: Option<Arc<freepack::Progress>>,
     /// A newer Free Pack, once looked for.
     pack_update: Slot<Option<freepack::Update>>,
     /// The new look menus alone being downloaded or updated.
@@ -412,6 +415,7 @@ impl Launcher {
             import: None,
             pack_import: None,
             pack_download: None,
+            demo_download: None,
             pack_update: Arc::new(Mutex::new(None)),
             menus_download: None,
             menus_update: Arc::new(Mutex::new(None)),
@@ -429,6 +433,11 @@ impl Launcher {
     }
 
     fn pick(&mut self, path: PathBuf) {
+        if demo::is_installer(&path) {
+            self.note = None;
+            self.demo_download = Some(demo::install(Some(path), settings::user_dir().join("GAME")));
+            return;
+        }
         match Source::of(&path) {
             Ok(source) => {
                 self.note = None;
@@ -563,6 +572,30 @@ impl Launcher {
                 ctx.request_repaint_after(Duration::from_millis(100));
             }
         }
+        if let Some(p) = self.demo_download.clone() {
+            let r = p.result.lock().unwrap().take();
+            if let Some(r) = r {
+                match r {
+                    Ok(dir) => {
+                        self.settings.game = Some(dir);
+                        self.settings.free_graphics = false;
+                        if self.settings.freepack.is_none() && self.pack_download.is_none() {
+                            // The demo's missing tracks, bikes and screens
+                            // come from the Free Pack.
+                            self.note = Some(("The demo is ready. Now getting the Free Pack, which fills in everything the demo lacks.".into(), false));
+                            self.pack_download = Some(freepack::install(settings::user_dir().join("FreePack")));
+                        } else {
+                            self.note = Some(("The demo is ready: press Play.".into(), false));
+                        }
+                        let _ = self.settings.save();
+                    }
+                    Err(e) => self.note = Some((e, true)),
+                }
+                self.demo_download = None;
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+        }
         if let Some(p) = self.pack_import.clone() {
             let r = p.result.lock().unwrap().take();
             if let Some(r) = r {
@@ -586,7 +619,9 @@ impl Launcher {
                     Ok(dir) => {
                         self.note = Some(("The Free Pack is ready.".into(), false));
                         self.settings.freepack = Some(dir);
-                        self.settings.free_graphics = true;
+                        // With the demo, the pack fills in under the demo's
+                        // own look rather than replacing it.
+                        self.settings.free_graphics = !self.settings.game.as_deref().is_some_and(mm2_settings::is_demo);
                         let _ = self.settings.save();
                         *self.pack_update.lock().unwrap() = Some(Ok(None));
                     }
@@ -686,7 +721,11 @@ impl Launcher {
             let image = egui::ColorImage::from_rgba_unmultiplied([png.width as usize, png.height as usize], &png.rgba);
             self.logo = Some(ui.ctx().load_texture("logo", image, egui::TextureOptions::LINEAR));
         }
-        let busy = self.import.is_some() || self.pack_import.is_some() || self.pack_download.is_some() || self.menus_download.is_some();
+        let busy = self.import.is_some()
+            || self.pack_import.is_some()
+            || self.pack_download.is_some()
+            || self.menus_download.is_some()
+            || self.demo_download.is_some();
         egui::Panel::left("nav")
             .exact_size(236.0)
             .resizable(false)
@@ -834,6 +873,7 @@ impl Launcher {
         use look::icon;
         let free = self.settings.free_graphics;
         let (has_game, has_pack) = (self.settings.game.is_some(), self.settings.freepack.is_some());
+        let is_demo = self.settings.game.as_deref().is_some_and(mm2_settings::is_demo);
         let has_menus = self.settings.menus_pack.is_some();
         let mut pick = None;
         let mut pick_menus = None;
@@ -851,6 +891,7 @@ impl Launcher {
                     "Plays with the art, sounds and menus from your own Motocross Madness 2 CD, CD image or install. This is the game as it was, and it's the default.",
                     w,
                     |ui| match has_game {
+                        true if is_demo => look::status(ui, true, "Free demo ready"),
                         true => look::status(ui, true, "Game data ready"),
                         false => look::status(ui, false, "Needs your MM2 files"),
                     },
@@ -1171,13 +1212,25 @@ impl Launcher {
                 });
                 ui.label(look::weak(format!("Copying game data… {} of {} MB", done >> 20, total >> 20)));
             }
+            if let Some(p) = &self.demo_download {
+                let total = p.total.load(Ordering::Relaxed).max(1);
+                let done = p.done.load(Ordering::Relaxed);
+                ui.horizontal(|ui| {
+                    ui.add(egui::ProgressBar::new(done as f32 / total as f32).show_percentage().desired_width(ui.available_width() - 90.0));
+                    if ui.button("Cancel").clicked() {
+                        p.cancel.store(true, Ordering::Relaxed);
+                    }
+                });
+                let stage = p.stage.lock().unwrap().clone();
+                ui.label(look::weak(if total > 1 << 20 { format!("{stage} {} of {} MB", done >> 20, total >> 20) } else { stage }));
+            }
             ui.add_space(2.0);
             ui.horizontal_wrapped(|ui| {
                 ui.add_enabled_ui(!busy, |ui| {
                     if ui.button(look::with(look::icon::ICON_DISC_FULL, "Choose CD image or zip…")).clicked() {
                         if let Some(f) = rfd::FileDialog::new()
                             .set_title("Your Motocross Madness 2 CD image or zip")
-                            .add_filter("CD image or zip", &["iso", "bin", "cue", "img", "mdf", "mds", "nrg", "zip"])
+                            .add_filter("CD image or zip", &["iso", "bin", "cue", "img", "mdf", "mds", "nrg", "zip", "exe"])
                             .add_filter("All files", &["*"])
                             .pick_file()
                         {
@@ -1188,6 +1241,20 @@ impl Launcher {
                         if let Some(d) = rfd::FileDialog::new().set_title("Your Motocross Madness 2 CD or install folder").pick_folder() {
                             self.pick(d);
                         }
+                    }
+                    // No copy of the game: Microsoft's free demo, which
+                    // never replaces a real copy set up here.
+                    let no_game = self.settings.game.as_deref().is_none_or(mm2_settings::is_demo);
+                    if no_game
+                        && ui
+                            .button(look::with(look::icon::ICON_DOWNLOAD, "Get the free MM2 demo (43 MB)"))
+                            .on_hover_text(
+                                "No copy of the game? This downloads Microsoft's free Motocross Madness 2 demo from 2000 from the Internet Archive, checks it, and plays it with the original graphics: the Voodoo Basin national track and the Donner Pass stunt quarry. The Free Pack fills in everything else, so every event, the Pro Circuit and multiplayer are open. Nothing of the demo comes with OpenMCM2 itself.",
+                            )
+                            .clicked()
+                    {
+                        self.note = None;
+                        self.demo_download = Some(demo::install(None, settings::user_dir().join("GAME")));
                     }
                 });
             });
@@ -2163,6 +2230,8 @@ mod shots {
             ("play_full", Page::Play, true, 1300.0),
             ("play_free", Page::Play, true, 1300.0),
             ("play_free_new", Page::Play, true, 1300.0),
+            // A first start with no game yet: the CD picker and the demo.
+            ("play_new", Page::Play, true, 1300.0),
             // The window as it opens, and a Steam Deck's screen.
             ("window", Page::Play, true, 675.0),
             ("deck", Page::Play, true, 800.0),
@@ -2175,7 +2244,7 @@ mod shots {
             let custom = name.ends_with("custom");
             let mut s = Settings::default();
             s.enhanced = enhanced;
-            s.game = Some("C:/Games/Motocross Madness 2/GAME".into());
+            s.game = (name != "play_new").then(|| "C:/Games/Motocross Madness 2/GAME".into());
             s.quality = Quality::RayTraced;
             s.auto = name == "graphics_auto";
             s.fullscreen = name == "play_full";

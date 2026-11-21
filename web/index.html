@@ -206,8 +206,14 @@
       <label class="button" for="folder" title="The folder Motocross Madness 2 is installed in, or the CD's own folder.">Choose game folder</label>
       <label class="button" for="file" title="Your game CD's image (.iso, .bin, .img, .mdf or .nrg), or a .zip of the game folder or of a CD image.">Choose a CD image or .zip</label>
       <input id="folder" type="file" webkitdirectory multiple>
-      <input id="file" type="file" multiple accept=".zip,.iso,.bin,.img,.mdf,.mds,.nrg,.cue,application/zip">
+      <input id="file" type="file" multiple accept=".zip,.iso,.bin,.img,.mdf,.mds,.nrg,.cue,.exe,application/zip">
       <p><label><input id="keep" type="checkbox" checked title="Keeps your game in this browser, so next time Play starts it straight away."> Remember it in this browser</label></p>
+    </div>
+    <div id="demorow">
+      <p class="hint">No copy of the game? Play Microsoft's free Motocross Madness 2 demo from 2000, with the
+        original graphics on its two tracks. The Free Pack fills in the rest, so every event is open.</p>
+      <button type="button" id="getdemo" class="plainbutton"
+        title="Downloads Microsoft's free Motocross Madness 2 demo (43 MB) from the Internet Archive, checks it and keeps it in this browser. It plays with the original graphics on the Voodoo Basin national track and the Donner Pass stunt quarry. The Free Pack (several hundred MB, downloaded once) fills in every other track, bike and screen, so every event, the Pro Circuit and multiplayer are open. Nothing of the demo comes with OpenMCM2 itself.">Play the free MM2 demo</button>
     </div>
     <div id="kept" hidden>
       <button id="play" title="Starts the game with your Motocross Madness 2 files.">Play</button>
@@ -377,6 +383,8 @@ const STEPS = {
   pack: ["Downloading the Free Pack", ""],
   menuscheck: ["Checking the new look menus", "Asking for the newest list of the menus' files. Only the menus download, not the whole Free Pack."],
   menus: ["Downloading the new look menus", ""],
+  demodl: ["Downloading the Motocross Madness 2 demo", "Microsoft's free demo from 2000, from the Internet Archive. It stays in this browser."],
+  demo: ["Unpacking the demo", "Taking the game's files out of the demo's installer."],
 };
 const MB = (n) => (n / 1048576).toFixed(n < 10 * 1048576 ? 1 : 0);
 const loader = {
@@ -1063,6 +1071,7 @@ async function fromFile(file) {
 
 async function useFile(file) {
   if (!file) return;
+  if (/\.exe$/i.test(file.name)) return useDemo(file);
   if (/\.(cue|mds)$/i.test(file.name)) {
     $("why").textContent = /\.cue$/i.test(file.name)
       ? "Pick the .bin file that goes with the .cue."
@@ -1286,15 +1295,17 @@ try {
   newMenus = localStorage.getItem("mm2menus") === "new";
 } catch {}
 let haveGame = false;
-const menusNew = () => newMenus || !haveGame;
+// The demo has the original's menus too.
+let haveMenus = false;
+const menusNew = () => newMenus || !haveMenus;
 function showMenus() {
   $("picknewmenus").setAttribute("aria-checked", String(menusNew()));
   $("pickoldmenus").setAttribute("aria-checked", String(!menusNew()));
-  $("pickoldmenus").setAttribute("aria-disabled", String(!haveGame));
+  $("pickoldmenus").setAttribute("aria-disabled", String(!haveMenus));
 }
 for (const [id, n] of [["picknewmenus", true], ["pickoldmenus", false]]) {
   $(id).addEventListener("click", () => {
-    if (!n && !haveGame) {
+    if (!n && !haveMenus) {
       $("why").textContent = "The original menus come from your MM2 files: pick them under MM2 graphics first.";
       return;
     }
@@ -1322,6 +1333,19 @@ function setParam(name, value) {
 // the menus picked: the new look's from the pack (with MM2 graphics, only
 // the menus' part of it), the original's from the MM2 files.
 async function go(list, withPack) {
+  // The demo: its own look and its own menus (unless the new look is
+  // picked), with the whole Free Pack filling in what it lacks.
+  if (!withPack && isDemo(list)) {
+    const pack = await demoPack();
+    if (!pack) return;
+    const newLook = menusNew();
+    setParam("freepack", null);
+    setParam("fill-from", "/freepack");
+    setParam("new-menus", newLook ? "/freepack" : null);
+    setParam("original-menus", newLook ? null : "");
+    return start(list.concat(pack));
+  }
+  setParam("fill-from", null);
   let files = list;
   let newLook = menusNew();
   if (withPack && !newLook) files = list.concat(kept);
@@ -1629,6 +1653,101 @@ async function downloadAndPlay() {
 }
 $("getpack").addEventListener("click", downloadAndPlay);
 
+// ---- The Motocross Madness 2 demo ----
+// Microsoft's free demo from 2000, kept by the Internet Archive: fetched
+// only when the player asks, checked, and kept in this browser. The game
+// unpacks it into its game folder as it starts (crates/mm2-formats/src/demo.rs).
+const DEMO = {
+  url: "https://cors.archive.org/cors/MotocrossMadness2Demo/MCM2PCG.exe",
+  path: "/demo/MCM2PCG.exe",
+  size: 42954810,
+  sha256: "383eae1ccac90b478d89864c0a6142407fab6b151c7b84d7f7db52121ac4125a",
+};
+const isDemo = (list) => !!list?.some(([p]) => p === DEMO.path);
+
+// The demo's installer, downloaded with a progress bar.
+async function fetchDemo() {
+  const r = await fetch(DEMO.url);
+  if (!r.ok) throw new Error(`the Internet Archive answered ${r.status} ${r.statusText}`);
+  const out = new Uint8Array(DEMO.size);
+  let got = 0;
+  const reader = r.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (got + value.length > DEMO.size) throw new Error("the download is bigger than the demo should be");
+    out.set(value, got);
+    got += value.length;
+    loader.progress(got / DEMO.size, `${MB(got)} of ${MB(DEMO.size)} MB`);
+  }
+  if (got !== DEMO.size) throw new Error(`the download stopped at ${MB(got)} MB`);
+  return out;
+}
+
+// The Free Pack, which the demo needs: kept, or downloaded (only what changed).
+async function demoPack() {
+  if (keptPack) return keptPack;
+  try {
+    const list = await syncPack(true);
+    if (!list) throw new Error("the downloaded pack is missing some files");
+    downloaded = true;
+    return list;
+  } catch (err) {
+    console.warn(err);
+    loader.fail(
+      "Couldn't download the Free Pack",
+      "The demo needs the Free Pack for its missing tracks, bikes and screens. Check your internet connection and try again: what already came down is kept.",
+      String(err.stack || err),
+      [["Try the download again", () => { loader.hide(); go(kept, false); }]],
+      "Download failed"
+    );
+    return null;
+  }
+}
+
+// The demo, from the Internet Archive or a copy of MCM2PCG.exe the
+// player picked: checked, kept, and played.
+async function useDemo(file) {
+  $("why").textContent = "";
+  if (!(await checkBrowser())) return;
+  let bytes;
+  try {
+    if (file) {
+      loader.step("demo", "Checking the demo you picked.");
+      bytes = new Uint8Array(await file.arrayBuffer());
+    } else {
+      loader.step("demodl");
+      bytes = await fetchDemo();
+    }
+    if (bytes.length !== DEMO.size || (await sha256(bytes)) !== DEMO.sha256)
+      throw new Error(file ? "That isn't the Motocross Madness 2 demo (MCM2PCG.exe)." : "The demo came down damaged (wrong checksum).");
+  } catch (err) {
+    console.warn(err);
+    if (file) {
+      loader.hide();
+      $("why").textContent = String(err.message || err);
+      return;
+    }
+    loader.fail(
+      "Couldn't download the demo",
+      "The download from the Internet Archive stopped or came down damaged. Check your internet connection and try again.",
+      String(err.stack || err),
+      [["Try the download again", () => { loader.hide(); useDemo(); }]],
+      "Download failed"
+    );
+    return;
+  }
+  const blob = new Blob([bytes], { type: "application/octet-stream" });
+  const list = [[DEMO.path, blob]];
+  navigator.storage?.persist?.();
+  await fs.forgetGame().catch(() => {});
+  await fs.keepGame(list).catch((e) => console.warn("demo not kept", e));
+  kept = list;
+  showReady();
+  go(list, false);
+}
+$("getdemo").addEventListener("click", () => useDemo());
+
 let kept = await fs.keptGame().catch(() => null);
 const keptFile = kept?.find(([path]) => path === "/file");
 if (keptFile) kept = await fromFile(keptFile[1]).catch(() => null);
@@ -1645,7 +1764,9 @@ let downloaded = !keptPack && (await fs.packGet("manifest").catch(() => null));
 let menusKept = !keptPack && !downloaded && (await fs.packGet("menusmanifest").catch(() => null));
 
 function showReady() {
-  haveGame = !!kept;
+  // The demo has only some of the original menus: it wears the new look.
+  haveGame = !!kept && !isDemo(kept);
+  haveMenus = !!kept;
   showMenus();
   $("oldmenustate").textContent = kept ? "Your MM2 files are here" : "Needs your MM2 files";
   $("oldmenustate").classList.toggle("ready", !!kept);
@@ -1658,7 +1779,8 @@ function showReady() {
           ? "Small download (about 60 MB)"
           : "Comes with the Free Pack";
   $("newmenustate").classList.toggle("ready", !!(keptPack || downloaded || menusKept));
-  $("mm2state").textContent = kept ? "Remembered in this browser" : "Needs your MM2 files";
+  $("mm2state").textContent = isDemo(kept) ? "The free demo is kept in this browser" : kept ? "Remembered in this browser" : "Needs your MM2 files";
+  $("demorow").hidden = !!kept;
   $("mm2state").classList.toggle("ready", !!kept);
   const has = keptPack || downloaded;
   $("freestate").textContent = has ? "Free Pack kept in this browser" : "Free Pack not downloaded yet";
@@ -1703,7 +1825,7 @@ $("openbuilder").addEventListener("click", () => {
 if (kept) {
   $("pick").hidden = true;
   $("kept").hidden = false;
-  status("Your game folder is remembered in this browser.");
+  status(isDemo(kept) ? "The free demo is kept in this browser." : "Your game folder is remembered in this browser.");
   $("play").addEventListener("click", () => go(kept, false));
 }
 // Back from switching the look: straight into the game again.

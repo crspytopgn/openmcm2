@@ -47,6 +47,14 @@ mod paths {
         /// Removes a file, or a folder and all in it.
         #[wasm_bindgen(js_name = remove)]
         fn js_remove(path: &str) -> bool;
+        /// Puts a file in the game folder for this visit.
+        #[wasm_bindgen(js_name = putGame)]
+        fn js_put_game(path: &str, data: &[u8]) -> bool;
+    }
+
+    /// Puts a file into the game folder in memory (the demo's, unpacked).
+    pub fn put_game(p: impl AsRef<Path>, data: &[u8]) -> bool {
+        js_put_game(&key(p.as_ref()), data)
     }
 
     /// `/a/b/c`, with `.` and `..` worked out.
