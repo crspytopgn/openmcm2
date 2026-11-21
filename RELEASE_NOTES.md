@@ -1,3 +1,17 @@
+# OpenMCM2 0.7.3
+
+* **Typing on phones and tablets.** In the browser version, tapping the
+  game while a box wants a name now opens the phone's keyboard. That
+  covers a new rider profile, chat, the race number and a track's name.
+  A bar along the top shows what you're typing, with a *Done* button, as
+  the keyboard can cover the box. On an iPhone the first start's
+  *Create New Profile* box could not be filled in before, which left the
+  menus behind it stuck.
+* **The browser version starts sooner,** most of all on phones. The game
+  no longer waits for the whole Free Pack to be read in first. The
+  scenery and ground load while you're in the menus, and a race picked
+  before they're ready waits on its loading screen.
+
 # OpenMCM2 0.7.2
 
 * **Smoother rebuilt tracks.** The grey walls on some rebuilt tracks,
