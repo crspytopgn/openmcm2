@@ -84,6 +84,21 @@ def triplebale(lo, hi, name):
 def single_bale(lo, hi, name):
     bale_block(lo, hi, wrap=brand_mat(name))
 
+def round_bale(lo, hi, name):
+    # one big round bale lying on its side, as the stock HayBale is: a
+    # rolled cylinder along the stock's depth, net-wrapped round the middle
+    R = (hi.z - lo.z) / 2; cx = (lo.x + hi.x) / 2; cz = lo.z + R
+    a = Vector((cx, lo.y + 0.15, cz)); b = Vector((cx, hi.y - 0.15, cz))
+    cyl(a, b, R * 0.985, hay(), 48, "bale", uv_scale=4)
+    # the rolled ends: rings of tighter hay a little proud of the face
+    for y0, y1 in ((lo.y, lo.y + 0.16), (hi.y - 0.16, hi.y)):
+        for k, f in enumerate((0.92, 0.66, 0.4, 0.16)):
+            cyl(Vector((cx, y0 + 0.01 * k, cz)), Vector((cx, y1 - 0.01 * k, cz)), R * f, hay(), 40, "end", uv_scale=2 + k)
+    # net wrap bands
+    for f in (0.2, 0.5, 0.8):
+        y = lo.y + (hi.y - lo.y) * f
+        cyl(Vector((cx, y - 0.06, cz)), Vector((cx, y + 0.06, cz)), R, twine(), 48, "band", cap=False)
+
 def bale_stack(lo, hi, name):
     # pyramid of big bales, 3 tiers
     tiers = 3; th = (hi.z - lo.z) / tiers
@@ -1051,7 +1066,7 @@ FP_PROPS = {  # name: (game lo, game hi) in feet, y up
 RULES = [
     (r"^fp_haybale$", single_bale), (r"^fp_tuffblock$", tuffblock), (r"^fp_startgate_post$", startgate_post),
     (r"^fp_fence(_\d)?$", sponsor_fence), (r"^fp_flag_\d$", feather_flag), (r"^fp_tirewall$", tirewall), (r"^fp_flagman_stand$", flagman_stand), (r"^fp_banner$", billboard), (r"^fp_banner_\d$", race_banner),
-    (r"^triplebale\d+$", triplebale), (r"^haybale$", bale_stack), (r"^haybale_", single_bale),
+    (r"^triplebale\d+$", triplebale), (r"^haybale$", round_bale), (r"^haybale_", single_bale),
     (r"^(fox\d+|.*hb)$", single_bale), (r"^billboard", billboard), (r"^gianttire", giant_tyre),
     (r"^cameraplatform", camera_platform), (r"^rail$", rail), (r"^50gal$|^trash_can", drum),
     (r"^crate", crate), (r"^tent0", tent), (r"^fence_chlink(short)?$", chainlink), (r"^waypnt$", waypoint),

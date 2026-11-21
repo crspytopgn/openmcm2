@@ -126,7 +126,7 @@ const TOOLS: [(Tool, &str, &str); 8] = [
 
 /// Objects to place: name, model, about.
 const OBJECTS: [(&str, &str, &str); 20] = [
-    ("Hay bale", "HayBale.slt", "A single straw bale."),
+    ("Hay bale", "HayBale.slt", "A big round straw bale, lying on its side."),
     ("Bale stack", "TripleBale03.slt", "Three bales stacked, the Supercross edge marker."),
     ("Wrapped bale", "AlpineStarsHB.SLT", "A bale in a sponsor wrap, as the stadiums line their tracks."),
     ("Banner", "Fox03.SLT", "A sponsor banner on a frame."),

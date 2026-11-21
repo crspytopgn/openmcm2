@@ -159,6 +159,20 @@ pub struct Bed {
     pub bank: Vec<f32>,
 }
 
+/// The height at `x`, `z` (feet) of land given whole, between samples.
+fn given_height(g: &[f32], mode: Mode, x: f32, z: f32) -> f32 {
+    let n = mode.samples();
+    let s = mode.scale();
+    let fx = (x / s).clamp(0.0, (n - 1) as f32);
+    let fz = (z / s).clamp(0.0, (n - 1) as f32);
+    let (x0, z0) = (fx.floor() as usize, fz.floor() as usize);
+    let (x1, z1) = ((x0 + 1).min(n - 1), (z0 + 1).min(n - 1));
+    let (tx, tz) = (fx - x0 as f32, fz - z0 as f32);
+    let a = g[z0 * n + x0] * (1.0 - tx) + g[z0 * n + x1] * tx;
+    let b = g[z1 * n + x0] * (1.0 - tx) + g[z1 * n + x1] * tx;
+    a * (1.0 - tz) + b * tz
+}
+
 impl Bed {
     pub fn new(course: &Course, path: &Path) -> Bed {
         let side = course.mode.side();
@@ -173,9 +187,11 @@ impl Bed {
         let raw: Vec<f32> = path
             .pts
             .iter()
-            .map(|p| match &course.source {
-                Some(src) => src.height(p[0], p[1]),
-                None => land::height(&land, side, p[0], p[1]),
+            .map(|p| match (&course.source, &course.ground) {
+                (Some(src), _) => src.height(p[0], p[1]),
+                // Land given whole (a rebuilt track): the track follows it.
+                (None, Some(g)) if g.len() == course.mode.samples().pow(2) => given_height(g, course.mode, p[0], p[1]),
+                _ => land::height(&land, side, p[0], p[1]),
             })
             .collect();
         let mut grade = path.smooth(&raw, grade_window(course.mode));
