@@ -1415,6 +1415,7 @@ impl Launcher {
             slider(ui, "Stick steering curve", "How gently a stick steers near the middle. 100% is the original game's: little steering for a small push and a lot near the edge, which can feel all-or-nothing on a short stick like a Steam Deck's. 0% steers in straight proportion.", &mut s.more.pad_curve, 0..=100, 5.0, "%");
             slider(ui, "Stick smoothing", "Evens out a twitchy stick's steering. 0% is the original game's.", &mut s.more.pad_smoothing, 0..=90, 5.0, "%");
             tile(ui, &mut s.more.freshen_engines, "Freshen engine sounds", "Your own MM2 engine sounds with a fuller low end, a little crisp top and a hint of a room around them. Off is the original game's sound. The free bikes' own sounds don't change.");
+            tile(ui, &mut s.more.whistle, "Out-of-bounds whistle", "On unless you turn it off. On the free tracks, a cartoon slide whistle goes up as you ride off the edge of the world and get thrown back in, and comes down as you fall. Off, that throw is silent as in the original.");
             tile(ui, &mut s.mute_in_background, "Mute in the background", "The game goes quiet while its window isn't the one in front.");
             tile(ui, &mut s.screenshot_key, "Screenshot key (Ctrl+P)", "Ctrl+P in a race saves a picture to the Screenshots folder beside your saves.");
             tile(ui, &mut s.vsync, "VSync", "A picture each time the screen refreshes, with no tearing.");

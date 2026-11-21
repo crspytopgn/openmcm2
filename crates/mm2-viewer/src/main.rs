@@ -1155,6 +1155,9 @@ pub struct Track {
     sounds: Vec<(scn::SoundSpec, sound::Site)>,
     /// The craft in its sky that can be flown (crate::drive).
     aircraft: Vec<drive::Craft>,
+    /// Free mode: a Free Pack track, or any track with the free graphics
+    /// (where the out-of-bounds whistle plays).
+    free: bool,
 }
 
 impl Track {
@@ -2578,6 +2581,7 @@ fn load_track(
         water,
         sounds: scene_sounds,
         aircraft,
+        free: freepack::chosen() || file_name(path).to_ascii_uppercase().starts_with("FP"),
     })
 }
 
@@ -4934,6 +4938,7 @@ impl App {
                 self.sounds = track.res.as_deref().map(|res| {
                     let mut s = sound::RaceSounds::load(res, &self.audio, &classes, player, setup.event, track.crowd, options);
                     s.set_scene(track.sounds.iter().cloned());
+                    s.whistle = track.free && tweaks::more().whistle;
                     s
                 });
                 self.follow = self.race.is_some();
