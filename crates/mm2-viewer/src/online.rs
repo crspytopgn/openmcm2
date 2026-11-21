@@ -100,14 +100,21 @@ pub fn send_saved(dir: &Path) {
     let more = crate::tweaks::more();
     if more.leaderboards {
         let waiting = laps::parse_all(&crate::fs::read_to_string(dir.join(laps::PENDING)).unwrap_or_default());
+        let ghosts = more.online_ghosts.then(|| (url.clone(), dir.to_path_buf()));
         if !waiting.is_empty() {
             let reply = post(format!("{url}/laps"), laps::text(&waiting));
-            after(reply, dir.join(laps::PENDING), move |path| {
+            after(reply, dir.join(laps::PENDING), move |path, _| {
                 // Laps the game added while these were on their way stay.
                 let now = laps::parse_all(&crate::fs::read_to_string(path).unwrap_or_default());
                 let left: Vec<_> = now.into_iter().filter(|l| !waiting.contains(l)).collect();
                 let _ = crate::fs::write(path, laps::text(&left));
+                // A ghost goes once the server has its lap.
+                if let Some((url, dir)) = ghosts {
+                    send_ghosts(&url, &dir);
+                }
             });
+        } else if let Some((url, dir)) = ghosts {
+            send_ghosts(&url, &dir);
         }
     }
     if more.share_playtime {
@@ -120,7 +127,7 @@ pub fn send_saved(dir: &Path) {
                 new.insert("players".into(), 1);
             }
             let reply = post(format!("{url}/playtime"), playtime::text(&new));
-            after(reply, dir.join(playtime::SENT), move |path| {
+            after(reply, dir.join(playtime::SENT), move |path, _| {
                 let _ = crate::fs::write(path, playtime::text(&now));
             });
         }
@@ -150,14 +157,14 @@ pub fn send_playtime_now(dir: &Path) {
     }
 }
 
-/// Runs `then` once `reply` has come back well, on the sending thread, or
+/// Runs `then` with the answer once `reply` has come back well, on the sending thread, or
 /// in a browser when the answer arrives.
-fn after(reply: Reply, path: PathBuf, then: impl FnOnce(&Path) + Send + 'static) {
+fn after(reply: Reply, path: PathBuf, then: impl FnOnce(&Path, &str) + Send + 'static) {
     #[cfg(not(target_arch = "wasm32"))]
     std::thread::spawn(move || loop {
         if let Some(r) = take(&reply) {
             match r {
-                Ok(_) => then(&path),
+                Ok(t) => then(&path, &t),
                 Err(e) => eprintln!("the leaderboard server: {e}"),
             }
             return;
@@ -169,7 +176,7 @@ fn after(reply: Reply, path: PathBuf, then: impl FnOnce(&Path) + Send + 'static)
         loop {
             if let Some(r) = take(&reply) {
                 match r {
-                    Ok(_) => then(&path),
+                    Ok(t) => then(&path, &t),
                     Err(e) => web_sys::console::log_1(&format!("the leaderboard server: {e}").into()),
                 }
                 return;
@@ -181,6 +188,126 @@ fn after(reply: Reply, path: PathBuf, then: impl FnOnce(&Path) + Send + 'static)
             let _ = wasm_bindgen_futures::JsFuture::from(wait).await;
         }
     });
+}
+
+/// The online ghosts waiting to go up, in the user folder: one file for
+/// each board, its lap's line then the tape in base64 on the next, as
+/// `POST /ghost` takes it.
+pub const GHOSTS_PENDING: &str = "ghosts-pending";
+
+/// Keeps a new best lap's ghost to send with the laps.
+pub fn keep_ghost(dir: &Path, lap: &laps::Lap, tape: &mm2_formats::vcr::Tape) -> std::io::Result<()> {
+    let folder = dir.join(GHOSTS_PENDING);
+    crate::fs::create_dir_all(&folder)?;
+    let name: String = lap.board.key().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    crate::fs::write(&folder.join(format!("{name}.txt")), ghost_body(lap, tape))
+}
+
+/// What `POST /ghost` takes: the lap's line, then its tape in base64.
+pub fn ghost_body(lap: &laps::Lap, tape: &mm2_formats::vcr::Tape) -> String {
+    format!("{}\n{}\n", lap.line(), base64(&tape.write()))
+}
+
+/// Sends the ghosts waiting, each forgotten once the server has answered
+/// (it keeps only the fastest lap's), unless it asks for it again later
+/// ("wait": the lap isn't on its board yet).
+fn send_ghosts(url: &str, dir: &Path) {
+    let Ok(files) = crate::fs::read_dir(&dir.join(GHOSTS_PENDING)) else { return };
+    for path in files.filter_map(|e| e.ok().map(|e| e.path())) {
+        let Ok(body) = crate::fs::read_to_string(&path) else { continue };
+        let reply = post(format!("{url}/ghost"), body);
+        after(reply, path, move |path, answer| {
+            if !answer.starts_with("wait") {
+                let _ = crate::fs::remove_file(path);
+            }
+        });
+    }
+}
+
+/// One ghost on the server: the fastest lap of a track and course that
+/// went up with its ghost.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GhostInfo {
+    pub track: String,
+    pub event: u32,
+    pub course: u32,
+    pub class: u32,
+    pub rider: String,
+    pub ms: u32,
+    pub title: String,
+}
+
+impl GhostInfo {
+    /// The `GET /ghost` address of its tape.
+    pub fn address(&self, url: &str) -> String {
+        format!("{url}/ghost?track={}&event={}&course={}", escape(&self.track), self.event, self.course)
+    }
+}
+
+/// The `GET /ghosts` answer: lines of
+/// `track<TAB>event<TAB>course<TAB>class<TAB>rider<TAB>ms<TAB>title`.
+pub fn parse_ghosts(text: &str) -> Vec<GhostInfo> {
+    text.lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            Some(GhostInfo {
+                track: laps::clean(f.first()?),
+                event: f.get(1)?.trim().parse().ok()?,
+                course: f.get(2)?.trim().parse().ok()?,
+                class: f.get(3)?.trim().parse().ok()?,
+                rider: laps::clean(f.get(4)?),
+                ms: f.get(5)?.trim().parse().ok()?,
+                title: f.get(6).map_or_else(String::new, |t| laps::clean_title(t)),
+            })
+        })
+        .filter(|g| !g.track.is_empty())
+        .collect()
+}
+
+/// The `GET /ghost` answer: the tape, in base64.
+pub fn parse_ghost(text: &str) -> Option<mm2_formats::vcr::Tape> {
+    mm2_formats::vcr::Tape::parse(&unbase64(text.trim())?).ok()
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+pub fn base64(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for k in 0..4 {
+            if k <= c.len() {
+                out.push(B64[(n >> (18 - 6 * k) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+pub fn unbase64(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    let (mut n, mut bits) = (0u32, 0);
+    for b in text.bytes() {
+        let v = match b {
+            b'A'..=b'Z' => b - b'A',
+            b'a'..=b'z' => b - b'a' + 26,
+            b'0'..=b'9' => b - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' | b'\n' | b'\r' => continue,
+            _ => return None,
+        };
+        n = n << 6 | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((n >> bits) as u8);
+            n &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
 }
 
 /// One board on the server: its track, course and class, how many riders
@@ -245,5 +372,20 @@ mod tests {
         assert_eq!(b[1].riders, 3);
         assert_eq!(parse_board("B\t90000\t250\nA\t83456\t125\n"), vec![("A".into(), 83_456, 125), ("B".into(), 90_000, 250)]);
         assert_eq!(escape("rat's hole"), "rat%27s%20hole");
+        let g = parse_ghosts("farm\t2\t0\t250\tMike\t83456\tMunchberry Farms\n\tbad\n");
+        assert_eq!(g.len(), 1);
+        assert_eq!((g[0].event, g[0].class, g[0].ms, g[0].title.as_str()), (2, 250, 83_456, "Munchberry Farms"));
+        assert_eq!(g[0].address("https://x"), "https://x/ghost?track=farm&event=2&course=0");
+    }
+
+    #[test]
+    fn base64_goes_both_ways() {
+        for n in 0..12 {
+            let bytes: Vec<u8> = (0..n).map(|i| (i * 37 + 5) as u8).collect();
+            assert_eq!(unbase64(&base64(&bytes)).unwrap(), bytes);
+        }
+        assert_eq!(base64(b"Man"), "TWFu");
+        assert_eq!(base64(b"Ma"), "TWE=");
+        assert_eq!(unbase64("TWE=").unwrap(), b"Ma");
     }
 }

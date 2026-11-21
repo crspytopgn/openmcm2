@@ -11,6 +11,11 @@
 //!
 //! The files are kept in `Record` in the user's folder (the game kept
 //! them in its own).
+//!
+//! With the online ghosts (an extra, off by default), the ghost tab lists
+//! the leaderboard server's ghosts under the player's own: the fastest
+//! lap of each track the player has. Start fetches the ghost into
+//! `Record/Online` and races it as a saved one.
 
 use super::{popup, Cx, Go, Screen};
 use crate::ui::{Dlg, Event};
@@ -37,6 +42,35 @@ pub struct Replays {
     picked: Option<usize>,
     /// The description box, while it is up.
     describe: Option<Dlg>,
+    /// The server's ghosts for the player's tracks, under the files.
+    online: Vec<crate::online::GhostInfo>,
+    /// The server's list of ghosts on its way.
+    asked: Option<crate::online::Reply>,
+    /// A ghost being fetched to race, and where it goes.
+    fetching: Option<(crate::online::Reply, PathBuf)>,
+}
+
+/// Whether the ghost tab lists the server's ghosts (the extra).
+fn online_ghosts() -> Option<String> {
+    crate::tweaks::more().online_ghosts.then(crate::online::address).flatten()
+}
+
+/// The server's ghosts on a track the player has, as a ghost race finds
+/// it (`Frontend::ghost_setup`).
+fn on_my_tracks(cx: &Cx, ghosts: Vec<crate::online::GhostInfo>) -> Vec<crate::online::GhostInfo> {
+    use crate::frontend::{list_tracks, EventKind};
+    let mut lists = std::collections::HashMap::new();
+    ghosts
+        .into_iter()
+        .filter(|g| {
+            let Some(event) = EventKind::from_number(g.event) else { return false };
+            let tracks = lists.entry(g.event).or_insert_with(|| list_tracks(&cx.game().join(event.folder()), event));
+            tracks.iter().any(|e| {
+                e.path.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case(&g.track))
+                    && (e.course == g.course as usize || !event.courses())
+            })
+        })
+        .collect()
 }
 
 /// The tapes of a tab in `Record`: ghosts (`*.gho`) or replays (`*.vcr`),
@@ -76,6 +110,9 @@ impl Replays {
             files: Vec::new(),
             picked: None,
             describe: None,
+            online: Vec::new(),
+            asked: None,
+            fetching: None,
         };
         r.show(cx, 1);
         Some(r)
@@ -89,24 +126,39 @@ impl Replays {
             self.base.set_on(name, i == tab);
         }
         let tapes = tapes(cx, tab);
-        let column = |f: &dyn Fn(&Tape) -> String| tapes.iter().map(|(_, t)| f(t)).collect();
-        page.set_items("LstTrack", column(&|t| t.track()), 0);
+        // The server's ghosts go under the player's own, on the ghost tab.
+        let online: &[crate::online::GhostInfo] = if tab == 0 { &self.online } else { &[] };
+        let column = |f: &dyn Fn(&Tape) -> String, g: &dyn Fn(&crate::online::GhostInfo) -> String| {
+            tapes.iter().map(|(_, t)| f(t)).chain(online.iter().map(g)).collect()
+        };
+        page.set_items(
+            "LstTrack",
+            column(&|t| t.track(), &|g| if g.title.is_empty() { g.track.clone() } else { g.title.clone() }),
+            0,
+        );
         page.set_items(
             "LstRider",
-            column(&|t| t.riders.first().map(|r| r.name.clone()).unwrap_or_default()),
+            column(&|t| t.riders.first().map(|r| r.name.clone()).unwrap_or_default(), &|g| g.rider.clone()),
             0,
         );
         page.set_items(
             "LstLaps",
-            column(&|t| t.setting(vcr::setting::LAPS).to_string()),
+            column(&|t| t.setting(vcr::setting::LAPS).to_string(), &|_| String::new()),
             0,
         );
         page.set_items(
             "LstLength",
-            column(&|t| crate::hud::clock_text(t.length).trim().to_string()),
+            column(
+                &|t| crate::hud::clock_text(t.length).trim().to_string(),
+                &|g| crate::hud::clock_text(g.ms as f32 / 1000.0).trim().to_string(),
+            ),
             0,
         );
-        page.set_items("LstDesc", column(&|t| t.description.clone()), 0);
+        page.set_items(
+            "LstDesc",
+            column(&|t| t.description.clone(), &|g| format!("Online fastest lap, {}cc", g.class)),
+            0,
+        );
         for list in LISTS {
             page.set_selectable(list, true);
             // The original shows the picked tape in pink, on no box.
@@ -123,6 +175,27 @@ impl Replays {
         page.enable("ButDelete", false);
         self.base.show("Start", false);
         self.page = page;
+        if tab == 0 && self.asked.is_none() && self.online.is_empty() {
+            if let Some(url) = online_ghosts() {
+                self.asked = Some(crate::online::get(format!("{url}/ghosts")));
+            }
+        }
+    }
+
+    /// Whether the line picked is one of the server's ghosts.
+    fn online_line(&self) -> Option<&crate::online::GhostInfo> {
+        let line = self.picked?.checked_sub(self.files.len())?;
+        (self.tab == 0).then(|| self.online.get(line)).flatten()
+    }
+
+    /// Fetches the server's ghost picked to race, into `Record/Online`.
+    fn fetch(&mut self, cx: &Cx) {
+        let (Some(g), Some(url)) = (self.online_line(), online_ghosts()) else { return };
+        let keep = |s: &str| -> String { s.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect() };
+        let name = format!("{}_{}_{}_{}.gho", keep(&g.track), g.event, g.course, keep(&g.rider));
+        let path = crate::replay::record_dir(&cx.user.store.dir).join("Online").join(name);
+        self.fetching = Some((crate::online::get(g.address(&url)), path));
+        self.base.show("Start", false);
     }
 }
 
@@ -194,6 +267,33 @@ impl Replays {
 }
 
 impl Screen for Replays {
+    fn tick(&mut self, cx: &mut Cx) -> Go {
+        if let Some(r) = self.asked.as_ref().and_then(crate::online::take) {
+            match r {
+                Ok(text) => {
+                    self.online = on_my_tracks(cx, crate::online::parse_ghosts(&text));
+                    if self.tab == 0 && !self.online.is_empty() && self.describe.is_none() {
+                        self.show(cx, 0);
+                    }
+                }
+                Err(e) => eprintln!("the online ghosts: {e}"),
+            }
+        }
+        if let Some(r) = self.fetching.as_ref().and_then(|f| crate::online::take(&f.0)) {
+            let (_, path) = self.fetching.take().unwrap();
+            let tape = r.and_then(|t| crate::online::parse_ghost(&t).ok_or_else(|| "not a ghost".to_string()));
+            let written = tape.and_then(|t| {
+                path.parent().map_or(Ok(()), crate::fs::create_dir_all).and_then(|_| crate::fs::write(&path, t.write())).map_err(|e| e.to_string())
+            });
+            self.base.show("Start", self.picked.is_some());
+            match written {
+                Ok(()) => return Go::Ghost(path),
+                Err(e) => eprintln!("the online ghosts: {e}"),
+            }
+        }
+        Go::Stay
+    }
+
     fn layers(&mut self) -> Vec<&mut Dlg> {
         match &mut self.describe {
             Some(d) => vec![&mut self.base, &mut self.page, d],
@@ -218,14 +318,17 @@ impl Screen for Replays {
         }
         if let Event::Selected(n, line) = &e {
             // A line picked in one list picks it in them all.
-            if LISTS.iter().any(|l| l.eq_ignore_ascii_case(n)) && *line < self.files.len() {
+            let online = if self.tab == 0 { self.online.len() } else { 0 };
+            if LISTS.iter().any(|l| l.eq_ignore_ascii_case(n)) && *line < self.files.len() + online {
                 for list in LISTS {
                     self.page.mark(list, Some(*line));
                 }
                 self.picked = Some(*line);
-                self.page.enable("ButDelete", true);
-                self.page.enable("ButDescription", true);
-                self.base.show("Start", true);
+                // A server's ghost is only to race.
+                let file = *line < self.files.len();
+                self.page.enable("ButDelete", file);
+                self.page.enable("ButDescription", file);
+                self.base.show("Start", self.fetching.is_none());
             }
             return Go::Stay;
         }
@@ -237,6 +340,12 @@ impl Screen for Replays {
         }
         let picked = self.picked.and_then(|i| self.files.get(i)).cloned();
         if n.eq_ignore_ascii_case("Start") {
+            if self.online_line().is_some() {
+                if self.fetching.is_none() {
+                    self.fetch(cx);
+                }
+                return Go::Stay;
+            }
             if let Some(p) = picked {
                 return if self.tab == 0 {
                     Go::Ghost(p)

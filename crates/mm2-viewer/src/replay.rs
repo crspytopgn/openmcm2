@@ -462,6 +462,75 @@ impl Ghost {
     }
 }
 
+/// The player's laps on tape for the online ghosts (an extra): each lap
+/// the player rides goes on its own tape, as a ghost race tapes them, and
+/// the fastest few are kept so the lap that goes on the leaderboard can go
+/// up with its ghost.
+pub struct LapTapes {
+    header: Tape,
+    rec: Option<vcr::Recorder>,
+    lap_start: f32,
+    laps: u32,
+    wait: f32,
+    /// Finished laps' tapes by the lap's index in the racer's lap times.
+    kept: Vec<(usize, Tape)>,
+}
+
+/// How many of the fastest laps' tapes [`LapTapes`] keeps.
+const LAPS_KEPT: usize = 3;
+
+impl LapTapes {
+    /// `header` is the race's tape header with the player alone on it.
+    pub fn new(header: Tape) -> LapTapes {
+        LapTapes { header, rec: None, lap_start: 0.0, laps: 0, wait: 0.0, kept: Vec::new() }
+    }
+
+    /// After each update of the race. The first lap, from the gate, is
+    /// never taped: it never goes on the leaderboards.
+    pub fn tick(&mut self, race: &Race, dt: f32) {
+        let Some(player) = race.racers.get(race.player) else {
+            return;
+        };
+        if !race.gate_down() {
+            return;
+        }
+        if player.laps > self.laps {
+            let index = player.laps as usize - 1;
+            self.laps = player.laps;
+            if let Some(rec) = self.rec.take() {
+                let mut tape = rec.finish();
+                tape.length = player.lap_times.get(index).copied().unwrap_or(race.time - self.lap_start);
+                tape.description = date();
+                self.kept.push((index, tape));
+                self.kept.sort_by(|a, b| a.1.length.total_cmp(&b.1.length));
+                self.kept.truncate(LAPS_KEPT);
+            }
+            self.lap_start = race.time;
+            if player.laps > 0 {
+                self.rec = Some(vcr::Recorder::new(self.header.clone()));
+                self.wait = 0.0;
+            }
+        }
+        let into = race.time - self.lap_start;
+        if into > GHOST_LIMIT {
+            self.rec = None;
+        }
+        self.wait -= dt;
+        if let (Some(rec), true) = (&mut self.rec, self.wait <= 0.0) {
+            self.wait = FRAME;
+            let s = state_of(player, (into * 1000.0) as u32, 1, 0, race.clock());
+            rec.frame(into, FRAME, &[s]);
+        }
+    }
+
+    /// The tape of the lap at `index` in the racer's lap times, if it was
+    /// one of the fastest.
+    pub fn take(&mut self, index: usize) -> Option<Tape> {
+        let at = self.kept.iter().position(|k| k.0 == index)?;
+        Some(self.kept.swap_remove(at).1)
+    }
+}
+
 /// The player's speeds (`0x489c20`, the game's `+0x2e0`): play, the two
 /// fast forwards, and to the end, which runs at 30 times.
 const PLAY: f32 = 1.0;

@@ -18,6 +18,14 @@
 //                (a room's address is its WebSocket address)
 //   GET  /room/<name>   a WebSocket into one of the always-open free roam
 //                rooms (ROOMS): the game's own messages, as a host's
+//   POST /ghost   a best lap's ghost (the online ghosts extra): the lap's
+//                line as POST /laps takes it, then the lap's tape (.gho) in
+//                base64. Kept if it is that rider's lap on its board and the
+//                fastest ghost of its track and course. Answers "ok",
+//                "slower", or "wait" while the lap isn't on its board yet
+//   GET  /ghosts   the ghosts kept, one per track and course:
+//                track<TAB>event<TAB>course<TAB>class<TAB>rider<TAB>ms<TAB>name
+//   GET  /ghost?track=&event=&course=   that ghost's tape, in base64
 //
 // Each board keeps one lap per rider (their best), at most KEEP of them.
 
@@ -92,6 +100,59 @@ async function addToIndex(env, key, riders, title) {
   entry.classes[cls] = riders;
   if (title) entry.title = title;
   await env.LAPS.put(at, JSON.stringify(index));
+}
+
+// The online ghosts: one tape for each track and course ("g:" and the
+// board's key without its class), the fastest lap sent with its ghost,
+// and their list ("ghosts").
+const MOST_GHOST = 1024 * 1024;
+
+function ghostKey(track, event, course) {
+  const key = boardKey(track, event, course, 0);
+  return key && `g:${key.slice(2).split("|").slice(0, 3).join("|")}`;
+}
+
+async function addGhost(request, env) {
+  const body = await request.text();
+  if (body.length > MOST_GHOST) return text("too much\n", 413);
+  const [line = "", tape = ""] = body.split("\n");
+  const f = line.replace(/\r$/, "").split("\t");
+  if (f.length !== 6 && f.length !== 7) return text("which lap?\n", 400);
+  const key = boardKey(f[0], f[1], f[2], f[3]);
+  const at = ghostKey(f[0], f[1], f[2]);
+  const rider = clean(f[4]);
+  const ms = Number.parseInt(f[5], 10);
+  const data = tape.trim();
+  if (!key || !at || !rider || !(ms >= SHORTEST && ms <= LONGEST)) return text("which lap?\n", 400);
+  if (data.length < 64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) return text("not a ghost\n", 400);
+  // Only the rider's own lap on its board: the one POST /laps put there.
+  const rows = (await env.LAPS.get(key, "json")) ?? [];
+  const mine = rows.find((r) => r[0].toLowerCase() === rider.toLowerCase());
+  if (!mine || mine[1] > ms) return text("wait\n");
+  if (mine[1] < ms) return text("slower\n");
+  const list = (await env.LAPS.get("ghosts", "json")) ?? {};
+  const had = list[at.slice(2)];
+  if (had && had.ms <= ms) return text("slower\n");
+  const title = (f[6] ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 40).trim();
+  await env.LAPS.put(at, data);
+  list[at.slice(2)] = { cls: Number.parseInt(f[3], 10), rider: mine[0], ms, title: title || (had?.title ?? "") };
+  await env.LAPS.put("ghosts", JSON.stringify(list));
+  return text("ok\n");
+}
+
+async function ghosts(env) {
+  const list = (await env.LAPS.get("ghosts", "json")) ?? {};
+  const rows = Object.entries(list).map(([k, g]) => [...k.split("|"), g.cls, g.rider, g.ms, g.title]);
+  rows.sort((a, b) => a[0].localeCompare(b[0]) || a[1] - b[1] || a[2] - b[2]);
+  return text(rows.map((r) => `${r.join("\t")}\n`).join(""));
+}
+
+async function ghost(url, env) {
+  const q = url.searchParams;
+  const at = ghostKey(q.get("track"), q.get("event"), q.get("course"));
+  if (!at) return text("which ghost?\n", 400);
+  const data = await env.LAPS.get(at);
+  return data ? text(`${data}\n`) : text("no ghost\n", 404);
 }
 
 async function board(url, env) {
@@ -337,6 +398,9 @@ export default {
     if (request.method === "GET" && url.pathname === "/boards") return boards(url, env);
     if (request.method === "POST" && url.pathname === "/playtime") return addPlaytime(request, env);
     if (request.method === "GET" && url.pathname === "/playtime") return playtime(env);
+    if (request.method === "POST" && url.pathname === "/ghost") return addGhost(request, env);
+    if (request.method === "GET" && url.pathname === "/ghosts") return ghosts(env);
+    if (request.method === "GET" && url.pathname === "/ghost") return ghost(url, env);
     if (request.method === "OPTIONS") return text("", 204);
     return text("OpenMCM2 lap leaderboards\n", url.pathname === "/" ? 200 : 404);
   },

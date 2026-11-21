@@ -32,6 +32,22 @@ in `crates/mm2-settings/src/lib.rs` to it before a release.
   (`total`, `races`, `count`, `players`, `event:N`, `track:NAME`,
   `bike:CC`), and `GET /playtime` gives everyone's added up.
 
+## Online ghosts
+
+With the online ghosts extra on (off by default), a new best lap goes up
+with its ghost, and the game's Saved Ghost Race Files list offers the
+server's ghosts to race. One ghost is kept for each track and course: the
+fastest lap sent with one, in any class. It costs two KV writes, only
+when a ghost is faster than the one kept.
+
+- `POST /ghost`: the lap's line as `POST /laps` takes it, then on the next
+  line the lap's tape (a `.gho`) in base64. The game sends it after its
+  laps. The answer is `ok` (kept), `slower`, or `wait` while the lap is
+  not on its board yet (the game tries again after its next race).
+- `GET /ghosts`: the ghosts kept, as
+  `track<TAB>event<TAB>course<TAB>class<TAB>rider<TAB>ms<TAB>name` lines.
+- `GET /ghost?track=farm&event=2&course=0`: that ghost's tape, in base64.
+
 ## The server browser
 
 The same worker keeps the open network races for the game's Host or Join
