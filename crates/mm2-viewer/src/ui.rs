@@ -2049,6 +2049,11 @@ impl Dlg {
         self.editing.map(|i| self.dialog.controls[i].name.as_str())
     }
 
+    /// What the edit box with the keyboard holds, if one has it.
+    pub fn editing_text(&self) -> Option<String> {
+        self.editing.map(|i| self.ctls[i].text.clone().unwrap_or_default())
+    }
+
     /// A key typed into the edit box that has the keyboard: letters it
     /// takes up to its length, backspace, and Return or Tab to leave it.
     pub fn type_char(&mut self, c: char) -> Vec<Event> {

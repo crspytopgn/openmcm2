@@ -76,7 +76,20 @@ const CSS = `
 #typing { position: fixed; top: 10px; left: calc(50% - 22px); width: 44px; height: 44px; border-radius: 8px;
   background: rgba(20,20,20,.5); color: #fff; border: 2px solid rgba(255,255,255,.4); font-size: 22px;
   padding: 0; touch-action: manipulation; }
-#typed { position: fixed; left: -1000px; top: 0; width: 10px; opacity: 0; }
+#typing.want { background: rgba(163,194,74,.6); border-color: rgba(220,240,160,.9); }
+/* Kept on the screen (a phone may not open its keyboard for a box off it),
+   16px so the phone doesn't zoom in on it, and see-through. */
+#typed { position: fixed; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0;
+  font-size: 16px; pointer-events: none; }
+#typebar { position: fixed; z-index: 25; top: calc(env(safe-area-inset-top, 0px) + 8px); left: 50%; transform: translateX(-50%);
+  display: flex; gap: 10px; align-items: center; max-width: calc(100% - 32px); padding: 6px 6px 6px 14px; border-radius: 10px;
+  background: rgba(16,16,14,.9); border: 1px solid rgba(255,255,255,.3); color: #fff; font: 600 18px system-ui, sans-serif; }
+#typebar[hidden] { display: none; }
+#typebar span { min-width: 8em; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+#typebar span::after { content: "▏"; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+#typebar button { font: 700 15px system-ui, sans-serif; padding: 6px 12px; border-radius: 7px; border: 0;
+  background: rgba(163,194,74,.85); color: #111; }
 #turn { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; text-align: center;
   background: rgba(10,10,9,.92); color: #ece6d8; font: 600 18px/1.4 system-ui, sans-serif; padding: 24px; }
 #turn[hidden] { display: none; }
@@ -256,8 +269,13 @@ export function setup(canvas) {
   const checkTurn = () => (turn.hidden = !(playing && upright.matches));
   upright.addEventListener?.("change", checkTurn);
 
-  // The menus' typing (a profile's name, chat): the phone's keyboard,
-  // opened by a hidden text box, its letters passed on as keys.
+  // The menus' typing (a profile's name, chat, a course's name): the
+  // phone's keyboard, opened by a hidden text box, its letters passed on
+  // as keys. The game says when a box wants typing (typing() below); a
+  // phone opens its keyboard only from a tap, so the next tap on the game
+  // (the one that picked the box, or any after) opens it, and the ⌨
+  // button does too. A bar along the top shows what the box holds, as the
+  // keyboard may cover the box itself.
   const typing = document.createElement("button");
   typing.id = "typing";
   typing.textContent = "⌨";
@@ -266,28 +284,83 @@ export function setup(canvas) {
   typing.hidden = true;
   const typed = document.createElement("input");
   typed.id = "typed";
-  typed.autocapitalize = "off";
-  typed.autocomplete = "off";
-  typing.addEventListener("click", () => typed.focus());
+  typed.type = "text";
+  typed.setAttribute("autocapitalize", "none");
+  typed.setAttribute("autocorrect", "off");
+  typed.setAttribute("autocomplete", "off");
+  typed.setAttribute("enterkeyhint", "done");
+  typed.spellcheck = false;
+  const bar = document.createElement("div");
+  bar.id = "typebar";
+  bar.hidden = true;
+  const shown = document.createElement("span");
+  const done = document.createElement("button");
+  done.textContent = "Done";
+  bar.append(shown, done);
+  // The box keeps one space, so the keyboard's delete key always has
+  // something to take (an empty box sends nothing for it on some phones).
+  const KEEP = " ";
+  const reset = () => {
+    typed.value = KEEP;
+    try {
+      typed.setSelectionRange(1, 1);
+    } catch {}
+  };
+  let wanted = null; // what the game's box holds, or null
+  const open = () => {
+    reset();
+    typed.focus({ preventScroll: true });
+  };
+  typing.addEventListener("click", open);
+  // A tap on the game while a box wants typing: up comes the keyboard.
+  // On touchend and pointerup, the moments a phone allows it; the game
+  // has heard the tap by then and said whether a box has the keyboard.
+  const tapped = (e) => {
+    if (e.pointerType && e.pointerType !== "touch") return;
+    if (wanted !== null && document.activeElement !== typed) open();
+  };
+  canvas.addEventListener("pointerup", tapped);
+  canvas.addEventListener("touchend", tapped);
   const press = (code, key) => {
     send(canvas, "keydown", code, key);
     send(canvas, "keyup", code, key);
   };
+  const codeOf = (c) => (/[a-z]/i.test(c) ? "Key" + c.toUpperCase() : /[0-9]/.test(c) ? "Digit" + c : c === " " ? "Space" : "");
   typed.addEventListener("input", (e) => {
-    if (e.inputType === "deleteContentBackward") press("Backspace", "Backspace");
-    for (const c of e.data || "") {
-      const code = /[a-z]/i.test(c) ? "Key" + c.toUpperCase() : /[0-9]/.test(c) ? "Digit" + c : c === " " ? "Space" : "";
-      press(code, c);
+    const now = typed.value;
+    if (e.inputType?.startsWith("delete")) {
+      // Delete keys: one press each, however many letters went.
+      const gone = Math.max(1, KEEP.length - now.length);
+      for (let i = 0; i < gone; i++) press("Backspace", "Backspace");
+    } else {
+      // Letters, or a word the keyboard put in: what's new after the kept space.
+      const text = now.startsWith(KEEP) ? now.slice(KEEP.length) : now;
+      for (const c of text) press(codeOf(c), c);
     }
-    typed.value = "";
+    reset();
   });
   typed.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
+      e.preventDefault();
       press("Enter", "Enter");
       typed.blur();
-    } else if (e.key === "Backspace" && !typed.value) press("Backspace", "Backspace");
+    }
   });
-  document.body.append(typing, typed);
+  done.addEventListener("pointerdown", (e) => e.preventDefault());
+  done.addEventListener("click", () => {
+    press("Enter", "Enter");
+    typed.blur();
+  });
+  const showBar = () => {
+    bar.hidden = !(wanted !== null && document.activeElement === typed);
+    typing.style.visibility = bar.hidden ? "" : "hidden";
+  };
+  typed.addEventListener("focus", showBar);
+  typed.addEventListener("blur", () => {
+    showBar();
+    canvas.focus({ preventScroll: true });
+  });
+  document.body.append(typing, typed, bar);
   const releaseAll = () => releases.forEach((r) => r());
   // A real keyboard while riding: the buttons keep out of the way until a
   // finger is back on the screen.
@@ -317,6 +390,14 @@ export function setup(canvas) {
       if (on) typed.blur();
       // Let go of everything when the race ends.
       if (!on) releaseAll();
+    },
+    // A box wants typing, holding `text`, or none (null): the game says.
+    typing(text) {
+      wanted = text ?? null;
+      shown.textContent = wanted ?? "";
+      typing.classList.toggle("want", wanted !== null);
+      if (wanted === null && document.activeElement === typed) typed.blur();
+      showBar();
     },
     // The game is on screen (menus or riding): upright phones are asked to turn.
     playing(on) {

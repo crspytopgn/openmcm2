@@ -569,6 +569,16 @@ impl Frontend {
         }
     }
 
+    /// What the box that has the keyboard holds (a profile's name, the
+    /// race number, the plate), or None when no box is being typed in:
+    /// a phone shows its keyboard for it.
+    pub fn typing_text(&mut self) -> Option<String> {
+        if self.typing {
+            return Some(self.plate.clone());
+        }
+        self.dialogs().iter().find_map(|d| d.editing_text())
+    }
+
     pub fn mouse_move(&mut self, audio: &Audio, x: f32, y: f32) {
         let mut events = Vec::new();
         for d in self.dialogs() {
