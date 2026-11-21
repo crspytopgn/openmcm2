@@ -66,12 +66,21 @@ impl Archive {
 
     /// Entry `i`'s bytes.
     pub fn at(&self, i: usize) -> Vec<u8> {
-        self.entries.get(i).map(|e| self.bytes[e.1..e.1 + e.2].to_vec()).unwrap_or_default()
+        self.entries
+            .get(i)
+            .map(|e| self.bytes[e.1..e.1 + e.2].to_vec())
+            .unwrap_or_default()
     }
 
     /// The entry called `name` (any case, folders ignored), if there is one.
     pub fn find(&self, name: &str) -> Option<usize> {
-        let bare = |n: &str| n.rsplit(['\\', '/']).next().unwrap_or(n).trim().to_ascii_lowercase();
+        let bare = |n: &str| {
+            n.rsplit(['\\', '/'])
+                .next()
+                .unwrap_or(n)
+                .trim()
+                .to_ascii_lowercase()
+        };
         let want = bare(name);
         self.entries.iter().position(|e| bare(&e.0) == want)
     }
@@ -105,7 +114,11 @@ impl Picture {
 #[wasm_bindgen]
 pub fn texture(bytes: &[u8]) -> Result<Picture, JsError> {
     match mm2_formats::texture::parse(bytes) {
-        Ok(t) => Ok(Picture { width: t.size, height: t.size, rgba: mm2_formats::hires::export_rgba(&t) }),
+        Ok(t) => Ok(Picture {
+            width: t.size,
+            height: t.size,
+            rgba: mm2_formats::hires::export_rgba(&t),
+        }),
         Err(e) => targa(bytes).map_err(|_| err(e)),
     }
 }
@@ -114,7 +127,11 @@ pub fn texture(bytes: &[u8]) -> Result<Picture, JsError> {
 #[wasm_bindgen]
 pub fn targa(bytes: &[u8]) -> Result<Picture, JsError> {
     let i = tga::parse(bytes).map_err(err)?;
-    Ok(Picture { width: i.width, height: i.height, rgba: i.rgba })
+    Ok(Picture {
+        width: i.width,
+        height: i.height,
+        rgba: i.rgba,
+    })
 }
 
 /// A sky box's six faces side by side in one picture (+z, −x, −z, +x, up,
@@ -132,7 +149,11 @@ pub fn sky(bytes: &[u8]) -> Result<Picture, JsError> {
             rgba[d..d + s * 4].copy_from_slice(&f[y * s * 4..(y + 1) * s * 4]);
         }
     }
-    Ok(Picture { width: side * 6, height: side, rgba })
+    Ok(Picture {
+        width: side * 6,
+        height: side,
+        rgba,
+    })
 }
 
 /// An uncompressed 24-bit Targa from top-down RGBA, laid out as the game's
@@ -225,11 +246,124 @@ pub fn model(bytes: &[u8], name: &str) -> Result<String, JsError> {
     } else {
         slb::parse(bytes).map_err(err)?
     };
-    Ok(model_json(&m).to_string())
+    Ok(model_json(&lift_decals(m)).to_string())
+}
+
+// As the game's models are drawn (crates/mm2-viewer/src/objects.rs).
+/// How far a decal is lifted off the face it lies on, and each side of a
+/// thin wall moved out, ft: enough that the depth buffer tells them apart
+/// far off, little enough that the ray-traced shadows' rays starting by a
+/// thin roof's edge find no gap to slip through.
+const DECAL_LIFT: f32 = 0.03;
+/// How thin a wall's two sides are parted from, ft.
+const THIN_WALL: f32 = 0.1;
+
+/// Parts a model's faces that lie in the very same plane, over one
+/// another: a depth buffer cannot tell which is in front, and far off
+/// they flicker through one another (the game drew them in order, and
+/// only the side facing the eye). Two kinds:
+///
+/// * A wall with an outside and an inside, back to back and in one
+///   plane or a hair apart (a tent's sides, a fifth of an inch thick):
+///   each moves a little the way it faces, so each is in front from its
+///   own side.
+/// * A decal on a face (a logo, a sign), facing the same way: the smaller
+///   of the two is lifted off the bigger.
+fn lift_decals(mut model: slb::Model) -> slb::Model {
+    let Some(lod) = model.lods.first_mut() else {
+        return model;
+    };
+    struct Tri {
+        surface: usize,
+        corners: [u16; 3],
+        points: [Vec3; 3],
+        normal: Vec3,
+        area: f32,
+    }
+    let mut tris = Vec::new();
+    for (surface, s) in lod.surfaces.iter().enumerate() {
+        for f in &s.faces {
+            let p = f.map(|i| {
+                s.positions
+                    .get(i as usize)
+                    .copied()
+                    .map_or(Vec3::ZERO, Vec3::from)
+            });
+            let cross = (p[1] - p[0]).cross(p[2] - p[0]);
+            let area = cross.length() * 0.5;
+            if area > 1e-6 {
+                // Facing as its corners' normals say (the game lights by
+                // them): the windings are not to be trusted.
+                let lit: Vec3 = f
+                    .iter()
+                    .filter_map(|&i| s.normals.get(i as usize))
+                    .map(|n| Vec3::from(*n))
+                    .sum();
+                let normal = cross.normalize() * if cross.dot(lit) < 0.0 { -1.0 } else { 1.0 };
+                tris.push(Tri {
+                    surface,
+                    corners: *f,
+                    points: p,
+                    normal,
+                    area,
+                });
+            }
+        }
+    }
+    // Whether `p` is over triangle `t`, in its plane.
+    let over = |t: &Tri, p: Vec3| {
+        (0..3).all(|k| {
+            let (a, b) = (t.points[k], t.points[(k + 1) % 3]);
+            let wound = (t.points[1] - t.points[0]).cross(t.points[2] - t.points[0]);
+            (b - a).cross(p - a).dot(wound) >= -1e-6
+        })
+    };
+    let middle_of = |t: &Tri| (t.points[0] + t.points[1] + t.points[2]) / 3.0;
+    let mut lifts: Vec<(usize, u16, Vec3)> = Vec::new();
+    for a in &tris {
+        let middle = middle_of(a);
+        let flat = |b: &Tri| {
+            a.points
+                .iter()
+                .all(|p| (*p - b.points[0]).dot(b.normal).abs() < 0.01)
+        };
+        let lift = tris.iter().any(|b| {
+            let facing = a.normal.dot(b.normal);
+            // Back to back, one over the other; or a decal on a bigger
+            // face.
+            (facing < -0.999
+                && a.points.iter().all(|p| {
+                    let behind = (b.points[0] - *p).dot(b.normal);
+                    (-0.01..THIN_WALL).contains(&behind)
+                })
+                && (over(b, middle) || over(a, middle_of(b))))
+                || (facing > 0.999 && b.area > a.area * 1.5 && flat(b) && over(b, middle))
+        });
+        if lift {
+            lifts.extend(
+                a.corners
+                    .iter()
+                    .map(|&i| (a.surface, i, a.normal * DECAL_LIFT)),
+            );
+        }
+    }
+    // Each corner once, however many of its triangles are decals.
+    lifts.sort_by_key(|l| (l.0, l.1));
+    lifts.dedup_by_key(|l| (l.0, l.1));
+    for (surface, i, lift) in lifts {
+        if let Some(p) = lod.surfaces[surface].positions.get_mut(i as usize) {
+            *p = (Vec3::from(*p) + lift).into();
+        }
+    }
+    model
 }
 
 fn model_json(m: &slb::Model) -> Value {
-    let world: Vec<Mat4> = m.world_matrices().iter().map(Mat4::from_cols_array).collect();
+    let world: Vec<Mat4> = m
+        .world_matrices()
+        .iter()
+        .map(Mat4::from_cols_array)
+        .collect();
     let inverse: Vec<Mat4> = world.iter().map(|w| w.inverse()).collect();
     let frames: Vec<Value> = m
         .frames
@@ -247,47 +381,82 @@ fn model_json(m: &slb::Model) -> Value {
     if let Some(lod) = m.lods.first() {
         for s in &lod.surfaces {
             let material = s.materials.first().copied().unwrap_or(u32::MAX);
-            // Each face goes with the frame of its first corner.
-            let mut by_frame: std::collections::BTreeMap<usize, Vec<[u16; 3]>> = Default::default();
+            let textured = m
+                .materials
+                .get(material as usize)
+                .is_some_and(|t| !t.texture.is_empty());
+            let frame_of: Vec<usize> = (0..s.positions.len()).map(|v| s.frame_of(v)).collect();
+            let used = || s.faces.iter().flatten().map(|&v| frame_of[v as usize]);
+            let first = used().next().unwrap_or(0);
+            // A surface on one frame is kept in that frame's space; one
+            // over several (a rider's joints) is skinned, each corner moving
+            // with its own frame, as the game draws them.
+            let skinned = used().any(|f| f != first);
+            let inv = if skinned {
+                Mat4::IDENTITY
+            } else {
+                inverse.get(first).copied().unwrap_or(Mat4::IDENTITY)
+            };
+            let mut remap = vec![u32::MAX; s.positions.len()];
+            let (mut p, mut n, mut uv, mut pu, mut c, mut fr, mut idx) =
+                (vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
             for f in &s.faces {
-                by_frame.entry(s.frame_of(f[0] as usize)).or_default().push(*f);
-            }
-            for (frame, faces) in by_frame {
-                let inv = inverse.get(frame).copied().unwrap_or(Mat4::IDENTITY);
-                let mut remap = vec![u32::MAX; s.positions.len()];
-                let (mut p, mut n, mut uv, mut c, mut idx) = (vec![], vec![], vec![], vec![], vec![]);
-                for f in &faces {
-                    // Flipping z turns the winding round too.
-                    for &v in &[f[0], f[2], f[1]] {
-                        let v = v as usize;
-                        if remap[v] == u32::MAX {
-                            remap[v] = (p.len() / 3) as u32;
-                            let wp = Vec3::from(s.positions[v]);
-                            for k in 0..3 {
-                                bounds.0[k] = bounds.0[k].min(flip_point(s.positions[v])[k]);
-                                bounds.1[k] = bounds.1[k].max(flip_point(s.positions[v])[k]);
-                            }
-                            let lp = flip_point(inv.transform_point3(wp).into());
-                            let ln = flip_point(
-                                inv.transform_vector3(Vec3::from(s.normals.get(v).copied().unwrap_or([0.0, 1.0, 0.0])))
-                                    .normalize_or(Vec3::Y)
-                                    .into(),
-                            );
-                            p.extend(lp.map(round));
-                            n.extend(ln);
-                            let t = s.uvs.get(v).copied().unwrap_or([0.0, 0.0]);
-                            uv.extend([round(t[0]), round(t[1])]);
-                            let col = s.colors[v];
-                            c.extend([col[2], col[1], col[0], col[3]]);
+                // Flipping z turns the winding round too.
+                for &v in &[f[0], f[2], f[1]] {
+                    let v = v as usize;
+                    if remap[v] == u32::MAX {
+                        remap[v] = (p.len() / 3) as u32;
+                        let wp = Vec3::from(s.positions[v]);
+                        for k in 0..3 {
+                            bounds.0[k] = bounds.0[k].min(flip_point(s.positions[v])[k]);
+                            bounds.1[k] = bounds.1[k].max(flip_point(s.positions[v])[k]);
                         }
-                        idx.push(remap[v]);
+                        let lp = flip_point(inv.transform_point3(wp).into());
+                        let ln = flip_point(
+                            inv.transform_vector3(Vec3::from(
+                                s.normals.get(v).copied().unwrap_or([0.0, 1.0, 0.0]),
+                            ))
+                            .normalize_or(Vec3::Y)
+                            .into(),
+                        );
+                        p.extend(lp.map(round));
+                        n.extend(ln);
+                        let t = s.uvs.get(v).copied().unwrap_or([0.0, 0.0]);
+                        // The game's pictures are stored bottom row first and
+                        // its texture coordinates count from there; the
+                        // page's are top down, as the pictures are shown.
+                        uv.extend([round(t[0]), round(1.0 - t[1])]);
+                        // A bike's untextured material is its number
+                        // plate; the front one shows the number smaller,
+                        // in the middle (0x418470).
+                        if !textured {
+                            let front = s.positions[v][2] >= -0.5;
+                            let [u, v] = if front {
+                                [t[0] * 0.65 + 0.175, t[1] * 0.65 + 0.11]
+                            } else {
+                                t
+                            };
+                            pu.extend([round(u), round(1.0 - v)]);
+                        }
+                        let col = s.colors[v];
+                        // As the game: its stored alpha is a leftover.
+                        c.extend([col[2], col[1], col[0], 255]);
+                        fr.push(frame_of[v]);
                     }
+                    idx.push(remap[v]);
                 }
-                meshes.push(json!({
-                    "frame": frame, "material": material,
-                    "p": p, "n": n, "uv": uv, "c": c, "i": idx,
-                }));
             }
+            if idx.is_empty() {
+                continue;
+            }
+            let mut mesh = json!({ "frame": first, "material": material, "p": p, "n": n, "uv": uv, "c": c, "i": idx });
+            if skinned {
+                mesh["skin"] = json!(fr);
+            }
+            if !textured {
+                mesh["plate"] = json!(pu);
+            }
+            meshes.push(mesh);
         }
     }
     json!({ "frames": frames, "materials": materials, "meshes": meshes, "min": bounds.0, "max": bounds.1 })
@@ -324,7 +493,10 @@ fn motion_json(m: &anim::Motion) -> Value {
             e.1.extend([q.x, q.y, q.z, q.w].map(round));
         }
     }
-    let tracks: Vec<Value> = tracks.into_iter().map(|(f, (t, q))| json!({ "frame": f, "t": t, "q": q })).collect();
+    let tracks: Vec<Value> = tracks
+        .into_iter()
+        .map(|(f, (t, q))| json!({ "frame": f, "t": t, "q": q }))
+        .collect();
     json!({ "count": m.frames.len(), "tracks": tracks })
 }
 
@@ -355,7 +527,9 @@ pub fn free_motions(data: &[u8]) -> Result<String, JsError> {
         let n = take(2)?;
         let frames = u16::from_le_bytes([n[0], n[1]]) as usize;
         let keys = take(1)?[0] as usize;
-        let mut motion = anim::Motion { frames: Vec::with_capacity(frames) };
+        let mut motion = anim::Motion {
+            frames: Vec::with_capacity(frames),
+        };
         for _ in 0..frames {
             let mut list = Vec::with_capacity(keys);
             for _ in 0..keys {
@@ -381,7 +555,13 @@ pub fn free_motions(data: &[u8]) -> Result<String, JsError> {
     Ok(Value::Array(out).to_string())
 }
 
-fn placement(model: &str, position: [f32; 3], look: [f32; 3], up: [f32; 3], scale: [f32; 3]) -> Value {
+fn placement(
+    model: &str,
+    position: [f32; 3],
+    look: [f32; 3],
+    up: [f32; 3],
+    scale: [f32; 3],
+) -> Value {
     let mut v = trs(orientation(look, up, Vec3::from(scale), position));
     v["model"] = json!(model);
     v
@@ -392,8 +572,11 @@ fn placement(model: &str, position: [f32; 3], look: [f32; 3], up: [f32; 3], scal
 #[wasm_bindgen]
 pub fn scene(bytes: &[u8]) -> Result<String, JsError> {
     let s = scn::Scene::parse(bytes).map_err(err)?;
-    let models: Vec<Value> =
-        s.models.iter().map(|p| placement(&p.model, p.position, p.look, p.up, p.scale)).collect();
+    let models: Vec<Value> = s
+        .models
+        .iter()
+        .map(|p| placement(&p.model, p.position, p.look, p.up, p.scale))
+        .collect();
     let animations: Vec<Value> = s
         .animations
         .iter()
@@ -406,7 +589,15 @@ pub fn scene(bytes: &[u8]) -> Result<String, JsError> {
     let procedural: Vec<Value> = s
         .procedural
         .iter()
-        .map(|p| placement(&p.model, p.offset, [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0; 3]))
+        .map(|p| {
+            placement(
+                &p.model,
+                p.offset,
+                [0.0, 0.0, 1.0],
+                [0.0, 1.0, 0.0],
+                [1.0; 3],
+            )
+        })
         .collect();
     let sun = s
         .lights
@@ -437,10 +628,16 @@ pub fn scene(bytes: &[u8]) -> Result<String, JsError> {
 pub fn eco(bytes: &[u8], span: f32) -> Result<String, JsError> {
     let e = esb::parse(bytes).map_err(err)?;
     let unit = span / 65536.0;
-    let species: Vec<Value> = e.species.iter().map(|s| json!({ "slot": s.slot, "name": s.name })).collect();
+    let species: Vec<Value> = e
+        .species
+        .iter()
+        .map(|s| json!({ "slot": s.slot, "name": s.name }))
+        .collect();
     let mut plants = Vec::with_capacity(e.objects.len() * 6);
     for o in &e.objects {
-        let Some(s) = e.species(o.species) else { continue };
+        let Some(s) = e.species(o.species) else {
+            continue;
+        };
         let p = o.position.map(|p| p as f32 * unit);
         plants.extend([
             o.species as f32,
@@ -458,8 +655,11 @@ pub fn eco(bytes: &[u8], span: f32) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn track_line(bytes: &[u8]) -> Result<String, JsError> {
     let t = tdf::parse(bytes).map_err(err)?;
-    let nodes: Vec<Vec<[f32; 3]>> =
-        t.nodes.iter().map(|n| n.sections.iter().map(|s| flip_point(s.center)).collect()).collect();
+    let nodes: Vec<Vec<[f32; 3]>> = t
+        .nodes
+        .iter()
+        .map(|n| n.sections.iter().map(|s| flip_point(s.center)).collect())
+        .collect();
     Ok(json!({ "nodes": nodes }).to_string())
 }
 
@@ -530,7 +730,9 @@ pub fn terrain(bytes: &[u8], step: u32, map_max: u32) -> Result<Ground, JsError>
     let map_side = units * per;
     let mut map = vec![0u8; map_side * map_side * 4];
     for tile in &t.tiles {
-        let Some(tex) = t.textures.get(tile.texture as usize) else { continue };
+        let Some(tex) = t.textures.get(tile.texture as usize) else {
+            continue;
+        };
         let want = tile.size as usize * per;
         // The mip level nearest the size it's drawn at.
         let mut level = 0;

@@ -340,7 +340,7 @@ export async function mount(app, panel) {
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     tex.generateMipmaps = true;
     tex.anisotropy = viewer.renderer.capabilities.getMaxAnisotropy();
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, roughness: 1, metalness: 0, side: THREE.DoubleSide }));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide }));
     mesh.name = "Ground";
     mesh.userData.mapCanvas = c;
     return mesh;
