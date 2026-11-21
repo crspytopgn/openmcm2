@@ -596,6 +596,18 @@ impl Ui {
         }
     }
 
+    /// A line of text in a dark band at the bottom middle (photo mode's).
+    pub fn bottom_note(&mut self, gfx: &mut Gfx, text: &str) {
+        let Some(t) = self.text(gfx, text, 10.0, true) else {
+            return;
+        };
+        let (tw, th) = gfx.sprites.size(t);
+        let (w, h) = (tw as f32, th as f32);
+        let (x, y) = ((640.0 - w) / 2.0, 470.0 - h);
+        self.fill(gfx, [x - 8.0, y - 3.0, w + 16.0, h + 6.0], [0.0, 0.0, 0.0, 0.55]);
+        gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [x, y, w, h], [1.0, 1.0, 1.0, 1.0]);
+    }
+
     /// The mouse pointer, the classic arrow with its tip at (`x`, `y`), for
     /// where the system's is not shown (see [`draws_pointer`]).
     pub fn pointer(&mut self, gfx: &mut Gfx, (x, y): (f32, f32)) {

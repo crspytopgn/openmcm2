@@ -290,13 +290,21 @@ impl Pads {
             family,
             name: plain_name(pad.name()),
             device: self.device(),
-            rumble: pad.is_ff_supported(),
+            rumble: can_rumble(&pad),
         })
     }
 
     /// Runs the pad in use's heavy and light motors at these strengths,
     /// 0 to 1 (the others stop).
     pub fn rumble(&mut self, strength: [f32; 2]) {
+        // In a browser the page vibrates the pad (gilrs has no motors there).
+        #[cfg(target_arch = "wasm32")]
+        {
+            let name = self.pad().map(|p| p.name().to_string());
+            crate::web::rumble(name.as_deref(), strength);
+            return;
+        }
+        #[allow(unreachable_code)]
         let id = self.pad().filter(|p| p.is_ff_supported()).map(|p| p.id());
         if self.motors.as_ref().map(|m| m.0) != id {
             self.motors = id.and_then(|id| Some((id, motors(&mut self.gilrs, id)?, [0.0; 2])));
@@ -412,6 +420,15 @@ fn motors(gilrs: &mut Gilrs, id: GamepadId) -> Option<[Effect; 2]> {
         motor(BaseEffectType::Strong { magnitude: u16::MAX })?,
         motor(BaseEffectType::Weak { magnitude: u16::MAX })?,
     ])
+}
+
+/// Whether the pad can vibrate: through gilrs, or in a browser through
+/// the page.
+fn can_rumble(pad: &Gamepad) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    return crate::web::can_rumble(pad.name());
+    #[cfg(not(target_arch = "wasm32"))]
+    pad.is_ff_supported()
 }
 
 /// A pad's name as people know it. Browsers add their own tags: Chrome

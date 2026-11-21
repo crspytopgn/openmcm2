@@ -151,3 +151,43 @@ export function setup(row) {
     },
   };
 }
+
+// Vibration (the profile's Force Feedback box and strength, worked out in
+// the game): the pad's heavy and light motors, 0 to 1. Browsers play a
+// rumble for a set time, so a steady one is asked for again before it
+// runs out, and nothing at all stops it.
+function actuator(id) {
+  const list = pads().filter((p) => p.vibrationActuator);
+  const pad = list.find((p) => p.id === id) || list[0];
+  return pad?.vibrationActuator || null;
+}
+
+export function canRumble(id) {
+  return !!actuator(id);
+}
+
+let felt = { id: "", strong: 0, weak: 0, timer: 0 };
+function play() {
+  const a = actuator(felt.id);
+  if (!a) return;
+  try {
+    const p = a.playEffect("dual-rumble", { duration: 250, strongMagnitude: felt.strong, weakMagnitude: felt.weak });
+    p?.catch?.(() => {});
+  } catch {}
+}
+
+export function rumble(id, strong, weak) {
+  felt.id = id || "";
+  felt.strong = Math.min(1, Math.max(0, strong));
+  felt.weak = Math.min(1, Math.max(0, weak));
+  if (felt.strong === 0 && felt.weak === 0) {
+    clearInterval(felt.timer);
+    felt.timer = 0;
+    try {
+      actuator(felt.id)?.reset?.();
+    } catch {}
+    return;
+  }
+  play();
+  if (!felt.timer) felt.timer = setInterval(play, 150);
+}

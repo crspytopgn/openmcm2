@@ -783,6 +783,33 @@ globalThis.mm2page = {
   building(on) {
     document.body.classList.toggle("building", on);
   },
+  // The pad's motors, heavy and light, 0 to 1 (gamepad.js).
+  rumble(id, strong, weak) {
+    gamepads.rumble(id, strong, weak);
+  },
+  canRumble(id) {
+    return gamepads.canRumble(id);
+  },
+  // Photo mode's Enter: the picture just drawn, as a PNG in the
+  // downloads. Asked as the frame is shown, before the browser clears it.
+  savePicture() {
+    const c = $("mm2");
+    if (!c?.toBlob) return false;
+    const d = new Date();
+    const two = (n) => String(n).padStart(2, "0");
+    const name = `OpenMCM2 ${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}.${two(d.getMinutes())}.${two(d.getSeconds())}.png`;
+    c.toBlob((blob) => {
+      if (!blob) return;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    }, "image/png");
+    return true;
+  },
   // A race started or ended: the touch buttons come and go with it.
   racing(on) {
     racingNow = on;

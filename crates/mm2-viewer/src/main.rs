@@ -28,6 +28,7 @@
 //! mm2-viewer ... --kmh                     // the speedometer in km/h
 //! mm2-viewer ... --mute-in-background      // quiet while the window is in the background
 //! mm2-viewer ... --screenshot-key          // Ctrl+P saves a screenshot
+//! mm2-viewer ... --photo-mode              // F in a race: hold it still, fly the camera, Enter saves a picture
 //! mm2-viewer ... --lap-gap                 // live gap to the best lap under the race panel
 //! mm2-viewer ... --steady-camera           // the chase camera turns and rises more gently
 //! mm2-viewer ... --fov=N                   // the Chase Cam's field of view (the game's 85)
@@ -4295,6 +4296,14 @@ fn save_png(
 static LOAD_STEPS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 const LOAD_BAR_STEPS: u32 = 20;
 
+/// Photo mode's line at the bottom when it starts, and how long a line
+/// stays there.
+const PHOTO_HELP: &str = "Photo mode: Enter or A saves a picture, F, Esc or B goes back to the race";
+const PHOTO_NOTE_SECS: f32 = 5.0;
+/// Photo mode's camera: its speed, with Shift (or RB) its speed, and how
+/// fast it turns (radians a second).
+const PHOTO_SPEEDS: (f32, f32, f32) = (25.0, 150.0, 1.2);
+
 fn load_step() {
     LOAD_STEPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
@@ -4412,6 +4421,12 @@ struct App {
     quiet: bool,
     /// The screenshot key was pressed: save the next frame.
     shoot: bool,
+    /// Photo mode (an extra): the race held still, the display hidden and
+    /// the camera flying free; whether it followed the bike before, and
+    /// the line shown at the bottom until when.
+    photo: bool,
+    photo_follow: bool,
+    photo_note: Option<(String, Instant)>,
     /// The Course Builder (an extra), open over the menus.
     builder: Option<builder::Builder>,
     /// Leave the game at the end of this frame (the builder on its own
@@ -4569,6 +4584,9 @@ impl App {
             shake: [0.0; 2],
             quiet: false,
             shoot: false,
+            photo: false,
+            photo_follow: false,
+            photo_note: None,
             builder: None,
             quit: false,
         }
@@ -5330,6 +5348,61 @@ impl App {
         }
     }
 
+    /// Photo mode on (F, or both sticks clicked on a pad; an extra): the
+    /// race holds still with its sound off and its display hidden, and
+    /// the camera flies free from where it is. Not in a network race,
+    /// where the others can't wait, nor on the podium.
+    fn enter_photo(&mut self) {
+        let can = tweaks::more().photo_mode
+            && !self.photo
+            && self.net.is_none()
+            && self.loading.is_none()
+            && !self.in_menus()
+            && self.race.as_ref().is_some_and(|r| r.podium.is_none());
+        if !can {
+            return;
+        }
+        eprintln!("photo mode: on");
+        self.photo = true;
+        self.photo_follow = self.follow;
+        self.follow = false;
+        self.audio.set_muted(true);
+        self.photo_note = Some((PHOTO_HELP.to_string(), Instant::now()));
+    }
+
+    /// Back to the race as it was left.
+    fn leave_photo(&mut self) {
+        if !std::mem::take(&mut self.photo) {
+            return;
+        }
+        eprintln!("photo mode: off");
+        self.follow = self.photo_follow && self.race.is_some();
+        self.audio.set_muted(self.quiet && tweaks::get().mute_in_background);
+        self.photo_note = None;
+    }
+
+    /// A pad in photo mode: the left stick flies (RB faster), the right
+    /// stick looks round, the right trigger rises and the left sinks, A
+    /// saves a picture, and B, Start or both sticks again go back.
+    #[cfg(feature = "gamepad")]
+    fn photo_pad(&mut self, presses: &[pad::Press], [stick, right]: [[f32; 2]; 2], rise: f32, fast: bool, dt: f32) {
+        let pressed = |b: i32| presses.contains(&pad::Press::Button(b));
+        if pressed(1) || pressed(7) {
+            self.leave_photo();
+            return;
+        }
+        if pressed(0) {
+            self.shoot = true;
+        }
+        let Some(state) = &mut self.state else { return };
+        let dead = |v: f32| if v.abs() < 0.15 { 0.0 } else { (v.abs() - 0.15) / 0.85 * v.signum() };
+        let cam = &mut state.camera;
+        let speed = if fast { PHOTO_SPEEDS.1 } else { PHOTO_SPEEDS.0 };
+        let way = cam.forward() * -dead(stick[1]) + cam.right() * dead(stick[0]) + Vec3::Y * dead(rise);
+        cam.position += way.clamp_length_max(1.0) * speed * dt;
+        cam.look(dead(right[0]) * PHOTO_SPEEDS.2 * dt, dead(right[1]) * PHOTO_SPEEDS.2 * dt);
+    }
+
     fn fly(&mut self, dt: f32) {
         let Some(state) = &mut self.state else { return };
         let key = |k| self.keys.contains(&k);
@@ -5353,13 +5426,11 @@ impl App {
         if key(KeyCode::KeyQ) || key(KeyCode::ControlLeft) {
             dir -= Vec3::Y
         }
-        let speed = if key(KeyCode::ShiftLeft) || key(KeyCode::ShiftRight) {
-            900.0
-        } else {
-            200.0
-        };
+        // Photo mode's camera goes at a walk, to frame a picture close up.
+        let (slow, fast, turn) = if self.photo { PHOTO_SPEEDS } else { (200.0, 900.0, 1.5) };
+        let speed = if key(KeyCode::ShiftLeft) || key(KeyCode::ShiftRight) { fast } else { slow };
         cam.position += dir.normalize_or_zero() * speed * dt;
-        let turn = 1.5 * dt;
+        let turn = turn * dt;
         if key(KeyCode::ArrowLeft) {
             cam.look(-turn, 0.0)
         }
@@ -5821,7 +5892,25 @@ impl App {
         let (stick, a, b) = pads.pointer();
         let right = [pads.axis(-9).unwrap_or(0.0), pads.axis(-11).unwrap_or(0.0)];
         let zoom = -pads.axis(-7).unwrap_or(0.0);
+        // Both sticks clicked (DirectInput's 8 and 9): photo mode.
+        let pressed = |n: i32| presses.contains(&pad::Press::Button(n));
+        let both_sticks = (pressed(8) && pads.button(9)) || (pressed(9) && pads.button(8));
+        let fast = pads.button(5);
         let (was_a, was_b) = std::mem::replace(&mut self.pad_click, (a, b));
+        if self.photo {
+            if both_sticks {
+                self.leave_photo();
+            } else {
+                self.photo_pad(&presses, [stick, right], zoom, fast, dt);
+            }
+            return;
+        }
+        if both_sticks && !self.in_menus() && !self.in_builder() && self.track.is_some() {
+            self.enter_photo();
+            if self.photo {
+                return;
+            }
+        }
         // The Course Builder: the left stick or D-pad moves the pointer
         // (pushed on at the edge, the view), A clicks, B backs out, X
         // removes, Y undoes, the shoulders change tool, the right stick
@@ -6003,7 +6092,27 @@ impl App {
         self.shake = [0.0; 2];
         if self.track.is_none() {
             self.rumble.reset();
+            self.leave_photo();
             return;
+        }
+        if self.photo {
+            if self.race.is_none() || self.in_menus() || self.net.is_some() {
+                self.leave_photo();
+            } else {
+                // Nothing moves on, not even the race's clock: only the
+                // camera. The marker over the player, the Visual Cue
+                // arrow and the countdown numbers are left out of the
+                // picture.
+                self.fly(dt);
+                if let (Some(r), Some(track), Some(state)) = (&mut self.race, &self.track, &mut self.state) {
+                    if let Some(renderer) = &mut state.renderer {
+                        let marker = std::mem::replace(&mut r.player_indicator, false);
+                        show(r, track, renderer, renderer::from_game(state.camera.position), None);
+                        r.player_indicator = marker;
+                    }
+                }
+                return;
+            }
         }
         let podium_over = |r: &Race| r.podium.is_some_and(|(_, at)| r.time + dt - at >= podium::LENGTH);
         if self.race.as_ref().is_some_and(podium_over) {
@@ -6288,16 +6397,24 @@ impl App {
                     device: &s.device,
                     queue: &s.queue,
                 };
-                // A replay shows the VCR player instead.
+                // A replay shows the VCR player instead, and photo mode
+                // nothing but its line at the bottom for a few seconds
+                // (never in the picture it saves).
+                let note = self.photo_note.as_ref().filter(|(_, at)| at.elapsed().as_secs_f32() < PHOTO_NOTE_SECS);
                 match &mut self.replay {
+                    _ if self.photo => {
+                        if let (Some((text, _)), false) = (note, self.shoot) {
+                            ui.bottom_note(&mut gfx, text);
+                        }
+                    }
                     Some(rp) => rp.draw(ui, &mut gfx, now),
                     None if race.podium.is_some() => {}
                     None => hud.draw(ui, &mut gfx, race, self.frame),
                 }
-                if let Some(fps) = self.fps_shown {
+                if let (Some(fps), false) = (self.fps_shown, self.photo) {
                     ui.frame_rate(&mut gfx, fps);
                 }
-                if self.replay.is_some() && ui::draws_pointer() {
+                if self.replay.is_some() && !self.photo && ui::draws_pointer() {
                     ui.pointer(&mut gfx, self.pointer);
                 }
                 let mut encoder = s.device.create_command_encoder(&Default::default());
@@ -6370,7 +6487,14 @@ impl App {
             }
         }
         s.queue.submit(commands);
-        if std::mem::take(&mut self.shoot) {
+        let shoot = std::mem::take(&mut self.shoot);
+        // A browser can't wait for the picture to come back from the
+        // GPU: the page saves the canvas, after it is shown.
+        #[cfg(target_arch = "wasm32")]
+        let web_photo = shoot;
+        #[cfg(target_arch = "wasm32")]
+        let shoot = false;
+        if shoot {
             let said = match save_screenshot(&s.device, &s.queue, &frame.texture) {
                 Ok(path) => format!("Screenshot saved: {}", path.file_name().unwrap_or_default().to_string_lossy()),
                 Err(e) => {
@@ -6378,12 +6502,23 @@ impl App {
                     "Couldn't save the screenshot".to_string()
                 }
             };
-            if let Some((_, hud)) = &mut self.hud {
+            if self.photo {
+                self.photo_note = Some((said, Instant::now()));
+            } else if let Some((_, hud)) = &mut self.hud {
                 hud.say(&said);
             }
         }
         s.window.pre_present_notify();
         s.queue.present(frame);
+        #[cfg(target_arch = "wasm32")]
+        if web_photo {
+            let said = if web::save_picture() { "Picture saved to your downloads" } else { "Couldn't save the picture" };
+            if self.photo {
+                self.photo_note = Some((said.to_string(), Instant::now()));
+            } else if let Some((_, hud)) = &mut self.hud {
+                hud.say(said);
+            }
+        }
         if suboptimal {
             s.fit_surface();
         }
@@ -6601,8 +6736,11 @@ impl ApplicationHandler for App {
                     return;
                 }
                 if let PhysicalKey::Code(code) = event.physical_key {
+                    let photo = self.photo;
                     if code == KeyCode::Escape && event.state == ElementState::Pressed {
-                        if self.in_menus() {
+                        if photo {
+                            self.leave_photo();
+                        } else if self.in_menus() {
                             if let Some(f) = &mut self.front {
                                 let next = f.escape(now);
                                 self.next(next, event_loop);
@@ -6615,7 +6753,17 @@ impl ApplicationHandler for App {
                             event_loop.exit();
                         }
                     }
-                    if event.state == ElementState::Pressed && !event.repeat && self.track.is_some()
+                    // Photo mode takes the keys: F or Escape goes back,
+                    // Enter saves a picture, and the camera's keys fly.
+                    if photo && event.state == ElementState::Pressed && !event.repeat {
+                        match code {
+                            KeyCode::KeyF => self.leave_photo(),
+                            KeyCode::KeyP if self.ctrl() => self.shoot = true,
+                            KeyCode::Enter | KeyCode::NumpadEnter if !self.keys.contains(&KeyCode::AltLeft) && !self.keys.contains(&KeyCode::AltRight) => self.shoot = true,
+                            _ => {}
+                        }
+                    }
+                    if !photo && event.state == ElementState::Pressed && !event.repeat && self.track.is_some()
                     {
                         // Enter or Space ends the podium (0x460190).
                         let podium = self.race.as_ref().is_some_and(|r| r.podium.is_some());
@@ -6733,6 +6881,8 @@ impl ApplicationHandler for App {
                                 }
                             }
                             KeyCode::KeyP if self.ctrl() && tweaks::get().screenshot_key => self.shoot = true,
+                            // F: photo mode (an extra).
+                            KeyCode::KeyF if !self.ctrl() => self.enter_photo(),
                             KeyCode::KeyP => {
                                 if let Some(r) = &mut self.race {
                                     r.autopilot = !r.autopilot;
