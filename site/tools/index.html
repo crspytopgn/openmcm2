@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenMCM2 Tools</title>
+<meta name="description" content="Look through the game's files, turn the bikes and riders, fly round the tracks and paint your own skins, all in your browser. Your files never leave your computer.">
+<meta name="theme-color" content="#121110">
+<link rel="icon" href="../img/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="tools.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+
+<div class="top-wrap"><nav class="top">
+  <a class="brand" href="../"><img src="../img/logo.svg" alt="OpenMCM2" width="191" height="30"></a>
+  <div class="links">
+    <a href="../#play">Play</a>
+    <a href="../play/">Browser</a>
+    <a href="./" aria-current="page">Tools</a>
+    <a href="https://github.com/crspytopgn/openmcm2">GitHub</a>
+  </div>
+</nav></div>
+
+<main class="tools">
+  <header class="intro">
+    <h1>Tools</h1>
+    <p class="lede">Look through the game's files, turn the bikes and riders, fly round the tracks and paint your own skins.
+      It all runs here in your browser, on the same file readers as the game. Your files are read on your own computer and never uploaded.</p>
+  </header>
+
+  <section class="sources" aria-label="Your files">
+    <h2 class="small">1. Pick what to look at</h2>
+    <div class="pick">
+      <label class="tbtn" for="folder" title="Your installed Motocross Madness 2 folder (the one with RES, TERAFORM and UI in it), or your game CD. The files are read here and never uploaded.">Choose your game folder</label>
+      <input id="folder" type="file" webkitdirectory multiple hidden>
+      <label class="tbtn" for="file" title="Your game CD's image (.iso, .bin, .img, .mdf or .nrg), or a .zip of the game folder, of a CD image, or of the Free Pack. Read here, never uploaded.">Choose a CD image or .zip</label>
+      <input id="file" type="file" multiple accept=".zip,.iso,.bin,.img,.mdf,.nrg,application/zip" hidden>
+      <button class="tbtn" id="kept" hidden title="Use the game this browser keeps for the browser version, so you don't have to pick it again.">Use the game kept in this browser</button>
+      <button class="tbtn" id="pack" title="Our own free graphics: bikes, riders, scenery, sounds and menus. Only the list of files comes down now; each file downloads when you open it. You don't need the original game for this.">Use the Free Pack</button>
+      <label class="tbtn" for="trackfile" title="A track made by a player, as its .zip or .env (from MDX Racing, say). It shows under Your tracks and in the track viewer. It stays on this page only.">Add a track (.zip or .env)</label>
+      <input id="trackfile" type="file" multiple accept=".zip,.env,application/zip" hidden>
+    </div>
+    <p id="status" class="hint" aria-live="polite">Nothing picked yet. Pick your game, or use the Free Pack if you don't have the game.</p>
+  </section>
+
+  <nav class="tabs" role="tablist" aria-label="Tools">
+    <button role="tab" data-tab="files" aria-selected="true" title="Every file in the game, the Free Pack and your tracks, with previews of models, pictures and sounds, and saving as .glb, .png or .wav.">Files</button>
+    <button role="tab" data-tab="garage" title="The bikes and riders in 3D, with their paints and outfits and every animation the game has.">Bikes &amp; riders</button>
+    <button role="tab" data-tab="track" title="Any track in 3D: its ground, objects, trees and the racing line. Fly round it freely.">Tracks</button>
+    <button role="tab" data-tab="paint" title="Paint a bike or a rider in 3D and save it as a skin the game picks up.">Skin painter</button>
+  </nav>
+
+  <!-- Files -->
+  <section class="panel" id="tab-files" role="tabpanel">
+    <div class="split">
+      <aside class="tree-wrap">
+        <input id="filter" type="search" placeholder="Find a file…" title="Shows only the files whose name has this in it, inside the archives too once they're open.">
+        <div id="tree" class="tree" role="tree" aria-label="Files"><p class="hint">Pick your files above to see them here.</p></div>
+      </aside>
+      <div class="preview" id="preview">
+        <p class="hint">Click a file to preview it. Archives (.RES, .ENV, .DAT, .TEX) open like folders.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Bikes & riders -->
+  <section class="panel" id="tab-garage" role="tabpanel" hidden>
+    <div class="side">
+      <div class="controls" id="garage-controls"><p class="hint">Pick your game or the Free Pack first.</p></div>
+      <div class="view"><canvas id="garage-view" tabindex="0" aria-label="Bike and rider"></canvas>
+        <p class="viewhint">Drag to turn, scroll or pinch to zoom, right-drag to move.</p></div>
+    </div>
+  </section>
+
+  <!-- Tracks -->
+  <section class="panel" id="tab-track" role="tabpanel" hidden>
+    <div class="side">
+      <div class="controls" id="track-controls"><p class="hint">Pick your game, the Free Pack or add a track first.</p></div>
+      <div class="view"><canvas id="track-view" tabindex="0" aria-label="Track"></canvas>
+        <div class="flypad" id="flypad" hidden>
+          <button data-k="KeyW" title="Fly forward">▲</button><button data-k="KeyS" title="Fly back">▼</button>
+          <button data-k="KeyA" title="Slide left">◀</button><button data-k="KeyD" title="Slide right">▶</button>
+          <button data-k="KeyE" title="Rise">⤒</button><button data-k="KeyQ" title="Sink">⤓</button>
+        </div>
+        <p class="viewhint" id="track-hint">Drag to turn, scroll or pinch to zoom, right-drag to move.</p></div>
+    </div>
+  </section>
+
+  <!-- Skin painter -->
+  <section class="panel" id="tab-paint" role="tabpanel" hidden>
+    <div class="side">
+      <div class="controls" id="paint-controls"><p class="hint">Pick your game or the Free Pack first.</p></div>
+      <div class="view"><canvas id="paint-view" tabindex="0" aria-label="Painting"></canvas>
+        <p class="viewhint" id="paint-hint">Paint by dragging on the model. Hold Space (or switch to Turn) to turn it.</p></div>
+    </div>
+  </section>
+
+  <p class="foot hint">Motocross Madness 2 is Microsoft's and Rainbow Studios'. This page holds none of the game's files: it only reads the copy you pick.
+    The Free Pack is our own and openly licensed. <a href="https://github.com/crspytopgn/openmcm2/tree/main/site/tools">The page's code</a> is open source like the rest of OpenMCM2.</p>
+</main>
+
+<script type="module" src="tools.js"></script>
+</body>
+</html>

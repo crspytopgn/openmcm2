@@ -22,3 +22,5 @@
 /web/pkg
 /web/version.json
 __pycache__/
+/site/tools/pkg
+/site/play

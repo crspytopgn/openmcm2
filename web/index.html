@@ -1181,6 +1181,13 @@ function addTracks() {
     const into = `/game/TERAFORM/${kind}/${name}`;
     if (mm2fs.kind(into) === 0) fs.put(into, mm2fs.read(path));
   }
+  // Skins from the Tools page's skin painter, kept as
+  // /user/Skins/<BIKES|RIDERS>/<NAME>.TGA, go in the game's own folders.
+  for (const path of [...fs.paths("/user/Skins/")]) {
+    const [folder, name] = path.slice("/user/Skins/".length).split("/");
+    const into = `/game/${folder}/${name}`;
+    if (mm2fs.kind(into) === 0) fs.put(into, mm2fs.read(path));
+  }
 }
 async function listTracks() {
   const list = $("tracklist");
