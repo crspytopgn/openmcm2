@@ -1,3 +1,17 @@
+# OpenMCM2 0.7.2
+
+* **Smoother rebuilt tracks.** The grey walls on some rebuilt tracks,
+  such as Farm and Ski Lodge, are gone. The track and the land beside it
+  now follow the same ground, so the banks slope away smoothly.
+* **Riders get round every rebuilt Enduro and Baja track.** Routes bend
+  round buildings instead of running into them, go over culverts and
+  under bridges as in the original, and computer riders no longer get
+  stuck.
+* **Round hay bales.** The free Farm and enduro hay bales are now big
+  round bales lying on their side, like the original's. Supercross bales
+  stay square. This comes with a Free Pack update, which the launcher and
+  browser fetch for you.
+
 # OpenMCM2 0.7.1
 
 * **The demo's other tracks, rebuilt** (Extras, off by default, only with
