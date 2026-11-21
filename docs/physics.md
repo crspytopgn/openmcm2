@@ -1056,13 +1056,24 @@ The reference parser is `engine/docs/re/colparse.py`.
   (0x435cb0). Per object hit, the callback 0x406af0 → 0x405fb0 applies a rigid-body impulse at the
   contact (0x52bb10 → 0x5050b0): `j = -(1+e)·vn / (1/m + n·((I⁻¹(r×n))×r))`, e = f_14c ridden (0.1 in the running
   game, the sx10 wall memory watch: 81.6 ft/s into the wall, 6.3 back out), 0.1 crashed, with no friction.
-  Ridden, the spin is scaled by (0.3, 0.1, 0.3) here too, as for a bottomed tyre (0x52bb10 → 0x5050b0 is
-  the same call): only that share of the spin counts in the contact's speed, and the spin change is scaled
-  the same. The port had applied the full spin change, so a glancing hit on a bale or barrier at speed
-  swung the bike 0.46 rad in one step where the original turns about 0.05 rad a step. Fixed 2026-11-15:
-  crash_wall1 and crash_wall2 (SX15, a glancing hit then the wall) now crash at 3.53 s against the
-  original's 3.55 and 3.63 (were 5.65 and 7.33); over 117 whole-ride replays the crash outcomes match
-  100 (were 99) and no other ride's outcome changed. Then 0x40aeb0 → 0x492650 crashes the bike only if a trick is running;
+  **Corrected 2026-11-20: no spin scale for objects.** The scale is an argument of 0x52bb10, not part of
+  it: 0x52ffb0 passes (0.3, 0.1, 0.3) ridden for its frame and bottomed-tyre points (type 0x67), but the
+  object callback 0x405fb0 passes `&local_4c` = (1, 1, 1) for scenery (types 0, 1, 0x66), ridden or
+  crashed. The crash comes after the impulse (0x40aeb0 runs after v3). Two memory watches confirm it to
+  about 1 %: the sx10 wall (50.4, 64.6 ft/s in; out −11.55, 2.64 against the formula's −11.59, 2.60; body
+  spin −4.14, −2.02, 0.97 against −4.08, −2.03, 0.95) and the taps bale box (out −62.74, 9.70 against
+  −62.73, 9.63; body spin 2.14, 10.41, −2.32 against 2.37, 10.30, −2.36). With (0.3, 0.1, 0.3) the
+  same hits give a spin of about a third and a tenth. f_cc is the world spin, f_d8 the body spin.
+  The contact is also per object: 0x439e10 calls back once per object hit, as each is found, before
+  the push of 0x435cb0. Its contact is the mean over the bike's parts that met it of each part's mean
+  crossing (0x4376c0 → 0x438bc0 → 0x439220), its normal the normalised sum of its distinct face normals
+  (0x435b70). The port had one impulse at the mean of all crossings with the reduced spin (2026-11-15),
+  which kept wrecks tame: across the 44 tapes where both crash, the port's mean spin over the second after
+  the crash was 3.7 rad/s against the original's 7.2; it is now 7.5. crash_wall1 (a glancing hit on
+  SX15, then the wall) now rides on to 5.6 s instead of crashing at the original's 3.55: the port's nose
+  meets the barrier one step before its bar end, so it yaws (10.7 rad/s) where the original, hitting with
+  both at once, rolls (−8.3) and yaws less (2.9). The outcome flips with a 0.05 ft or 0.0005 rad change of
+  start (crash_wall2 crashed on time in 5 of 15 nudged starts before, 7 of 15 now). Then 0x40aeb0 → 0x492650 crashes the bike only if a trick is running;
   otherwise the usual checks of 0x40a950 decide (the speed-loss check 4 catches head-on hits).
 * `.scn` `[TerrainZoneN]` has SurfaceFriction, SurfaceDrag and SurfaceTraction (0x4f0d50 reads zones 2–8 into
   three 8-float tables at terrain+0x3a0 / +0x3c0 / +0x3e0, default 1.0; zone 1 stays 1.0). Each terrain
@@ -1228,6 +1239,23 @@ Then use `show.py` (annotates DAT_ constants and hex floats) and `cg.py` (caller
   test.
 * **Crests** (nat_straight at 0.65 s). The port's rear kept pulling to the ground for 0.07 s longer
   than the original's. The memory watch mw_natcrest has the shocks for it; not compared yet.
+
+* **SX01 jump 2 lip (2026-11-20).** Over nine takes (straight_long ×4, jump_flat ×4, air_steer) the port
+  leaves the second jump 0.09 to 0.24 rad more nose-up than the original (peak pitch 0.55–0.77 against
+  0.43–0.61; air_steer 0.60 against 0.17); jump 1 matches (0.24–0.27 both). Step by step on jump_flat:
+  the port's fork reaches full travel on the lip for three steps and the bottom-out impulse lifts the
+  bike a step early (vy 23.0 ft/s where the tape has 15.5), it leaves 1.6 ft/s faster upward, and while
+  only the rear is on the lip its nose-up spin decays by 0.80–0.88 a step where the original's falls by
+  0.65–0.86 (−2.85 → −1.10 rad/s over four samples; port −2.97 → −1.63). The rear damper is held to
+  |v·axis| there (rate 9.2 ft/s clamped to 4.3, 5.4 to 1.6), but that clamp is the original's too:
+  0x4ff1f0 and 0x4ffa50 both pass |(f_64 + ω×(contact − COM))·axis|·h to 0x4fee80, which limits the
+  compression's change to it either way; the original's axis for the rear is the swing tangent at the
+  axle (+0x200), as the port's. With the bike's path 0.1 rad above its pitch the upward speed and the
+  spin's downward swing of the rear contact nearly cancel, so it is small in both. Not resolved: the
+  next step needs a memory watch of the original's shocks on this lip (fs/rs2 at ~4 ms, SX01 jump_flat
+  inputs, from about 7.6 s after gas).
+* **SX04 face (2026-11-20 rerun).** The original's own takeoff pitch spans 0.63–0.77 over four takes,
+  the port's 0.56–0.78; no change of method moved it out of that spread. Treated as matching.
 
 ## 15. Engine sound (Audio.cpp, ctor 0x4e7160, update 0x4e8720) **[solid]**
 

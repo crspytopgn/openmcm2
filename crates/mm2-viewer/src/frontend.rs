@@ -1897,7 +1897,10 @@ impl Frontend {
 
     fn start(&mut self) -> Next {
         self.read_event_page();
-        if let Some(b) = self.roster.bikes.get(self.bike).filter(|_| self.bike_picked) {
+        // The garage's curve follows the bike ridden, picked or not: a
+        // Free Pack 125 left as the page's first choice still rides with
+        // a 125's power, not that of the class the garage last held.
+        if let Some(b) = self.roster.bikes.get(self.bike) {
             let classes = crate::screens::options::engine_classes(self.ui.game());
             let mut garage = self.user.profile.garage.clone();
             crate::screens::options::ride_bike(&mut garage, &classes, b.cc);
