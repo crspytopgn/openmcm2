@@ -49,6 +49,40 @@ export function put(path, data) {
   index(path);
 }
 
+// Files still being read in (see later()): how many are left.
+let waiting = 0;
+
+/// Lists `list` ([path, blob]) as there, and reads them in one by one
+/// behind the game: a race waits for ready() (crates/mm2-viewer/src/fs.rs).
+/// `done(path)` is told of each, for the loading note.
+export function later(list, done) {
+  for (const [p] of list) {
+    const path = norm(p);
+    if (!files.has(path.toLowerCase())) files.set(path.toLowerCase(), { path, data: undefined });
+    index(path);
+  }
+  waiting += list.length;
+  let next = 0;
+  const worker = async () => {
+    while (next < list.length) {
+      const [p, blob] = list[next++];
+      try {
+        const f = files.get(norm(p).toLowerCase());
+        if (f && f.data === undefined) f.data = new Uint8Array(await blob.arrayBuffer());
+      } catch (e) {
+        console.warn("couldn't read", p, e);
+      }
+      waiting--;
+      done?.(p);
+    }
+  };
+  return Promise.all(Array.from({ length: 4 }, worker));
+}
+
+function ready() {
+  return waiting === 0;
+}
+
 // ---- IndexedDB: saves, and the game folder when the player keeps it ----
 
 let db = null;
@@ -154,6 +188,22 @@ export async function packGet(key) {
   return (await request(store("pack", "readonly").get(key))) || null;
 }
 
+/// Several of the pack's files, in one go (one look per file is slow on
+/// phones): a Map of key -> value, missing ones left out.
+export async function packGetMany(keys) {
+  await open();
+  const s = store("pack", "readonly");
+  const out = new Map();
+  await Promise.all(
+    [...new Set(keys)].map((k) =>
+      request(s.get(k)).then((v) => {
+        if (v) out.set(k, v);
+      })
+    )
+  );
+  return out;
+}
+
 export async function packPut(key, value) {
   await open();
   await request(store("pack", "readwrite").put(value, key));
@@ -248,4 +298,4 @@ function putGame(path, data) {
   return true;
 }
 
-globalThis.mm2fs = { read, list, kind, write, remove, putGame };
+globalThis.mm2fs = { read, list, kind, write, remove, putGame, ready };

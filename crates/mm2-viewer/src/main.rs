@@ -4446,6 +4446,9 @@ struct App {
     photo_note: Option<(String, Instant)>,
     /// The Course Builder (an extra), open over the menus.
     builder: Option<builder::Builder>,
+    /// The Course Builder was asked for while the page was still reading
+    /// files in (the browser): it opens on this once they are.
+    builder_waiting: Option<Option<PathBuf>>,
     /// Leave the game at the end of this frame (the builder on its own
     /// was closed).
     quit: bool,
@@ -4605,6 +4608,7 @@ impl App {
             photo_follow: false,
             photo_note: None,
             builder: None,
+            builder_waiting: None,
             quit: false,
         }
     }
@@ -5246,6 +5250,13 @@ impl App {
 
     /// Opens the Course Builder on `file`, or on the last track made.
     fn open_builder(&mut self, file: Option<&Path>) {
+        // It draws the scenery and ground, which may not be read in yet.
+        #[cfg(target_arch = "wasm32")]
+        if !crate::fs::all_read() {
+            self.builder_waiting = Some(file.map(Path::to_path_buf));
+            web::track_loading(true);
+            return;
+        }
         let game = self.front.as_ref().and_then(|f| f.game()).map(Path::to_path_buf);
         self.keys.clear();
         self.builder = Some(builder::Builder::new(game, file));
@@ -6970,6 +6981,12 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 if let Some(n) = self.front.as_mut().and_then(|f| f.take_next()) {
                     self.next(n, event_loop);
+                }
+                if self.builder_waiting.is_some() && crate::fs::all_read() {
+                    let file = self.builder_waiting.take().flatten();
+                    #[cfg(target_arch = "wasm32")]
+                    web::track_loading(false);
+                    self.open_builder(file.as_deref());
                 }
                 let now = Instant::now();
                 let real = (now - self.last).as_secs_f32().min(0.1);

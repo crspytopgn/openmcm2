@@ -38,13 +38,15 @@ impl<T: 'static> Job<T> {
     }
 
     /// Asked once a frame: the work runs on the third ask, so the frames
-    /// before show the loading screen.
+    /// before show the loading screen, and once every file has been read
+    /// into memory.
     pub fn is_finished(&self) -> bool {
         if self.done.borrow().is_some() {
             return true;
         }
         self.waited.set(self.waited.get() + 1);
-        if self.waited.get() < 3 {
+        // The track's files may still be coming into memory (fs::all_read).
+        if self.waited.get() < 3 || !crate::fs::all_read() {
             return false;
         }
         let work = self.work.borrow_mut().take();
