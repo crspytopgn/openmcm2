@@ -6,6 +6,12 @@
 <title>OpenMCM2</title>
 <link rel="icon" href="../img/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#121110">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="OpenMCM2">
 <style>
   :root { --bg: #121110; --fg: #ece6d8; --dim: #a39d8f; --accent: #a3c24a; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
@@ -136,6 +142,22 @@
   #trackload { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 6;
     padding: .45rem 1rem; background: rgba(18,17,16,.88); border-left: 4px solid var(--accent);
     border-radius: 4px; font-size: .9rem; color: var(--fg); max-width: calc(100vw - 32px); pointer-events: none; }
+  /* The Home Screen tip, the bug report and the "not loading?" help. */
+  .tip { margin: 0 0 1rem; padding: .7rem .9rem; border: 1px solid #3a3a2a; border-left: 4px solid var(--accent);
+    border-radius: 8px; background: #1a1a15; }
+  .tip p { margin: 0 0 .4rem; color: var(--fg); }
+  .tip p.hint { color: var(--dim); }
+  .tip .row { display: flex; gap: .5rem; align-items: center; }
+  .report { margin-top: 1.2rem; }
+  .report p { margin: 0 0 .5rem; }
+  pre.reporttext { white-space: pre-wrap; word-break: break-word; background: #0c0b0a; border: 1px solid #2c2a24;
+    padding: .6rem; max-height: 12rem; overflow: auto; font-size: .8rem; user-select: text; -webkit-user-select: text; }
+  #ldSlow { margin: 0 0 1rem; padding: .7rem .9rem; border: 1px solid #4a4128; border-left: 4px solid #c9a227;
+    border-radius: 6px; background: #1c1a14; }
+  #ldSlow h3 { margin: 0 0 .3rem; font-size: 1rem; }
+  #ldSlow p, #ldSlow li { color: var(--dim); font-size: .9rem; }
+  #ldSlow ul { margin: .2rem 0 .6rem; padding-left: 1.2rem; }
+  #ldSlow .actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 </style>
 </head>
 <body>
@@ -143,6 +165,7 @@
 <div id="setup"><div>
   <h1>OpenMCM2</h1>
   <p class="lead">Motocross Madness 2, running in your browser.</p>
+  <div id="installtip" class="tip" hidden></div>
   <h2 class="ask">How do you want to play?</h2>
   <div class="choices" role="radiogroup" aria-label="Graphics">
     <button type="button" class="choice" id="pickmm2" role="radio" aria-checked="true"
@@ -253,6 +276,12 @@
   <progress id="bar" hidden></progress>
   <p id="status"></p>
   <p id="why"></p>
+  <div class="report">
+    <p class="hint">Something not working? <button type="button" class="small ghost" id="reportbtn"
+      title="Copies what this browser and device are, what you picked and the last messages, with nothing personal in it. Paste it in a new issue on GitHub.">Copy a bug report</button>
+      and paste it in <a id="reportlink" href="https://github.com/crspytopgn/openmcm2/issues/new" target="_blank" rel="noopener" style="color:var(--accent)">a new issue on GitHub</a>.</p>
+    <pre class="reporttext" id="reporttext" hidden></pre>
+  </div>
   <div class="support">
     <h2>Enjoying it? Help keep it going</h2>
     <p>OpenMCM2 is free and always will be. Making it has real monthly costs,
@@ -267,11 +296,24 @@
   <h2 id="ldTitle">Getting ready</h2>
   <p id="ldDetail"></p>
   <div class="track busy" id="ldTrack"><div id="ldFill"></div></div>
+  <div id="ldSlow" hidden>
+    <h3>Not loading?</h3>
+    <p id="ldSlowWhy">This step is taking a while. Big downloads and slower phones can take a minute or two, so it may just need longer.</p>
+    <ul id="ldSlowTips"></ul>
+    <div class="actions">
+      <button class="small" id="ldSlowCopy" title="Copies what this browser and device are and where loading got to. Paste it in a new issue on GitHub.">Copy a bug report</button>
+      <button class="small ghost" id="ldSlowRetry">Try again</button>
+      <button class="small plain" id="ldSlowBack">Back to the start page</button>
+    </div>
+    <pre class="reporttext" id="ldSlowReport" hidden></pre>
+  </div>
   <div id="ldError" hidden>
     <p id="ldWhy"></p>
     <div class="actions" id="ldActions"></div>
     <details><summary>Details, for a bug report</summary><pre id="ldTech"></pre>
-      <button class="small plain" id="ldCopy">Copy details</button></details>
+      <button class="small" id="ldCopy" title="Copies these details with what this browser and device are. Paste them in a new issue on GitHub.">Copy a bug report</button>
+      <a href="https://github.com/crspytopgn/openmcm2/issues/new" target="_blank" rel="noopener" class="ldIssue" style="color:var(--accent);margin-left:.5rem">Open a new issue</a>
+      <pre class="reporttext" id="ldReport" hidden></pre></details>
   </div>
   <ol id="ldSteps"></ol>
 </div></div>
@@ -304,6 +346,15 @@ const iso = await import(fresh("./iso.js"));
 const touch = await import(fresh("./touch.js"));
 const net = await import(fresh("./net.js"));
 const gamepads = await import(fresh("./gamepad.js"));
+const help = await import(fresh("./help.js"));
+
+// Keeps this page and the engine in the browser, so it starts with no
+// internet once played (sw.js). "?nosw" in the address turns it off.
+if ("serviceWorker" in navigator) {
+  if (new URLSearchParams(location.search).has("nosw"))
+    navigator.serviceWorker.getRegistrations().then((all) => all.forEach((r) => r.unregister()));
+  else navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).catch((e) => console.warn("offline copy not set up", e));
+}
 
 const $ = (id) => document.getElementById(id);
 const status = (t) => ($("status").textContent = t);
@@ -332,6 +383,11 @@ const loader = {
   now: null,
   since: 0,
   shown: false,
+  // When the screen last changed (a new step, or a download moving on),
+  // for the "not loading?" help.
+  moved: 0,
+  // Each step with its time, for a bug report.
+  log: [],
   show() {
     if (this.shown) return;
     this.shown = true;
@@ -341,6 +397,7 @@ const loader = {
     $("ldDetail").hidden = $("ldTrack").hidden = false;
     $("ldSteps").replaceChildren();
     $("ldTag").textContent = "Loading";
+    $("ldSlow").hidden = true;
   },
   row(id) {
     let li = document.querySelector(`#ldSteps li[data-id="${id}"]`);
@@ -358,7 +415,9 @@ const loader = {
     this.show();
     this.finish();
     this.now = id;
-    this.since = performance.now();
+    this.since = this.moved = performance.now();
+    this.log.push(`${STEPS[id]?.[0] ?? id}: started`);
+    $("ldSlow").hidden = true;
     this.row(id).className = "now";
     $("ldFill").style.width = "0";
     $("ldTitle").textContent = STEPS[id]?.[0] ?? id;
@@ -370,11 +429,16 @@ const loader = {
     const li = this.row(this.now);
     li.className = "done";
     li.lastChild.textContent = `${((performance.now() - this.since) / 1000).toFixed(1)} s`;
+    this.log[this.log.length - 1] = `${STEPS[this.now]?.[0] ?? this.now}: ${li.lastChild.textContent}`;
     this.now = null;
   },
   // A share done, 0 to 1, with a line saying how far; null for a step
   // that can't tell.
   progress(share, text) {
+    if (share != null || text != null) {
+      this.moved = performance.now();
+      $("ldSlow").hidden = true;
+    }
     $("ldTrack").classList.toggle("busy", share == null);
     if (share != null) $("ldFill").style.width = `${Math.min(100, share * 100).toFixed(1)}%`;
     if (text != null) $("ldDetail").textContent = text;
@@ -388,9 +452,11 @@ const loader = {
     this.now = null;
     this.shown = false;
     $("loader").hidden = true;
+    $("ldSlow").hidden = true;
   },
   done() {
     this.finish();
+    $("ldSlow").hidden = true;
     $("loader").classList.add("gone");
     setTimeout(() => ($("loader").hidden = true), 400);
   },
@@ -399,7 +465,9 @@ const loader = {
   fail(title, why, tech, actions = [], tag = "Couldn't start") {
     this.show();
     if (this.now) this.row(this.now).className = "bad";
+    if (this.now) this.log.push(`${STEPS[this.now]?.[0] ?? this.now}: failed`);
     this.now = null;
+    $("ldSlow").hidden = true;
     $("loader").hidden = false;
     $("loader").classList.remove("gone");
     $("loader").classList.add("failed");
@@ -429,19 +497,73 @@ function backToStart() {
   } catch {}
   location.reload();
 }
-$("ldCopy").addEventListener("click", () =>
-  navigator.clipboard?.writeText($("ldTech").textContent).then(() => ($("ldCopy").textContent = "Copied"))
-);
-// The game's last few error lines, for the details of a failure.
+// The game's last few error and warning lines, for the details of a
+// failure and for a bug report.
 const recent = [];
-{
-  const error = console.error.bind(console);
-  console.error = (...a) => {
-    recent.push(a.map(String).join(" ").slice(0, 600));
-    if (recent.length > 6) recent.shift();
-    error(...a);
+for (const kind of ["error", "warn"]) {
+  const write = console[kind].bind(console);
+  console[kind] = (...a) => {
+    recent.push((kind === "warn" ? "warning: " : "") + a.map(String).join(" ").slice(0, 600));
+    if (recent.length > 10) recent.shift();
+    write(...a);
   };
 }
+// A bug report: the device, what was picked, how far loading got and the
+// last messages (help.js). `problem` is a failure's own detail.
+const picked = (id) => $(id)?.getAttribute("aria-checked") === "true";
+const bugReport = (problem) =>
+  help.report({
+    version,
+    steps: loader.log,
+    problem,
+    recent,
+    extra: {
+      Graphics: picked("pickfree") ? "Free Pack" : "MM2 files",
+      Menus: picked("picknewmenus") ? "new look" : "original",
+      Look: look,
+      Quality: s.enhanced ? s.quality : "original",
+      "Light mode": s.light == null ? "auto" : s.light ? "on" : "off",
+      Touch: pad ? "on" : "off",
+      "Game pad": gamepad?.found?.() ? "yes" : "no",
+    },
+  });
+help.copyButton($("ldCopy"), () => bugReport($("ldTech").textContent), $("ldReport"));
+help.copyButton($("reportbtn"), () => bugReport(), $("reporttext"));
+help.copyButton(
+  $("ldSlowCopy"),
+  () => bugReport(`Still on "${STEPS[loader.now]?.[0] ?? loader.now}" after ${Math.round((performance.now() - loader.since) / 1000)} s`),
+  $("ldSlowReport")
+);
+for (const a of [$("reportlink"), document.querySelector(".ldIssue")]) a.href = help.issuesUrl;
+$("ldSlowRetry").addEventListener("click", () => location.reload());
+$("ldSlowBack").addEventListener("click", () => backToStart());
+
+// "Not loading?": a step that shows nothing new for 20 seconds gets a few
+// things to try and the bug report, under the loading bar.
+const SLOW_TIPS = {
+  browser: ["Make sure the browser is up to date: the game needs WebGPU (Safari 26, or a recent Chrome or Edge)."],
+  engine: ["The engine is about 12 MB, so a slow connection can take a minute.", "Check you're still online."],
+  compile: ["Slower phones and tablets take longest here. Give it a minute.", "Close other apps and tabs to free memory."],
+  gpu: ["Close other tabs and apps that use the graphics card.", "Make sure hardware acceleration is on in the browser's settings."],
+  graphics: ["The first start builds every shader, which can take a minute on a phone.", "The light mode (in Settings and extras) is easier on a phone."],
+  pack: ["The Free Pack is several hundred MB, which takes a while on a phone's connection.", "Use Wi-Fi if you can. What has come down stays, so trying again carries on."],
+  packcheck: ["Check you're still online. Once the pack is here, it plays without the internet."],
+  menuscheck: ["Check you're still online."],
+  menus: ["Use Wi-Fi if you can. What has come down stays, so trying again carries on."],
+  files: ["Reading a CD image is slower than the game folder.", "Files on a USB stick or network drive are slow: copy them to the device first."],
+  unpack: ["A big CD image takes a while to unpack, more so on a phone."],
+  keep: ["Keeping the game in this browser happens once. Make sure the device has free space."],
+  start: ["Close other apps and tabs to free memory."],
+};
+setInterval(() => {
+  if (!loader.shown || !loader.now || $("loader").classList.contains("failed") || !$("ldSlow").hidden) return;
+  if (performance.now() - loader.moved < 20000) return;
+  const tips = [...(SLOW_TIPS[loader.now] || []), "If it never moves on, Try again often helps. A bug report tells us where it stopped."];
+  $("ldSlowTips").replaceChildren(...tips.map((t) => Object.assign(document.createElement("li"), { textContent: t })));
+  $("ldSlowReport").hidden = true;
+  $("ldSlow").hidden = false;
+  $("ldSlow").scrollIntoView({ block: "nearest", behavior: "smooth" });
+}, 2000);
 
 // What went wrong, for a player: a title and what to try.
 function explain(raw) {
@@ -816,6 +938,8 @@ async function checkBrowser() {
   canRun = true;
   return true;
 }
+
+help.installTip($("installtip"), { touch: touch.wanted() });
 
 let starting = false;
 async function start(list) {

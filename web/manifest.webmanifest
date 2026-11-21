@@ -1,0 +1,19 @@
+{
+  "name": "OpenMCM2",
+  "short_name": "OpenMCM2",
+  "description": "Motocross Madness 2, open source, in your browser. Play from your own copy of the game or with the Free Pack.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#121110",
+  "theme_color": "#121110",
+  "categories": ["games"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
