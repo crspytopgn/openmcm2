@@ -9,6 +9,10 @@
 // brake, and slides from one to the other without lifting. The stunts and
 // the clutch sit above them, and the small buttons along the top are the
 // camera, looking back, backing up and the pause menu.
+//
+// They come up only on a touch screen with no mouse or trackpad (a phone,
+// or a tablet on its own). A keyboard's key while riding puts them away
+// until the screen is touched again, for a tablet with a keyboard.
 
 // [label, key code, key, css class, what it does, slide group]
 const BUTTONS = [
@@ -67,6 +71,7 @@ const CSS = `
   left: 50%; transform: translateX(-50%); white-space: nowrap; text-shadow: 0 1px 2px #000; }
 #touch .stick .up { top: -3.6vmin; }
 #touch .stick .dn { bottom: -3.6vmin; }
+#touch.away { display: none; }
 #touch .zone { position: absolute; left: 0; bottom: 0; width: 45%; top: 14vmin; pointer-events: auto; touch-action: none; }
 #typing { position: fixed; top: 10px; left: calc(50% - 22px); width: 44px; height: 44px; border-radius: 8px;
   background: rgba(20,20,20,.5); color: #fff; border: 2px solid rgba(255,255,255,.4); font-size: 22px;
@@ -284,6 +289,24 @@ export function setup(canvas) {
   });
   document.body.append(typing, typed);
   const releaseAll = () => releases.forEach((r) => r());
+  // A real keyboard while riding: the buttons keep out of the way until a
+  // finger is back on the screen.
+  addEventListener(
+    "keydown",
+    (e) => {
+      if (!e.isTrusted || pad.hidden || e.target === typed || pad.classList.contains("away")) return;
+      releaseAll();
+      pad.classList.add("away");
+    },
+    true
+  );
+  addEventListener(
+    "pointerdown",
+    (e) => {
+      if (e.pointerType === "touch") pad.classList.remove("away");
+    },
+    true
+  );
   // A call, the home screen or another app: nothing stays held down.
   addEventListener("blur", releaseAll);
   document.addEventListener("visibilitychange", () => document.hidden && releaseAll());
@@ -303,9 +326,14 @@ export function setup(canvas) {
   };
 }
 
-/// A touch screen with no mouse, or `?touch` in the address.
+/// A touch screen with no mouse or trackpad, or `?touch` in the address
+/// (`?notouch` keeps them off). A laptop's touch screen, or a tablet with a
+/// trackpad, plays with the keyboard and mouse it has.
 export function wanted() {
-  return new URLSearchParams(location.search).has("touch") || matchMedia("(pointer: coarse)").matches;
+  const q = new URLSearchParams(location.search);
+  if (q.has("touch")) return true;
+  if (q.has("notouch")) return false;
+  return matchMedia("(any-pointer: coarse)").matches && !matchMedia("(any-pointer: fine)").matches;
 }
 
 /// A phone (or `?phone`): a touch screen whose short side is a phone's.

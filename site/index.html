@@ -26,6 +26,7 @@
     <a href="#ideas">Ideas</a>
     <a href="#play">Play</a>
     <a href="play/">Browser</a>
+    <a href="#community">Community</a>
     <a href="#support">Support</a>
     <a href="https://github.com/crspytopgn/openmcm2">GitHub</a>
   </div>
@@ -235,7 +236,7 @@
     <li class="done"><h3>Sound</h3><p>Engines, crashes, crowd and track sounds, placed in 3D like the original.</p></li>
     <li class="wip"><h3>Physics</h3><p>The original's own bike model, checked against recordings of the original game. Most runs match, but a few landings and rough patches still feel different.</p></li>
     <li class="wip"><h3>Enhanced look</h3><p>Optional, and kept close to the original's palette.</p></li>
-    <li class="wip"><h3>In the browser</h3><p>The whole game in a WebGPU browser, from your own game files. Race friends over the internet with a race code or an invite link.</p></li>
+    <li class="wip"><h3>In the browser</h3><p>The whole game in a WebGPU browser, from your own game files or with the free graphics. Touch controls on phones, and it adds to your Home Screen. Race friends over the internet with a race code or an invite link.</p></li>
   </ol>
 </section>
 
@@ -247,13 +248,25 @@
     <li><b>3</b><div><h3>Pick and play</h3><p>Choose the original or enhanced look, full screen or a window, then press Play.</p></div></li>
   </ol>
   <h3 id="browser">Or play in your browser</h3>
-  <p class="sub"><a href="play/">Open the browser version</a> in a recent Chrome or Edge, or Safari&nbsp;26 (it needs WebGPU). Then pick your installed game folder, your CD, a CD image, or a <code>.zip</code> of any of these. The files are read on your own computer and never uploaded, and the page holds no game data. It can remember your game in that browser for next time.</p>
+  <p class="sub"><a href="play/">Open the browser version</a> in a recent Chrome or Edge, or Safari&nbsp;26 (it needs WebGPU). No copy of the game? Pick <b>Free graphics</b> and it plays with the Free Pack, downloaded once into that browser. Or pick your installed game folder, your CD, a CD image, or a <code>.zip</code> of any of these. Your files are read on your own device and never uploaded, and the page holds no game data. It remembers your game in that browser for next time, and once played it starts without the internet too.</p>
+  <p class="sub">On a phone or tablet you get touch controls: a thumb stick to steer and lean, gas and brake, stunts and the camera. Add the page to your Home Screen to play full screen. On iPhone and iPad the Home Screen copy keeps its own storage, so you pick your game files or download the Free Pack once more there. If something goes wrong, the page has a button that copies a bug report for you to paste into <a href="https://github.com/crspytopgn/openmcm2/issues">an issue</a>.</p>
   <p class="sub">The launcher copies the game from your own copy and keeps your settings. It never downloads the game. If you like, it can fetch player-made tracks from <a href="https://mdxracing.com">MDX Racing</a>, one at a time when you ask. To build from source you need <a href="https://rustup.rs">Rust</a>:</p>
 <pre><code>git clone https://github.com/crspytopgn/openmcm2
 cd openmcm2
 cargo build --release -p mm2-viewer -p mm2-launcher
 ./target/release/mm2-launcher</code></pre>
   <p class="note">On Linux, install <code>libasound2-dev</code>, <code>libudev-dev</code> and <code>pkg-config</code> first. On a Mac, the app isn't notarised yet, so right-click <code>OpenMCM2.app</code> and choose Open the first time.</p>
+</section>
+
+<section id="community" class="community">
+  <h2>Community</h2>
+  <p class="sub">OpenMCM2 is made in the open, and players have been keeping Motocross Madness&nbsp;2 alive for over twenty years. Come and say hello.</p>
+  <div class="idea-grid">
+    <article><h3><a href="https://github.com/crspytopgn/openmcm2/discussions">Discussions</a></h3><p>Questions, ideas, tracks you've built and races you want to set up. The place to chat about OpenMCM2.</p></article>
+    <article><h3><a href="https://github.com/crspytopgn/openmcm2/issues">Bugs and requests</a></h3><p>Something broken, or missing from the original? Open an issue. In the browser, the start page copies a bug report for you.</p></article>
+    <article><h3><a href="https://mdxracing.com">MDX Racing</a></h3><p>Thousands of tracks made by players over the years, each one belonging to the rider who made it. The launcher fetches them for you.</p></article>
+    <article><h3><a href="https://github.com/dwolp/MCM2">Daniel's fork</a></h3><p>Many of the fixes and most of the Extras came from Daniel's fork. Forks like it are how the game keeps getting better.</p></article>
+  </div>
 </section>
 
 <section class="credits">

@@ -116,14 +116,20 @@ On a Mac, `sh tools/make-mac-app.sh` builds `target/release/OpenMCM2.app`.
 ### In a browser
 
 OpenMCM2 also runs in a browser with WebGPU (a recent Chrome or Edge, or
-Safari 26): **https://crspytopgn.github.io/openmcm2/play/**. It plays
-from your own copy too: pick your installed game folder, your CD, a CD
-image (`.iso`, `.bin`, `.img`, `.mdf`, `.nrg`) or a `.zip`, or drop it on
-the page. The files are read on your computer and never uploaded, and the
-page holds no game data. It can remember your game in that browser, saves
-stay there too, and phones and tablets get touch controls (a thumb stick
-to steer and lean, gas and brake, stunts and the camera) and a light mode
-that keeps a phone smooth. Network races
+Safari 26): **https://crspytopgn.github.io/openmcm2/play/**. With no copy
+of the game, pick **Free graphics** and it plays with the Free Pack,
+downloaded once into that browser. Or play from your own copy: pick your
+installed game folder, your CD, a CD image (`.iso`, `.bin`, `.img`,
+`.mdf`, `.nrg`) or a `.zip`, or drop it on the page. The files are read
+on your computer and never uploaded, and the page holds no game data. It
+can remember your game in that browser, saves stay there too, and once
+played it starts without the internet. Phones and tablets with no mouse
+get touch controls (a thumb stick to steer and lean, gas and brake,
+stunts and the camera) and a light mode that keeps a phone smooth. Add the
+page to your Home Screen to play full screen; on iPhone and iPad the Home
+Screen copy keeps its own storage, so you pick your game files or download
+the Free Pack once more there. If something goes wrong, the start page and
+the loading screen copy a bug report to paste into an issue. Network races
 work between browsers and desktops alike: the host gets a race code and
 an invite link to share, and races show in everyone's server browser. To build it
 yourself:
@@ -248,6 +254,17 @@ track, model and texture of your install, set `MM2_DATA` to the game folder:
 ```sh
 MM2_DATA="/path/to/Motocross Madness 2" cargo test
 ```
+
+## Community
+
+* [Discussions](https://github.com/crspytopgn/openmcm2/discussions): questions,
+  ideas, tracks you've built and races you want to set up.
+* [Issues](https://github.com/crspytopgn/openmcm2/issues): bugs and requests.
+  In the browser version, "Copy a bug report" gathers what's needed.
+* [MDX Racing](https://mdxracing.com): thousands of tracks made by players
+  over the years, each belonging to the rider who made it.
+* [Daniel's fork, dwolp/MCM2](https://github.com/dwolp/MCM2), where many of
+  the fixes and Extras came from.
 
 ## Credits
 
