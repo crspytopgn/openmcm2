@@ -18,8 +18,10 @@ pub const LABEL: &str = "(Rebuilt)";
 /// rebuild changes, so tracks built before are built again.
 /// Scenery lifted less than this (feet) over the old ground stands on the new ground.
 const GROUNDED: f32 = 6.0;
+/// How much higher (feet) scenery must sit than what's under it to be on it.
+const STACKED: f32 = 2.5;
 
-pub const MADE: &str = "2";
+pub const MADE: &str = "3";
 
 /// The name of the scene file in `files`, and its text.
 fn scene_of(files: &[(String, Vec<u8>)]) -> Option<(&str, String)> {
@@ -405,6 +407,21 @@ fn lifted(line: &str, key: &str, place: &dyn Fn(f32, f32, f32) -> [f32; 3]) -> O
 
 /// Whether scenery named `model` is ridden through or under (a culvert,
 /// a bridge, an arch, a start gate), so it may stand on the route.
+/// Scenery that hangs from or sits up on other scenery: wires, aerials,
+/// the rails over a trestle, crates on a loading dock.
+fn held_up(model: &str) -> bool {
+    const WORDS: [&str; 8] = ["wire", "conn", "ant_", "twr-", "trestle", "_dock", "rrtrack", "track"];
+    let m = model.to_ascii_lowercase();
+    WORDS.iter().any(|w| m.contains(w))
+}
+
+/// Scenery that holds other scenery up: towers, poles, posts, trestles.
+fn holds_up(model: &str) -> bool {
+    const WORDS: [&str; 7] = ["tower", "pole", "post", "twr", "support", "trestle", "ramp"];
+    let m = model.to_ascii_lowercase();
+    WORDS.iter().any(|w| m.contains(w))
+}
+
 fn ridden_through(model: &str) -> bool {
     const WORDS: [&str; 10] = ["culvert", "bridge", "arch", "gate", "start", "finish", "banner", "tunnel", "overpass", "trestle"];
     let m = model.to_ascii_lowercase();
@@ -522,13 +539,10 @@ pub fn rebuild(files: &[(String, Vec<u8>)], pictures: &Pictures) -> Result<Vec<(
         let k = ((z / scale).round().clamp(0.0, (n - 1) as f32)) as usize;
         base[k * n + i]
     };
-    // The scenery moves with the ground the track was carved into.
-    // Scenery on the route, or left by the scene to stand where it falls
-    // (height 0), stands on the new ground; the rest keeps its height
-    // over the ground it stood on.
-    // Anything else on the new route (hay bales the original route went
-    // round) is set beside it.
-    let place = |model: &str, x: f32, y: f32, z: f32| -> [f32; 3] {
+    // Where scenery on the new route goes: anything ridden through stays,
+    // anything else (hay bales the original route went round) is set
+    // beside it.
+    let beside = |model: &str, x: f32, z: f32| {
         let near = on_route(x, z);
         let (x, z) = match near {
             Some(near) if !ridden_through(model) => {
@@ -540,14 +554,60 @@ pub fn rebuild(files: &[(String, Vec<u8>)], pictures: &Pictures) -> Result<Vec<(
             }
             _ => (x, z),
         };
-        let ground = baked.field.height(x, z);
-        // Scenery within a few feet of the ground it stood on (hay bales,
-        // fences, signs) sits on the new ground: the fitted ground is only
-        // close to the old one, so keeping its small offset sinks it or
-        // floats it. Only what stood well above the ground keeps its lift.
+        (x, z, near.is_some())
+    };
+    // The height of what isn't on the scene's model list (animations):
+    // on the new ground unless it stood well above the old.
+    let loose = |x: f32, y: f32, z: f32, ground: f32| {
         let lift = y - base_at(x, z);
-        let y = if y.abs() < 0.01 || near.is_some() || lift < GROUNDED { ground } else { ground + lift };
-        [x, y, z]
+        if y.abs() < 0.01 || lift < GROUNDED { ground } else { ground + lift }
+    };
+    // The scenery's heights on the new ground. The fitted ground is only
+    // near the old one, so scenery doesn't keep its height over it: what
+    // stands on the ground (hay bales, tents, signs, buildings) stands on
+    // the new ground, what sits on other scenery (stacked crates, a bale
+    // on a bale) keeps its height over that, and what hangs from or sits
+    // up on a tower, post or trestle (wires, aerials, the rails over a
+    // trestle) keeps its height over that. Lowest first, so what holds
+    // something up is placed before it.
+    let mut order: Vec<usize> = (0..models.len()).collect();
+    order.sort_by(|&a, &b| models[a][1].total_cmp(&models[b][1]));
+    let mut placed: Vec<Option<[f32; 3]>> = vec![None; models.len()];
+    for (at, &j) in order.iter().enumerate() {
+        let [x, y, z] = models[j];
+        let name = names[j];
+        let (nx, nz, on) = beside(name, x, z);
+        let ground = baked.field.height(nx, nz);
+        let up = held_up(name);
+        // A trestle stands on its own legs; what's over it is held up.
+        let alone = name.to_ascii_lowercase().contains("trestle");
+        let support = order[..at]
+            .iter()
+            .filter(|&&i| y - models[i][1] > STACKED)
+            .filter(|&&i| if up { holds_up(names[i]) } else { true })
+            .map(|&i| (i, (models[i][0] - x).hypot(models[i][2] - z)))
+            .filter(|&(_, d)| !alone && d < if up { 80.0 } else { 4.0 })
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        let ny = if y.abs() < 0.01 || on {
+            ground
+        } else if let Some((i, _)) = support {
+            (placed[i].map_or(ground, |p| p[1]) + y - models[i][1]).max(ground)
+        } else if up {
+            loose(x, y, z, ground)
+        } else {
+            ground
+        };
+        placed[j] = Some([nx, ny, nz]);
+    }
+    let place = |model: &str, x: f32, y: f32, z: f32| -> [f32; 3] {
+        if let Some(j) = (0..models.len()).find(|&j| models[j] == [x, y, z]) {
+            if let Some(p) = placed[j] {
+                return p;
+            }
+        }
+        let (x, z, on) = beside(model, x, z);
+        let ground = baked.field.height(x, z);
+        [x, if on { ground } else { loose(x, y, z, ground) }, z]
     };
 
     let mut out: Vec<(String, Vec<u8>)> = Vec::new();
