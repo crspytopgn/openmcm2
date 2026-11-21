@@ -426,7 +426,7 @@ export async function mount(app, panel) {
         else (ctx.fillStyle = "#f4f1ea"), ctx.fillRect(0, 0, w, h);
         await usePicture(start);
         if (!target) {
-          const m = await gameAnimated(lib, bike ? "yamaha.mcf" : "Rider.mcf", { skin: texture, prefix: "p_" });
+          const m = await gameAnimated(lib, bike ? "yamaha.mcf" : "Rider.mcf", { skin: texture, prefix: "p_", plate: bike ? 7 : 0 });
           if (!m) throw new Error("the model isn't in this game");
           const mat = m.obj.userData.materials.get(0);
           target = { obj: m.obj, material: mat, kind: bike ? "bike" : "rider", game: true };

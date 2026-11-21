@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import * as mm from "./pkg/mm2_webtools.js";
 import { findIn } from "./library.js";
 
@@ -27,6 +28,12 @@ export class Viewer {
     this.sun = new THREE.DirectionalLight(0xffffff, 2.2);
     this.sun.position.set(5, 10, 6);
     this.scene.add(this.hemi, this.sun);
+    // Soft light all round for the Free Pack's metal and shine (the
+    // game's own models are lit as the game lights them, without it).
+    const pm = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environmentIntensity = 0.45;
+    pm.dispose();
     this.grid = new THREE.GridHelper(20, 20, 0x4a463d, 0x332f29);
     this.scene.add(this.grid);
     this.mixers = [];
@@ -253,12 +260,14 @@ const safeName = (s) => THREE.PropertyBinding.sanitizeNodeName(s || "frame");
 
 /// A game model (the readers' JSON) as a three.js group. `nodes[i]` is
 /// model frame `i`. `skin` (a texture) replaces the first material's, as
-/// the game does for paints and outfits.
-export function buildModel(json, textures, { skin = null, prefix = "", lit = true } = {}) {
+/// the game does for paints and outfits; `plate` (a texture) is drawn on
+/// a bike's untextured material, its number plates. Lit as the game
+/// lights its models: a light all round and the sun on what faces it.
+export function buildModel(json, textures, { skin = null, plate = null, prefix = "", lit = true } = {}) {
   const root = new THREE.Group();
   const names = new Set();
   const nodes = json.frames.map((f, i) => {
-    const o = new THREE.Object3D();
+    const o = new THREE.Bone();
     let n = safeName(prefix + (f.name || "frame" + i));
     while (names.has(n)) n += "_" + i;
     names.add(n);
@@ -271,32 +280,63 @@ export function buildModel(json, textures, { skin = null, prefix = "", lit = tru
   });
   json.frames.forEach((f, i) => (f.parent != null && nodes[f.parent] ? nodes[f.parent] : root).add(nodes[i]));
   const mats = new Map();
-  const material = (m) => {
-    if (mats.has(m)) return mats.get(m);
+  const Lit = lit ? THREE.MeshLambertMaterial : THREE.MeshBasicMaterial;
+  const material = (m, plated) => {
+    const key = plated ? "plate" : m;
+    if (mats.has(key)) return mats.get(key);
     const name = json.materials[m] || "";
-    const map = m === 0 && skin ? skin : textures?.get(name) || null;
-    const opts = { side: THREE.DoubleSide, roughness: 0.85, metalness: 0 };
+    const map = plated ? plate : m === 0 && skin ? skin : textures?.get(name) || null;
+    const opts = { side: THREE.DoubleSide };
     let mat;
-    if (map) {
-      mat = new (lit ? THREE.MeshStandardMaterial : THREE.MeshBasicMaterial)({ ...opts, map });
+    if (plated) {
+      // The number's white digits, tinted by the plate's own colour; the
+      // rest of the plate is clear, as in the game.
+      mat = new Lit({ ...opts, map, vertexColors: true, alphaTest: 0.5 });
+    } else if (map) {
+      mat = new Lit({ ...opts, map });
       if (map.userData.alpha) mat.alphaTest = 0.5;
-    } else mat = new (lit ? THREE.MeshStandardMaterial : THREE.MeshBasicMaterial)({ ...opts, vertexColors: true });
-    if (!lit) delete mat.roughness;
-    mat.name = name || "plain";
-    mats.set(m, mat);
+    } else mat = new Lit({ ...opts, vertexColors: true });
+    mat.name = plated ? "plate" : name || "plain";
+    mats.set(key, mat);
     return mat;
   };
+  let skeleton = null;
+  const skinned = [];
   for (const mesh of json.meshes) {
+    const plated = !!(plate && mesh.plate);
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(mesh.p, 3));
     g.setAttribute("normal", new THREE.Float32BufferAttribute(mesh.n, 3));
-    g.setAttribute("uv", new THREE.Float32BufferAttribute(mesh.uv, 2));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(plated ? mesh.plate : mesh.uv, 2));
     g.setAttribute("color", new THREE.Uint8BufferAttribute(mesh.c, 4, true));
     g.setIndex(mesh.i);
-    const m = new THREE.Mesh(g, material(mesh.material));
+    let m;
+    if (mesh.skin) {
+      // Over several frames (a rider's joints): each corner moves with
+      // its own frame, as the game draws it.
+      const idx = new Uint16Array(mesh.skin.length * 4);
+      const wt = new Float32Array(mesh.skin.length * 4);
+      mesh.skin.forEach((f, k) => {
+        idx[k * 4] = nodes[f] ? f : 0;
+        wt[k * 4] = 1;
+      });
+      g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(idx, 4));
+      g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(wt, 4));
+      m = new THREE.SkinnedMesh(g, material(mesh.material, plated));
+      m.frustumCulled = false;
+      skinned.push(m);
+      root.add(m);
+    } else {
+      m = new THREE.Mesh(g, material(mesh.material, plated));
+      (nodes[mesh.frame] || root).add(m);
+    }
     m.name = (nodes[mesh.frame]?.name || "mesh") + "_mesh";
     m.userData.material = mesh.material;
-    (nodes[mesh.frame] || root).add(m);
+  }
+  if (skinned.length) {
+    root.updateMatrixWorld(true);
+    skeleton = new THREE.Skeleton(nodes, nodes.map((n) => n.matrixWorld.clone().invert()));
+    for (const m of skinned) m.bind(skeleton, new THREE.Matrix4());
   }
   root.userData.nodes = nodes;
   root.userData.materials = mats;

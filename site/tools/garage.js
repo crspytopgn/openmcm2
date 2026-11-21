@@ -86,8 +86,8 @@ export async function mount(app, panel) {
         const archives = [game.bikeRes];
         const [paint, outfit] = await Promise.all([paintTexture(lib, b, archives), o ? paintTexture(lib, o, archives) : null]);
         const [race, ui, rRace, rUi] = await Promise.all([
-          gameAnimated(lib, b.model, { skin: paint, prefix: "bike_" }),
-          gameAnimated(lib, "ui" + b.model, { prefix: "bike_" }),
+          gameAnimated(lib, b.model, { skin: paint, prefix: "bike_", plate: 7 }),
+          gameAnimated(lib, "ui" + b.model, { prefix: "bike_", plate: 7 }),
           gameAnimated(lib, "Rider.mcf", { skin: outfit, prefix: "rider_" }),
           gameAnimated(lib, "UIRider.mcf", { prefix: "rider_" }),
         ]);

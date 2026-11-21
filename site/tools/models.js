@@ -101,18 +101,60 @@ export async function paintTexture(lib, item, archives) {
 }
 
 /// A game .mcf's model, built, with its motions to make clips from.
-export async function gameAnimated(lib, mcfName, { skin, prefix = "" } = {}) {
+/// A number plate as the game paints it (0x418300, 0x418380, 0x418470): a
+/// clear 64x64 picture with the white digits of BikeNumbers128.tga (32
+/// high, four to a row) set in the middle.
+export function plateTexture(archives, number) {
+  const hit = findIn(archives, "BikeNumbers128.tga");
+  if (!hit) return null;
+  let pic;
+  try {
+    pic = mm.texture(hit[0].at(hit[1]));
+  } catch {
+    return null;
+  }
+  const src = pic.rgba();
+  const side = 64;
+  const out = new ImageData(side, side);
+  const width = (d) => (d === 1 ? 13 : 19);
+  const digits = String(Math.min(number, 999)).split("").map(Number);
+  let x = 28 - Math.trunc(digits.reduce((a, d) => a + width(d), 0) / 2);
+  for (const d of digits) {
+    const [col, row] = [d % 4, Math.floor(d / 4)];
+    for (let y = 0; y < 32; y++)
+      for (let dx = 0; dx < width(d); dx++) {
+        // Rows counted as the game stores them, bottom first.
+        const [tx, ty] = [x + 4 + dx, side - 1 - (4 + y)];
+        const [sx, sy] = [col * 32 + dx, pic.height - 1 - (row * 32 + y)];
+        if (tx < 0 || tx >= 60 || sx >= pic.width || sy < 0) continue;
+        out.data.set(src.subarray((sy * pic.width + sx) * 4, (sy * pic.width + sx) * 4 + 4), (ty * side + tx) * 4);
+      }
+    x += width(d);
+  }
+  const c = document.createElement("canvas");
+  c.width = c.height = side;
+  c.getContext("2d").putImageData(out, 0, 0);
+  const t = textureOf(c, "plate");
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
+/// A game .mcf's model, built, with its motions to make clips from; a
+/// bike with `plate` gets that number on its plates.
+export async function gameAnimated(lib, mcfName, { skin, prefix = "", plate } = {}) {
   const bikeRes = await lib.res("BIKE.RES");
   const archives = await lib.modelArchives(bikeRes ? [bikeRes] : []);
   const hit = findIn(archives, mcfName);
   if (!hit) return null;
   const info = JSON.parse(mm.mcf(hit[0].at(hit[1])));
   const stem = info.model.replace(/^.*[\\/]/, "").replace(/\.[^.]*$/, "");
-  const model = findIn(archives, stem + ".slb") || findIn(archives, stem + ".slt");
+  // A bike installed as text over a stock one wins, as in the game.
+  const model = findIn(archives, stem + ".slt") || findIn(archives, stem + ".slb");
   if (!model) return null;
   const json = JSON.parse(mm.model(model[0].at(model[1]), model[0].names()[model[1]]));
-  const textures = new Textures(await lib.textureArchives(bikeRes ? [bikeRes] : []));
-  const obj = buildModel(json, textures, { skin, prefix });
+  const texArchives = await lib.textureArchives(bikeRes ? [bikeRes] : []);
+  const textures = new Textures(texArchives);
+  const obj = buildModel(json, textures, { skin, prefix, plate: plate ? plateTexture(texArchives, plate) : null });
   obj.name = stem;
   const names = obj.userData.nodes.map((n) => n.name);
   const clips = new Map();
@@ -163,7 +205,9 @@ export function packRoster(lib) {
   if (!files.length) return null;
   const pick = (re) => {
     const all = files.filter((p) => re.test(p));
-    return all.find((p) => /\/web\//.test(p)) || all[0] || null;
+    // The full-detail ones the game draws on a computer; the lighter
+    // ones made for the browser version only when there are no others.
+    return all.find((p) => !/\/web\//.test(p)) || all[0] || null;
   };
   const bikes = [];
   for (const p of files) {
