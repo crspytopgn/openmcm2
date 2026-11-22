@@ -395,7 +395,12 @@ impl Bank {
                     .map(Arc::new)
                     .collect()
             })
-            .collect();
+            .collect::<Vec<Vec<_>>>();
+        // The demo's lists name every class's samples, but it has only the
+        // 250's, and only in 8-bit: a class with none is not there.
+        if lists.iter().all(Vec::is_empty) {
+            return None;
+        }
         let band = |key: &str, default: i32| {
             section
                 .get(key)
@@ -678,34 +683,50 @@ impl RaceSounds {
             (true, 3..) => 2,
             _ => 1,
         };
-        // The free pack's own recordings for each class when it is in use,
-        // else the original's samples for the class's section.
+        // With the free graphics picked, the free pack's own recordings for
+        // each class, else the original's samples for the class's section.
+        // With the original's files (the full game, or the demo with the
+        // pack filling in its gaps), the original's samples come first, on
+        // the free tracks too; the pack's only stand in for a class they lack.
+        let pack_first = crate::freepack::chosen();
+        let freshen = crate::tweaks::more().freshen_engines;
         let mut banks: [Option<Bank>; 5] = Default::default();
         for &c in &present {
-            banks[c] = crate::freepack::engine_dir(CLASSES[c])
-                .and_then(|dir| Bank::load_dir(&dir, divisor(c)))
-                .or_else(|| Bank::load(res, options.sixteen_bit, CLASSES[ORIGINAL[c]], divisor(c), crate::tweaks::more().freshen_engines));
+            let pack = || crate::freepack::engine_dir(CLASSES[c]).and_then(|dir| Bank::load_dir(&dir, divisor(c)));
+            let original = || {
+                let class = CLASSES[ORIGINAL[c]];
+                Bank::load(res, options.sixteen_bit, class, divisor(c), freshen)
+                    .or_else(|| options.sixteen_bit.then(|| Bank::load(res, false, class, divisor(c), freshen)).flatten())
+            };
+            banks[c] = if pack_first { pack().or_else(original) } else { original().or_else(pack) };
             if banks[c].is_none() {
                 eprintln!("no [{}] engine sounds", CLASSES[c]);
             }
         }
-        let mut effects = HashMap::new();
+        // The race effects the same way: the pack's first only with the
+        // free graphics; either way, the other fills in what one lacks.
+        let mut pack_fx = HashMap::new();
         if let Some(dir) = crate::freepack::fx_dir() {
             for e in crate::fs::read_dir(&dir).into_iter().flatten().flatten() {
                 let name = e.file_name().to_string_lossy().to_ascii_lowercase();
                 if let Some(s) = crate::fs::read(e.path()).ok().and_then(|b| mm2_formats::wav::parse(&b).ok()) {
-                    effects.insert(name, Arc::new(s));
+                    pack_fx.insert(name, Arc::new(s));
                 }
             }
         }
+        let mut original_fx = HashMap::new();
         if let Ok(bytes) = crate::read_archive(&res.join("AUDIO.RES")) {
             if let Ok(ar) = rs2::Archive::parse(&bytes) {
                 for e in ar.entries() {
                     if let Ok(s) = mm2_formats::wav::parse(ar.data(e)) {
-                        effects.entry(e.name.to_ascii_lowercase()).or_insert(Arc::new(s));
+                        original_fx.insert(e.name.to_ascii_lowercase(), Arc::new(s));
                     }
                 }
             }
+        }
+        let (mut effects, rest) = if pack_first { (pack_fx, original_fx) } else { (original_fx, pack_fx) };
+        for (name, s) in rest {
+            effects.entry(name).or_insert(s);
         }
         // The rivers' own sounds (OpenMCM2's, none of the game's).
         effects.insert(RIVER.into(), Arc::new(river_sound()));

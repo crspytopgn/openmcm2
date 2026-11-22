@@ -54,6 +54,28 @@ pub fn set_fill(dir: PathBuf) {
     let _ = FILL.set(dir);
 }
 
+/// The game's folder (the full game's or the demo's), when there is one.
+static GAME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Notes the game's folder, so the free tracks (which live in the pack's
+/// folder) can still ride the game's own bikes and hear its sounds.
+pub fn set_game(game: &std::path::Path) {
+    let _ = GAME.set(game.to_path_buf());
+}
+
+/// The game's own `RES` folder, for the bikes, riders, their numbers and
+/// sounds on every track, the pack's free tracks too: unless the free
+/// graphics were picked, the original's (or the demo's) win, and the pack
+/// only fills in what they lack.
+pub fn original_res() -> Option<PathBuf> {
+    if chosen() {
+        return None;
+    }
+    let res = GAME.get()?.join("RES");
+    let has = |name: &str| crate::fs::is_file(res.join(name));
+    (has("BIKE.RES") || has("ENGINE.RES") || has("AUDIO.RES")).then_some(res)
+}
+
 /// Whether the player picked the free graphics (`--freepack`), rather
 /// than a pack set up beside the original's files.
 pub fn chosen() -> bool {
