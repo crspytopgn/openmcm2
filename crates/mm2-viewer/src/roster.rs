@@ -98,12 +98,20 @@ pub fn own_files(game: &Path, folder: &str) -> Vec<(String, String)> {
 impl Roster {
     /// Reads the lists from the game's `UI/UIRES.RES`.
     pub fn load(game: &Path) -> Roster {
+        let mut roster = Roster::default();
+        if let Some(originals) = Roster::originals(game) {
+            roster = originals;
+            roster.add_own(game);
+        }
+        roster.add_free();
+        roster
+    }
+
+    /// The game's own bikes and outfits alone (for the demo, the few it
+    /// really has), without the player's paints or the free pack's.
+    pub fn originals(game: &Path) -> Option<Roster> {
         let bytes = crate::read_archive(&game.join("UI").join("UIRES.RES")).unwrap_or_default();
-        let Ok(ar) = rs2::Archive::parse(&bytes) else {
-            let mut roster = Roster::default();
-            roster.add_free();
-            return roster;
-        };
+        let ar = rs2::Archive::parse(&bytes).ok()?;
         let text = |name: &str| {
             ar.get(name)
                 .map(|b| String::from_utf8_lossy(b).into_owned())
@@ -121,9 +129,7 @@ impl Roster {
                 roster.outfits.retain(|o| has(&o.file));
             }
         }
-        roster.add_own(game);
-        roster.add_free();
-        roster
+        Some(roster)
     }
 
     /// The free pack's bikes and outfits, after the game's.

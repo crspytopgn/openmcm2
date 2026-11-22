@@ -247,6 +247,17 @@ fn main() -> Result<(), BoxError> {
     let path = args.first().filter(|a| !a.starts_with("--")).map(Path::new);
     let is_track =
         path.is_some_and(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("env")));
+    // A track ridden straight away: the game whose bikes and sounds it
+    // takes (`--game DIR`, for a free track, which lives in the pack's
+    // folder), else the one the track is in.
+    if is_track {
+        let game = flag("--game").map(PathBuf::from).or_else(|| {
+            path?.ancestors().find(|d| fs::is_file(d.join("RES").join("MODELS.RES"))).map(Path::to_path_buf)
+        });
+        if let Some(game) = game {
+            freepack::set_game(&game);
+        }
+    }
     // `--course-builder` with no menus to go behind it (the free pack on
     // its own): the builder by itself, riding straight from it.
     // With the free pack and no game folder to show menus from, the
@@ -285,6 +296,7 @@ fn main() -> Result<(), BoxError> {
             std::process::exit(2);
         };
         demo::note(&game);
+        freepack::set_game(&game);
         if let Some(out) = flag("--screenshot") {
             let clicks = flag("--clicks").map(String::as_str).unwrap_or("");
             return pollster::block_on(menu_screenshot(&game, clicks, Path::new(out), None));
@@ -506,9 +518,9 @@ fn main() -> Result<(), BoxError> {
             // as a 22.05 kHz WAV (`--engine-wav FILE`).
             let mut engine_wav = flag("--engine-wav").and_then(|_| {
                 let audio = audio::Audio::offline(22050.0);
-                let res = track.res.as_deref()?;
+                let res = sound_res(track.res.as_deref())?;
                 let mut sounds = sound::RaceSounds::load(
-                    res,
+                    &res,
                     &audio,
                     &[match flag("--engine-class").map(String::as_str) {
                         Some("125") => sound::class(125, false),
@@ -2083,8 +2095,14 @@ fn load_track(
         .find(|res| fs::is_file(res.join("MODELS.RES")))
         // Without the original's files, the free pack stands in for them.
         .or_else(freepack::root);
+    // The bikes and riders, their numbers and motions: the game's own on
+    // every track (a free track's folder is the pack's), unless the free
+    // graphics were picked.
+    let bikes_res = freepack::original_res()
+        .filter(|r| fs::is_file(r.join("BIKE.RES")))
+        .or_else(|| res.clone());
     let cc = ride.as_ref().map_or(250, |r| r.bike.cc);
-    let spec = res
+    let spec = bikes_res
         .as_deref()
         .map(|res| player_spec(res, cc))
         .unwrap_or_default();
@@ -2147,7 +2165,7 @@ fn load_track(
             }));
             let mut skins = Vec::new();
             let mut grid_sources = Vec::new();
-            match read_archive(&res.join("BIKE.RES")) {
+            match read_archive(&bikes_res.as_deref().unwrap_or(&res).join("BIKE.RES")) {
                 Ok(bytes) => {
                     let bike = ride.as_ref().map_or(GRID[0].0, |r| r.bike.model.as_str());
                     tricks = rs2::Archive::parse(&bytes)
@@ -2980,6 +2998,24 @@ fn start_grid(
         .grid
         .unwrap_or((if gate.is_some() { 4.6 } else { 2.0 }, GRID_OFFSET));
     skins.resize(animations.len(), None);
+    // Without the stock grid's bikes (the demo has two of the game's), the
+    // computer's riders ride the game's own bikes it does have, on every
+    // track, before the free pack's.
+    let own_grid = match (originals, freepack::original_res()) {
+        (false, Some(res)) if std::env::var_os("MM2_FREE_GRID").is_none() => {
+            let game = res.parent();
+            let mut own = game.and_then(roster::Roster::originals).unwrap_or_default();
+            // Only the ones whose models and paints are really there.
+            if let Some(have) = game.and_then(demo::bike_files) {
+                let has = |f: &str| have.contains(&f.to_ascii_lowercase());
+                own.bikes.retain(|b| has(&b.model) && (b.texture.is_empty() || has(&b.texture)));
+                own.outfits.retain(|o| has(&o.file));
+            }
+            own
+        }
+        _ => roster::Roster::default(),
+    };
+    let own_grid = (!own_grid.bikes.is_empty() && !own_grid.outfits.is_empty()).then_some(own_grid);
     let mut bikes = Vec::new();
     for i in 0..riders.max(1) {
         let (mut bike, mut outfit) = (
@@ -2988,7 +3024,15 @@ fn start_grid(
         );
         let mut skin = Some(format!("{}{}", objects::PLATE, plate_number(i)));
         let (free_bikes, free_outfits) = (freepack::bikes(), freepack::outfits());
-        if !originals && !free_bikes.is_empty() && !free_outfits.is_empty() {
+        if let Some(own) = &own_grid {
+            let b = &own.bikes[i % own.bikes.len()];
+            bike = b.model.clone();
+            skin = Some(match b.texture.as_str() {
+                "" => format!("{}{}", objects::PLATE, plate_number(i)),
+                paint => format!("{}{}:{paint}", objects::PLATE, plate_number(i)),
+            });
+            outfit = own.outfits[(i + 1) % own.outfits.len()].file.clone();
+        } else if !originals && !free_bikes.is_empty() && !free_outfits.is_empty() {
             // Spread over the shapes and colours: no two alike side by side.
             // (`MM2_FREE_GRID=n` starts the turn at the pack's bike n.)
             let first: usize = std::env::var("MM2_FREE_GRID").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
@@ -3472,6 +3516,14 @@ fn tag_say(race: &mut Race) {
 
 /// The race's sounds are heard from the camera at `eye`, looking at
 /// `target`, moving with the player's bike (0x4e84a0).
+/// Where a race's sounds come from. A free track's folder is the pack's,
+/// so it has no `RES` of the original's; unless the free graphics were
+/// picked, the game's own `RES` (the full game's or the demo's) gives the
+/// bikes their original sounds there too, and the pack only fills in.
+fn sound_res(track_res: Option<&Path>) -> Option<PathBuf> {
+    freepack::original_res().or_else(|| track_res.map(Path::to_path_buf))
+}
+
 fn listener(r: &Race, eye: Vec3, target: Vec3) -> sound::Listener {
     let f = target - eye;
     sound::Listener {
@@ -5009,8 +5061,8 @@ impl App {
                 self.sound_off = false;
                 self.reverb = matches!(setup.event, frontend::EventKind::Supercross | frontend::EventKind::Tag);
                 self.apply_reverb();
-                self.sounds = track.res.as_deref().map(|res| {
-                    let mut s = sound::RaceSounds::load(res, &self.audio, &classes, player, setup.event, track.crowd, options);
+                self.sounds = sound_res(track.res.as_deref()).map(|res| {
+                    let mut s = sound::RaceSounds::load(&res, &self.audio, &classes, player, setup.event, track.crowd, options);
                     s.set_scene(track.sounds.iter().cloned());
                     s.whistle = track.free && tweaks::more().whistle;
                     s
