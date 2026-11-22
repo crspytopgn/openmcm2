@@ -28,7 +28,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download the tracks
-        run: python3 tools/trackpack/build.py tools/trackpack/tracks.json out
+        run: |
+          pip install -q pillow
+          python3 tools/trackpack/build.py tools/trackpack/tracks.json out
 
       - name: Set up rclone for R2
         run: |

@@ -8,7 +8,8 @@
    "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/./Cobble%20Hill.zip",
    "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/./Cobble%20Hill.jpg",
    "laps": 190,
-   "sha256": "1d968806ddbfe92b35466b238003dbcde04ec80ccccf3d4a7cca150bb2c752b9"
+   "sha256": "1d968806ddbfe92b35466b238003dbcde04ec80ccccf3d4a7cca150bb2c752b9",
+   "starter": true
   },
   {
    "name": "Sucker Punch",
@@ -119,9 +120,9 @@
    "author": "XPR_TECH",
    "event": "NATIONAL",
    "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/BellsEnd.zip",
-   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/BellsEns.jpg",
    "laps": 105,
-   "sha256": "524401f39335e6054dfd7a0d9a759bc4ef80a6ad656738b3784c22c3d266b555"
+   "sha256": "524401f39335e6054dfd7a0d9a759bc4ef80a6ad656738b3784c22c3d266b555",
+   "picture_file": "pictures/bellsend.jpg"
   },
   {
    "name": "Trapper",
@@ -264,7 +265,8 @@
    "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/%20Portsmouth%20Arena.zip",
    "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/%20Portsmouth%20Arena.jpg",
    "laps": 114,
-   "sha256": "0730eb0cf3945736a2b10647ce741bd550e878d3a41b918563e8dc189e58d97c"
+   "sha256": "0730eb0cf3945736a2b10647ce741bd550e878d3a41b918563e8dc189e58d97c",
+   "starter": true
   },
   {
    "name": "Projectile 2",
@@ -273,7 +275,8 @@
    "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Projectile%202.zip",
    "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Projectile%202.jpg",
    "laps": 100,
-   "sha256": "d50f0cd3f2f3960f0a3365592404265b44fc116a1abf3bb427b41f4ba5ec1eae"
+   "sha256": "d50f0cd3f2f3960f0a3365592404265b44fc116a1abf3bb427b41f4ba5ec1eae",
+   "starter": true
   },
   {
    "name": "DIZ_Round6Indianapolis",
@@ -282,7 +285,8 @@
    "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/DIZ_Round6Indianapolis.zip",
    "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/DIZ_Round6Indianapolis.jpg",
    "laps": 80,
-   "sha256": "d9474748cc6a7f2c9f1805346899fde4fdb192735d2ee2c443b5d2d8cf0d7982"
+   "sha256": "d9474748cc6a7f2c9f1805346899fde4fdb192735d2ee2c443b5d2d8cf0d7982",
+   "starter": true
   },
   {
    "name": "Countryside Park SX",
@@ -291,7 +295,8 @@
    "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./Countryside%20Park%20SX.zip",
    "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./Countryside%20Park%20SX.jpg",
    "laps": 62,
-   "sha256": "5312c77fa41204776f210094cbb0edf62fe58489472eb23037e5cae5febc5072"
+   "sha256": "5312c77fa41204776f210094cbb0edf62fe58489472eb23037e5cae5febc5072",
+   "starter": true
   },
   {
    "name": "Primetime Park",
@@ -299,7 +304,8 @@
    "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Primetime_Park.zip",
    "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Primetime_Park.jpeg",
    "laps": 56,
-   "sha256": "51977d266125d0b86c67a1fc3481270020c23b1f6f0b287580b6c00af6563f0f"
+   "sha256": "51977d266125d0b86c67a1fc3481270020c23b1f6f0b287580b6c00af6563f0f",
+   "starter": true
   },
   {
    "name": "SuiXycle",
@@ -450,7 +456,8 @@
    "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/ballbreakbaja.zip",
    "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/ballbreakbaja.gif",
    "laps": 0,
-   "sha256": "70548e32775aa59f3a523cb821d37f0ebcb50e85d128f379a6037700e359fdc5"
+   "sha256": "70548e32775aa59f3a523cb821d37f0ebcb50e85d128f379a6037700e359fdc5",
+   "starter": true
   },
   {
    "name": "bambooisland",
@@ -602,7 +609,8 @@
    "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/the_pharm.zip",
    "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/the_pharm.jpg",
    "laps": 0,
-   "sha256": "4af2e8864bf85c546e7c7edba6b22226ae06d1b1f805436ed7a79e2b7dc98b40"
+   "sha256": "4af2e8864bf85c546e7c7edba6b22226ae06d1b1f805436ed7a79e2b7dc98b40",
+   "starter": true
   },
   {
    "name": "tracker",
@@ -610,7 +618,8 @@
    "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/tracker.zip",
    "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/tracker.gif",
    "laps": 0,
-   "sha256": "112a7a0a5cf43068df3fe9faca2aed9038c795a26c7c6db05decbc0f989bf156"
+   "sha256": "112a7a0a5cf43068df3fe9faca2aed9038c795a26c7c6db05decbc0f989bf156",
+   "starter": true
   },
   {
    "name": "turtlerock",
@@ -650,7 +659,8 @@
    "mdx": "https://mdxracing.com/mcm2/Tracks/ENDURO/sw.zip",
    "picture_url": "https://mdxracing.com/mcm2/Tracks/ENDURO/sw.gif",
    "laps": 0,
-   "sha256": "12906ced503842c5b09cb460ea60803319768eeea87938b6519ab78f9854bd01"
+   "sha256": "12906ced503842c5b09cb460ea60803319768eeea87938b6519ab78f9854bd01",
+   "starter": true
   }
  ]
 }

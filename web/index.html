@@ -97,6 +97,11 @@
   label.plainbutton { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost:hover { border-color: var(--accent); }
+  /* A popular track's picture, while the mouse rests on it (or it's tapped). */
+  #popularlist li { position: relative; cursor: default; }
+  #popularlist li img { display: none; position: absolute; left: 0; top: 100%; z-index: 5; width: min(360px, 80vw);
+    border: 1px solid #55524a; border-radius: 6px; background: #000; }
+  #popularlist li:hover img, #popularlist li:focus img { display: block; }
   [hidden] { display: none !important; }
   /* The playtime card by Play, as the launcher's Play page has it. */
   .playtime { margin: 1rem 0 0; padding: .7rem .9rem; border: 1px solid #34322c; border-radius: 10px; background: #1a1917; }
@@ -279,13 +284,17 @@
       <p class="hint" id="popularabout">The Nationals and Supercross tracks players have raced most, going by the lap times
         posted on <a href="https://mdxracing.com/new/index.php" target="_blank" rel="noopener" style="color:var(--accent)">MDX Racing</a>,
         and the Baja and Enduro maps players made there. Each one belongs to the player who made it. They work with either graphics.</p>
+      <div id="popularset" hidden>
+        <label title="A few of the best: the most raced National, the five most raced Supercross tracks, three small Baja maps and an Enduro map."><input type="radio" name="popularset" value="starter" checked> <span id="starterlabel">Starter set</span></label>
+        <label title="All the popular tracks of the events ticked below."><input type="radio" name="popularset" value="all"> All of these events:</label>
+      </div>
       <div id="popularkinds"></div>
       <button type="button" id="popularget" hidden
         title="Downloads the ticked events' tracks and adds them to the game's track lists. They stay in this browser.">Add them</button>
       <button type="button" class="ghost" id="popularremove" hidden title="Takes the popular tracks out of this browser again.">Remove them</button>
       <p id="popularstatus" class="hint"></p>
       <details>
-        <summary>Who made them</summary>
+        <summary>Who made them (rest the mouse on one to see it)</summary>
         <ul id="popularlist"></ul>
       </details>
     </fieldset>
@@ -1414,6 +1423,8 @@ async function popularHave() {
   return new Set((await fs.userFiles(TRACKS).catch(() => [])).map((p) => p.slice(TRACKS.length).toLowerCase()));
 }
 const popularKey = (t, env) => `${t.event}/${env}`.toLowerCase();
+const popularStarter = () => !$("popularset").hidden && $("popularset").querySelector("input:checked")?.value === "starter";
+$("popularset").addEventListener("change", () => showPopular());
 async function showPopular() {
   if (!popular) return;
   const have = await popularHave();
@@ -1431,8 +1442,19 @@ async function showPopular() {
   }
   const isIn = (t) => t.envs.length && t.envs.every((e) => have.has(popularKey(t, e)));
   const got = popular.filter(isIn).length;
-  $("popularget").hidden = got === popular.length;
-  $("popularget").textContent = got ? `Add the other ${popular.length - got}` : `Add them`;
+  // A small starter set, picked first; the full lists by event below it.
+  const starter = popular.filter((t) => t.starter);
+  $("popularset").hidden = !starter.length;
+  if (starter.length) {
+    const mb = Math.max(1, Math.round(starter.reduce((n, t) => n + (t.size || 0), 0) / 1e6));
+    $("starterlabel").textContent = `Starter set (${starter.length} tracks, about ${mb} MB)`;
+  }
+  const useStarter = popularStarter();
+  for (const i of $("popularkinds").querySelectorAll("input")) i.disabled = useStarter;
+  const wanted = useStarter ? starter : popular;
+  const gotWanted = wanted.filter(isIn).length;
+  $("popularget").hidden = gotWanted === wanted.length;
+  $("popularget").textContent = useStarter ? (gotWanted ? `Add the other ${wanted.length - gotWanted}` : `Add the starter set`) : got ? `Add the other ${popular.length - got}` : `Add them`;
   $("popularremove").hidden = !got;
   if (!$("popularstatus").dataset.busy) $("popularstatus").textContent = got ? `${got} of ${popular.length} added.` : "";
   const list = $("popularlist");
@@ -1441,6 +1463,15 @@ async function showPopular() {
     for (const t of popular.filter((t) => t.event === event)) {
       const li = document.createElement("li");
       li.textContent = `${isIn(t) ? "✓ " : ""}${t.name} (${label}) · ${t.author ? "by " + t.author : "maker not named"}`;
+      if (t.picture) {
+        // Fetched only once shown (it's hidden until then).
+        const img = document.createElement("img");
+        img.loading = "lazy";
+        img.alt = t.name;
+        img.src = PACK_URL + "trackpack/" + t.picture;
+        li.tabIndex = 0;
+        li.append(img);
+      }
       list.append(li);
     }
   }
@@ -1460,7 +1491,8 @@ $("tracksbox").addEventListener("toggle", (e) => e.target.open && loadPopular())
 $("popularget").addEventListener("click", async () => {
   const want = new Set([...$("popularkinds").querySelectorAll("input:checked")].map((i) => i.value));
   const have = await popularHave();
-  const todo = popular.filter((t) => want.has(t.event) && !t.envs.every((e) => have.has(popularKey(t, e))));
+  const pick = popularStarter() ? (t) => t.starter : (t) => want.has(t.event);
+  const todo = popular.filter((t) => pick(t) && !t.envs.every((e) => have.has(popularKey(t, e))));
   const status = $("popularstatus");
   status.dataset.busy = "1";
   $("popularget").disabled = true;

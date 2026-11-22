@@ -72,6 +72,8 @@ pub struct Track {
     pub laps: u32,
     /// The download's size in bytes, when the list says.
     pub size: u64,
+    /// In the small starter set (the popular tracks).
+    pub starter: bool,
 }
 
 impl Track {
@@ -133,10 +135,33 @@ pub(crate) fn parse_popular(text: &str, from: &str) -> Result<Vec<Track>, String
                 sha256: Some(s(t, "sha256")).filter(|h| !h.is_empty()),
                 laps: t.get("laps").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                 size: t.get("size").and_then(|v| v.as_u64()).unwrap_or(0),
+                starter: t.get("starter").and_then(|v| v.as_bool()).unwrap_or(false),
             })
         })
         .filter(|t| !t.url.is_empty() && !t.name.is_empty())
         .collect())
+}
+
+/// A popular track's picture (a PNG), ready to show; `None` when it
+/// can't be had.
+pub fn picture(url: &str) -> Option<eframe::egui::ColorImage> {
+    let bytes = retry(
+        || {
+            agent()
+                .get(url)
+                .call()
+                .map_err(|e| e.to_string())?
+                .body_mut()
+                .with_config()
+                .limit(8 << 20)
+                .read_to_vec()
+                .map_err(|e| e.to_string())
+        },
+        &AtomicBool::new(false),
+    )
+    .ok()?;
+    let png = eframe::icon_data::from_png_bytes(&bytes).ok()?;
+    Some(eframe::egui::ColorImage::from_rgba_unmultiplied([png.width as usize, png.height as usize], &png.rgba))
 }
 
 #[derive(Clone, Debug, Default)]
@@ -243,6 +268,7 @@ fn parse_mdx(site: &Site, html: &str) -> Listing {
             mirror: None,
             sha256: None,
             laps: 0,
+            starter: false,
             size: 0,
         });
     }
@@ -533,7 +559,7 @@ mod tests {
     fn reads_the_popular_list() {
         let text = r#"{"format":1,"tracks":[
             {"name":"Cobble Hill","author":"TTM_KEVSTER","event":"NATIONAL","mdx":"https://mdxracing.com/mcm2/Tracks/National_Tracks/Cobble%20Hill.zip",
-             "file":"files/ab.zip","sha256":"ab","laps":190,"picture":"pictures/ab.jpg"},
+             "file":"files/ab.zip","sha256":"ab","laps":190,"starter":true,"picture":"pictures/ab.jpg"},
             {"name":"Odd","event":"TAG","mdx":"https://x/y.zip"},
             {"name":"Sand","author":"","event":"baja","mdx":"https://x/s.zip"}]}"#;
         let l = parse_popular(text, "https://example.com/trackpack/index.json").unwrap();
@@ -541,7 +567,7 @@ mod tests {
         assert_eq!(l[0].folder, "NATIONAL");
         assert_eq!(l[0].mirror.as_deref(), Some("https://example.com/trackpack/files/ab.zip"));
         assert_eq!(l[0].picture.as_deref(), Some("https://example.com/trackpack/pictures/ab.jpg"));
-        assert_eq!((l[0].laps, l[0].sha256.as_deref()), (190, Some("ab")));
+        assert_eq!((l[0].laps, l[0].sha256.as_deref(), l[0].starter), (190, Some("ab"), true));
         assert_eq!((l[1].folder, l[1].mirror.as_deref()), ("BAJA", None));
     }
 
@@ -550,7 +576,7 @@ mod tests {
         let home = std::env::temp_dir().join(format!("mm2-tracks-pack-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(&home).unwrap();
-        let track = Track { name: "x".into(), author: String::new(), url: "u".into(), picture: None, folder: "SX", mirror: None, sha256: None, laps: 0, size: 0 };
+        let track = Track { name: "x".into(), author: String::new(), url: "u".into(), picture: None, folder: "SX", mirror: None, sha256: None, laps: 0, size: 0, starter: false };
         let files = install(&zip_of(&[("t.env", b"track")]), &track, &home).unwrap();
         assert_eq!(files, ["TERAFORM/SX/t.env"]);
         let _ = std::fs::remove_dir_all(&home);
@@ -571,7 +597,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&game);
         std::fs::create_dir_all(game.join("TERAFORM/ENDURO")).unwrap();
         std::fs::write(game.join("TERAFORM/ENDURO/FARM.env"), b"stock").unwrap();
-        let track = |folder| Track { name: "x".into(), author: String::new(), url: "u".into(), picture: None, folder, mirror: None, sha256: None, laps: 0, size: 0 };
+        let track = |folder| Track { name: "x".into(), author: String::new(), url: "u".into(), picture: None, folder, mirror: None, sha256: None, laps: 0, size: 0, starter: false };
         let files = install(&zip_of(&[("readme.txt", b"hi"), ("sub/ar.env", b"track")]), &track("NATIONAL"), &game).unwrap();
         assert_eq!(files, ["TERAFORM/NATIONAL/ar.env"]);
         assert_eq!(std::fs::read(game.join("TERAFORM/NATIONAL/ar.env")).unwrap(), b"track");
@@ -593,6 +619,9 @@ mod tests {
     fn live_popular() {
         let list = popular().unwrap();
         println!("{} popular tracks", list.len());
+        assert!(list.iter().all(|t| t.picture.is_some()), "every one has a picture");
+        let p = picture(list[0].picture.as_deref().unwrap()).expect("its picture is a PNG");
+        println!("picture {:?}", p.size);
         let homes: Vec<PathBuf> = (0..2).map(|i| std::env::temp_dir().join(format!("mm2-popular-{i}-{}", std::process::id()))).collect();
         for h in &homes {
             std::fs::create_dir_all(h).unwrap();
