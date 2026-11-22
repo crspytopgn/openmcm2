@@ -98,6 +98,13 @@
   button.ghost { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost:hover { border-color: var(--accent); }
   [hidden] { display: none !important; }
+  /* The playtime card by Play, as the launcher's Play page has it. */
+  .playtime { margin: 1rem 0 0; padding: .7rem .9rem; border: 1px solid #34322c; border-radius: 10px; background: #1a1917; }
+  .playtime h3 { margin: 0 0 .3rem; font-size: .95rem; letter-spacing: .03em; text-transform: uppercase; }
+  .playtime p { margin: .2rem 0; }
+  .playtime p.mine { color: var(--fg); }
+  .playtime .grid { margin: .4rem 0; gap: .2rem .8rem; }
+  .playtime .grid b { color: var(--fg); font-weight: 600; }
 
   /* The loading screen: what the page is doing at each step, and a plain
      answer when something goes wrong. */
@@ -234,6 +241,13 @@
       <button id="playfree" title="Starts with the Free Pack, fetching any update first.">Play</button>
       <button id="forgetpack" class="plain" title="Forgets the Free Pack this browser kept.">Use another Free Pack</button>
     </div>
+  </div>
+  <div id="playtime" class="playtime" hidden
+    title="How long you've played in this browser, and everyone's time added up on the OpenMCM2 server. Unless you tick &quot;Don't add my time to everyone's&quot; in Settings and extras, how long you play each event, track and bike class is added to everyone's, with no name or anything else that says who you are.">
+    <h3>Playtime</h3>
+    <p id="ptmine" class="mine"></p>
+    <div id="pttop" class="grid"></div>
+    <p id="ptall" class="hint"></p>
   </div>
   <div class="builderrow">
     <button type="button" id="openbuilder" class="ghost"
@@ -1884,6 +1898,73 @@ async function useDemo(file) {
   go(list, false);
 }
 $("getdemo").addEventListener("click", () => useDemo());
+
+// The playtime card (the launcher's Playtime card): the time played in
+// this browser, which the game keeps among the saves as /user/playtime.txt
+// (mm2_settings::playtime), and everyone's from the server.
+const PLAYTIME_URL = "https://openmcm2-laps.openmcm2-laps.workers.dev/playtime";
+function parseTimes(text) {
+  const t = {};
+  for (const line of (text || "").split("\n")) {
+    const [k, v] = line.split("\t");
+    const n = Number.parseInt(v, 10);
+    if (k && Number.isFinite(n)) t[k.trim()] = n;
+  }
+  return t;
+}
+// As a person reads it: 3 h 12 min, 12 min, 40 s (mm2_settings::playtime::shown).
+function shownTime(seconds) {
+  const h = Math.floor(seconds / 3600), m = Math.floor(seconds / 60) % 60;
+  return h ? `${h} h ${m} min` : m ? `${m} min` : `${seconds} s`;
+}
+const PT_EVENTS = ["Stunt Quarry", "Baja", "Nationals", "Supercross", "Moto-Tag", "Enduro"];
+async function showPlaytime() {
+  const card = $("playtime");
+  const bytes = await fs.userFile("/user/playtime.txt").catch(() => null);
+  const mine = parseTimes(bytes ? new TextDecoder().decode(bytes) : "");
+  const get = (k) => mine[k] || 0;
+  $("pttop").replaceChildren();
+  if (!get("total")) {
+    $("ptmine").textContent = "Nothing yet. The time you play goes here.";
+  } else {
+    const count = get("count");
+    $("ptmine").textContent =
+      `${shownTime(get("total"))} played, ${shownTime(get("races"))} of it racing in ${count} race${count === 1 ? "" : "s"}.`;
+    const kinds = [
+      ["Events", "event:", (k) => PT_EVENTS[Number(k)] || "Race"],
+      ["Tracks", "track:", (k) => k],
+      ["Bikes", "bike:", (k) => `${k}cc`],
+    ];
+    for (const [label, prefix, name] of kinds) {
+      const top = Object.entries(mine)
+        .filter(([k]) => k.startsWith(prefix))
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([k, v]) => `${name(k.slice(prefix.length))} ${shownTime(v)}`)
+        .join(", ");
+      if (!top) continue;
+      const b = document.createElement("b");
+      b.textContent = label;
+      const span = document.createElement("span");
+      span.textContent = top;
+      $("pttop").append(b, span);
+    }
+  }
+  card.hidden = false;
+  try {
+    const r = await fetch(PLAYTIME_URL, { cache: "no-store" });
+    if (!r.ok) return;
+    const all = parseTimes(await r.text());
+    const n = all.players || 0;
+    if (all.total > 0) {
+      $("ptall").textContent =
+        `Everyone: ${shownTime(all.total)} played by ${n} player${n === 1 ? "" : "s"}, in ${all.count || 0} races.`;
+    }
+  } catch (e) {
+    console.warn("everyone's playtime not fetched", e);
+  }
+}
+showPlaytime();
 
 let kept = await fs.keptGame().catch(() => null);
 const keptFile = kept?.find(([path]) => path === "/file");

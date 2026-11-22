@@ -164,6 +164,14 @@ export async function userFiles(prefix) {
   return keys.filter((k) => k.toLowerCase().startsWith(prefix.toLowerCase()));
 }
 
+/// One saved file's bytes, read from the saves without loading them all
+/// (the start page's playtime card), or null.
+export async function userFile(path) {
+  await open();
+  const v = await request(store("user", "readonly").get(norm(path)));
+  return v ? new Uint8Array(v) : null;
+}
+
 /// Keeps a file among the saves, before or while the game runs.
 export async function keepUser(path, data) {
   await open();
