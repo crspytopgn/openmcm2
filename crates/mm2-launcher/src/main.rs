@@ -296,6 +296,52 @@ struct Tracks {
     queued: usize,
     /// Where tracks go: the game folder and the Free Pack's, as set up.
     homes: Vec<std::path::PathBuf>,
+    /// The popular tracks' pictures by address, fetched the first time
+    /// the mouse rests on a track, then kept.
+    pictures: std::collections::HashMap<String, Picture>,
+}
+
+/// A track's picture: on its way, there, or not to be had.
+enum Picture {
+    Loading(Arc<Mutex<Option<Option<egui::ColorImage>>>>),
+    Ready(egui::TextureHandle),
+    Missing,
+}
+
+/// The picture at `url` for a hover: a spinner until it has come.
+fn track_picture(ui: &mut egui::Ui, pictures: &mut std::collections::HashMap<String, Picture>, url: &str) {
+    let p = pictures.entry(url.to_string()).or_insert_with(|| {
+        let slot = Arc::new(Mutex::new(None));
+        let s = slot.clone();
+        let u = url.to_string();
+        std::thread::spawn(move || *s.lock().unwrap() = Some(tracks::picture(&u)));
+        Picture::Loading(slot)
+    });
+    if let Picture::Loading(slot) = p {
+        let got = slot.lock().unwrap().take();
+        match got {
+            Some(Some(image)) => *p = Picture::Ready(ui.ctx().load_texture(url, image, egui::TextureOptions::LINEAR)),
+            Some(None) => *p = Picture::Missing,
+            None => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Getting its picture…");
+                });
+                ui.ctx().request_repaint_after(Duration::from_millis(100));
+                return;
+            }
+        }
+    }
+    match p {
+        Picture::Ready(t) => {
+            let size = t.size_vec2();
+            let scale = (360.0 / size.x).min(1.0);
+            ui.add(egui::Image::new(&*t).fit_to_exact_size(size * scale));
+        }
+        _ => {
+            ui.label("No picture.");
+        }
+    }
 }
 
 /// How many tracks download at once from "Get them all".
@@ -2242,7 +2288,7 @@ fn popular_card(ui: &mut egui::Ui, t: &mut Tracks, game: &std::path::Path, remov
         if failed > 0 && !working {
             look::status(ui, false, &format!("{failed} couldn't be added. Try again later."));
         }
-        egui::CollapsingHeader::new("Who made them").id_salt("popular-list").show(ui, |ui| {
+        egui::CollapsingHeader::new("Who made them (rest the mouse on one to see it)").id_salt("popular-list").show(ui, |ui| {
             for k in kinds {
                 let of: Vec<&tracks::Track> = list.iter().filter(|x| x.folder == k.folder).collect();
                 if of.is_empty() {
@@ -2252,7 +2298,10 @@ fn popular_card(ui: &mut egui::Ui, t: &mut Tracks, game: &std::path::Path, remov
                 for x in of {
                     let by = if x.author.is_empty() { String::from("maker not named") } else { format!("by {}", x.author) };
                     let mark = if t.added.has(game, &x.url) { "✓ " } else { "" };
-                    ui.label(look::weak(format!("{mark}{} · {by}", x.name)));
+                    let row = ui.label(look::weak(format!("{mark}{} · {by}", x.name)));
+                    if let Some(url) = &x.picture {
+                        row.on_hover_ui(|ui| track_picture(ui, &mut t.pictures, url));
+                    }
                 }
                 ui.add_space(4.0);
             }
@@ -2353,6 +2402,39 @@ fn preset_text(q: Quality) -> String {
 #[cfg(test)]
 mod shots {
     use super::*;
+
+    /// The popular tracks' list with the mouse resting on one, from the
+    /// list at `MM2_TRACKPACK_URL`, drawn into `MM2_SHOTS`.
+    #[test]
+    #[ignore]
+    fn popular_hover_shot() {
+        use egui_kittest::kittest::Queryable;
+        let dir = std::env::var("MM2_SHOTS").expect("MM2_SHOTS: where to draw it");
+        let mut s = Settings::default();
+        s.game = Some("C:/Games/Motocross Madness 2/GAME".into());
+        let mut l = Launcher::with(s, Err("built from source".into()));
+        l.page = Page::Tracks;
+        l.tracks.error = Some("(not fetched in this picture)".into());
+        l.tracks.popular = Some(tracks::popular().expect("the list"));
+        let (width, height) = (1200.0, 1100.0);
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([width + 16.0, height + 16.0])
+            .with_theme(egui::Theme::Light)
+            .with_context_setup(|ctx| look::apply(ctx))
+            .build_ui_state(|ui, l: &mut Launcher| l.draw(ui), l);
+        h.step();
+        h.get_by_label_contains("Who made them").click();
+        h.step();
+        h.step();
+        h.get_by_label_contains("Hawaiian Punch").hover();
+        for _ in 0..100 {
+            h.step();
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let image = h.render().expect("render");
+        let image = image::imageops::crop_imm(&image, 8, 8, width as u32, height as u32).to_image();
+        image.save(format!("{dir}/tracks_hover.png")).expect("save");
+    }
 
     /// Draws each page into the folder `MM2_SHOTS`, to look at:
     /// `MM2_SHOTS=dir cargo test -p mm2-launcher shots -- --ignored`.

@@ -119,9 +119,9 @@
    "author": "XPR_TECH",
    "event": "NATIONAL",
    "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/BellsEnd.zip",
-   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/BellsEns.jpg",
    "laps": 105,
-   "sha256": "524401f39335e6054dfd7a0d9a759bc4ef80a6ad656738b3784c22c3d266b555"
+   "sha256": "524401f39335e6054dfd7a0d9a759bc4ef80a6ad656738b3784c22c3d266b555",
+   "picture_file": "pictures/bellsend.jpg"
   },
   {
    "name": "Trapper",

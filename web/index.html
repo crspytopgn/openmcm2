@@ -97,6 +97,11 @@
   label.plainbutton { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost:hover { border-color: var(--accent); }
+  /* A popular track's picture, while the mouse rests on it (or it's tapped). */
+  #popularlist li { position: relative; cursor: default; }
+  #popularlist li img { display: none; position: absolute; left: 0; top: 100%; z-index: 5; width: min(360px, 80vw);
+    border: 1px solid #55524a; border-radius: 6px; background: #000; }
+  #popularlist li:hover img, #popularlist li:focus img { display: block; }
   [hidden] { display: none !important; }
 
   /* The loading screen: what the page is doing at each step, and a plain
@@ -260,7 +265,7 @@
       <button type="button" class="ghost" id="popularremove" hidden title="Takes the popular tracks out of this browser again.">Remove them</button>
       <p id="popularstatus" class="hint"></p>
       <details>
-        <summary>Who made them</summary>
+        <summary>Who made them (rest the mouse on one to see it)</summary>
         <ul id="popularlist"></ul>
       </details>
     </fieldset>
@@ -1327,6 +1332,15 @@ async function showPopular() {
     for (const t of popular.filter((t) => t.event === event)) {
       const li = document.createElement("li");
       li.textContent = `${isIn(t) ? "✓ " : ""}${t.name} (${label}) · ${t.author ? "by " + t.author : "maker not named"}`;
+      if (t.picture) {
+        // Fetched only once shown (it's hidden until then).
+        const img = document.createElement("img");
+        img.loading = "lazy";
+        img.alt = t.name;
+        img.src = PACK_URL + "trackpack/" + t.picture;
+        li.tabIndex = 0;
+        li.append(img);
+      }
       list.append(li);
     }
   }

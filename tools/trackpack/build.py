@@ -7,7 +7,7 @@ Downloads each track's zip (and picture) from MDX Racing and writes:
 
 - out/trackpack/index.json: the list the launcher and browser read
 - out/trackpack/files/<sha256>.zip: our copy of each download, unchanged
-- out/trackpack/pictures/<sha256>.<jpg|gif>: its picture, when MDX has one
+- out/trackpack/pictures/<sha256>.png: its picture (MDX's, or `picture_file`)
 - out/trackpack/CREDITS.md: who made each track
 
 Then upload out/trackpack to the R2 bucket under trackpack/ (files and
@@ -23,6 +23,8 @@ import time
 import urllib.parse
 import urllib.request
 import zipfile
+
+from PIL import Image  # pip install pillow
 
 AGENT = "OpenMCM2-trackpack/1"
 
@@ -63,13 +65,23 @@ def main(listing, out):
         open(os.path.join(root, "files", sha + ".zip"), "wb").write(data)
         entry = {k: t[k] for k in ("name", "author", "event", "mdx", "laps") if k in t}
         entry.update(file=f"files/{sha}.zip", sha256=sha, size=len(data), envs=envs)
-        if t.get("picture_url"):
+        # Its picture, as a PNG (the launcher reads PNGs): MDX's own, or
+        # one of ours beside tracks.json for a track MDX has none for.
+        picture = None
+        if t.get("picture_file"):
+            picture = open(os.path.join(os.path.dirname(listing), t["picture_file"]), "rb").read()
+        elif t.get("picture_url"):
             try:
-                ext = os.path.splitext(t["picture_url"])[1].lower() or ".jpg"
-                open(os.path.join(root, "pictures", sha + ext), "wb").write(get(quote(t["picture_url"]), 2))
-                entry["picture"] = f"pictures/{sha}{ext}"
+                picture = get(quote(t["picture_url"]), 2)
             except RuntimeError as e:
                 print("no picture:", e)
+        if picture:
+            im = Image.open(io.BytesIO(picture)).convert("RGB")
+            im.thumbnail((480, 240))
+            im.save(os.path.join(root, "pictures", sha + ".png"), optimize=True)
+            entry["picture"] = f"pictures/{sha}.png"
+        else:
+            sys.exit(f"{t['name']}: no picture")
         index.append(entry)
         print(f"{t['event']:9} {t['name']} ({len(data) >> 10} KB)")
     json.dump({"format": 1, "version": time.strftime("%Y.%m.%d"), "tracks": index}, open(os.path.join(root, "index.json"), "w"), indent=1)

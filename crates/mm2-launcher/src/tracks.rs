@@ -139,6 +139,28 @@ pub(crate) fn parse_popular(text: &str, from: &str) -> Result<Vec<Track>, String
         .collect())
 }
 
+/// A popular track's picture (a PNG), ready to show; `None` when it
+/// can't be had.
+pub fn picture(url: &str) -> Option<eframe::egui::ColorImage> {
+    let bytes = retry(
+        || {
+            agent()
+                .get(url)
+                .call()
+                .map_err(|e| e.to_string())?
+                .body_mut()
+                .with_config()
+                .limit(8 << 20)
+                .read_to_vec()
+                .map_err(|e| e.to_string())
+        },
+        &AtomicBool::new(false),
+    )
+    .ok()?;
+    let png = eframe::icon_data::from_png_bytes(&bytes).ok()?;
+    Some(eframe::egui::ColorImage::from_rgba_unmultiplied([png.width as usize, png.height as usize], &png.rgba))
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Listing {
     pub tracks: Vec<Track>,
@@ -593,6 +615,9 @@ mod tests {
     fn live_popular() {
         let list = popular().unwrap();
         println!("{} popular tracks", list.len());
+        assert!(list.iter().all(|t| t.picture.is_some()), "every one has a picture");
+        let p = picture(list[0].picture.as_deref().unwrap()).expect("its picture is a PNG");
+        println!("picture {:?}", p.size);
         let homes: Vec<PathBuf> = (0..2).map(|i| std::env::temp_dir().join(format!("mm2-popular-{i}-{}", std::process::id()))).collect();
         for h in &homes {
             std::fs::create_dir_all(h).unwrap();
