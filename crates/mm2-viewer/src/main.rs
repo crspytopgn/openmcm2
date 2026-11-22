@@ -2049,12 +2049,14 @@ fn load_track(
     // A course with no start line starts at its last gate, the finish
     // arch: the original's lone rider stands 7.96 ft through it and
     // 0.78 ft right of its middle (all six Baja and Enduro tapes).
-    if random_course || course.as_ref().is_some_and(|c| c.start.is_none()) {
+    // So does one made of gates alone.
+    let gates_only = course.is_none() && !gate_list.is_empty();
+    if random_course || gates_only || course.as_ref().is_some_and(|c| c.start.is_none()) {
         if let Some(last) = gate_list.last() {
             start = Start {
                 position: Vec3::new(
                     last.position.x,
-                    if random_course { ride::ground(&terrain, last.position.x, last.position.z) } else { start.position.y },
+                    if random_course || gates_only { ride::ground(&terrain, last.position.x, last.position.z) } else { start.position.y },
                     last.position.z,
                 ),
                 direction: last.look,
@@ -2800,7 +2802,13 @@ fn race_start(
         .collect();
     defs.sort_by_key(|e| e.name.to_ascii_lowercase());
     let def = defs.get(which).or(defs.first());
-    let stem = def.map(|e| e.name[..e.name.len() - 4].to_string());
+    // A Baja or Enduro track made with only its gates (`.wpt`, no `.tdf`,
+    // as many players' tracks are): the course is its gates alone.
+    let mut gates: Vec<_> = archive.entries().iter().filter(|e| e.name.to_ascii_lowercase().ends_with(".wpt")).collect();
+    gates.sort_by_key(|e| e.name.to_ascii_lowercase());
+    let stem = def
+        .or_else(|| gates.get(which).or(gates.first()))
+        .map(|e| e.name[..e.name.len() - 4].to_string());
     let course = def.and_then(|e| {
         tdf::parse(archive.data(e))
             .map_err(|err| eprintln!("{}: {err}", e.name))

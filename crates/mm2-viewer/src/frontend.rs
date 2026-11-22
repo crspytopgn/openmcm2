@@ -2201,11 +2201,10 @@ pub fn list_tracks(folder: &Path, event: EventKind) -> Vec<TrackEntry> {
             .unwrap_or(&stem)
             .to_string();
         if event.courses() {
-            let courses = ar
-                .entries()
-                .iter()
-                .filter(|e| e.name.to_ascii_lowercase().ends_with(".tdf"))
-                .count();
+            // Each course has its `.tdf`, or (many players' tracks) only
+            // its gates' `.wpt`.
+            let count = |ext: &str| ar.entries().iter().filter(|e| e.name.to_ascii_lowercase().ends_with(ext)).count();
+            let courses = count(".tdf").max(count(".wpt"));
             for c in 0..courses {
                 let course = info
                     .and_then(|s| s.get(&format!("WaypointRaceName{}", c + 1)))

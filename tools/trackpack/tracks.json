@@ -1,0 +1,656 @@
+{
+ "about": "The popular tracks pack: the most raced Nationals and Supercross tracks on MDX Racing (by lap times posted to its hot-lap records, Nov 2026), and every players' Baja and Enduro map it hosts. Each belongs to the player who made it. Build with build.py.",
+ "tracks": [
+  {
+   "name": "Cobble Hill",
+   "author": "TTM_KEVSTER",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/./Cobble%20Hill.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/./Cobble%20Hill.jpg",
+   "laps": 190,
+   "sha256": "1d968806ddbfe92b35466b238003dbcde04ec80ccccf3d4a7cca150bb2c752b9"
+  },
+  {
+   "name": "Sucker Punch",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Sucker%20Punch.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Sucker%20Punch.jpg",
+   "laps": 186,
+   "sha256": "676d161e93708656c2ef0a679aabc8f2da115051d2627dd1cbecbf0cb670bf95"
+  },
+  {
+   "name": "Lakeside Motocross Park",
+   "author": "aus",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Lakeside%20Motocross%20Park.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Lakeside_Motocross_Park_jpgba089.jpg",
+   "laps": 178,
+   "sha256": "cefa8c4162f92985c11543144ee18d93d213192e977bd08fd63a38893b7c2fce"
+  },
+  {
+   "name": "Hawaiian Punch",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Hawaiian%20Punch.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Hawaiian%20Punch.jpg",
+   "laps": 164,
+   "sha256": "43a4deaaee40dab22a2eca423c32a4b26a5a53e6edf8224d69b3275c4f83f79a"
+  },
+  {
+   "name": "Blackmore Vale",
+   "author": "XPR_TECH",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Blackmore_Vale.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Blackmore_Vale.jpg",
+   "laps": 120,
+   "sha256": "daa5fa38ad2907b6e666fcc61ce622d8fc6bbcd9da3ccabb5c665550b8ea6c4c"
+  },
+  {
+   "name": "AfterDark",
+   "author": "XPR_TECH",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/AfterDark.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/AfterDark.jpg",
+   "laps": 120,
+   "sha256": "9217c32607ddc1a7c8514f4dba6df5a17a6acebd2035943741bd831182f65988"
+  },
+  {
+   "name": "Idsworth Farm",
+   "author": "XPR_TECH",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Idsworth%20Farm.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Idsworth%20Farm.jpg",
+   "laps": 115,
+   "sha256": "6b47183a01d231b5de3f493a132fc7057b6d2df022915af9ee1c868db23295ea"
+  },
+  {
+   "name": "Ashliegh FarmLT",
+   "author": "XPR_TECH",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Ashliegh_FarmLT.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Asliegh%20FarmLT.jpg",
+   "laps": 115,
+   "sha256": "1a1d03081d4823a5d8bef220f2b4f1169edc59c164ea598ae1a5f1848b2f9ef9"
+  },
+  {
+   "name": "Slingshot",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Slingshot.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Slingshot.jpg",
+   "laps": 113,
+   "sha256": "a39bf7b1b9bb5dcff3a4252dff04125076e791121ff489bc50aee2425e2a3e8b"
+  },
+  {
+   "name": "ELIMINATOR",
+   "author": "6FU",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/./ELIMINATOR.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/./ELIMINATOR.jpg",
+   "laps": 111,
+   "sha256": "07b5651fedc5ea03b2ac183a94ec9a43eacb0696a654f9b80dc24f00b09bf687"
+  },
+  {
+   "name": "Ponca City 2016",
+   "author": "MDx_Wayne",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Ponca%20City%202016.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Ponca%20City%202016.jpg",
+   "laps": 110,
+   "sha256": "71500249372a1ee182fe9e1c381b2592e2fd42ef0184516fdcc8d4acb4eb60be"
+  },
+  {
+   "name": "VirginRun",
+   "author": "MUD Drifter",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/VirginRun.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/VirginRun.jpg",
+   "laps": 109,
+   "sha256": "0574043c2cf6f0b65c5bb82a4b93415bc9eda77b2cdc1d8c6a228d005ce61365"
+  },
+  {
+   "name": "MULLET Madness",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/MULLET_Madness.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/MULLET_Madness.jpg",
+   "laps": 107,
+   "sha256": "ecdcdd6641ff8ddb0ba88092495a70fec005b46c56c0077c67e73ad0e4132477"
+  },
+  {
+   "name": "BellsEnd",
+   "author": "XPR_TECH",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/BellsEnd.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/BellsEns.jpg",
+   "laps": 105,
+   "sha256": "524401f39335e6054dfd7a0d9a759bc4ef80a6ad656738b3784c22c3d266b555"
+  },
+  {
+   "name": "Trapper",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Trapper.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Trapper.jpg",
+   "laps": 104,
+   "sha256": "69fbbe3113e6fce4efa09ff6a6f706e3a8ae51c6159b9da77fc988818d621443"
+  },
+  {
+   "name": "Cullum Hills",
+   "author": "XPR_TECH",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Cullum_Hills.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Cullum%20Hills%20Pic.jpg",
+   "laps": 104,
+   "sha256": "e5e2bed5752c13ceb233e203c3de81783cd400337b46907a55a42e0e48c7eb18"
+  },
+  {
+   "name": "Big Sur",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Big%20Sur.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Big%20Sur.jpg",
+   "laps": 102,
+   "sha256": "5073d41f5ce94c8dc45ac6d7bff06f58db06bbcacc8b06ba03ba0d59f2711d05"
+  },
+  {
+   "name": "The Knutz",
+   "author": "XPR_TECH",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/The_Knutz.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/The%20Knutz.jpg",
+   "laps": 102,
+   "sha256": "9175431dcfde74c91540be2f52e1d8b388326e9733e99644b881adccaf1b92d7"
+  },
+  {
+   "name": "MXU National01: Seneca Butte",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/MXU%20National01%3A%20Seneca%20Butte.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/MXU%20National01%3A%20Seneca%20Butte.jpg",
+   "laps": 100,
+   "sha256": "bbbeb43e9ddd15ff92eb920205b837c440c7caaa38d91ea999cb35edefa94dff"
+  },
+  {
+   "name": "Slo Rider",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Slo%20Rider.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Slo%20Rider.jpg",
+   "laps": 96,
+   "sha256": "21297c7842351a2dc205f01d0217b27e74c4330fb4dfbfe1e1a51264649d6263"
+  },
+  {
+   "name": "Lucky Strike",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Lucky%20Strike.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Lucky%20Strike.jpg",
+   "laps": 92,
+   "sha256": "35591c74daeea876bb030a3048d2982391b29b5d8568f02177f48b361e576a86"
+  },
+  {
+   "name": "In the Fall",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/In%20the%20Fall.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/In%20the%20Fall.jpg",
+   "laps": 91,
+   "sha256": "36bd135721978b12badfc6dff8b508ce439290ae09cd960befe5eff20df63faa"
+  },
+  {
+   "name": "wild hills",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/wild_hills.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/wild_hills.jpg",
+   "laps": 91,
+   "sha256": "3dc51b16fd790f989f01e97b5d5b16cf19c44461a95986c97bea41372e276e2d"
+  },
+  {
+   "name": "MotorPark",
+   "author": "XPR_TECH",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/MotorPark.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/MotorPark.jpg",
+   "laps": 91,
+   "sha256": "fba52dcfec937ea879868648f7010665816fa1cc92c777c3b035282950e473b1"
+  },
+  {
+   "name": "Bulford Down",
+   "author": "XPR_TECH",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Bulford_Down.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Bulford%20Down.jpg",
+   "laps": 90,
+   "sha256": "52d431ddd32cf30c416cf9c3b25ed1e8faba072fdd3092ac0be1a08e13c0ea5b"
+  },
+  {
+   "name": "Midgem",
+   "author": "XPR_TECH",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Midgem.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Midgem.jpg",
+   "laps": 89,
+   "sha256": "eee2b285436ebe067b19181f4c5614cf0bf91262b6cf6b35eb64124f0fd3d29f"
+  },
+  {
+   "name": "centerpunch",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/centerpunch.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/centerpunch.jpg",
+   "laps": 88,
+   "sha256": "61c9c5c37f256d438a40ca82b633649b2008236b2a6782452b2b063066529b13"
+  },
+  {
+   "name": "Orange County",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Orange%20County.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Orange%20County.jpg",
+   "laps": 84,
+   "sha256": "e6fc63c756a9fd8173ff0e4ef7d016ae1d9b2ad4e49bf7ce268eaf90a7d6755f"
+  },
+  {
+   "name": "Side Job",
+   "author": "MDx_Wayne",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Side%20Job.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/Side%20Job.jpg",
+   "laps": 84,
+   "sha256": "fbe897d2299dbe8bdb48d3f3d800185b9ffca9dcbb3826fc83754124472fd988"
+  },
+  {
+   "name": "shock",
+   "event": "NATIONAL",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/National_Tracks/shock.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/National_Tracks/shock.jpg",
+   "laps": 83,
+   "sha256": "3cc93aded841a85155eeca86262a098184793821c659b425f2a59c801ddccd07"
+  },
+  {
+   "name": "Portsmouth Arena",
+   "author": "XPR_TECH",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/%20Portsmouth%20Arena.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/%20Portsmouth%20Arena.jpg",
+   "laps": 114,
+   "sha256": "0730eb0cf3945736a2b10647ce741bd550e878d3a41b918563e8dc189e58d97c"
+  },
+  {
+   "name": "Projectile 2",
+   "author": "XPR_TECH",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Projectile%202.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Projectile%202.jpg",
+   "laps": 100,
+   "sha256": "d50f0cd3f2f3960f0a3365592404265b44fc116a1abf3bb427b41f4ba5ec1eae"
+  },
+  {
+   "name": "DIZ_Round6Indianapolis",
+   "author": "DIZ No Rebase",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/DIZ_Round6Indianapolis.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/DIZ_Round6Indianapolis.jpg",
+   "laps": 80,
+   "sha256": "d9474748cc6a7f2c9f1805346899fde4fdb192735d2ee2c443b5d2d8cf0d7982"
+  },
+  {
+   "name": "Countryside Park SX",
+   "author": "MDx_Chris774",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./Countryside%20Park%20SX.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./Countryside%20Park%20SX.jpg",
+   "laps": 62,
+   "sha256": "5312c77fa41204776f210094cbb0edf62fe58489472eb23037e5cae5febc5072"
+  },
+  {
+   "name": "Primetime Park",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Primetime_Park.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Primetime_Park.jpeg",
+   "laps": 56,
+   "sha256": "51977d266125d0b86c67a1fc3481270020c23b1f6f0b287580b6c00af6563f0f"
+  },
+  {
+   "name": "SuiXycle",
+   "author": "MUDFUGGAS",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/SuiXycle.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/SuiXycle.jpg",
+   "laps": 46,
+   "sha256": "4894d92cd0c103308afa9bbf9f0f95a8623332dd5b88d2b6c306b5d590ba2623"
+  },
+  {
+   "name": "2000USOpenSX",
+   "author": "DIZ No Rebase",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/2000USOpenSX.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/2000USOpenSX.jpg",
+   "laps": 43,
+   "sha256": "7249e10413f44269d37d8f9f162cf2541b4f117b1e690faa1d06479a4c1e5c55"
+  },
+  {
+   "name": "High Definition Series - Carpal Tunnel SX",
+   "author": "VRT MCMnut",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/High%20Definition%20Series%20-%20Carpal%20Tunnel%20SX.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/High%20Definition%20Series%20-%20Carpal%20Tunnel%20SX.jpg",
+   "laps": 42,
+   "sha256": "9f3998553077fd05c27742512c45a75ab357070bae3470cc5b50f7460bd79fea"
+  },
+  {
+   "name": "Crucial SX",
+   "author": "XPR_TECH",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Crucial%20SX.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Crucial%20SX.jpg",
+   "laps": 42,
+   "sha256": "281314d99e336890d9304fc03c0e7ea5f44d0b8ed1937335bfbc0200693e6599"
+  },
+  {
+   "name": "Formula SX Round 4",
+   "author": "RXR_FormulaDirt",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./~3Formula%20~5SX%20~4Round%204.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./~3Formula%20~5SX%20~4Round%204.jpg",
+   "laps": 42,
+   "sha256": "daf32694d1d2096742679a1cef9203f61f8907aebbd7f996f11550c564507786"
+  },
+  {
+   "name": "After Midnight",
+   "author": "MDx_Wayne",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./After%20Midnight.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./After%20Midnight.jpg",
+   "laps": 42,
+   "sha256": "048472063a835c028132cdf20fbe8726dcd0b50b9deebf16d8db7d06cfb6eb1a"
+  },
+  {
+   "name": "TECHSX16",
+   "author": "XPR_TECH",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/TECHSX16.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/TECHSX16.jpg",
+   "laps": 40,
+   "sha256": "578457e0e116746dbacb03219c6cc63ead57e428e426d9345702fbca3b7cd982"
+  },
+  {
+   "name": "THQ Vegas 2K4 By BluesCreations",
+   "author": "BluesCreations VRT_RideBlue65",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/THQ%20Vegas%202K4%20By%20BluesCreations.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/THQ%20Vegas%202K4%20By%20BluesCreations.jpg",
+   "laps": 38,
+   "sha256": "c7b8f8eddaaf724aeebd8564cbfe3a70a11b87c510b005cbcf3c2f6ad60fffcb"
+  },
+  {
+   "name": "Bistro",
+   "author": "XPR_TECH",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Bistro.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Bistro.jpg",
+   "laps": 37,
+   "sha256": "be6c4140196b417a1c2b2ddf9118df112976f2d8386fd7d794a0e14cffef3b2a"
+  },
+  {
+   "name": "Grass-Track-SX",
+   "author": "Rocket Creations",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./Grass-Track-SX.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./Grass-Track-SX.jpg",
+   "laps": 34,
+   "sha256": "6b067d7a8a874dacbce3556cfe94e648bf25137fe901954642c7ec38d82c2050"
+  },
+  {
+   "name": "Sandpitz SX",
+   "author": "MDx_ART",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./Sandpitz%20SX.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./Sandpitz%20SX.jpg",
+   "laps": 33,
+   "sha256": "8ae48da746082650cb2ba1f87156b74283627416476cea68ebc18a7d22f217df"
+  },
+  {
+   "name": "Race of championsz",
+   "author": "Prokawi",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./Race%20of%20championsz.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./Race%20of%20championsz.jpg",
+   "laps": 28,
+   "sha256": "2b8948b52294ad246e8e137eba59b819cd85fe12bf5891b334697ff1ccd173f0"
+  },
+  {
+   "name": "2005 THQ SanDiego Supercross by Mx333",
+   "author": "Mx333",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./2005%20THQ%20SanDiego%20Supercross%20by%20Mx333.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./2005%20THQ%20SanDiego%20Supercross%20by%20Mx333.jpg",
+   "laps": 28,
+   "sha256": "ee5e1b980d2fbd95730c879e8cdc48f73202ad79be0da817b1a4349489ea79b7"
+  },
+  {
+   "name": "ES-X",
+   "author": "XPR_TECH",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./ES-X.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/./ES-X.jpg",
+   "laps": 26,
+   "sha256": "4ab0fd91277ce03bdd510a1eb930e2ab9723dea329bbc6986e59df25f5adfd54"
+  },
+  {
+   "name": "Seedy SX",
+   "author": "XPR_TECH",
+   "event": "SX",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Seedy%20SX.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/SuperCross_Tracks/Seedy%20SX.jpg",
+   "laps": 24,
+   "sha256": "8a4877ca6dbf43fc3ffed6b94a7da058c494507c294ae481e54e324bdb4b37ec"
+  },
+  {
+   "name": "africanfoothills",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/africanfoothills.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/africanfoothills.gif",
+   "laps": 0,
+   "sha256": "6a86f391a5534cf9ad7a2de5802b708a4874eb9104857bbaea13ac62acde31ec"
+  },
+  {
+   "name": "ballbreakbaja",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/ballbreakbaja.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/ballbreakbaja.gif",
+   "laps": 0,
+   "sha256": "70548e32775aa59f3a523cb821d37f0ebcb50e85d128f379a6037700e359fdc5"
+  },
+  {
+   "name": "bambooisland",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/bambooisland.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/bambooisland.gif",
+   "laps": 0,
+   "sha256": "9a1917ae089b7b065b0c4a5aafbc94cce79b8bcb0883ee9c1e5cb6d90eb61387"
+  },
+  {
+   "name": "beachbums",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/beachbums.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/beachbums.gif",
+   "laps": 0,
+   "sha256": "efcb4c1c04b1937f53c5ad0a7ba219c827ce9c0eebaa4afb59abf882ee63ef54"
+  },
+  {
+   "name": "freestylerbaja",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/freestylerbaja.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/freestylerbaja.gif",
+   "laps": 0,
+   "sha256": "8159c129c3889fd88a59a3ae592690104590475d9ff55c1b010b6dafb3afcb8c"
+  },
+  {
+   "name": "idb",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/idb.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/idb.gif",
+   "laps": 0,
+   "sha256": "f90c667c1ed7171019226d84169f61b872272f375547caa8378c648148749adb"
+  },
+  {
+   "name": "mars",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/mars.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/mars.jpg",
+   "laps": 0,
+   "sha256": "d64cf68cc451e954a7d7606920492cbbc1964460928b66be929a277a730b4fba"
+  },
+  {
+   "name": "marz",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/marz.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/marz.jpg",
+   "laps": 0,
+   "sha256": "f48b6bab3a137312772dea6093c82db21ca3a079536613382cb0a2e95864321a"
+  },
+  {
+   "name": "mbh baja 1000",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/mbh_baja_1000.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/mbh_baja_1000.jpg",
+   "laps": 0,
+   "sha256": "476085d24e152df858b8ad46e3d500cdb1f52d1527d81562f8e0ce8fdbfac84d"
+  },
+  {
+   "name": "mesabaja",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/mesabaja.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/mesabaja.gif",
+   "laps": 0,
+   "sha256": "ae0eeee97bb693844e2b0562fbfdf5fd23aad4c5e1d1e304605baa13d6b7e307"
+  },
+  {
+   "name": "mojogoin",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/mojogoin.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/mojogoin.gif",
+   "laps": 0,
+   "sha256": "de5a7bd3b8938a5e4deb91b3a4be10805b0aa31c89f2b3c2e49245df8d8333b6"
+  },
+  {
+   "name": "msc",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/msc.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/msc.gif",
+   "laps": 0,
+   "sha256": "d58b6757890d2bd2e888851da0c55c86da801751d40e60e0ab869b473aeef935"
+  },
+  {
+   "name": "nowaybaja",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/nowaybaja.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/nowaybaja.gif",
+   "laps": 0,
+   "sha256": "ac545e9a63a073a46af6d0149756a8480e392349916e2cc5e3dfe7733e1b3d6f"
+  },
+  {
+   "name": "redcanyon",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/redcanyon.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/redcanyon.gif",
+   "laps": 0,
+   "sha256": "380ea10fda9dca72131d1014745a5b2165a35ec502146fdb4e484fbe669424c9"
+  },
+  {
+   "name": "route66se",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/route66se.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/route66se.gif",
+   "laps": 0,
+   "sha256": "9db2154eba68504280fc14f4c16804bd53a44169ff647a186ea57670ef105c46"
+  },
+  {
+   "name": "snowstorm",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/snowstorm.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/snowstorm.gif",
+   "laps": 0,
+   "sha256": "77163dc1de3e91b3e34cb2ff3a84132ce8ff4a7b0224f7b92e2b882dd6183505"
+  },
+  {
+   "name": "spaceslug",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/spaceslug.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/spaceslug.gif",
+   "laps": 0,
+   "sha256": "b7feb7b60dfe0228ff708cf5c8d77ac0dd8cdc54c5ba89722363bc30c63e39f2"
+  },
+  {
+   "name": "splatbaja",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/splatbaja.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/splatbaja.gif",
+   "laps": 0,
+   "sha256": "40ab5ed9a8c37af910635703dc18576616a0549be42df9ce30adbb9459115fdb"
+  },
+  {
+   "name": "sunset baja",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/sunset_baja.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/sunset_baja.gif",
+   "laps": 0,
+   "sha256": "f623e21a7b9ac54c49b067ca2fe3f292ab2f65ac2046415c1a7815f1443e3ea0"
+  },
+  {
+   "name": "taja",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/taja.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/taja.gif",
+   "laps": 0,
+   "sha256": "9e0d8d3561231376ab26ff7fae181996ebeeeed44cf4365846b76b497b9edf37"
+  },
+  {
+   "name": "the pharm",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/the_pharm.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/the_pharm.jpg",
+   "laps": 0,
+   "sha256": "4af2e8864bf85c546e7c7edba6b22226ae06d1b1f805436ed7a79e2b7dc98b40"
+  },
+  {
+   "name": "tracker",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/tracker.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/tracker.gif",
+   "laps": 0,
+   "sha256": "112a7a0a5cf43068df3fe9faca2aed9038c795a26c7c6db05decbc0f989bf156"
+  },
+  {
+   "name": "turtlerock",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/turtlerock.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/turtlerock.gif",
+   "laps": 0,
+   "sha256": "bb35c584989c9f11e3d23a63b29aa487b9be38da56193207ae9ba90630bbd3da"
+  },
+  {
+   "name": "urbanjunglebaja",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/urbanjunglebaja.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/urbanjunglebaja.gif",
+   "laps": 0,
+   "sha256": "bd8bfdfeb12b9fabab959b40c6ab317b20053eb385333c26512c4c4c649dd356"
+  },
+  {
+   "name": "wrek",
+   "event": "BAJA",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/wrek.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/BAJA_Maps/wrek.gif",
+   "laps": 0,
+   "sha256": "dc8d4dc6c91f507175ec811023e893111bd6fbac5c4b0804a23dbbf667487f59"
+  },
+  {
+   "name": "DustTrails",
+   "event": "ENDURO",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/ENDURO/DustTrails.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/ENDURO/DustTrails.gif",
+   "laps": 0,
+   "sha256": "45c68135fa04cab9c2c6df595eaa4206d965850662000bece5659feb9d0e7ce5"
+  },
+  {
+   "name": "sw",
+   "event": "ENDURO",
+   "mdx": "https://mdxracing.com/mcm2/Tracks/ENDURO/sw.zip",
+   "picture_url": "https://mdxracing.com/mcm2/Tracks/ENDURO/sw.gif",
+   "laps": 0,
+   "sha256": "12906ced503842c5b09cb460ea60803319768eeea87938b6519ab78f9854bd01"
+  }
+ ]
+}

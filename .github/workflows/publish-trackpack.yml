@@ -1,0 +1,58 @@
+# Publishes the popular tracks pack: our copies of the most raced MDX
+# Racing tracks (tools/trackpack/tracks.json), with who made each, to the
+# openmcm2-freepack R2 bucket under trackpack/. The browser can't download
+# from MDX itself, and the launcher tries these copies before MDX.
+#
+# Secrets: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ACCOUNT_ID.
+name: Publish the popular tracks
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only download and list them, upload nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency: publish-trackpack
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      BUCKET: openmcm2-freepack
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the tracks
+        run: python3 tools/trackpack/build.py tools/trackpack/tracks.json out
+
+      - name: Set up rclone for R2
+        run: |
+          sudo apt-get install -y -q rclone
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret_access_key = ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          endpoint = https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          acl = private
+          no_check_bucket = true
+          EOF
+
+      - name: Upload to R2 (files first, the list last)
+        if: ${{ !inputs.dry_run }}
+        run: |
+          rclone copy out/trackpack/files "r2:$BUCKET/trackpack/files" --transfers 8 \
+            --header-upload "Cache-Control: public, max-age=31536000, immutable"
+          rclone copy out/trackpack/pictures "r2:$BUCKET/trackpack/pictures" --transfers 8 \
+            --header-upload "Cache-Control: public, max-age=31536000, immutable"
+          rclone copyto out/trackpack/CREDITS.md "r2:$BUCKET/trackpack/CREDITS.md" \
+            --header-upload "Cache-Control: no-cache" --header-upload "Content-Type: text/markdown; charset=utf-8"
+          rclone copyto out/trackpack/index.json "r2:$BUCKET/trackpack/index.json" \
+            --header-upload "Cache-Control: no-cache" --header-upload "Content-Type: application/json"

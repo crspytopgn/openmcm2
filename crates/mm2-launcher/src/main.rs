@@ -286,7 +286,20 @@ struct Tracks {
     /// Downloads by address, and how the finished ones went.
     jobs: std::collections::HashMap<String, Arc<tracks::Job>>,
     failed: std::collections::HashMap<String, String>,
+    /// The most raced tracks, once their list has come.
+    popular: Option<Vec<tracks::Track>>,
+    popular_fetch: Option<Arc<Mutex<Option<Result<Vec<tracks::Track>, String>>>>>,
+    popular_error: Option<String>,
+    /// Tracks waiting their turn to download ("Get them all"), and how
+    /// many that started with, for its progress.
+    queue: std::collections::VecDeque<tracks::Track>,
+    queued: usize,
+    /// Where tracks go: the game folder and the Free Pack's, as set up.
+    homes: Vec<std::path::PathBuf>,
 }
+
+/// How many tracks download at once from "Get them all".
+const AT_ONCE: usize = 3;
 
 impl Tracks {
     fn fetch(&mut self, page: u32) {
@@ -336,9 +349,42 @@ impl Tracks {
             }
             self.added = tracks::Added::load();
         }
+        if let Some(f) = &self.popular_fetch {
+            let got = f.lock().unwrap().take();
+            match got {
+                Some(Ok(l)) => {
+                    self.popular = Some(l);
+                    self.popular_fetch = None;
+                }
+                Some(Err(e)) => {
+                    self.popular_error = Some(e);
+                    self.popular_fetch = None;
+                }
+                None => ctx.request_repaint_after(Duration::from_millis(100)),
+            }
+        }
+        while self.jobs.len() < AT_ONCE && !self.homes.is_empty() {
+            let Some(track) = self.queue.pop_front() else { break };
+            if self.jobs.contains_key(&track.url) || self.added.has(&self.homes[0], &track.url) {
+                continue;
+            }
+            self.failed.remove(&track.url);
+            self.jobs.insert(track.url.clone(), tracks::add(track, self.homes.clone()));
+        }
+        if self.queue.is_empty() && self.jobs.is_empty() {
+            self.queued = 0;
+        }
         if !self.jobs.is_empty() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
+    }
+
+    fn fetch_popular(&mut self) {
+        let slot = Arc::new(Mutex::new(None));
+        let s = slot.clone();
+        std::thread::spawn(move || *s.lock().unwrap() = Some(tracks::popular()));
+        self.popular_error = None;
+        self.popular_fetch = Some(slot);
     }
 }
 
@@ -1994,12 +2040,15 @@ impl Launcher {
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.label(look::weak("Each one is downloaded from "));
             ui.hyperlink_to(site.name, site.home);
-            ui.label(look::weak(" only when you pick it, and belongs to the player who made it. Added tracks show up in the game's track list for their event."));
+            ui.label(look::weak(" only when you pick it (the popular ones from our own copy), and belongs to the player who made it. Added tracks show up in the game's track list for their event, with either graphics."));
         });
         ui.add_space(8.0);
-        let Some(game) = self.settings.game.clone() else {
-            look::card(ui, look::icon::ICON_DISC_FULL, "Set up the game data first", |ui| {
-                ui.label(look::weak("Tracks are added to your copy of the game: choose it on the Play page."));
+        // Tracks go into the game folder and the Free Pack's folder, so
+        // they're in the track lists with either graphics.
+        let homes: Vec<std::path::PathBuf> = [self.settings.game.clone(), self.settings.freepack.clone()].into_iter().flatten().collect();
+        let Some(game) = homes.first().cloned() else {
+            look::card(ui, look::icon::ICON_DISC_FULL, "Set up the game first", |ui| {
+                ui.label(look::weak("Tracks are added to your copy of the game or to the Free Pack: choose one on the Play page."));
             });
             return;
         };
@@ -2008,13 +2057,18 @@ impl Launcher {
             return;
         }
         let t = &mut self.tracks;
+        t.homes = homes.clone();
         if t.listing.is_none() && t.fetching.is_none() && t.error.is_none() {
             t.kind = Some(0);
             t.fetch(1);
         }
+        if t.popular.is_none() && t.popular_fetch.is_none() && t.popular_error.is_none() {
+            t.fetch_popular();
+        }
         let mut fetch = None;
         let mut add = None;
         let mut remove = None;
+        popular_card(ui, t, &game, &mut remove);
         look::card(ui, look::icon::ICON_SEARCH, &format!("Browse {}", site.name), |ui| {
             let kinds: Vec<_> = site.kinds.iter().enumerate().map(|(i, k)| look::Choice::new(Some(i), k.label)).collect();
             if let Some(k) = look::segmented(ui, t.kind, &kinds) {
@@ -2073,7 +2127,7 @@ impl Launcher {
                                 ui.add(egui::ProgressBar::new(done as f32 / total as f32).desired_width(110.0));
                             } else if t.added.has(&game, &track.url) {
                                 if ui.button(look::with(look::icon::ICON_DELETE, "Remove")).clicked() {
-                                    remove = Some(track.url.clone());
+                                    remove = Some(vec![track.url.clone()]);
                                 }
                                 ui.label(egui::RichText::new(look::with(look::icon::ICON_CHECK_CIRCLE, "Added")).color(look::GOOD));
                             } else if track.can_add() {
@@ -2108,14 +2162,102 @@ impl Launcher {
         }
         if let Some(track) = add {
             t.failed.remove(&track.url);
-            t.jobs.insert(track.url.clone(), tracks::add(track, game.clone()));
+            t.jobs.insert(track.url.clone(), tracks::add(track, homes.clone()));
         }
-        if let Some(url) = remove {
-            if let Err(e) = t.added.remove(&game, &url) {
-                t.failed.insert(url, e);
+        if let Some(urls) = remove {
+            for url in urls {
+                if let Err(e) = t.added.remove(&homes, &url) {
+                    t.failed.insert(url, e);
+                }
             }
+            t.added = tracks::Added::load();
         }
     }
+}
+
+/// The Tracks page's card for the most raced tracks: all of them in one
+/// go, with who made each.
+fn popular_card(ui: &mut egui::Ui, t: &mut Tracks, game: &std::path::Path, remove: &mut Option<Vec<String>>) {
+    look::card(ui, look::icon::ICON_STAR, "Most popular tracks", |ui| {
+        if t.popular_fetch.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Getting the list…");
+            });
+            return;
+        }
+        if let Some(e) = &t.popular_error {
+            look::status(ui, false, e);
+            if ui.button("Try again").clicked() {
+                t.fetch_popular();
+            }
+            return;
+        }
+        let Some(list) = &t.popular else { return };
+        let kinds = tracks::SITES[0].kinds;
+        let counts: Vec<String> = kinds
+            .iter()
+            .filter_map(|k| {
+                let n = list.iter().filter(|x| x.folder == k.folder).count();
+                (n > 0).then(|| format!("{n} {}", k.label))
+            })
+            .collect();
+        ui.label(format!(
+            "{} tracks: the Nationals and Supercross tracks players have raced most, going by the lap times posted on MDX Racing, and the Baja and Enduro maps players made there ({}). Each one belongs to the player who made it.",
+            list.len(),
+            counts.join(", ")
+        ));
+        let have = list.iter().filter(|x| t.added.has(game, &x.url)).count();
+        let missing: Vec<tracks::Track> = list.iter().filter(|x| !t.added.has(game, &x.url) && !t.jobs.contains_key(&x.url)).cloned().collect();
+        let working = t.queued > 0;
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if working {
+                let left = t.queue.len() + t.jobs.len();
+                let done = t.queued.saturating_sub(left);
+                ui.add(egui::ProgressBar::new(done as f32 / t.queued.max(1) as f32).desired_width(180.0).text(format!("{done} of {}", t.queued)));
+                if ui.button("Stop").clicked() {
+                    t.queue.clear();
+                    for j in t.jobs.values() {
+                        j.cancel.store(true, Ordering::Relaxed);
+                    }
+                }
+            } else if !missing.is_empty() {
+                let mb = (missing.iter().map(|x| x.size).sum::<u64>() >> 20).max(1);
+                let label = if have == 0 { format!("Get all {} ({mb} MB)", missing.len()) } else { format!("Get the other {} ({mb} MB)", missing.len()) };
+                let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_DOWNLOAD, &label)).color(look::ON_ACCENT)).fill(look::ACCENT);
+                if ui.add(b).on_hover_text("Downloads each one and adds it to the track list for its event. They're a few megabytes each.").clicked() {
+                    t.queued = missing.len();
+                    t.queue.extend(missing.iter().cloned());
+                }
+            }
+            if have > 0 && !working {
+                ui.label(egui::RichText::new(look::with(look::icon::ICON_CHECK_CIRCLE, &format!("{have} added"))).color(look::GOOD));
+                if ui.button(look::with(look::icon::ICON_DELETE, "Remove them")).on_hover_text("Takes the popular tracks out of the game again.").clicked() {
+                    *remove = Some(list.iter().filter(|x| t.added.has(game, &x.url)).map(|x| x.url.clone()).collect());
+                }
+            }
+        });
+        let failed = list.iter().filter(|x| t.failed.contains_key(&x.url)).count();
+        if failed > 0 && !working {
+            look::status(ui, false, &format!("{failed} couldn't be added. Try again later."));
+        }
+        egui::CollapsingHeader::new("Who made them").id_salt("popular-list").show(ui, |ui| {
+            for k in kinds {
+                let of: Vec<&tracks::Track> = list.iter().filter(|x| x.folder == k.folder).collect();
+                if of.is_empty() {
+                    continue;
+                }
+                ui.label(egui::RichText::new(k.label).family(look::bold_family()));
+                for x in of {
+                    let by = if x.author.is_empty() { String::from("maker not named") } else { format!("by {}", x.author) };
+                    let mark = if t.added.has(game, &x.url) { "✓ " } else { "" };
+                    ui.label(look::weak(format!("{mark}{} · {by}", x.name)));
+                }
+                ui.add_space(4.0);
+            }
+        });
+    });
 }
 
 /// Whether the effects, anti-aliasing and scene resolution in `s` are just
@@ -2271,6 +2413,14 @@ mod shots {
             l.page = page;
             // No listing fetched from the net.
             l.tracks.error = Some("(not fetched in this picture)".into());
+            // The popular tracks from a saved list (`MM2_SHOTS_POPULAR`).
+            l.tracks.popular = std::env::var("MM2_SHOTS_POPULAR")
+                .ok()
+                .and_then(|f| std::fs::read_to_string(f).ok())
+                .and_then(|t| tracks::parse_popular(&t, "https://example.org/trackpack/index.json").ok());
+            if l.tracks.popular.is_none() {
+                l.tracks.popular_error = Some("(not fetched in this picture)".into());
+            }
             // The harness draws in a frame with an 8 px margin round it:
             // 16 px more each way, cut off after, is the window's own.
             let mut h = egui_kittest::Harness::builder()
