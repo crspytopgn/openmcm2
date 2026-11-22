@@ -1477,7 +1477,11 @@ fn write_esb(species: &[Species], objects: &[(u8, [f32; 3], u8, u8)], land: &Lan
 
 /// Scatters plants over the land where it is open: off the track and
 /// clear of `keep` (places and their radii), thicker in noisy clumps.
-fn scatter(land: &Land, species: &[Species], density: f32, seed: u32, keep: &[([f32; 2], f32)], track_clear: f32, infield: Option<([f32; 2], [f32; 2])>) -> Vec<(u8, [f32; 3], u8, u8)> {
+///
+/// `open`, when given, is each land sample's distance from the nearest
+/// course: plants thin out towards it (Baja, which has no road to keep
+/// them off), as on the original deserts.
+fn scatter(land: &Land, species: &[Species], density: f32, seed: u32, keep: &[([f32; 2], f32)], track_clear: f32, infield: Option<([f32; 2], [f32; 2])>, open: Option<&[f32]>) -> Vec<(u8, [f32; 3], u8, u8)> {
     if species.is_empty() || density <= 0.0 {
         return Vec::new();
     }
@@ -1509,6 +1513,14 @@ fn scatter(land: &Land, species: &[Species], density: f32, seed: u32, keep: &[([
             }
             if keep.iter().any(|(p, r)| (p[0] - x).powi(2) + (p[1] - z).powi(2) < r * r) {
                 continue;
+            }
+            if let Some(open) = open {
+                // Nothing within 40 ft of the way, a few out to 300 ft,
+                // then the full spread.
+                let d = land.sample(open, x, z);
+                if d < 40.0 || rng.next() > 0.15 + 0.85 * smooth((d - 40.0) / 260.0) {
+                    continue;
+                }
             }
             let mut pick = rng.next() * total;
             let mut s = 0;
@@ -3322,9 +3334,22 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
     let (textures, tiles) = paint(land, def.kind, def.biome, &ground, def.seed);
     let terrain = trn::Build { size: land.size, heights: &land.heights, surfaces: &surfaces, scale: land.scale, textures: &textures, tiles: &tiles }.write()?;
 
-    let species = flora(def.biome);
+    let mut species = flora(def.biome);
     let keep: Vec<([f32; 2], f32)> = made.keep.iter().copied().chain(made.models.iter().map(|m| ([m.at[0], m.at[2]], 12.0))).collect();
-    let plants = scatter(land, &species, plant_density(def.kind, def.biome), def.seed, &keep, if def.kind == Kind::Enduro { 10.0 } else { 24.0 }, made.infield);
+    let open = (def.kind == Kind::Baja).then(|| {
+        // Baja is wide open country: far fewer tall plants (cactus and
+        // trees), mostly low brush, and the ground round the gates left
+        // clear, as the original deserts are.
+        for sp in &mut species {
+            if sp.trunk.is_some() {
+                sp.weight *= 0.3;
+            }
+        }
+        let lines: Vec<&Course> = made.courses.iter().map(|c| &c.0).collect();
+        land.course_distance(&lines)
+    });
+    let density = plant_density(def.kind, def.biome) * if def.kind == Kind::Baja { 0.6 } else { 1.0 };
+    let plants = scatter(land, &species, density, def.seed, &keep, if def.kind == Kind::Enduro { 10.0 } else { 24.0 }, made.infield, open.as_deref());
 
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
     let stem = def.file;
@@ -3359,7 +3384,7 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
 /// Which making of the recipes a built track is from (its `.made` file):
 /// a track built by an older one is built again. Change it whenever a
 /// change here moves anything on an existing track.
-pub const MADE: &str = "8";
+pub const MADE: &str = "9";
 
 /// The free track whose file is `stem` (`FPNAT01`), any case.
 pub fn find(stem: &str) -> Option<&'static Def> {
