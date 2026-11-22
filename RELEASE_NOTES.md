@@ -1,3 +1,16 @@
+# OpenMCM2 0.7.4
+
+* **The free rider sits on the bike like the original rider.** With the
+  original game installed, the free rider used the original rider's
+  poses. Those were made for the original's narrower bike, so his knees
+  and shins went in through the free bikes' side panels. He now always
+  uses his own poses: the original's moves and timing, with his feet on
+  the free bike's pegs and his knees outside the bike.
+* **A cleaner free rider kit.** The jagged black patches at the waist and
+  under the arms are gone. The kit also gets a proper race number on the
+  back, a plain goggle strap and deeper folds in the suit. This comes
+  with a Free Pack update, which the launcher and browser fetch for you.
+
 # OpenMCM2 0.7.3
 
 * **Typing on phones and tablets.** In the browser version, tapping the
