@@ -63,7 +63,7 @@ def main(listing, out):
         if t.get("sha256") and t["sha256"] != sha:
             sys.exit(f"{t['name']}: MDX's file changed ({sha}); check it and update tracks.json")
         open(os.path.join(root, "files", sha + ".zip"), "wb").write(data)
-        entry = {k: t[k] for k in ("name", "author", "event", "mdx", "laps") if k in t}
+        entry = {k: t[k] for k in ("name", "author", "event", "mdx", "laps", "starter") if k in t}
         entry.update(file=f"files/{sha}.zip", sha256=sha, size=len(data), envs=envs)
         # Its picture, as a PNG (the launcher reads PNGs): MDX's own, or
         # one of ours beside tracks.json for a track MDX has none for.

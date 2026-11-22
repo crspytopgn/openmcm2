@@ -2269,12 +2269,31 @@ fn popular_card(ui: &mut egui::Ui, t: &mut Tracks, game: &std::path::Path, remov
                     }
                 }
             } else if !missing.is_empty() {
-                let mb = (missing.iter().map(|x| x.size).sum::<u64>() >> 20).max(1);
-                let label = if have == 0 { format!("Get all {} ({mb} MB)", missing.len()) } else { format!("Get the other {} ({mb} MB)", missing.len()) };
-                let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_DOWNLOAD, &label)).color(look::ON_ACCENT)).fill(look::ACCENT);
-                if ui.add(b).on_hover_text("Downloads each one and adds it to the track list for its event. They're a few megabytes each.").clicked() {
-                    t.queued = missing.len();
-                    t.queue.extend(missing.iter().cloned());
+                let mb = |l: &[tracks::Track]| (l.iter().map(|x| x.size).sum::<u64>() >> 20).max(1);
+                // A small starter set first (a few of each event), then the rest.
+                let starter: Vec<tracks::Track> = missing.iter().filter(|x| x.starter).cloned().collect();
+                let mut get: Option<Vec<tracks::Track>> = None;
+                if !starter.is_empty() {
+                    let label = format!("Get the starter set ({} tracks, {} MB)", starter.len(), mb(&starter));
+                    let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_DOWNLOAD, &label)).color(look::ON_ACCENT)).fill(look::ACCENT);
+                    if ui.add(b).on_hover_text("A few of the best: the most raced National, the five most raced Supercross tracks, three small Baja maps and an Enduro map.").clicked() {
+                        get = Some(starter.clone());
+                    }
+                }
+                let label = if have == 0 { format!("Get all {} ({} MB)", missing.len(), mb(&missing)) } else { format!("Get the other {} ({} MB)", missing.len(), mb(&missing)) };
+                let hover = "Downloads each one and adds it to the track list for its event. They're a few megabytes each.";
+                let clicked = if starter.is_empty() {
+                    let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_DOWNLOAD, &label)).color(look::ON_ACCENT)).fill(look::ACCENT);
+                    ui.add(b).on_hover_text(hover).clicked()
+                } else {
+                    ui.button(look::with(look::icon::ICON_DOWNLOAD, &label)).on_hover_text(hover).clicked()
+                };
+                if clicked {
+                    get = Some(missing.clone());
+                }
+                if let Some(l) = get {
+                    t.queued = l.len();
+                    t.queue.extend(l);
                 }
             }
             if have > 0 && !working {
