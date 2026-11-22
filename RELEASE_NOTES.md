@@ -1,3 +1,28 @@
+# OpenMCM2 0.7.5
+
+* **Players' own tracks in one click.** The launcher's *Tracks* page and
+  the browser's *Your own tracks* box have a new *Most popular tracks*
+  list. It holds 77 tracks made by players on MDX Racing: the Nationals
+  and Supercross tracks raced most, going by the lap times posted there,
+  and the Baja and Enduro maps. Start with the *starter set* (10 tracks,
+  about 55 MB) or get them all. Rest the mouse on a name to see the
+  track's picture. Each track belongs to the player who made it and is
+  credited by name. They work with either graphics, also without the
+  original game.
+* **Custom Baja and Enduro maps work.** Maps with only gates, and no
+  course file, now show up in the track list and can be raced.
+* **Original bikes and sounds everywhere.** With the original game or the
+  free demo installed, the free tracks now use the original bikes and
+  engine sounds too, unless you pick free graphics.
+* **Clearer free Baja tracks.** Far fewer cactuses and trees, and open
+  ground round the gates, as in the original.
+* **Faster, clearer track loading in the browser.** A loading bar shows
+  each step, a free track builds about a third faster the first time,
+  and a track that can't load says so instead of dropping back to the
+  menus.
+* **Playtime in the browser.** The play page shows your time riding and
+  everyone's, like the launcher.
+
 # OpenMCM2 0.7.4
 
 * **The free rider sits on the bike like the original rider.** With the
