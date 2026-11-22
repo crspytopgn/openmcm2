@@ -247,8 +247,23 @@
     <summary>Settings and extras</summary>
     <div id="settings"></div>
   </details>
-  <details class="more">
+  <details class="more" id="tracksbox">
     <summary>Your own tracks</summary>
+    <fieldset>
+      <legend>Most popular tracks</legend>
+      <p class="hint" id="popularabout">The Nationals and Supercross tracks players have raced most, going by the lap times
+        posted on <a href="https://mdxracing.com/new/index.php" target="_blank" rel="noopener" style="color:var(--accent)">MDX Racing</a>,
+        and the Baja and Enduro maps players made there. Each one belongs to the player who made it. They work with either graphics.</p>
+      <div id="popularkinds"></div>
+      <button type="button" id="popularget" hidden
+        title="Downloads the ticked events' tracks and adds them to the game's track lists. They stay in this browser.">Add them</button>
+      <button type="button" class="ghost" id="popularremove" hidden title="Takes the popular tracks out of this browser again.">Remove them</button>
+      <p id="popularstatus" class="hint"></p>
+      <details>
+        <summary>Who made them</summary>
+        <ul id="popularlist"></ul>
+      </details>
+    </fieldset>
     <fieldset>
       <legend>Tracks made by players</legend>
       <p class="hint">Thousands of tracks made by players are on
@@ -1215,8 +1230,11 @@ const TRACKS = "/user/Tracks/";
 function addTracks() {
   for (const path of [...fs.paths(TRACKS)]) {
     const [kind, name] = path.slice(TRACKS.length).split("/");
-    const into = `/game/TERAFORM/${kind}/${name}`;
-    if (mm2fs.kind(into) === 0) fs.put(into, mm2fs.read(path));
+    // The game's folder, and the Free Pack's for its menus.
+    for (const root of ["/game", "/freepack"]) {
+      const into = `${root}/TERAFORM/${kind}/${name}`;
+      if (mm2fs.kind(into) === 0) fs.put(into, mm2fs.read(path));
+    }
   }
   // Skins from the Tools page's skin painter, kept as
   // /user/Skins/<BIKES|RIDERS>/<NAME>.TGA, go in the game's own folders.
@@ -1273,6 +1291,95 @@ $("trackfile").addEventListener("change", async (e) => {
   listTracks();
 });
 listTracks();
+
+// The most raced tracks: their list and our copies sit beside the Free
+// Pack (trackpack/index.json, tools/trackpack), fetched when the box opens.
+const EVENT_NAMES = { NATIONAL: "Nationals", SX: "Supercross", BAJA: "Baja", ENDURO: "Enduro", QUARRIES: "Stunt" };
+let popular = null;
+async function popularHave() {
+  return new Set((await fs.userFiles(TRACKS).catch(() => [])).map((p) => p.slice(TRACKS.length).toLowerCase()));
+}
+const popularKey = (t, env) => `${t.event}/${env}`.toLowerCase();
+async function showPopular() {
+  if (!popular) return;
+  const have = await popularHave();
+  const kinds = $("popularkinds");
+  if (!kinds.childElementCount) {
+    for (const [event, label] of Object.entries(EVENT_NAMES)) {
+      const of = popular.filter((t) => t.event === event);
+      if (!of.length) continue;
+      const mb = Math.max(1, Math.round(of.reduce((n, t) => n + (t.size || 0), 0) / 1e6));
+      const l = document.createElement("label");
+      l.title = `The ${of.length} most raced ${label} tracks, about ${mb} MB.`;
+      l.innerHTML = `<input type="checkbox" checked value="${event}"> ${label} (${of.length}, about ${mb} MB) `;
+      kinds.append(l);
+    }
+  }
+  const isIn = (t) => t.envs.length && t.envs.every((e) => have.has(popularKey(t, e)));
+  const got = popular.filter(isIn).length;
+  $("popularget").hidden = got === popular.length;
+  $("popularget").textContent = got ? `Add the other ${popular.length - got}` : `Add them`;
+  $("popularremove").hidden = !got;
+  if (!$("popularstatus").dataset.busy) $("popularstatus").textContent = got ? `${got} of ${popular.length} added.` : "";
+  const list = $("popularlist");
+  list.replaceChildren();
+  for (const [event, label] of Object.entries(EVENT_NAMES)) {
+    for (const t of popular.filter((t) => t.event === event)) {
+      const li = document.createElement("li");
+      li.textContent = `${isIn(t) ? "✓ " : ""}${t.name} (${label}) · ${t.author ? "by " + t.author : "maker not named"}`;
+      list.append(li);
+    }
+  }
+}
+async function loadPopular() {
+  if (popular) return;
+  try {
+    const r = await fetch(PACK_URL + "trackpack/index.json", { cache: "no-cache" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    popular = ((await r.json()).tracks || []).filter((t) => EVENT_NAMES[t.event] && t.file && t.envs);
+    showPopular();
+  } catch (e) {
+    $("popularstatus").textContent = `Couldn't get the list of popular tracks (${e.message}).`;
+  }
+}
+$("tracksbox").addEventListener("toggle", (e) => e.target.open && loadPopular());
+$("popularget").addEventListener("click", async () => {
+  const want = new Set([...$("popularkinds").querySelectorAll("input:checked")].map((i) => i.value));
+  const have = await popularHave();
+  const todo = popular.filter((t) => want.has(t.event) && !t.envs.every((e) => have.has(popularKey(t, e))));
+  const status = $("popularstatus");
+  status.dataset.busy = "1";
+  $("popularget").disabled = true;
+  let done = 0;
+  const failed = [];
+  for (const t of todo) {
+    status.textContent = `Adding ${done + 1} of ${todo.length}: ${t.name}…`;
+    try {
+      const r = await fetch(PACK_URL + "trackpack/" + t.file);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const envs = (await zip.entries(await r.blob())).filter(([n]) => /\.env$/i.test(n));
+      for (const [n, entry] of envs) {
+        await fs.keepUser(TRACKS + t.event + "/" + n.split("/").pop(), new Uint8Array(await entry.arrayBuffer()));
+      }
+      done++;
+    } catch (err) {
+      failed.push(t.name);
+    }
+  }
+  delete status.dataset.busy;
+  $("popularget").disabled = false;
+  await listTracks();
+  await showPopular();
+  status.textContent =
+    `Added ${done} track${done === 1 ? "" : "s"}.` + (failed.length ? ` ${failed.length} couldn't be added: ${failed.join(", ")}.` : "");
+});
+$("popularremove").addEventListener("click", async () => {
+  const have = await fs.userFiles(TRACKS).catch(() => []);
+  const ours = new Set(popular.flatMap((t) => t.envs.map((e) => popularKey(t, e))));
+  for (const path of have) if (ours.has(path.slice(TRACKS.length).toLowerCase())) await fs.forgetUser(path);
+  await listTracks();
+  await showPopular();
+});
 // "Start in the Course Builder": kept in this browser, not in the
 // address. The game reads it from the address, so start() puts it there
 // only for the start that wants it and takes it out once the game has

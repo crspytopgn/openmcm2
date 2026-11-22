@@ -7,6 +7,7 @@
 
 use crate::game::find_ci;
 use crate::settings::user_dir;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
@@ -63,6 +64,14 @@ pub struct Track {
     pub picture: Option<String>,
     /// The folder under `TERAFORM` it goes in.
     pub folder: &'static str,
+    /// Our own copy of the download, tried first (the popular tracks).
+    pub mirror: Option<String>,
+    /// The download's SHA-256, when known, to check it arrived whole.
+    pub sha256: Option<String>,
+    /// How many lap times players have posted on it (the popular tracks).
+    pub laps: u32,
+    /// The download's size in bytes, when the list says.
+    pub size: u64,
 }
 
 impl Track {
@@ -70,6 +79,64 @@ impl Track {
     pub fn can_add(&self) -> bool {
         self.url.to_ascii_lowercase().ends_with(".zip")
     }
+}
+
+/// Where the list of popular tracks is: the tracks players have raced
+/// most, by the lap times posted on MDX Racing, with our own copy of
+/// each (`tools/trackpack`).
+pub const POPULAR: &str = "https://pub-18a3400893df4f6dbcc1edfbe934a71c.r2.dev/trackpack/index.json";
+
+/// The popular tracks, most raced first within each event.
+pub fn popular() -> Result<Vec<Track>, String> {
+    // `MM2_TRACKPACK_URL` points at another copy, to try a new list.
+    let from = std::env::var("MM2_TRACKPACK_URL").unwrap_or_else(|_| POPULAR.to_string());
+    let text = retry(
+        || {
+            agent()
+                .get(&from)
+                .call()
+                .map_err(|e| format!("couldn't get the list of popular tracks: {e}"))?
+                .body_mut()
+                .with_config()
+                .limit(4 << 20)
+                .read_to_string()
+                .map_err(|e| format!("couldn't read the list of popular tracks: {e}"))
+        },
+        &AtomicBool::new(false),
+    )?;
+    parse_popular(&text, &from)
+}
+
+/// Reads the popular tracks' list, whose files are named relative to
+/// `from`.
+pub(crate) fn parse_popular(text: &str, from: &str) -> Result<Vec<Track>, String> {
+    let json: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("the list of popular tracks is broken: {e}"))?;
+    let base = from.rsplit_once('/').map_or(from, |(b, _)| b);
+    let kinds = SITES[0].kinds;
+    let s = |t: &serde_json::Value, k: &str| t.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    Ok(json
+        .get("tracks")
+        .and_then(|t| t.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|t| {
+            let event = s(t, "event");
+            let folder = kinds.iter().find(|k| k.folder.eq_ignore_ascii_case(&event))?.folder;
+            let file = s(t, "file");
+            Some(Track {
+                name: s(t, "name"),
+                author: s(t, "author"),
+                url: s(t, "mdx"),
+                picture: Some(s(t, "picture")).filter(|p| !p.is_empty()).map(|p| format!("{base}/{p}")),
+                folder,
+                mirror: (!file.is_empty()).then(|| format!("{base}/{file}")),
+                sha256: Some(s(t, "sha256")).filter(|h| !h.is_empty()),
+                laps: t.get("laps").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                size: t.get("size").and_then(|v| v.as_u64()).unwrap_or(0),
+            })
+        })
+        .filter(|t| !t.url.is_empty() && !t.name.is_empty())
+        .collect())
 }
 
 #[derive(Clone, Debug, Default)]
@@ -173,6 +240,10 @@ fn parse_mdx(site: &Site, html: &str) -> Listing {
             url: format!("{base}{}", encode(rel, true)),
             picture,
             folder: kind.folder,
+            mirror: None,
+            sha256: None,
+            laps: 0,
+            size: 0,
         });
     }
     let pages = html
@@ -239,12 +310,14 @@ impl Added {
         self.0.keys().filter(|u| self.has(game, u)).count()
     }
 
-    /// Takes `url`'s track out of `game` again.
-    pub fn remove(&mut self, game: &Path, url: &str) -> Result<(), String> {
+    /// Takes `url`'s track out of each of `homes` again.
+    pub fn remove(&mut self, homes: &[PathBuf], url: &str) -> Result<(), String> {
         for f in self.0.get(url).cloned().unwrap_or_default() {
-            let p = game.join(&f);
-            if p.exists() {
-                std::fs::remove_file(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+            for home in homes {
+                let p = home.join(&f);
+                if p.exists() {
+                    std::fs::remove_file(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+                }
             }
         }
         self.0.remove(url);
@@ -262,13 +335,24 @@ pub struct Job {
     pub result: Mutex<Option<Result<Vec<String>, String>>>,
 }
 
-/// Downloads `track` and puts it in the game folder `game` on a thread
-/// of its own.
-pub fn add(track: Track, game: PathBuf) -> Arc<Job> {
+/// Downloads `track` and puts it in each of `homes` (the game folder,
+/// the Free Pack's folder), on a thread of its own. The first home is the
+/// one [`Added::has`] is asked about.
+pub fn add(track: Track, homes: Vec<PathBuf>) -> Arc<Job> {
     let job = Arc::new(Job::default());
     let j = job.clone();
     std::thread::spawn(move || {
-        let r = retry(|| download(&track.url, &j), &j.cancel).and_then(|bytes| install(&bytes, &track, &game));
+        let r = fetch(&track, &j).and_then(|bytes| {
+            let mut files = Vec::new();
+            for home in &homes {
+                for f in install(&bytes, &track, home)? {
+                    if !files.contains(&f) {
+                        files.push(f);
+                    }
+                }
+            }
+            Ok(files)
+        });
         if let Ok(files) = &r {
             // Two downloads can end together; one writes the list at a time.
             static LIST: Mutex<()> = Mutex::new(());
@@ -283,6 +367,27 @@ pub fn add(track: Track, game: PathBuf) -> Arc<Job> {
         *j.result.lock().unwrap() = Some(r);
     });
     job
+}
+
+/// The track's download: our own copy when there is one and it arrives
+/// whole, else from the site.
+fn fetch(track: &Track, j: &Job) -> Result<Vec<u8>, String> {
+    if let Some(mirror) = &track.mirror {
+        let got = retry(|| download(mirror, j), &j.cancel).and_then(|b| match &track.sha256 {
+            Some(want) if !hex(&Sha256::digest(&b)).eq_ignore_ascii_case(want) => Err("the copy didn't match".into()),
+            _ => Ok(b),
+        });
+        match got {
+            Ok(b) => return Ok(b),
+            Err(e) if e == "cancelled" => return Err(e),
+            Err(_) => {}
+        }
+    }
+    retry(|| download(&track.url, j), &j.cancel)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn download(url: &str, j: &Job) -> Result<Vec<u8>, String> {
@@ -325,7 +430,8 @@ fn install(bytes: &[u8], track: &Track, game: &Path) -> Result<Vec<String>, Stri
         });
     }
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("the track's zip is broken: {e}"))?;
-    let teraform = find_ci(game, "TERAFORM").ok_or("the game folder has no TERAFORM folder")?;
+    // The Free Pack's folder has no TERAFORM until a track goes in.
+    let teraform = find_ci(game, "TERAFORM").unwrap_or_else(|| game.join("TERAFORM"));
     let dir = find_ci(&teraform, track.folder).unwrap_or_else(|| teraform.join(track.folder));
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let ours = Added::load();
@@ -423,6 +529,33 @@ mod tests {
         assert!(!l.tracks[1].can_add());
     }
 
+    #[test]
+    fn reads_the_popular_list() {
+        let text = r#"{"format":1,"tracks":[
+            {"name":"Cobble Hill","author":"TTM_KEVSTER","event":"NATIONAL","mdx":"https://mdxracing.com/mcm2/Tracks/National_Tracks/Cobble%20Hill.zip",
+             "file":"files/ab.zip","sha256":"ab","laps":190,"picture":"pictures/ab.jpg"},
+            {"name":"Odd","event":"TAG","mdx":"https://x/y.zip"},
+            {"name":"Sand","author":"","event":"baja","mdx":"https://x/s.zip"}]}"#;
+        let l = parse_popular(text, "https://example.com/trackpack/index.json").unwrap();
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[0].folder, "NATIONAL");
+        assert_eq!(l[0].mirror.as_deref(), Some("https://example.com/trackpack/files/ab.zip"));
+        assert_eq!(l[0].picture.as_deref(), Some("https://example.com/trackpack/pictures/ab.jpg"));
+        assert_eq!((l[0].laps, l[0].sha256.as_deref()), (190, Some("ab")));
+        assert_eq!((l[1].folder, l[1].mirror.as_deref()), ("BAJA", None));
+    }
+
+    #[test]
+    fn installs_into_a_free_pack_folder_without_teraform() {
+        let home = std::env::temp_dir().join(format!("mm2-tracks-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let track = Track { name: "x".into(), author: String::new(), url: "u".into(), picture: None, folder: "SX", mirror: None, sha256: None, laps: 0, size: 0 };
+        let files = install(&zip_of(&[("t.env", b"track")]), &track, &home).unwrap();
+        assert_eq!(files, ["TERAFORM/SX/t.env"]);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     fn zip_of(files: &[(&str, &[u8])]) -> Vec<u8> {
         let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
         for (name, data) in files {
@@ -438,7 +571,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&game);
         std::fs::create_dir_all(game.join("TERAFORM/ENDURO")).unwrap();
         std::fs::write(game.join("TERAFORM/ENDURO/FARM.env"), b"stock").unwrap();
-        let track = |folder| Track { name: "x".into(), author: String::new(), url: "u".into(), picture: None, folder };
+        let track = |folder| Track { name: "x".into(), author: String::new(), url: "u".into(), picture: None, folder, mirror: None, sha256: None, laps: 0, size: 0 };
         let files = install(&zip_of(&[("readme.txt", b"hi"), ("sub/ar.env", b"track")]), &track("NATIONAL"), &game).unwrap();
         assert_eq!(files, ["TERAFORM/NATIONAL/ar.env"]);
         assert_eq!(std::fs::read(game.join("TERAFORM/NATIONAL/ar.env")).unwrap(), b"track");
@@ -451,6 +584,36 @@ mod tests {
         assert!(install(b"<html>404</html>", &track("SX"), &game).unwrap_err().contains("taken down"));
         assert!(install(&zip_of(&[("a.txt", b"")]), &track("SX"), &game).unwrap_err().contains("no track"));
         let _ = std::fs::remove_dir_all(&game);
+    }
+
+    /// Adds the first two popular tracks from the list at
+    /// `MM2_TRACKPACK_URL` (or ours); run with `--ignored` when online.
+    #[test]
+    #[ignore]
+    fn live_popular() {
+        let list = popular().unwrap();
+        println!("{} popular tracks", list.len());
+        let homes: Vec<PathBuf> = (0..2).map(|i| std::env::temp_dir().join(format!("mm2-popular-{i}-{}", std::process::id()))).collect();
+        for h in &homes {
+            std::fs::create_dir_all(h).unwrap();
+        }
+        for t in list.into_iter().take(2) {
+            let job = add(t.clone(), homes.clone());
+            let r = loop {
+                if let Some(r) = job.result.lock().unwrap().take() {
+                    break r;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            };
+            let files = r.unwrap();
+            println!("{} by {} -> {files:?}", t.name, t.author);
+            for h in &homes {
+                assert!(h.join(&files[0]).metadata().unwrap().len() > 1000);
+            }
+        }
+        for h in &homes {
+            std::fs::remove_dir_all(h).unwrap();
+        }
     }
 
     /// Lists and adds a real track; run with `--ignored` when online.
