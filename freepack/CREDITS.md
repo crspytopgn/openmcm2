@@ -100,6 +100,7 @@ These models were refitted to the game's bike and rider frames, recoloured and g
 | Rider, track-side people and stadium crowd base body | [Hight Quality Realistic Man Character](https://sketchfab.com/3d-models/10cbeabee635483fae932f9e49f3cf7b) | hammer.gamedev |
 | Free rider body (all prints replaced with our own kit) | "race driver" | [BELAZ](https://sketchfab.com/BELAZ) |
 | Free rider MX helmet (all prints replaced with our own kit) | "Motocross Helmet (Final)" | [Sharpsterman](https://sketchfab.com/Sharpsterman) |
+| Free rider MX boots (maker marks painted out) | "Alpinestars TECH 3 BOOT" scan | [johnnokomis](https://sketchfab.com/johnnokomis) |
 | Skid steer (bobcat) | [Skid Steer Digger](https://sketchfab.com/3d-models/d1b7c5cba07a4f278267fca69c821cb7) | MitchellBr |
 | Tractor | [Tractor](https://sketchfab.com/3d-models/e9e844f2f9364044a181ce8f38a83dc3) | sheldon.bean |
 | Old tractor | [Weathered Tractor](https://sketchfab.com/3d-models/d891c103cddd44b69d1357c832d9ad56) | ArtDmitriyK |
