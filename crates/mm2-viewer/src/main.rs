@@ -1963,10 +1963,7 @@ pub struct Start {
     grid: Option<(f32, f32)>,
 }
 
-/// Reads a track's `.ENV` archive, and the models it uses from the game's
-/// `RES` folder when that can be found above it.
-/// `rides` are each racer's bike, outfit and number from the menus, the
-/// player's first; any left out take the default grid.
+/// Loads a track in one go (see `load_track_steps`).
 fn load_track(
     path: &Path,
     course: usize,
@@ -1976,8 +1973,25 @@ fn load_track(
     ghost: Option<usize>,
     random_gates: Option<gates::RandomGates>,
 ) -> Result<Track, BoxError> {
+    job::block_on(load_track_steps(path, course, riders, rides, me, ghost, random_gates))
+}
+
+/// Reads a track's `.ENV` archive, and the models it uses from the game's
+/// `RES` folder when that can be found above it.
+/// `rides` are each racer's bike, outfit and number from the menus, the
+/// player's first; any left out take the default grid.
+async fn load_track_steps(
+    path: &Path,
+    course: usize,
+    riders: usize,
+    rides: Vec<Option<roster::Ride>>,
+    me: usize,
+    ghost: Option<usize>,
+    random_gates: Option<gates::RandomGates>,
+) -> Result<Track, BoxError> {
     let ride = rides.get(me).cloned().flatten();
-    load_step();
+    // Building a Free Pack track takes a phone a while: the page says so.
+    load_stage(if free_tracks::to_build(path) { "build" } else { "track" }).await;
     // A Free Pack track is built from its recipe the first time.
     free_tracks::ensure(path)?;
     // A demo track rebuilt the first time (an extra).
@@ -1993,16 +2007,16 @@ fn load_track(
     let entry = find(".trn").ok_or("no terrain (.trn) in this archive")?;
     let terrain = trn::parse(archive.data(entry))?;
     let ground_map = find(".gmt").and_then(|e| fine_ground::GroundMap::parse(archive.data(e)));
-    load_step();
+    load_stage("ground").await;
     let used_before = hires::pack().map_or(0, HiRes::used);
     let terrain_textures = terrain_textures(&terrain, &file_name(path), hires::pack());
-    load_step();
+    load_step().await;
 
     let scene = find(".scn")
         .map(|e| scn::Scene::parse(archive.data(e)))
         .transpose()?;
     let zones = scene.as_ref().map_or_else(Default::default, |s| s.zones);
-    load_step();
+    load_step().await;
     let (mut start, course, stem) = race_start(&archive, scene.as_ref(), &terrain, course);
     // A Baja or Enduro course's gates, from the `.wpt` beside its `.tdf`.
     let waypoints = stem
@@ -2045,7 +2059,7 @@ fn load_track(
         None => (waypoints, course),
     };
     let gate_list = waypoints.gates(|x, z| ride::ground(&terrain, x, z));
-    load_step();
+    load_step().await;
     // A course with no start line starts at its last gate, the finish
     // arch: the original's lone rider stands 7.96 ft through it and
     // 0.78 ft right of its middle (all six Baja and Enduro tapes).
@@ -2087,7 +2101,7 @@ fn load_track(
         .map(|res| player_spec(res, cc))
         .unwrap_or_default();
     let sky = load_sky(res.as_deref(), scene.as_ref());
-    load_step();
+    load_step().await;
     let fog = scene.as_ref().and_then(|s| s.fog_color);
     let haze = scene
         .as_ref()
@@ -2128,7 +2142,7 @@ fn load_track(
                 (file_name(path).to_ascii_uppercase(), track_bytes.clone()),
                 ("OBJECTS.RES".to_string(), read_archive(&res.join("OBJECTS.RES"))?),
             ];
-            load_step();
+            load_step().await;
             // Bikes and riders keep their models, motions and skins together.
             let mut animations = scene.animations.clone();
             // The Free Pack's start gate stands in the scene as a still
@@ -2213,7 +2227,7 @@ fn load_track(
             // An outdoor track's trees and bushes, from `ECO.RES`.
             let mut statics = scene.models.clone();
             statics.retain(|m| !freepack::is_gate(&m.model));
-            load_step();
+            load_step().await;
             // A lap race's finish arch and flag girl (0x418cd0). Custom
             // tracks hide them with a finish line that has no direction:
             // the game turns them to face along it (0x500bb0), and with
@@ -2250,7 +2264,7 @@ fn load_track(
             let man_source = animations
                 .iter()
                 .position(|a| a.model.eq_ignore_ascii_case(finish::MAN));
-            load_step();
+            load_step().await;
             // Each rider on the podium, in their own outfit (0x45e490).
             skins.resize(animations.len(), None);
             let winner_sources: Vec<usize> = grid_sources
@@ -2411,6 +2425,7 @@ fn load_track(
                 }
                 _ => (Vec::new(), Vec::new()),
             };
+            page_stage("scenery").await;
             let mut objects = ObjectMesh::build(
                 &statics,
                 (trees, &billboards),
@@ -2506,7 +2521,7 @@ fn load_track(
                 numbers: [f[0], f[1], f[2], f[3], f[4]],
                 sizes: countdown::MODELS.map(|m| model_size(&models, &m.replace(".slt", ".slb")).unwrap_or(1.0)),
             });
-            load_step();
+            load_step().await;
             // The scene's ambient sounds, on what they hang on.
             for sound in &scene.sounds {
                 let site = match &sound.site {
@@ -2558,7 +2573,7 @@ fn load_track(
     if let Some(h) = hires::pack() {
         eprintln!("using {} high-res textures", h.used() - used_before);
     }
-    load_step();
+    load_step().await;
     let water = archive
         .entries()
         .iter()
@@ -2586,6 +2601,8 @@ fn load_track(
         }
     }
     let aircraft = drive::aircraft(objects.animated.iter().map(|a| a.model.as_str()));
+    // What's left is handing it all to the graphics card (`finish_loading`).
+    page_stage("gpu").await;
     Ok(Track {
         terrain,
         terrain_textures,
@@ -4321,8 +4338,33 @@ const PHOTO_NOTE_SECS: f32 = 5.0;
 /// fast it turns (radians a second).
 const PHOTO_SPEEDS: (f32, f32, f32) = (25.0, 150.0, 1.2);
 
-fn load_step() {
+/// A step of a track's loading: the bar moves on, and in a browser the
+/// page gets to draw (the loading runs between its frames, a step a frame).
+async fn load_step() {
     LOAD_STEPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(target_arch = "wasm32")]
+    job::next_frame().await;
+}
+
+/// A step that the page names on its loading note (`web/index.html`
+/// trackStage), as some take a while on a phone.
+async fn load_stage(stage: &str) {
+    #[cfg(target_arch = "wasm32")]
+    web::track_stage(stage);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = stage;
+    load_step().await;
+}
+
+/// The same in a browser alone, without a step of the game's bar.
+async fn page_stage(stage: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web::track_stage(stage);
+        job::next_frame().await;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = stage;
 }
 
 /// A track loading on another thread while the loading screen shows.
@@ -4797,8 +4839,10 @@ impl App {
         }
         LOAD_STEPS.store(0, std::sync::atomic::Ordering::Relaxed);
         let random = setup.random_gates;
-        let job = job::Job::spawn(move || {
-            load_track(&path, course, riders, rides, me, ghost.then_some(1), random).map_err(|e| e.to_string())
+        let job = job::Job::spawn_steps(move || async move {
+            load_track_steps(&path, course, riders, rides, me, ghost.then_some(1), random)
+                .await
+                .map_err(|e| e.to_string())
         });
         self.loading = Some(Loading {
             setup,
@@ -5021,6 +5065,8 @@ impl App {
             }
             Ok(Err(e)) => {
                 eprintln!("{}: {e}", setup.track.display());
+                #[cfg(target_arch = "wasm32")]
+                web::track_failed(&setup.name, &format!("{}: {e}", setup.track.display()));
                 self.back_to_menu();
             }
             Err(_) => self.back_to_menu(),

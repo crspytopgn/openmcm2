@@ -49,8 +49,24 @@ export function put(path, data) {
   index(path);
 }
 
-// Files still being read in (see later()): how many are left.
+// Files still being read in (see later()): how many are left, and their
+// bytes read so far of all asked for, for the loading note.
 let waiting = 0;
+let laterBytes = 0;
+let laterDone = 0;
+
+/// How far the reading behind the game has got: { left, done, total } (bytes).
+export function progress() {
+  return { left: waiting, done: laterDone, total: laterBytes };
+}
+
+// A file's bytes, or a failure after `secs`: a browser has been seen to
+// leave a stored file's read unanswered, and a race waits for them all.
+function bytesOf(blob, secs) {
+  let timer;
+  const late = new Promise((_, fail) => (timer = setTimeout(() => fail(new Error(`no answer in ${secs} s`)), secs * 1000)));
+  return Promise.race([blob.arrayBuffer(), late]).finally(() => clearTimeout(timer));
+}
 
 /// Lists `list` ([path, blob]) as there, and reads them in one by one
 /// behind the game: a race waits for ready() (crates/mm2-viewer/src/fs.rs).
@@ -62,17 +78,21 @@ export function later(list, done) {
     index(path);
   }
   waiting += list.length;
+  laterBytes += list.reduce((n, [, b]) => n + (b.size || 0), 0);
   let next = 0;
   const worker = async () => {
     while (next < list.length) {
       const [p, blob] = list[next++];
       try {
         const f = files.get(norm(p).toLowerCase());
-        if (f && f.data === undefined) f.data = new Uint8Array(await blob.arrayBuffer());
+        // Tried twice; a file that still won't read is left out (as if
+        // missing) rather than holding up every race.
+        if (f && f.data === undefined) f.data = new Uint8Array(await bytesOf(blob, 30).catch(() => bytesOf(blob, 60)));
       } catch (e) {
         console.warn("couldn't read", p, e);
       }
       waiting--;
+      laterDone += blob.size || 0;
       done?.(p);
     }
   };
@@ -253,7 +273,8 @@ function write(path, data) {
   // The Course Builder's tracks and the Free Pack's built tracks join the
   // track folders (the game's, or the pack's without it) for this visit;
   // both are kept among the saves too (/user/Tracks, /user/FreeTracks).
-  if (/^\/(game|freepack)\/teraform\/[^/]+\/[^/]+\.(env|lights|made)$/i.test(path)) {
+  // So does a rebuilt demo track's note of which making built it.
+  if (/^\/(game|freepack)\/teraform\/[^/]+\/[^/]+\.(env|lights|made|rebuilt)$/i.test(path)) {
     const old = files.get(path.toLowerCase());
     put(old ? old.path : path, new Uint8Array(data));
     return true;

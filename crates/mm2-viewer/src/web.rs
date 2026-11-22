@@ -37,6 +37,10 @@ extern "C" {
     fn js_painted() -> js_sys::Promise;
     #[wasm_bindgen(js_name = trackLoading)]
     fn js_track_loading(on: bool);
+    #[wasm_bindgen(js_name = trackStage, catch)]
+    fn js_track_stage(stage: &str) -> Result<(), JsValue>;
+    #[wasm_bindgen(js_name = trackFailed, catch)]
+    fn js_track_failed(name: &str, why: &str) -> Result<(), JsValue>;
     #[wasm_bindgen(js_name = building)]
     fn js_building(on: bool);
     /// The graphics device was lost: the page starts the game again.
@@ -136,6 +140,19 @@ pub fn fail(why: &str) {
 /// frozen picture the page starts the game again.
 pub fn gpu_lost(why: &str) {
     let _ = js_gpu_lost(why);
+}
+
+/// A track couldn't be loaded (the game goes back to the menus): the
+/// page says so, rather than the race silently not starting.
+pub fn track_failed(name: &str, why: &str) {
+    web_sys::console::error_1(&format!("couldn't load the track {name}: {why}").into());
+    let _ = js_track_failed(name, why);
+}
+
+/// What a track's loading is doing now (`web/index.html` trackStage):
+/// "build", "track", "ground", "scenery", "gpu".
+pub fn track_stage(stage: &str) {
+    let _ = js_track_stage(stage);
 }
 
 /// Tells the page a track is loading (the page can't draw while it does).

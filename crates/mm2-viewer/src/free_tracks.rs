@@ -43,6 +43,24 @@ pub fn courses(def: &Def) -> Vec<String> {
 
 /// Builds the free track `path` names if it isn't there yet. Anything
 /// else is left alone.
+/// Whether `ensure` will build the track (not built yet, or by an older
+/// making of the recipes): a few seconds' work, longer on a phone.
+pub fn to_build(path: &Path) -> bool {
+    let Some(def) = path.file_stem().and_then(|s| s.to_str()).and_then(free::find) else {
+        return false;
+    };
+    let Some(dir) = path.parent() else { return false };
+    let current = |dir: &Path| {
+        crate::fs::is_file(&dir.join(format!("{}.ENV", def.file)))
+            && crate::fs::read(dir.join(format!("{}.made", def.file))).is_ok_and(|m| m == free::MADE.as_bytes())
+    };
+    #[cfg(target_arch = "wasm32")]
+    if current(&PathBuf::from("/user/FreeTracks").join(def.kind.folder())) {
+        return false;
+    }
+    !current(dir)
+}
+
 pub fn ensure(path: &Path) -> Result<(), String> {
     let Some(def) = path.file_stem().and_then(|s| s.to_str()).and_then(free::find) else {
         return Ok(());
