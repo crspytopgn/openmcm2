@@ -666,6 +666,14 @@ pub fn ridden(name: &str) -> Option<bool> {
     }
 }
 
+/// Whether `name` is the pack's rider on a bike or in the menus, which
+/// rides the pack's own motions even when the original's are there
+/// (not the podium's winner, which keeps the original's stand).
+pub fn rides_own_motions(name: &str) -> bool {
+    std::env::var_os("MM2_ORIGINAL_RIDER_MOTIONS").is_none()
+        && matches!(animated(name).map(|a| a.0), Some("Rider.mcf" | "UIRider.mcf"))
+}
+
 /// Whether `name` is one of the pack's liveries or outfits.
 pub fn is_paint(name: &str) -> bool {
     let stem = stem_of(name);

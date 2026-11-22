@@ -687,6 +687,19 @@ impl ObjectMesh {
             if motions.is_empty() && gate {
                 motions = gate_motions;
             }
+            // The free rider rides its own motions even beside the original
+            // game: the original's are fitted to the original's narrower
+            // bike, so on a free bike its legs went in through the
+            // shrouds. Its own are the original's poses and timing with the
+            // feet and knees refitted outside the free bikes
+            // (`tools/freepack/match_motions.py`). The podium keeps the
+            // original's, laid out for the original's stand.
+            if !motions.is_empty() && crate::freepack::rides_own_motions(&a.model) {
+                let own = crate::freepack::own_motions(true);
+                if !own.is_empty() {
+                    motions = own;
+                }
+            }
             if motions.is_empty() {
                 if let Some(rider) = crate::freepack::ridden(&a.model) {
                     motions = crate::freepack::own_motions(rider);
