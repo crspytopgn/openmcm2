@@ -1602,7 +1602,10 @@ impl Ground {
                 let repeats = 2f32.powf((tile_feet / period).log2().round()).clamp(1.0, 16.0) as usize;
                 let side = (tex / repeats).min(w.min(h));
                 let mut out = vec![[0.0f32; 3]; side * side];
-                let lin = |c: u8| (c as f32 / 255.0).powf(2.2);
+                // Each byte's linear value, worked out once (a power for
+                // every pixel was slow, above all in a browser).
+                let table: [f32; 256] = std::array::from_fn(|c| (c as f32 / 255.0).powf(2.2));
+                let lin = |c: u8| table[c as usize];
                 for y in 0..side {
                     for x in 0..side {
                         let (x0, x1) = (x * w / side, ((x + 1) * w / side).max(x * w / side + 1));
@@ -1732,16 +1735,19 @@ fn paint(land: &Land, kind: Kind, biome: Biome, ground: &Ground, seed: u32) -> (
     let fpp = tile_feet / tex as f32;
     let (track_a, track_b) = track_ground(kind, biome);
     let mut textures: Vec<(u32, Vec<u16>)> = Vec::new();
-    // The shared variants first.
+    // The shared variants first. Each tile of its own starts from one of
+    // them, pixel for pixel, so their colours are kept for that (working
+    // them out again for every tile was most of a track's building time).
+    let mut open: Vec<Vec<[f32; 3]>> = Vec::with_capacity(VARIANTS as usize);
     for k in 0..VARIANTS {
-        let mut px = Vec::with_capacity(tex * tex);
+        let mut colors = Vec::with_capacity(tex * tex);
         for j in 0..tex {
             for i in 0..tex {
-                let c = open_ground(biome, ground, (i as f32 + 0.5) * fpp, (j as f32 + 0.5) * fpp, k, fpp, seed);
-                px.push(rgb555(c[0], c[1], c[2]));
+                colors.push(open_ground(biome, ground, (i as f32 + 0.5) * fpp, (j as f32 + 0.5) * fpp, k, fpp, seed));
             }
         }
-        textures.push((tex as u32, px));
+        textures.push((tex as u32, colors.iter().map(|c| rgb555(c[0], c[1], c[2])).collect()));
+        open.push(colors);
     }
     // What is on each tile, or just over its edge: the track (always
     // painted), else how many samples of patches or rock.
@@ -1785,7 +1791,7 @@ fn paint(land: &Land, kind: Kind, biome: Biome, ground: &Ground, seed: u32) -> (
                 for i in 0..tex {
                     let (u, v) = ((i as f32 + 0.5) * fpp, (j as f32 + 0.5) * fpp);
                     let (x, z) = (tx as f32 * tile_feet + u, tz as f32 * tile_feet + v);
-                    let mut c = open_ground(biome, ground, u, v, k, fpp, seed);
+                    let mut c = open[k as usize][j * tex + i];
                     let (pm, pw) = land.patch[((z / land.scale) as usize).min(n - 1) * n + ((x / land.scale) as usize).min(n - 1)];
                     if pw > 0.0 {
                         let rag = (fbm(x / 9.0, z / 9.0, seed + 6) - 0.5) * 0.5;

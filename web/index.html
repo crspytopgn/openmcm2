@@ -145,10 +145,21 @@
   #ldError details { font-size: .85rem; color: var(--dim); }
   #ldError pre { white-space: pre-wrap; word-break: break-word; background: #0c0b0a; border: 1px solid #2c2a24;
     padding: .6rem; max-height: 12rem; overflow: auto; font-size: .8rem; }
-  /* Over the game while a track loads: the page can't draw then. */
-  #trackload { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 6;
-    padding: .45rem 1rem; background: rgba(18,17,16,.88); border-left: 4px solid var(--accent);
-    border-radius: 4px; font-size: .9rem; color: var(--fg); max-width: calc(100vw - 32px); pointer-events: none; }
+  /* Over the game while a track loads: what it's doing, and how far. */
+  #trackload { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 6;
+    width: min(26rem, calc(100vw - 32px)); padding: .6rem .9rem .7rem; background: rgba(18,17,16,.92);
+    border-left: 4px solid var(--accent); border-radius: 4px; color: var(--fg); pointer-events: none; }
+  #tlTitle { display: block; font-size: .95rem; font-weight: 600; }
+  #tlStep { display: block; font-size: .85rem; color: var(--dim); margin: .15rem 0 .45rem; min-height: 1.2em; }
+  #tlBar { height: 6px; background: #2c2a24; border-radius: 3px; overflow: hidden; }
+  #tlFill { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  #tlNote { display: block; font-size: .8rem; color: var(--dim); margin-top: .4rem; }
+  #trackfail { position: fixed; top: 44px; left: 50%; transform: translateX(-50%); z-index: 7; padding: .6rem .8rem .6rem 1rem;
+    background: rgba(0,0,0,.9); border: 1px solid #c8553d; border-radius: 8px; font-size: .9rem;
+    width: min(30rem, calc(100vw - 32px)); }
+  #trackfail p { margin: 0 0 .4rem; }
+  #trackfail .why { color: var(--dim); font-size: .8rem; word-break: break-word; }
+  #trackfail button { padding: .3rem .7rem; }
   /* The Home Screen tip, the bug report and the "not loading?" help. */
   .tip { margin: 0 0 1rem; padding: .7rem .9rem; border: 1px solid #3a3a2a; border-left: 4px solid var(--accent);
     border-radius: 8px; background: #1a1a15; }
@@ -352,7 +363,18 @@
   </div>
   <ol id="ldSteps"></ol>
 </div></div>
-<div id="trackload" hidden>Loading the track. The picture can stop for a few seconds while it does.</div>
+<div id="trackload" hidden role="status" aria-live="polite">
+  <strong id="tlTitle">Loading the track</strong>
+  <span id="tlStep"></span>
+  <div id="tlBar"><div id="tlFill"></div></div>
+  <span id="tlNote" hidden></span>
+</div>
+<div id="trackfail" hidden role="alert">
+  <p id="tfTitle"></p>
+  <p>The game went back to the menus. Pick the track again to try once more, or copy a bug report from the start page.</p>
+  <p class="why" id="tfWhy"></p>
+  <button id="tfOk">OK</button>
+</div>
 <div id="slow" class="banner" hidden>The game is running slowly on this computer.
   <button id="slowlow">Use Low quality</button> <button id="sloworig">Use the original look</button>
   <button id="slowkeep" class="plain">Keep going</button></div>
@@ -813,7 +835,19 @@ globalThis.mm2page = {
   },
   // A track starts or finishes loading.
   trackLoading(on) {
-    $("trackload").hidden = !on;
+    trackLoad.show(on);
+  },
+  // What the track's loading does now (crates/mm2-viewer/src/main.rs
+  // load_stage): the note says it, and the bar moves on.
+  trackStage(stage) {
+    trackLoad.stage(stage);
+  },
+  // A track couldn't be loaded, and the game went back to the menus.
+  trackFailed(name, why) {
+    trackLoad.show(false);
+    $("tfTitle").textContent = `Couldn't load ${name || "the track"}.`;
+    $("tfWhy").textContent = why;
+    $("trackfail").hidden = false;
   },
   // The Course Builder opened or closed: the corner buttons keep out of
   // its way.
@@ -892,6 +926,72 @@ globalThis.mm2page = {
     setTimeout(() => location.reload(), 1500);
   },
 };
+
+// The note over the game while a track loads. The game runs its loading
+// a step a frame, so this shows what it's on; first it may wait for the
+// scenery still being read into memory behind the menus.
+const TRACK_STAGES = {
+  read: ["Reading the scenery into memory", 0.25],
+  build: ["Building this track. This happens only the first time you ride it, and takes longer on a phone or tablet", 0.45],
+  track: ["Reading the track", 0.5],
+  ground: ["Laying out the ground", 0.6],
+  scenery: ["Putting up the scenery, bikes and riders", 0.75],
+  gpu: ["Sending it to the graphics card", 0.92],
+};
+const trackLoad = (() => {
+  let timer = null;
+  let since = 0;
+  let stage = null;
+  const set = (id, extra = "") => {
+    const [text, share] = TRACK_STAGES[id];
+    $("tlStep").textContent = text + extra;
+    $("tlFill").style.width = `${Math.round(share * 100)}%`;
+  };
+  const tick = () => {
+    // While nothing else has started, the game waits for the reading.
+    if (!stage) {
+      const p = fs.progress();
+      if (p.left) {
+        $("tlFill").style.width = `${Math.round(5 + (p.total ? (p.done / p.total) * 20 : 0))}%`;
+        $("tlStep").textContent = `${TRACK_STAGES.read[0]} · ${MB(p.done)} of ${MB(p.total)} MB`;
+      }
+    }
+    // A slow tablet: say it's still going, so it doesn't look stuck.
+    const secs = (Date.now() - since) / 1000;
+    if (secs > 20) {
+      $("tlNote").hidden = false;
+      $("tlNote").textContent = `${Math.round(secs)} s so far. Phones and tablets can take a minute or two for a big track.`;
+    }
+  };
+  return {
+    show(on) {
+      $("trackload").hidden = !on;
+      clearInterval(timer);
+      timer = null;
+      if (!on) {
+        if (since) console.log(`track loading: done in ${((Date.now() - since) / 1000).toFixed(1)} s`);
+        since = 0;
+        return;
+      }
+      $("trackfail").hidden = true;
+      stage = null;
+      since = Date.now();
+      $("tlNote").hidden = true;
+      $("tlStep").textContent = "Getting ready";
+      $("tlFill").style.width = "4%";
+      timer = setInterval(tick, 250);
+      tick();
+    },
+    stage(id) {
+      if (!TRACK_STAGES[id]) return;
+      if (!stage) console.log(`track loading: waited ${((Date.now() - since) / 1000).toFixed(1)} s for the files`);
+      stage = id;
+      set(id);
+      console.log(`track loading: ${id} at ${((Date.now() - since) / 1000).toFixed(1)} s`);
+    },
+  };
+})();
+$("tfOk").addEventListener("click", () => ($("trackfail").hidden = true));
 
 // Touch screens: buttons for riding, and full screen on the first tap.
 const pad = touch.wanted() ? touch.setup($("mm2")) : null;
