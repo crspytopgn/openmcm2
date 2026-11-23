@@ -2014,8 +2014,12 @@ impl Frontend {
                 let over = d.index("ScreenOverCtl").unwrap_or(n);
                 d.draw_some(ui, gfx, now, 0..over);
                 if let Some(m) = &mut self.events {
+                    // Under the frame (ScreenOverCtl, 355,113 144x104 in
+                    // the game's own layout), wherever the pull-down's art
+                    // has moved it: the new look slides the pull-down right.
                     let (x, y) = d.origin;
-                    m.draw(gfx, now, [x + 355.0, y + 113.0, 144.0, 104.0]);
+                    let at = d.rect_of("ScreenOverCtl").unwrap_or([x + 355.0, y + 113.0, 144.0, 104.0]);
+                    m.draw(gfx, now, at);
                 }
                 d.draw_some(ui, gfx, now, over..n);
                 d.draw_list(ui, gfx);
