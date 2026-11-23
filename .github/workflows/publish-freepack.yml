@@ -35,6 +35,9 @@ on:
       sound_from:
         description: "Or: a branch whose sound/ is laid over the pack's (each engine class it has replaced whole), e.g. freepack-audio"
         default: ""
+      colour_lift:
+        description: "How much more colour the scenery gets (tools/freepack/saturate.py): 0.20 = 20 %, 0 = as the source has it"
+        default: "0.20"
       dry_run:
         description: "Only pack it and list what would change, upload nothing"
         type: boolean
@@ -47,6 +50,7 @@ on:
       leave_out: { type: string, default: "" }
       sounds: { type: boolean, default: false }
       sound_from: { type: string, default: "" }
+      colour_lift: { type: string, default: "0.20" }
       dry_run: { type: boolean, default: false }
 
 permissions:
@@ -101,6 +105,10 @@ jobs:
             mkdir -p "$PACK/sound"
             cp -R "$RUNNER_TEMP/snd/sound/." "$PACK/sound/"
           fi
+          # A little more colour in the scenery (ground, skies, plants, trackside
+          # objects), before the previews below are drawn from the ground.
+          sudo apt-get install -y -q python3-numpy python3-pil
+          python3 tools/freepack/saturate.py "$PACK" "${{ inputs.colour_lift }}"
           # The free tracks' pictures, for the menus before a track is built.
           cargo build --release -q -p mm2-tools
           rm -rf "$PACK/previews"

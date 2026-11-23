@@ -19,6 +19,10 @@ Then turn its sounds into Ogg Vorbis (needs ffmpeg with libvorbis). The sources 
 
     python3 tools/freepack/ogg_sounds.py <pack folder>
 
+Then give the scenery a little more colour (the publish workflow does this with its `colour_lift` input, 0.20 by default). It lifts the colour of the ground, skies, plants and trackside objects by 20 %, keeping brightness and contrast, and leaves bikes, riders, menus and the HUD alone. Run it once only: each run lifts again. Free tracks bake the ground into their files, so a change to the amount also needs `MADE` in `crates/mm2-course/src/free.rs` bumped, so players' tracks are built again:
+
+    python3 tools/freepack/saturate.py <pack folder> 0.20
+
 Then run this on the finished pack folder, after `share_textures.py`:
 
     python3 tools/freepack/pack.py <pack folder> out 2026.11.20
