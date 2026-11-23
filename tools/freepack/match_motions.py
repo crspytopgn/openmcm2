@@ -77,18 +77,22 @@ def weight(d, full, none):
 # many degrees, over the bars, with the head kept up by most of it; the
 # elbows bend out and up. Fades out as the pelvis leaves the seat
 # (tricks, crashes).
-SEAT_DROP = np.array([0.0, -0.7, 0.05])
+SEAT_DROP = np.array([0.0, -0.6, 0.05])
 # ...but never with the hips below this height (ft) over the ground.
 SEAT_HIP = 3.5
 # On the seat with the pelvis behind SEAT_BACK (ft, model z), off it
 # (standing forward over the tank) ahead of SEAT_FRONT.
 SEAT_BACK, SEAT_FRONT = -1.0, -0.6
-SEAT_LEAN = 18.0
+SEAT_LEAN = 0.0
 # Standing up over the tank (the pelvis forward of this, ft) leans this
 # much more: the attack position, chest over the bars.
-ATTACK_Z, ATTACK_LEAN = -1.0, 22.0
+ATTACK_Z, ATTACK_LEAN = -1.0, 6.0
 HEAD_KEEP = 0.8
-ELBOW_BIAS = np.array([0.4, 0.2, 0.0])
+# The free bike's pegs sit this much lower (ft) than the original's: a
+# rider standing on them comes down by as much, so the knees keep the
+# original's bend instead of straightening.
+PEG_DROP = ORIG_ANKLE[1] - SEATED['ankle'][1]
+ELBOW_BIAS = np.array([0.0, 0.3, 0.0])
 
 def _axis_angle(a, deg):
     a = a / np.linalg.norm(a); t = math.radians(deg); c, s = math.cos(t), math.sin(t)
@@ -107,7 +111,7 @@ def settle(tree, W, home):
     sit = w * weight(-W[idx['Pelvis']][1][2], -SEAT_BACK, -SEAT_FRONT)
     y = W[idx['Pelvis']][1][1]
     d = SEAT_DROP * sit
-    d[1] = -min(-SEAT_DROP[1], max(0.0, y - SEAT_HIP)) * sit
+    d[1] = -max(min(-SEAT_DROP[1], max(0.0, y - SEAT_HIP)) * sit, PEG_DROP * w)
     W = [(R, t + d) for R, t in W]
     kids = {i: [j for j, f in enumerate(tree) if f['parent'] == i] for i in range(len(tree))}
     def sub(i):
