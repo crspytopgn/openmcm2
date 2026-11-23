@@ -1852,7 +1852,8 @@ async function syncPack(fetchNew, pick) {
       const r = await fetch(PACK_URL + "freepack.json", { cache: "no-cache" });
       if (!r.ok) throw new Error(`the Free Pack download answered ${r.status}`);
       const latest = await r.json();
-      if (latest.format !== 1) throw new Error("this Free Pack needs a newer OpenMCM2: reload the page");
+      // 2: sounds as Ogg Vorbis.
+      if (latest.format !== 1 && latest.format !== 2) throw new Error("this Free Pack needs a newer OpenMCM2: reload the page");
       if (!pick) {
         // Leaving out what the browser never reads: a broken stockmap just
         // means downloading everything, as before.

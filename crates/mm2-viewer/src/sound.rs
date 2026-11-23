@@ -24,7 +24,7 @@ use crate::frontend::EventKind;
 use crate::race::Race;
 use glam::Vec3;
 use mm2_formats::{rs2, scn, wav::Sound};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -214,9 +214,13 @@ impl Loops {
         let ini = scn::Ini::parse(&crate::fs::read_to_string(dir.join("engine.ini")).ok()?);
         let get = |key: &str| ini.sections.iter().find_map(|s| s.get(key)).map(|v| v.trim().to_string());
         let num = |key: &str| get(key).and_then(|v| v.parse::<f32>().ok());
+        // `OnLoop.wav` is found as `OnLoop.ogg` too, and back.
         let file = |name: &str| {
-            let bytes = crate::fs::read(dir.join(name)).map_err(|e| eprintln!("{}: {e}", dir.join(name).display())).ok()?;
-            mm2_formats::wav::parse(&bytes).ok().map(Arc::new)
+            let bytes = crate::fs::read(dir.join(name))
+                .or_else(|e| mm2_formats::wav::other_name(name).and_then(|n| crate::fs::read(dir.join(n)).ok()).ok_or(e))
+                .map_err(|e| eprintln!("{}: {e}", dir.join(name).display()))
+                .ok()?;
+            mm2_formats::wav::decode(&bytes).ok().map(Arc::new)
         };
         let wav = |key: &str| file(&get(key)?);
         // `OnLoops = a.wav@3000, ...`, or the one `OnLoop` at `OnLoopRpm`.
@@ -426,9 +430,12 @@ impl Bank {
             .ok()?
             .filter_map(|e| e.ok())
             .map(|e| (e.file_name().to_string_lossy().to_ascii_lowercase(), e.path()))
-            .filter(|(n, _)| n.ends_with(".wav"))
+            .filter(|(n, _)| mm2_formats::wav::is_sound_name(n))
             .collect();
         names.sort();
+        // A sound as both `.ogg` and `.wav` counts once (the Ogg Vorbis).
+        let oggs: HashSet<String> = names.iter().filter_map(|(n, _)| n.strip_suffix(".ogg").map(str::to_string)).collect();
+        names.retain(|(n, _)| n.strip_suffix(".wav").is_none_or(|stem| !oggs.contains(stem)));
         let lists: Vec<Vec<Arc<Sound>>> = LISTS
             .iter()
             .map(|(_, list)| {
@@ -445,7 +452,7 @@ impl Bank {
                     .into_iter()
                     .take(keep)
                     .filter_map(|(_, p)| crate::fs::read(p).ok())
-                    .filter_map(|b| mm2_formats::wav::parse(&b).map_err(|e| eprintln!("{}: {e}", dir.display())).ok())
+                    .filter_map(|b| mm2_formats::wav::decode(&b).map_err(|e| eprintln!("{}: {e}", dir.display())).ok())
                     .map(Arc::new)
                     .collect()
             })
@@ -709,7 +716,17 @@ impl RaceSounds {
         if let Some(dir) = crate::freepack::fx_dir() {
             for e in crate::fs::read_dir(&dir).into_iter().flatten().flatten() {
                 let name = e.file_name().to_string_lossy().to_ascii_lowercase();
-                if let Some(s) = crate::fs::read(e.path()).ok().and_then(|b| mm2_formats::wav::parse(&b).ok()) {
+                // An Ogg Vorbis `crowdloop.ogg` answers for `crowdloop.wav`,
+                // the name the game asks for, and wins over a WAV of it.
+                let (name, ogg) = match name.strip_suffix(".ogg") {
+                    Some(stem) => (format!("{stem}.wav"), true),
+                    None if name.ends_with(".wav") => (name, false),
+                    None => continue,
+                };
+                if !ogg && pack_fx.contains_key(&name) {
+                    continue;
+                }
+                if let Some(s) = crate::fs::read(e.path()).ok().and_then(|b| mm2_formats::wav::decode(&b).ok()) {
                     pack_fx.insert(name, Arc::new(s));
                 }
             }
@@ -1423,6 +1440,32 @@ mod tests {
         let bank = Bank::load_dir(&dir, 1).unwrap();
         assert!(bank.loops.is_none());
         assert_eq!(bank.list(List::PowerBand).len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The Free Pack's sounds as Ogg Vorbis load as the WAVs did: a list's
+    /// samples, an `engine.ini` that still names `.wav` files, and a sound
+    /// there as both counts once.
+    #[test]
+    fn ogg_samples_load() {
+        const TONE: &[u8] = include_bytes!("../../mm2-formats/tests/data/tone.ogg");
+        let dir = std::env::temp_dir().join(format!("mm2-ogg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ini = "[Engine]\nOnLoop=OnLoop.wav\nOffLoop=OffLoop.wav\nIdleLoop=IdleLoop.wav\nOnLoopRpm=5000\nOffLoopRpm=5000\nIdleLoopRpm=1500\n";
+        std::fs::write(dir.join("engine.ini"), ini).unwrap();
+        for name in ["OnLoop", "OffLoop", "IdleLoop"] {
+            std::fs::write(dir.join(format!("{name}.ogg")), TONE).unwrap();
+        }
+        let loops = Bank::load_dir(&dir, 1).unwrap().loops.unwrap();
+        assert_eq!(loops.idle.frames(), 5513);
+        for name in ["Idle01", "PowerBand01", "PowerBand02", "Decel01"] {
+            std::fs::write(dir.join(format!("{name}.ogg")), TONE).unwrap();
+        }
+        std::fs::write(dir.join("PowerBand01.wav"), b"not read").unwrap();
+        let bank = Bank::load_dir(&dir, 1).unwrap();
+        assert!(bank.loops.is_none());
+        assert_eq!(bank.list(List::PowerBand).len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

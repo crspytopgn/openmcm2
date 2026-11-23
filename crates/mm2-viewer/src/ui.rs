@@ -775,7 +775,7 @@ impl Ui {
             .or_else(|| self.global.as_ref()?.file(&file))
             .and_then(|b| wav::parse(b).ok())
             // Without the game's menus, the Free Pack's own.
-            .or_else(|| crate::freepack::ui_sound(&file).and_then(|b| wav::parse(&b).ok()))
+            .or_else(|| crate::freepack::ui_sound(&file).and_then(|b| wav::decode(&b).ok()))
             .map(Arc::new);
         self.sounds.insert(key, sound.clone());
         sound

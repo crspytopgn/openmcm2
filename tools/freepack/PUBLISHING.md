@@ -15,6 +15,10 @@ First give the pack its menus, so it plays with no MM2 files. Their layout comes
     python3 freepack/menu/no_text.py <pack folder>
     python3 tools/freepack/make_ui_sounds.py <pack folder>
 
+Then turn its sounds into Ogg Vorbis (needs ffmpeg with libvorbis). The sources stay WAVs; this writes a `.ogg` beside each `.wav`, checks it is the same length to the sample, and removes the `.wav`. The sound part goes from about 20 MB to about 3 MB. OpenMCM2 0.7.7 and later play `.ogg`, so publish a pack made this way only after that release is out (its `freepack.json` says `"format": 2`, which older launchers refuse rather than download sounds they can't play):
+
+    python3 tools/freepack/ogg_sounds.py <pack folder>
+
 Then run this on the finished pack folder, after `share_textures.py`:
 
     python3 tools/freepack/pack.py <pack folder> out 2026.11.20
