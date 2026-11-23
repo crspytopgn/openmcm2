@@ -677,12 +677,24 @@ impl Bike {
     pub fn followed(&self) -> crate::ride::Followed {
         let place = self.place();
         let airborne = self.airborne();
+        // The player's bike steps 50 times a second and is drawn between
+        // steps; its heading and velocity are taken between steps too, as
+        // the place is. The last step's would turn the views from the
+        // rider's head in 50 jerks a second: juddery at full lock.
+        let (forward, velocity, speed) = match self {
+            Bike::Player(b) => {
+                let f = place.z_axis.truncate();
+                let v = b.drawn_velocity();
+                (Vec3::new(f.x, 0.0, f.z).normalize_or(self.forward()), v, v.dot(f.normalize_or(Vec3::Z)))
+            }
+            _ => (self.forward(), self.velocity(), self.speed()),
+        };
         crate::ride::Followed {
             position: place.w_axis.truncate(),
-            forward: self.forward(),
+            forward,
             up: place.y_axis.truncate().normalize_or(Vec3::Y),
-            velocity: self.velocity(),
-            speed: self.speed(),
+            velocity,
+            speed,
             crashed: self.crashed(),
             airborne,
             high: match self {

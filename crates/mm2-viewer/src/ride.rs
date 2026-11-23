@@ -97,6 +97,9 @@ pub struct Chase {
     lean: f32,
     turn_look: f32,
     heading: Option<f32>,
+    /// Where the Helmet Cam's head faces, level: the bike's heading as a
+    /// neck follows it.
+    neck: Option<Vec3>,
     dip: (f32, f32),
     nod: f32,
     last_speed: f32,
@@ -183,6 +186,7 @@ impl Chase {
             lean: 0.0,
             turn_look: 0.0,
             heading: None,
+            neck: None,
             dip: (0.0, 0.0),
             nod: 0.0,
             last_speed: 0.0,
@@ -214,6 +218,7 @@ impl Chase {
             self.helmet = false;
         } else if self.view == View::User {
             self.helmet = true;
+            self.neck = None;
             return HELMET_CAM;
         }
         self.view = self.view.next();
@@ -227,6 +232,7 @@ impl Chase {
     /// from; the view's name, to flash.
     pub fn toggle_helmet(&mut self) -> &'static str {
         self.frozen = None;
+        self.neck = None;
         self.helmet = !self.helmet;
         if self.helmet { HELMET_CAM } else { self.view.name() }
     }
@@ -445,6 +451,10 @@ impl Chase {
     /// head straighter than the bike), and how fast it follows, s.
     const LEAN_WITH_BIKE: f32 = 0.45;
     const LEAN_EASE: f32 = 0.12;
+    /// How long the head takes to turn with the bike, s: a neck, not a
+    /// bolt, so the small twitches of the bike's heading at full lock
+    /// don't shake the view.
+    const NECK_TURN: f32 = 0.06;
     /// The landing dip: ft for each ft/s coming down (up to `DIP_MOST`),
     /// and the neck's spring, 1/s, and damping.
     const DIP_PER_FALL: f32 = 0.012;
@@ -467,6 +477,14 @@ impl Chase {
         // `forward` is level; the bike's own nose, tipped with its up.
         let nose = (forward - bike.up * forward.dot(bike.up)).normalize_or(forward);
         let want = bike.position + bike.up * Self::HELMET_UP + nose * Self::HELMET_AHEAD;
+        // The head turns with the bike through the neck; a big change (a
+        // reset, a crash) is taken at once.
+        let k = 1.0 - (-dt / Self::NECK_TURN).exp();
+        let neck = self
+            .neck
+            .filter(|n| n.dot(forward) > 0.7)
+            .map_or(forward, |n| n.lerp(forward, k).normalize_or(forward));
+        self.neck = Some(neck);
         let rise = 1.0 - (-dt / Self::NECK_RISE).exp();
         // A long way off (a restart, a reset): straight there.
         if self.head.distance(want) > 20.0 {
@@ -501,7 +519,7 @@ impl Chase {
         d = (d + v * dt).clamp(-Self::DIP_MOST, Self::DIP_MOST);
         self.dip = (d, v);
         // The eyes go ahead into the turn: how fast the heading turns.
-        let heading = forward.z.atan2(forward.x);
+        let heading = neck.z.atan2(neck.x);
         let rate = match self.heading {
             Some(h) => {
                 let mut a = heading - h;
@@ -528,8 +546,8 @@ impl Chase {
         let right = forward.cross(Vec3::Y);
         let lean = bike.up.dot(right).clamp(-0.9, 0.9).asin();
         self.roll_ease(lean * Self::LEAN_WITH_BIKE, dt);
-        let going = if bike.speed > 5.0 { flat(bike.velocity) } else { forward };
-        let look = forward.lerp(going, Self::INTO_TURN).normalize_or(forward);
+        let going = if bike.speed > 5.0 { flat(bike.velocity) } else { neck };
+        let look = neck.lerp(going, Self::INTO_TURN).normalize_or(neck);
         let look = glam::Quat::from_rotation_y(-self.turn_look) * look;
         // The pitch follows most of the bike's, so the bars stay put in
         // view over crests and dips as the rider's head would keep them.

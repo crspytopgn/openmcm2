@@ -503,8 +503,9 @@ pub struct Bike {
     pub position: Vec3,
     pub velocity: Vec3,
     last_velocity: Vec3,
-    /// The place before the last step, to draw in between steps.
-    previous: Option<(Vec3, Mat3)>,
+    /// The place and velocity before the last step, to draw (and to
+    /// follow with the camera) in between steps.
+    previous: Option<(Vec3, Mat3, Vec3)>,
     /// Body to world: columns right, up and forward.
     orientation: Mat3,
     /// Spin, rad/s, in body axes.
@@ -843,7 +844,7 @@ impl Bike {
     /// screen runs at another rate than the 50 steps a second).
     pub fn drawn_place(&self) -> Mat4 {
         let now = self.place();
-        let Some((position, orientation)) = self.previous else {
+        let Some((position, orientation, _)) = self.previous else {
             return now;
         };
         if position.distance(self.position) > 20.0 {
@@ -856,6 +857,19 @@ impl Bike {
         let mut m = Mat4::from_mat3(r);
         m.w_axis = (position.lerp(self.position, t) - r * COM).extend(1.0);
         m
+    }
+
+    /// The velocity between steps, as `drawn_place` places the bike: what
+    /// a camera riding with it follows, so a view from the rider's head
+    /// turns and moves smoothly at any frame rate rather than in the 50
+    /// steps a second.
+    pub fn drawn_velocity(&self) -> Vec3 {
+        match self.previous {
+            Some((position, _, velocity)) if position.distance(self.position) <= 20.0 => {
+                velocity.lerp(self.velocity, self.drawn_share())
+            }
+            _ => self.velocity,
+        }
     }
 
     /// How far the screen is from the step before to the last one, 0 to 1.
@@ -999,7 +1013,7 @@ impl Bike {
 
     /// One step of `self.h`.
     fn tick(&mut self, ground: &dyn Ground, c: Controls) {
-        self.previous = Some((self.position, self.orientation));
+        self.previous = Some((self.position, self.orientation, self.velocity));
         let h = self.h;
         // The shocks spring back and damp over the step before this one
         // (0x52e520 and 0x519350 take +0x1e8, not +0x13c): what moved
@@ -2149,7 +2163,7 @@ impl Bike {
     /// last step is pushed back out along the face, and the bike bounces
     /// off each object it hit (0x405fb0 → 0x5050b0).
     fn hit_objects(&mut self, ground: &dyn Ground, mass: f32, bounce: f32) {
-        let (Some(hull), Some((was_at, was_turned))) = (self.hull.clone(), self.previous) else {
+        let (Some(hull), Some((was_at, was_turned, _))) = (self.hull.clone(), self.previous) else {
             return;
         };
         let place = |at: Vec3, turned: Mat3, p: Vec3| at + turned * (p - COM);
