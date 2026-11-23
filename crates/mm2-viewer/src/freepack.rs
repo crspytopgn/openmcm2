@@ -884,59 +884,6 @@ fn shape(stem: &str) -> Option<(mm2_formats::slb::Model, Vec<mm2_formats::glb::I
     Some((model, images, path))
 }
 
-/// The lowest a free bike's frame reaches for the collision hull, ft
-/// above the ground between the tyres: the original's shared `honda.col`
-/// frame goes no lower than 1.29.
-const BELLY: f32 = 1.25;
-
-/// The collision hull of the pack's bike `name` (it has no `.col`), shaped
-/// like the original's shared one so the pack's bikes ride as the game's
-/// do: the frame's shell round its parts above the belly line, in model
-/// space, and each wheel the original's ring of points at the tyre's own
-/// size.
-pub fn bike_hull(name: &str) -> Option<mm2_physics::bike::Hull> {
-    use mm2_physics::bike::Hull;
-    let stem = stem_of(name);
-    if rides().shapes.get(&stem)?.1 {
-        return None;
-    }
-    let (model, _, _) = shape(&stem)?;
-    let world = model.world_matrices();
-    let wheel = |name: &str| BIKE_FRAMES.iter().position(|f| *f == name);
-    let (front, rear) = (wheel("TireFront")?, wheel("TireRear")?);
-    let (body, bars) = (wheel("Bike")?, wheel("HandleBars")?);
-    let mut parts: [Vec<glam::Vec3>; 3] = Default::default();
-    for s in model.lods.first()?.surfaces.iter() {
-        for (v, p) in s.positions.iter().enumerate() {
-            let frame = s.frame_of(v);
-            let p = glam::Vec3::from(*p);
-            let (list, centre) = match frame {
-                f if f == front => (1, world[f]),
-                f if f == rear => (2, world[f]),
-                // The swingarm, shocks and kickstart hang below the frame
-                // and move: the game's hull leaves them out too.
-                f if f == body || f == bars => (0, [0.0; 16]),
-                _ => continue,
-            };
-            // Nothing of the frame hangs below the shared hull's belly: the
-            // pack's models carry the chain, brake and swingarm ends on the
-            // frame (the Ridgeback's reach 0.63 ft, under the rear axle),
-            // which met the ground whenever the rear shock squeezed.
-            if list == 0 && p[1] < BELLY {
-                continue;
-            }
-            parts[list].push(p - glam::Vec3::new(centre[12], centre[13], centre[14]));
-        }
-    }
-    let [frame, a, b] = &parts;
-    // A round shell of the tyre's mesh pushed a bottomed fork back
-    // differently from the original's ring, launching the Ridgeback 6-9°
-    // more nose-up off a 20° face.
-    let radius = |w: &[glam::Vec3]| w.iter().map(|p| p.y.hypot(p.z)).fold(0.0f32, f32::max);
-    let (a, b) = (Hull::ring_wheel(radius(a)), Hull::ring_wheel(radius(b)));
-    Some(Hull::from_points(frame, [&a, &b]))
-}
-
 /// The race markers drawn over the riders and the course: the sign over
 /// the player's bike, Moto-Tag's IT sign, the runway pointer, the Visual
 /// Cue arrow and the countdown's figures.
