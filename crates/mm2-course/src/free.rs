@@ -3394,8 +3394,9 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
 /// a track built by an older one is built again. Change it whenever a
 /// change here moves anything on an existing track.
 /// "10": the Free Pack's ground got 20 % more colour (tools/freepack/saturate.py).
-/// "11": a crowd only in stadiums and Tag arenas, as in the original.
-pub const MADE: &str = "11";
+/// "12": a crowd only in stadiums and Tag arenas, as in the original
+/// (11 is the private engine's smoother free tracks).
+pub const MADE: &str = "12";
 
 /// The free track whose file is `stem` (`FPNAT01`), any case.
 pub fn find(stem: &str) -> Option<&'static Def> {
