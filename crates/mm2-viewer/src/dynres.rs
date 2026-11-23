@@ -250,6 +250,74 @@ impl Governor {
     }
 }
 
+/// In a browser, the whole picture's size while racing, menus and race
+/// display included (`Picture`): the share of the window's own pixels
+/// each way, as f32 bits. 1.0 natively, in the menus and at first.
+static PICTURE: AtomicU32 = AtomicU32::new(0x3f80_0000);
+
+/// The share of the window's own pixels, each way, to draw the whole
+/// picture at now (main.rs drawn_size).
+pub fn picture() -> f32 {
+    f32::from_bits(PICTURE.load(Ordering::Relaxed))
+}
+
+/// The most pixels a race in a browser starts at: 1440p's worth. A
+/// laptop's 4K screen at 150% has some 7.5 million in a big window,
+/// four 1080p screens' worth, which built-in graphics can't fill 60 times
+/// a second through a browser; 1440p's worth is still more than the
+/// window's own size in the page's points, so the picture stays sharp.
+pub const PICTURE_START: u64 = 2560 * 1440;
+
+/// The share of a `window` (pixels) a race starts at: all of it up to
+/// [`PICTURE_START`], else that many pixels' worth.
+pub fn picture_start(window: (u32, u32)) -> f32 {
+    let have = window.0 as f64 * window.1 as f64;
+    if have <= PICTURE_START as f64 {
+        1.0
+    } else {
+        (PICTURE_START as f64 / have).sqrt() as f32
+    }
+}
+
+/// A browser's picture while racing, in either look: it starts at
+/// [`picture_start`], is drawn smaller (down to 0.6 of that each way)
+/// while frames come late, and bigger again, up to the window's own,
+/// while they keep time ([`Governor`], which never sets effects aside
+/// here). Where the enhanced look's own dynamic resolution is in charge,
+/// it is left to that and the picture stays at the start. The menus are
+/// drawn at the window's own size, sharp, as they cost next to nothing.
+#[derive(Debug, Clone)]
+pub struct Picture {
+    governor: Governor,
+}
+
+impl Default for Picture {
+    fn default() -> Self {
+        Picture { governor: Governor { sheds: false, ..Governor::default() } }
+    }
+}
+
+impl Picture {
+    /// After a frame that took `real` seconds when `wanted` was wanted
+    /// ([`Governor::frame`]), in a `window` this many pixels big:
+    /// `racing` or in the menus, and whether the enhanced look's dynamic
+    /// resolution is `governing` the scene. Returns the share to draw at.
+    pub fn frame(&mut self, racing: bool, governing: bool, real: f32, wanted: f32, window: (u32, u32)) -> f32 {
+        let k = if !racing {
+            1.0
+        } else {
+            let start = picture_start(window);
+            if governing {
+                start
+            } else {
+                (start * self.governor.frame(real, wanted, 1.0 / start)).min(1.0)
+            }
+        };
+        PICTURE.store(k.to_bits(), Ordering::Relaxed);
+        k
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -361,5 +429,39 @@ mod tests {
             }
         }
         assert_eq!(STEPS[g.step], 1.0);
+    }
+
+    #[test]
+    fn a_big_browser_window_starts_at_1440p_and_grows_with_time_to_spare() {
+        // A 4K laptop screen at 150%: a 2552x1308 point window.
+        let window = (3828, 1962);
+        let start = picture_start(window);
+        assert!((start - 0.70).abs() < 0.01, "{start}");
+        assert_eq!(picture_start((1920, 1080)), 1.0);
+        let mut p = Picture::default();
+        assert_eq!(p.frame(false, false, BEAT, BEAT, window), 1.0);
+        assert_eq!(p.frame(true, false, BEAT, BEAT, window), start);
+        // Plenty of time: it grows, never past the window.
+        let mut k = start;
+        for _ in 0..60 * 60 {
+            k = p.frame(true, false, BEAT, BEAT, window);
+        }
+        assert!(k > 0.9 && k <= 1.0, "{k}");
+        // The enhanced look's own dynamic resolution in charge: the start.
+        assert_eq!(Picture::default().frame(true, true, BEAT, BEAT, window), start);
+    }
+
+    #[test]
+    fn a_slow_browser_picture_steps_down_but_not_too_far() {
+        let mut p = Picture::default();
+        let window = (1920, 1080);
+        let mut k = 1.0;
+        for _ in 0..60 * 30 {
+            // Every frame two beats late: as small as it goes.
+            k = p.frame(true, false, BEAT * 2.0, BEAT, window);
+        }
+        assert_eq!(k, 0.6);
+        // The menus are drawn sharp again.
+        assert_eq!(p.frame(false, false, BEAT * 2.0, BEAT, window), 1.0);
     }
 }

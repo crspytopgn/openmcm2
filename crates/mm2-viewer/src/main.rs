@@ -1014,6 +1014,17 @@ fn run(app: App) -> Result<(), BoxError> {
 /// stretches over the screen. A phone's sharp screen otherwise has its
 /// graphics chip fill three million pixels or more every frame.
 fn drawn_size(w: u32, h: u32) -> (u32, u32) {
+    let (w, h) = most_drawn(w, h);
+    // In a browser, while racing: dynres::Picture's share of it.
+    let k = dynres::picture();
+    if k >= 1.0 {
+        return (w, h);
+    }
+    (((w as f32 * k).round() as u32).max(1), ((h as f32 * k).round() as u32).max(1))
+}
+
+/// The most the picture is drawn at in a window of `w`×`h` (`--max-pixels`).
+fn most_drawn(w: u32, h: u32) -> (u32, u32) {
     static MOST: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
     let most = *MOST.get_or_init(|| {
         crate::args()
@@ -4466,6 +4477,8 @@ struct App {
     pace: pace::Pace,
     /// Dynamic resolution's governor (`dynres`), while racing.
     dynres: dynres::Governor,
+    /// In a browser, the whole picture's size while racing (`dynres::Picture`).
+    picture: dynres::Picture,
     /// The screen's beat, s, and when it was last asked for.
     beat: (Option<Instant>, Option<f32>),
     /// F2 (or the Show frame rate tweak): the frame rate, at the bottom
@@ -4667,6 +4680,7 @@ impl App {
             last: Instant::now(),
             pace: pace::Pace::default(),
             dynres: dynres::Governor::default(),
+            picture: dynres::Picture::default(),
             beat: (None, None),
             fps: tweaks::get().show_fps.then(|| (Instant::now(), 0, 0.0)),
             fps_shown: None,
@@ -6459,8 +6473,13 @@ impl App {
         });
         let Some(s) = &mut self.state else { return };
         display::tick(&s.window);
-        if s.config.present_mode != present_mode() {
+        // In a browser the picture's size changes while racing
+        // (dynres::Picture): made anew at it, before the frame is taken.
+        let size = s.window.inner_size();
+        let drawn = drawn_size(size.width, size.height);
+        if s.config.present_mode != present_mode() || (cfg!(target_arch = "wasm32") && drawn != (s.config.width, s.config.height)) {
             s.config.present_mode = present_mode();
+            (s.config.width, s.config.height) = drawn;
             s.surface.configure(&s.device, &s.config);
         }
         // A suboptimal frame (the Steam Deck's full screen gives them) is
@@ -7132,13 +7151,21 @@ impl ApplicationHandler for App {
                 // Dynamic resolution: the time a frame should take is the
                 // screen's beat with VSync (60 fps on a faster screen:
                 // sharpness first past that), else the frame cap's or 60 fps.
-                if self.track.is_some() && self.loading.is_none() && graphics::showing().is_some_and(|e| e.dynamic) {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let cap = tweaks::more().fps_cap;
-                    #[cfg(target_arch = "wasm32")]
-                    let cap = 0;
-                    let free = if cap > 0 { 1.0 / cap as f32 } else { 1.0 / 60.0 };
-                    let wanted = if tweaks::get().vsync { self.beat.1.unwrap_or(0.0).max(1.0 / 60.0) } else { free };
+                #[cfg(not(target_arch = "wasm32"))]
+                let cap = tweaks::more().fps_cap;
+                #[cfg(target_arch = "wasm32")]
+                let cap = 0;
+                let free = if cap > 0 { 1.0 / cap as f32 } else { 1.0 / 60.0 };
+                let wanted = if tweaks::get().vsync { self.beat.1.unwrap_or(0.0).max(1.0 / 60.0) } else { free };
+                let racing = self.track.is_some() && self.loading.is_none();
+                let governing = racing && graphics::showing().is_some_and(|e| e.dynamic);
+                // In a browser, the whole picture too, in either look.
+                #[cfg(target_arch = "wasm32")]
+                if let Some(s) = &self.state {
+                    let size = s.window.inner_size();
+                    self.picture.frame(racing, governing, real, wanted, most_drawn(size.width, size.height));
+                }
+                if governing {
                     self.dynres.apply(real, wanted);
                 } else if self.track.is_none() {
                     self.dynres = dynres::Governor::default();

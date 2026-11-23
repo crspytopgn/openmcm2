@@ -114,6 +114,8 @@ pub struct Screen {
 
 /// What the scene is drawn into, at one size.
 struct Targets {
+    /// Its textures, destroyed when it goes.
+    _held: crate::gpu_free::Held,
     size: (u32, u32),
     /// The screen's size: temporal anti-aliasing's outputs are made at it.
     output: (u32, u32),
@@ -370,12 +372,17 @@ impl Post {
             return;
         }
         let draw = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
-        let view = |t: wgpu::Texture| t.create_view(&Default::default());
+        // Every texture kept, so the last size's are destroyed when these
+        // take their place: in a browser a drop alone keeps their memory
+        // (crate::gpu_free), and dynamic resolution makes them anew often.
+        let held = std::cell::RefCell::new(crate::gpu_free::Held::default());
+        let keep = |t: wgpu::Texture| held.borrow_mut().texture(t);
+        let view = |t: wgpu::Texture| keep(t).create_view(&Default::default());
         let msaa = (self.samples > 1).then(|| {
             view(Self::texture(device, "scene msaa", size, HDR_FORMAT, self.samples, wgpu::TextureUsages::RENDER_ATTACHMENT))
         });
         let hdr = view(Self::texture(device, "scene", size, HDR_FORMAT, 1, draw));
-        let depth_texture = Self::texture(device, "scene depth", size, DEPTH_FORMAT, self.samples, draw);
+        let depth_texture = keep(Self::texture(device, "scene depth", size, DEPTH_FORMAT, self.samples, draw));
         let depth = depth_texture.create_view(&Default::default());
         let depth_only = depth_texture.create_view(&wgpu::TextureViewDescriptor {
             aspect: wgpu::TextureAspect::DepthOnly,
@@ -429,6 +436,7 @@ impl Post {
             [0, 1].map(|i| self.group(device, &self.composite, &[(1, &depth_only), (2, &history[i]), (3, &blurred), (6, &bloom[0]), (7, &shafts), (9, &ssr)], true, true));
         self.taa_valid.set(false);
         self.targets = Some(Targets {
+            _held: held.into_inner(),
             output,
             motion,
             motion_depth,
