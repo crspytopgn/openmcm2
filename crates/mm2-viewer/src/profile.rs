@@ -294,6 +294,12 @@ pub struct Profile {
     /// and the plate number.
     pub bike: String,
     pub outfit: String,
+    /// The same picks made with the free graphics (`FreeBike=`,
+    /// `FreeOutfit=`, ours), kept apart so that riding with them doesn't
+    /// put the Free Pack's rider and bike on the game's (or the demo's)
+    /// own. `None`: a profile from before they were kept apart.
+    pub free_bike: Option<String>,
+    pub free_outfit: Option<String>,
     pub plate: u32,
     /// The Kit & Paint page's colours for a high-detail kit and bike, by
     /// name: kit, kit trim, bike, bike trim, helmet (empty: the colourway
@@ -316,6 +322,8 @@ impl Profile {
             messages,
             bike: String::new(),
             outfit: String::new(),
+            free_bike: Some(String::new()),
+            free_outfit: Some(String::new()),
             plate: 101,
             paint: String::new(),
             keys,
@@ -326,10 +334,12 @@ impl Profile {
     /// rider (the Restore dialog's "Reset to Defaults").
     pub fn defaults(&mut self, messages: [String; 10], keys: Controls) {
         let keep = (self.name.clone(), self.bike.clone(), self.outfit.clone(), self.paint.clone());
+        let free = (self.free_bike.take(), self.free_outfit.take());
         *self = Profile::new(&keep.0, messages, keys);
         self.bike = keep.1;
         self.outfit = keep.2;
         self.paint = keep.3;
+        (self.free_bike, self.free_outfit) = free;
     }
 
     /// The profile as `<name>.prf` holds it.
@@ -342,6 +352,12 @@ impl Profile {
             "[Profile]\r\nName={}\r\nBike={}\r\nOutfit={}\r\nPlate={}\r\n",
             self.name, self.bike, self.outfit, self.plate
         );
+        if let Some(b) = &self.free_bike {
+            let _ = write!(o, "FreeBike={b}\r\n");
+        }
+        if let Some(f) = &self.free_outfit {
+            let _ = write!(o, "FreeOutfit={f}\r\n");
+        }
         if !self.paint.is_empty() {
             let _ = write!(o, "Paint={}\r\n", self.paint);
         }
@@ -446,6 +462,8 @@ ForceFeedback={}\r\nGasGyro={}\r\nBrakeGyro={}\r\nAnalogAxes={}\r\nDevice={}\r\n
         let mut p = Profile::new(get("Profile", "Name").unwrap_or(""), messages, keys);
         p.bike = get("Profile", "Bike").unwrap_or("").to_string();
         p.outfit = get("Profile", "Outfit").unwrap_or("").to_string();
+        p.free_bike = get("Profile", "FreeBike").map(|v| v.trim().to_string());
+        p.free_outfit = get("Profile", "FreeOutfit").map(|v| v.trim().to_string());
         p.plate = num("Profile", "Plate", 101);
         p.paint = get("Profile", "Paint").unwrap_or("").trim().to_string();
         let d = GameOptions::default();
@@ -765,8 +783,18 @@ mod tests {
         p.garage.suspension[2] = 0.25;
         p.messages[3] = "Eat my dust".into();
         p.keys.set(0, 6, (0, 44));
+        p.outfit = "Jeans & Flannel".into();
+        p.free_outfit = Some("Blue".into());
         let q = Profile::parse(&p.text(), messages(), p.keys.clone());
         assert_eq!(p, q);
+    }
+
+    #[test]
+    fn older_profiles_have_no_free_picks() {
+        let p = Profile::parse("[Profile]\r\nName=A\r\nBike=OpenMX Ridgeback 125\r\nOutfit=Blue\r\n", messages(), Controls::parse(""));
+        assert_eq!((p.free_bike, p.free_outfit), (None, None));
+        let q = Profile::parse(&Profile::new("B", messages(), Controls::parse("")).text(), messages(), Controls::parse(""));
+        assert_eq!((q.free_bike.as_deref(), q.free_outfit.as_deref()), (Some(""), Some("")));
     }
 
     #[test]
