@@ -2,16 +2,21 @@
 
 Every Freesound recording used in `engine/` and `fx/`. CC0 clips need no credit (they are listed anyway). CC BY clips **must** be credited as below in any release.
 
-## Engines 125, 250 and 500: YouTube recordings
+## Engines 125, 400 and the 250 riding sounds: recordings by crspytopgn
 
-These three classes are untouched stretches of real onboard recordings, cut into the original game's engine slots (LowTorque, MidTorque, HighTorque, PowerBand, Sputter, Decel, Idle, Rev). The only edits are cuts, 10 ms fades, loudness matching and, for the idles, a 0.1 s loop crossfade. The 125 idles are from late in its video, the bike rolling slowly with the throttle shut: Idle01 5:40.6-5:43.2 (about 1,450-1,600 rpm) and Idle02 5:38.5-5:40.4 (about 1,950 settling to 1,650 rpm). The game picks one at random. They have no engine.ini, so the game plays them as whole samples the way MM2 does. The Freesound table below no longer applies to these three folders except where noted here.
+The 125 (SX125 two-stroke) and 400 (CRF450R four-stroke) folders, and the 250's PowerBand, HighTorque, MidTorque, LowTorque and Idle clips (TC250 and YZ250 two-strokes), are cut from engine recordings made by **crspytopgn**, released under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). They are cut into the original game's slots and take counts, with steady stretches tiled into seamless clips, equal-power crossfades for the decel and rev chains, a gentle tone match, loudness matching and short fades. They have no engine.ini, so the game plays them as whole samples the way MM2 does. The 250's Decel01, Sputter01 and Rev01 are still from the YouTube recording below.
+
+Credit line: "Engine sounds (125, 250, 400) recorded by crspytopgn, CC BY 4.0."
+
+## Engines 250 and 500: YouTube recordings
+
+These classes are untouched stretches of real onboard recordings, cut into the original game's engine slots (LowTorque, MidTorque, HighTorque, PowerBand, Sputter, Decel, Idle, Rev). The only edits are cuts, 10 ms fades, loudness matching and, for the idles, a 0.1 s loop crossfade. They have no engine.ini, so the game plays them as whole samples the way MM2 does. The Freesound table below no longer applies to the 125, 250, 400 or 500 folders except where noted here.
 
 | Class | Recording | Uploader | Licence | Files |
 |---|---|---|---|---|
-| 125 | [2023 CR125 2 Stroke, Raw GoPro, Field Of Dreams NJ](https://www.youtube.com/watch?v=eFumQsGcKjE) (riding 1:28-5:21, idles 5:38-5:43, all from stretches with no talking) | The Moto Academy | YouTube Standard Licence | all but Rev01 |
-| 250 | [HONDA CR250 TOP SPEED RUN](https://www.youtube.com/watch?v=DE5nSP9d78U) | Matt McHugh | YouTube Standard Licence | all |
+| 250 | [HONDA CR250 TOP SPEED RUN](https://www.youtube.com/watch?v=DE5nSP9d78U) | Matt McHugh | YouTube Standard Licence | Decel01, Sputter01, Rev01 |
 | 500 | [HELMET CAM: 500cc / Tyler Wozney, Tale Of The 2 Stroke 2.0 Shoot](https://www.youtube.com/watch?v=akMqExb8EWs) (0:35-1:15) | MXPTV | YouTube Standard Licence | all but Rev01 |
-| 125 Rev01, 500 Rev01 | ["motorbike crm 250cc kick start rev engine.wav"](https://freesound.org/people/martian/sounds/148855/) | martian | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | kept from the Freesound set |
+| 500 Rev01 | ["motorbike crm 250cc kick start rev engine.wav"](https://freesound.org/people/martian/sounds/148855/) | martian | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | kept from the Freesound set |
 
 The YouTube recordings are not openly licensed; the project owner chose to include them. Recording owners who want theirs removed can open an issue.
 
