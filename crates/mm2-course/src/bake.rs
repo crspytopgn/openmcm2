@@ -26,6 +26,10 @@ pub struct Field {
     pub water: Vec<f32>,
     /// Each river's water.
     pub rivers: Vec<crate::nature::Water>,
+    /// On a worn track (a rebuilt one), where each sample on the track is
+    /// against the racing line: ft left of it, the distance along and the
+    /// track's half width; empty on others.
+    pub ruts: Vec<[f32; 3]>,
 }
 
 impl Field {
@@ -194,18 +198,45 @@ impl Bed {
                 _ => land::height(&land, side, p[0], p[1]),
             })
             .collect();
-        let mut grade = path.smooth(&raw, grade_window(course.mode));
+        // A rebuilt track follows the lie of its land more closely, so
+        // it climbs and drops with it instead of riding a level ridge.
+        let window = if worn(course) { grade_window(course.mode) * 0.5 } else { grade_window(course.mode) };
+        let mut grade = path.smooth(&raw, window);
         // Twice, for a gentler ride over the hills.
-        grade = path.smooth(&grade, grade_window(course.mode));
+        grade = path.smooth(&grade, window);
         let most = bank_most(course.mode) * course.line.berms.clamp(0.0, 1.0);
+        // A rebuilt track's berms build up into each turn and die away
+        // after it, as a raced-on track's do, rather than starting at its
+        // first bend.
+        let turn = if worn(course) { path.smooth(&path.smooth(&path.turn, 90.0), 90.0) } else { path.turn.clone() };
         // Full banking on a corner of about a 60 ft radius.
-        let bank = path
-            .turn
+        let bank = turn
             .iter()
             .map(|t| (t.abs() * 60.0).clamp(0.0, 1.0) * most * t.signum())
             .collect();
         Bed { grade, bank }
     }
+}
+
+/// Whether the track is worn in, as by a day's racing: a rebuilt track
+/// (land given whole), not a Supercross.
+fn worn(course: &Course) -> bool {
+    course.mode != Mode::Supercross && course.source.is_none() && course.ground.as_ref().is_some_and(|g| g.len() == course.mode.samples().pow(2))
+}
+
+/// The racing line at each sample of the path, ft left of the centre:
+/// wide into a turn, tight on the inside past its apex, wide on the way
+/// out.
+fn racing_line(path: &Path, half: &dyn Fn(usize) -> f32) -> Vec<f32> {
+    let turn = path.smooth(&path.smooth(&path.turn, 90.0), 90.0);
+    let m = turn.len();
+    let tight = |c: f32| (c * 120.0).clamp(-1.0, 1.0);
+    let at = |i: isize| {
+        let i = if path.closed { i.rem_euclid(m as isize) } else { i.clamp(0, m as isize - 1) } as usize;
+        tight(turn[i])
+    };
+    let k = (50.0 / crate::path::STEP) as isize;
+    (0..m).map(|i| half(i) * (0.5 * at(i as isize) - 0.35 * at(i as isize + k) - 0.2 * at(i as isize - k)).clamp(-0.6, 0.6)).collect()
 }
 
 /// Bakes the course at every `every`th sample, over `land` from [`land`].
@@ -234,11 +265,14 @@ pub fn bake(course: &Course, every: usize, land: &[f32]) -> Field {
     let copy = course.source.is_some();
     let shoulder = if copy { shoulder.min(12.0) } else { shoulder };
 
+    let worn = worn(course);
+    let line = if worn { racing_line(&path, &|i| path.width[i] / 2.0) } else { Vec::new() };
     let mut heights = land.to_vec();
     let mut track = vec![f32::MAX; n * n];
+    let mut ruts = if worn { vec![[f32::NAN; 3]; n * n] } else { Vec::new() };
     // The track, by rows on a few threads.
     {
-        let mut both: Vec<(f32, f32)> = heights.iter().map(|&h| (h, f32::MAX)).collect();
+        let mut both: Vec<(f32, f32, [f32; 3])> = heights.iter().map(|&h| (h, f32::MAX, [f32::NAN; 3])).collect();
         rows(&mut both, n, |z, row| {
             for (x, cell) in row.iter_mut().enumerate() {
                 let p = [x as f32 * step, z as f32 * step];
@@ -266,6 +300,16 @@ pub fn bake(course: &Course, every: usize, land: &[f32]) -> Field {
                         * smoothstep(0.05, 1.0, outer.min(1.0))
                         * (1.0 + 0.3 * (outer - 1.0).clamp(0.0, 0.6));
                 }
+                if worn {
+                    // Where the bikes go the dirt is packed down a little:
+                    // a broad, shallow bed along the line, smooth along its
+                    // length so it guides the bike without bumping it.
+                    let off = near.side - line[i];
+                    top -= 0.3 * (-(off / (hw * 0.28)).powi(2)).exp();
+                    if d <= hw + 2.0 {
+                        cell.2 = [off, near.s, hw];
+                    }
+                }
                 let t = smoothstep(hw, hw + shoulder, d);
                 if copy {
                     // A copy's track is already in its ground: the jumps
@@ -277,9 +321,12 @@ pub fn bake(course: &Course, every: usize, land: &[f32]) -> Field {
                 cell.1 = d / hw;
             }
         });
-        for (k, (h, d)) in both.into_iter().enumerate() {
+        for (k, (h, d, r)) in both.into_iter().enumerate() {
             heights[k] = h;
             track[k] = d;
+            if worn {
+                ruts[k] = r;
+            }
         }
     }
     let mut surfaces: Vec<u8> = track
@@ -318,6 +365,7 @@ pub fn bake(course: &Course, every: usize, land: &[f32]) -> Field {
         track,
         water,
         rivers,
+        ruts,
     }
 }
 

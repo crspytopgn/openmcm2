@@ -572,7 +572,8 @@ fn tile(field: &Field, tx: usize, tz: usize, seed: u32, sx: bool, ready: &[Optio
             };
             let shade = 1.0 + big * 0.07 + fine * 0.05
                 - slope * 0.06
-                - on_line * if sx { 0.10 } else { 0.07 };
+                - on_line * if sx { 0.10 } else { 0.07 }
+                - worn_ruts(field, x0, z0, ax, az, seed);
             let c = [
                 c[0] * shade + dry * 0.6,
                 c[1] * shade + dry * 0.4,
@@ -582,6 +583,51 @@ fn tile(field: &Field, tx: usize, tz: usize, seed: u32, sx: bool, ready: &[Optio
         }
     }
     px
+}
+
+/// How much darker a worn track's ruts make a pixel: a braid of lines
+/// packed dark into the dirt that follows the racing line round the
+/// turns, bunching up at the apex and spreading out on the straights,
+/// with a paler lip of pushed-up dirt beside each, over a darker smear
+/// of packed dirt along the line itself. Negative is paler.
+fn worn_ruts(field: &Field, x0: usize, z0: usize, ax: f32, az: f32, seed: u32) -> f32 {
+    if field.ruts.is_empty() {
+        return 0.0;
+    }
+    let n = field.n;
+    let near = field.ruts[(z0 + (az >= 0.5) as usize).min(n - 1) * n + (x0 + (ax >= 0.5) as usize).min(n - 1)];
+    if near[0].is_nan() {
+        return 0.0;
+    }
+    // Bilinear where all four corners are on the track at the same place.
+    let q = [field.ruts[z0 * n + x0], field.ruts[z0 * n + x0 + 1], field.ruts[(z0 + 1) * n + x0], field.ruts[(z0 + 1) * n + x0 + 1]];
+    let [side, along, half] = if q.iter().all(|r| !r[0].is_nan() && (r[1] - near[1]).abs() < 30.0) {
+        let mix = |k: usize| (q[0][k] * (1.0 - ax) + q[1][k] * ax) * (1.0 - az) + (q[2][k] * (1.0 - ax) + q[3][k] * ax) * az;
+        [mix(0), mix(1), near[2]]
+    } else {
+        near
+    };
+    let half = half.max(1.0);
+    let u = |v: f32| v * 0.5 + 0.5;
+    let spread = 0.45 + 0.55 * smoothstep(0.3, 0.7, u(land::fbm(along / 90.0, 0.5, seed ^ 39, 2)));
+    let (mut rut, mut lip) = (0.0f32, 0.0f32);
+    for k in 0..7u32 {
+        let fan = (k as f32 - 3.0) / 3.0;
+        let wander = land::fbm(along / 55.0, k as f32 * 3.7, seed ^ (40 + k), 2);
+        let at = (half * spread * (fan * 0.5 + wander * 0.22)).clamp(-half * 0.9, half * 0.9);
+        let width = 1.3 + 1.0 * u(land::fbm(along / 25.0, k as f32, seed ^ (50 + k), 2));
+        let depth = (0.45 + 0.55 * smoothstep(0.25, 0.6, u(land::fbm(along / 40.0, k as f32 * 1.3, seed ^ (60 + k), 2)))) * (1.0 - fan.abs() * 0.45);
+        let d = (side - at) / width;
+        rut = rut.max((-d * d).exp() * depth);
+        lip = lip.max((-((d.abs() - 1.6) / 0.6).powi(2)).exp() * depth);
+    }
+    let packed = (-(side / (half * 0.35)).powi(2)).exp();
+    rut * 0.45 + packed * 0.15 - lip * 0.1
+}
+
+fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 pub fn zone_section(k: usize, s: Surface) -> String {
