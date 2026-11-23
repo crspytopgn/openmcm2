@@ -24,8 +24,10 @@ use glam::{Mat4, Vec3};
 use std::collections::HashMap;
 
 /// The pack's own motion whose first frame is the pose the riders were
-/// fitted in (`engine/freepack/blender/rider4/fit.py`).
-pub const BIND_MOTION: &str = "Turn2D";
+/// fitted in (`engine/freepack/blender/rider4/fit.py`): the seated pose as
+/// it was then (Turn2D's first frame), kept apart since the seated pose
+/// moved (`tools/freepack/fit_pose.json`).
+pub const BIND_MOTION: &str = "FitPose";
 
 /// Each joint's half-width of blend, ft, by the frame below it: the skin
 /// within this of the joint's plane is shared. Wide for the hips and the

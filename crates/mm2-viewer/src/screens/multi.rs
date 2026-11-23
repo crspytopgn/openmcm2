@@ -428,9 +428,9 @@ impl Multi {
         let Some(at) = self.host_track(cx.ui, info) else {
             let line = if crate::share::original_track(&info.track) {
                 if ["NAT04", "QUARRY01"].iter().any(|t| t.eq_ignore_ascii_case(&info.track)) {
-                    format!("Can't ride {}: it's a Motocross Madness 2 track. Get the free MM2 demo (in the launcher, or Play the free MM2 demo in a browser) to ride it.", info.track)
+                    format!("Can't ride {}: get the free MM2 demo (launcher or Play page).", info.track)
                 } else {
-                    format!("Can't ride {}: it's one of Motocross Madness 2's own tracks, and needs the game's files.", info.track)
+                    format!("Can't ride {}: it needs the full MM2 game.", info.track)
                 }
             } else {
                 format!("Can't ride {}: it isn't here yet.", info.track)
@@ -556,7 +556,7 @@ impl Multi {
         if let Some(c) = base.ctl("EditChat") {
             c.max_len = 60;
         }
-        base.set_items("ListChat", self.chat.clone(), 0);
+        base.set_broken_items("ListChat", self.chat.clone());
         let Some(page) = Dlg::open(cx.ui, TABS[0].1, PAGE) else {
             return;
         };
@@ -908,11 +908,7 @@ impl Multi {
     fn say(&mut self, line: String) {
         self.chat.push(line);
         if let View::Lobby { base, .. } = &mut self.view {
-            let at = self.chat.len().saturating_sub(1);
-            base.set_items("ListChat", self.chat.clone(), at);
-            if let Some(c) = base.ctl("ListChat") {
-                c.scroll = self.chat.len().saturating_sub(6);
-            }
+            base.set_broken_items("ListChat", self.chat.clone());
         }
     }
 

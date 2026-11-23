@@ -255,29 +255,37 @@ impl Hull {
 }
 
 impl Hull {
-    /// A hull for a bike without a `.col` (the Free Pack's own bikes): a
-    /// convex shell round each part's points, the frame's in model space
-    /// and each wheel's about its axle, rounded off by taking the farthest
-    /// point along 98 even directions.
-    /// A wheel's collision points as the original's shared hull has
-    /// them (`honda.col`, both tyres alike): two rings of nine, every 40°
-    /// from straight ahead, 0.2 ft either side of the centre, and the
-    /// hub. No point sits straight under the axle, so a bottomed tyre
-    /// pushes back through the ones ahead of and behind it, which is how
-    /// a squeezed fork lifts the bike on a jump face; a round shell of
-    /// the tyre's mesh kicked the nose 6° higher off the same face.
-    pub fn ring_wheel(radius: f32) -> Vec<Vec3> {
-        let mut out = Vec::with_capacity(20);
-        for k in 0..9 {
-            let a = (k as f32 * 40.0).to_radians();
-            for x in [0.201f32, -0.201] {
-                out.push(Vec3::new(x, a.sin() * radius, a.cos() * radius));
-            }
-        }
-        out.extend([Vec3::new(0.201, 0.0, 0.0), Vec3::new(-0.201, 0.0, 0.0)]);
-        out
+    /// The hull every bike of the original rides with (`honda.col`, which
+    /// the Yamaha, Kazuyuki and KTM share byte for byte), for a bike
+    /// without a `.col` of its own: the Free Pack's bikes collide as the
+    /// game's do, whatever their looks.
+    pub fn shared() -> Self {
+        use crate::shared_hull::*;
+        use mm2_formats::col::{Collision, Part, Triangle};
+        let part = |frame: u32, corners: &[[f32; 3]], faces: &[[u16; 3]], order: &[u16]| {
+            let corners: Vec<Vec3> = corners.iter().map(|&c| Vec3::from(c)).collect();
+            let faces: Vec<Triangle> = faces
+                .iter()
+                .map(|&tri| {
+                    let [a, b, c] = tri.map(|i| corners[i as usize]);
+                    let normal = (b - a).cross(c - a).normalize();
+                    Triangle { normal: normal.into(), d: -normal.dot(a), vertices: tri }
+                })
+                .collect();
+            Part { frame: Some(frame), body: body(&corners, &faces, Some(order)) }
+        };
+        Hull::new(&Collision {
+            parts: vec![
+                part(1, &FRAME_CORNERS, &FRAME_FACES, &FRAME_POINTS),
+                part(7, &FRONT_CORNERS, &FRONT_FACES, &FRONT_POINTS),
+                part(8, &REAR_CORNERS, &REAR_FACES, &REAR_POINTS),
+            ],
+        })
     }
 
+    /// A hull of convex shells round each part's points, the frame's in
+    /// model space and each wheel's about its axle, rounded off by taking
+    /// the farthest point along 98 even directions.
     pub fn from_points(body: &[Vec3], wheels: [&[Vec3]; 2]) -> Self {
         let parts = [(1, body), (7, wheels[0]), (8, wheels[1])];
         let col = mm2_formats::col::Collision {
@@ -297,7 +305,7 @@ impl Hull {
 /// The convex shell of `points`' extremes as a collision body: its corners
 /// as the points, and its faces (outward) as the triangle tree.
 fn shell(points: &[Vec3]) -> mm2_formats::col::Body {
-    use mm2_formats::col::{Body, Bounds, Node, Triangle};
+    use mm2_formats::col::Triangle;
     let mut corners: Vec<Vec3> = Vec::new();
     for x in -2i32..=2 {
         for y in -2i32..=2 {
@@ -336,6 +344,14 @@ fn shell(points: &[Vec3]) -> mm2_formats::col::Body {
             }
         }
     }
+    body(&corners, &faces, None)
+}
+
+/// A collision body of `corners` and its outward `faces`: the corners as
+/// the points (all of them, or those of `order` in its order), and the
+/// faces as the triangle tree.
+fn body(corners: &[Vec3], faces: &[mm2_formats::col::Triangle], order: Option<&[u16]>) -> mm2_formats::col::Body {
+    use mm2_formats::col::{Body, Bounds, Node, Triangle};
     // The faces as a tree: each inner node bounds the ones under it.
     fn tree(faces: &[Triangle], corners: &[Vec3], out: &mut Vec<Node<Triangle>>) {
         if let [one] = faces {
@@ -358,14 +374,17 @@ fn shell(points: &[Vec3]) -> mm2_formats::col::Body {
     }
     let mut triangles = Vec::new();
     if !faces.is_empty() {
-        tree(&faces, &corners, &mut triangles);
+        tree(faces, corners, &mut triangles);
     }
     Body {
         matrix: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
         flags: 0,
         vertices: corners.iter().map(|&p| p.into()).collect(),
         triangles,
-        points: corners.iter().map(|&p| Node::Leaf(p.into())).collect(),
+        points: match order {
+            Some(order) => order.iter().map(|&i| Node::Leaf(corners[i as usize].into())).collect(),
+            None => corners.iter().map(|&p| Node::Leaf(p.into())).collect(),
+        },
     }
 }
 
@@ -503,8 +522,9 @@ pub struct Bike {
     pub position: Vec3,
     pub velocity: Vec3,
     last_velocity: Vec3,
-    /// The place before the last step, to draw in between steps.
-    previous: Option<(Vec3, Mat3)>,
+    /// The place and velocity before the last step, to draw (and to
+    /// follow with the camera) in between steps.
+    previous: Option<(Vec3, Mat3, Vec3)>,
     /// Body to world: columns right, up and forward.
     orientation: Mat3,
     /// Spin, rad/s, in body axes.
@@ -843,7 +863,7 @@ impl Bike {
     /// screen runs at another rate than the 50 steps a second).
     pub fn drawn_place(&self) -> Mat4 {
         let now = self.place();
-        let Some((position, orientation)) = self.previous else {
+        let Some((position, orientation, _)) = self.previous else {
             return now;
         };
         if position.distance(self.position) > 20.0 {
@@ -856,6 +876,19 @@ impl Bike {
         let mut m = Mat4::from_mat3(r);
         m.w_axis = (position.lerp(self.position, t) - r * COM).extend(1.0);
         m
+    }
+
+    /// The velocity between steps, as `drawn_place` places the bike: what
+    /// a camera riding with it follows, so a view from the rider's head
+    /// turns and moves smoothly at any frame rate rather than in the 50
+    /// steps a second.
+    pub fn drawn_velocity(&self) -> Vec3 {
+        match self.previous {
+            Some((position, _, velocity)) if position.distance(self.position) <= 20.0 => {
+                velocity.lerp(self.velocity, self.drawn_share())
+            }
+            _ => self.velocity,
+        }
     }
 
     /// How far the screen is from the step before to the last one, 0 to 1.
@@ -999,7 +1032,7 @@ impl Bike {
 
     /// One step of `self.h`.
     fn tick(&mut self, ground: &dyn Ground, c: Controls) {
-        self.previous = Some((self.position, self.orientation));
+        self.previous = Some((self.position, self.orientation, self.velocity));
         let h = self.h;
         // The shocks spring back and damp over the step before this one
         // (0x52e520 and 0x519350 take +0x1e8, not +0x13c): what moved
@@ -2149,7 +2182,7 @@ impl Bike {
     /// last step is pushed back out along the face, and the bike bounces
     /// off each object it hit (0x405fb0 → 0x5050b0).
     fn hit_objects(&mut self, ground: &dyn Ground, mass: f32, bounce: f32) {
-        let (Some(hull), Some((was_at, was_turned))) = (self.hull.clone(), self.previous) else {
+        let (Some(hull), Some((was_at, was_turned, _))) = (self.hull.clone(), self.previous) else {
             return;
         };
         let place = |at: Vec3, turned: Mat3, p: Vec3| at + turned * (p - COM);
@@ -2482,13 +2515,34 @@ mod tests {
     };
 
     #[test]
-    fn ring_wheels_are_shaped_like_the_originals() {
-        let ring = Hull::ring_wheel(1.17);
-        assert_eq!(ring.len(), 20);
-        // Every 40° from straight ahead: none straight under the axle.
-        let lowest = ring.iter().map(|p| p.y).fold(f32::MAX, f32::min);
-        assert!((lowest + 1.17 * 80f32.to_radians().sin()).abs() < 1e-4, "{lowest}");
-        assert!(ring.iter().all(|p| p.x.abs() > 0.2));
+    fn shared_hull_is_the_games() {
+        let hull = Hull::shared();
+        assert_eq!((hull.body.len(), hull.wheels[0].len(), hull.wheels[1].len()), (54, 20, 20));
+        // The frame stands 1.29 ft clear of the ground between the tyres.
+        let belly = hull.body.iter().map(|p| p.y).fold(f32::MAX, f32::min);
+        assert!((belly - 1.294).abs() < 1e-3, "{belly}");
+        // The frame's mesh is solid: a point in the middle of it is pushed out.
+        let (_, frame) = &hull.meshes[0];
+        let solid = crate::collision::Solid::new(frame, Mat3::IDENTITY, Vec3::ZERO);
+        assert!(solid.crossing(Vec3::new(3.0, 2.8, 0.0), Vec3::new(0.0, 2.8, 0.0)).is_some());
+        // With the game's files, the same as its `honda.col` (and so its
+        // other makes' copies of it).
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../GAME/RES/BIKE.RES");
+        let Ok(raw) = std::fs::read(&path) else { return };
+        let plain = match mm2_formats::rs2::Archive::parse(&raw) {
+            Ok(_) => raw,
+            Err(_) => mm2_formats::faoe::decode(&raw, "BIKE.RES").unwrap(),
+        };
+        let archive = mm2_formats::rs2::Archive::parse(&plain).unwrap();
+        for name in ["honda.col", "yamaha.col", "suzuki.col", "ktm.col"] {
+            let game = Hull::new(&mm2_formats::col::parse(archive.get(name).unwrap()).unwrap());
+            let same = |a: &[Vec3], b: &[Vec3]| a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.distance(*q) < 1e-5);
+            assert!(same(&game.body, &hull.body), "{name}");
+            assert!(same(&game.wheels[0], &hull.wheels[0]) && same(&game.wheels[1], &hull.wheels[1]), "{name}");
+            for ((_, a), (_, b)) in game.meshes.iter().zip(&hull.meshes) {
+                assert_eq!(a.vertices, b.vertices, "{name}");
+            }
+        }
     }
 
     #[test]

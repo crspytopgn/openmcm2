@@ -15,7 +15,7 @@ motions to the path given.
 
     python tools/freepack/free_motions.py crates/mm2-viewer/src/free_motions.bin
 """
-import math, sys, os
+import json, math, sys, os
 import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 from seated_pose import REST, ORDER, SEATED, solve, locals_, rx, ry, rz
@@ -409,5 +409,10 @@ if __name__ == '__main__':
         # Matched to the original's motions (match_motions.py).
         import match_motions
         match_motions.match(rider, bike, TIMING, sys.argv[sys.argv.index('--match') + 1])
+    # The pose the pack's riders were fitted in (skin.rs BIND_MOTION): their
+    # parts meet at every joint only there. It was Turn2D's first frame when
+    # rider4-7 were fitted, before the seated pose moved, so it is kept as
+    # it was, in fit_pose.json (from the bin of 2026-11-20, 2508b23).
+    rider["FitPose"] = [[(i, l, u, t) for i, l, u, t in json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fit_pose.json")))]]
     open(sys.argv[1], 'wb').write(pack((rider, bike)))
     print("rider", len(rider), "bike", len(bike), "bytes", os.path.getsize(sys.argv[1]))

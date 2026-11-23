@@ -72,12 +72,13 @@ def two_bone(A, T, L1, L2, knee):
 def weight(d, full, none):
     return float(np.clip((none - d) / (none - full), 0.0, 1.0))
 
-# The free bike's seat is lower than the original's: a rider on it sits
-# this much lower (ft, game axes) and leans the upper body forward this
-# many degrees, over the bars, with the head kept up by most of it; the
-# elbows bend out and up. Fades out as the pelvis leaves the seat
-# (tricks, crashes).
-SEAT_DROP = np.array([0.0, -0.6, 0.05])
+# The free bikes' seat, pegs and grips sit where the original's do
+# (within 0.1 ft), so the rider keeps the original's place on the bike:
+# only this small drop (ft, game axes) onto the seat, no extra lean. An
+# earlier fit sat the rider 0.6 ft lower and leaned him in, which pushed
+# the knees up and out and dropped the elbows. Fades out as the pelvis
+# leaves the seat (tricks, crashes).
+SEAT_DROP = np.array([0.0, -0.1, 0.0])
 # ...but never with the hips below this height (ft) over the ground.
 SEAT_HIP = 3.5
 # On the seat with the pelvis behind SEAT_BACK (ft, model z), off it
@@ -86,13 +87,13 @@ SEAT_BACK, SEAT_FRONT = -1.0, -0.6
 SEAT_LEAN = 0.0
 # Standing up over the tank (the pelvis forward of this, ft) leans this
 # much more: the attack position, chest over the bars.
-ATTACK_Z, ATTACK_LEAN = -1.0, 6.0
+ATTACK_Z, ATTACK_LEAN = -1.0, 0.0
 HEAD_KEEP = 0.8
 # The free bike's pegs sit this much lower (ft) than the original's: a
 # rider standing on them comes down by as much, so the knees keep the
 # original's bend instead of straightening.
 PEG_DROP = ORIG_ANKLE[1] - SEATED['ankle'][1]
-ELBOW_BIAS = np.array([0.0, 0.3, 0.0])
+ELBOW_BIAS = np.array([0.0, 0.0, 0.0])
 
 def _axis_angle(a, deg):
     a = a / np.linalg.norm(a); t = math.radians(deg); c, s = math.cos(t), math.sin(t)

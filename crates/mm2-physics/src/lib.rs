@@ -6,6 +6,7 @@
 
 pub mod ai;
 pub mod bike;
+mod shared_hull;
 pub mod bump;
 pub mod camera;
 pub mod career;
