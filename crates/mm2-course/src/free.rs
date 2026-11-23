@@ -3390,7 +3390,8 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
 /// Which making of the recipes a built track is from (its `.made` file):
 /// a track built by an older one is built again. Change it whenever a
 /// change here moves anything on an existing track.
-pub const MADE: &str = "9";
+/// "10": the Free Pack's ground got 20 % more colour (tools/freepack/saturate.py).
+pub const MADE: &str = "10";
 
 /// The free track whose file is `stem` (`FPNAT01`), any case.
 pub fn find(stem: &str) -> Option<&'static Def> {
