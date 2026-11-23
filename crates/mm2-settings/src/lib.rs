@@ -438,10 +438,11 @@ pub struct More {
     /// The Course Builder's link on the main menu's chain; on unless
     /// turned off (`--no-builder-menu`).
     pub builder_menu: bool,
-    /// The original's own engine sounds, from the player's `ENGINE.RES`,
-    /// with a fuller low end, a little top air and a short room
-    /// (`--freshen-engines`).
-    pub freshen_engines: bool,
+    /// The engine sounds from the player's own game or demo, freshened as
+    /// they load (EQ, a touch of pitch and saturation, seamless loops),
+    /// with the free graphics too; on unless turned off
+    /// (`--no-fresh-sounds`).
+    pub fresh_sounds: bool,
     /// Drive the scenery: in Practice and free roam, V gets in the
     /// track's cars, trucks, trains and aircraft (`--drive-vehicles`).
     pub drive_vehicles: bool,
@@ -492,7 +493,7 @@ impl Default for More {
             list_races: true,
             share_playtime: true,
             builder_menu: true,
-            freshen_engines: false,
+            fresh_sounds: true,
             drive_vehicles: false,
             online_ghosts: false,
             whistle: true,
@@ -535,7 +536,10 @@ impl More {
             "lobby_downloads" => self.lobby_downloads = yes,
             "list_races" => self.list_races = yes,
             "builder_menu" => self.builder_menu = yes,
-            "freshen_engines" => self.freshen_engines = yes,
+            "fresh_sounds" => self.fresh_sounds = yes,
+            // The old off-by-default Freshen extra (0.7.x): its saved 0 is
+            // not a choice, so the new default stands.
+            "freshen_engines" => {}
             "drive_vehicles" => self.drive_vehicles = yes,
             "online_ghosts" => self.online_ghosts = yes,
             "whistle" => self.whistle = yes,
@@ -550,7 +554,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfreshen_engines={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\ndemo_tracks={}\nfree_tracks={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfresh_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\ndemo_tracks={}\nfree_tracks={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -568,7 +572,7 @@ impl More {
             b(self.list_races),
             b(self.share_playtime),
             b(self.builder_menu),
-            b(self.freshen_engines),
+            b(self.fresh_sounds),
             b(self.drive_vehicles),
             b(self.online_ghosts),
             b(self.whistle),
@@ -593,7 +597,7 @@ impl More {
             (!self.lobby_downloads, "--no-lobby-downloads"),
             (!self.list_races, "--no-list-races"),
             (!self.builder_menu, "--no-builder-menu"),
-            (self.freshen_engines, "--freshen-engines"),
+            (!self.fresh_sounds, "--no-fresh-sounds"),
             (self.drive_vehicles, "--drive-vehicles"),
             (self.online_ghosts, "--online-ghosts"),
             (!self.whistle, "--no-whistle"),
@@ -640,7 +644,7 @@ impl More {
             leaderboards: !has("--no-leaderboards"),
             share_playtime: !has("--no-share-playtime"),
             builder_menu: !has("--no-builder-menu"),
-            freshen_engines: has("--freshen-engines"),
+            fresh_sounds: !has("--no-fresh-sounds"),
             drive_vehicles: has("--drive-vehicles"),
             online_ghosts: has("--online-ghosts"),
             whistle: !has("--no-whistle"),
@@ -1244,7 +1248,7 @@ mod tests {
             list_races: false,
             share_playtime: false,
             builder_menu: false,
-            freshen_engines: true,
+            fresh_sounds: false,
             drive_vehicles: true,
             online_ghosts: true,
             whistle: false,

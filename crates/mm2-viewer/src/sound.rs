@@ -362,8 +362,8 @@ impl Loops {
 
 impl Bank {
     /// `divisor` thins every list of more than one sample, to no fewer
-    /// than one (0x4e7160, +0x468). `freshen`: through the Freshen engine
-    /// sounds extra's chain.
+    /// than one (0x4e7160, +0x468). `freshen`: through the freshened
+    /// engine sounds' chain (`freshen.rs`).
     fn load(res: &Path, sixteen_bit: bool, class: &str, divisor: usize, freshen: bool) -> Option<Bank> {
         let bytes = crate::read_archive(&res.join("ENGINE.RES"))
             .map_err(|e| eprintln!("{e}"))
@@ -394,8 +394,10 @@ impl Bank {
                 }
                 (1..=total.min(10))
                     .filter_map(|i| section.get(&format!("{name}_{i}")))
-                    .filter_map(|f| mm2_formats::wav::parse(file(f)?).ok())
-                    .map(|s| if freshen { crate::freshen::freshen(&s) } else { s })
+                    .filter_map(|f| {
+                        let s = mm2_formats::wav::parse(file(f)?).ok()?;
+                        Some(if freshen { crate::freshen::engine(&s, f, class) } else { s })
+                    })
                     .map(Arc::new)
                     .collect()
             })
@@ -695,17 +697,21 @@ impl RaceSounds {
         // With the original's files (the full game, or the demo with the
         // pack filling in its gaps), the original's samples come first, on
         // the free tracks too; the pack's only stand in for a class they lack.
+        // Freshened, the original's engines win with the free graphics too,
+        // from the player's own game or demo files where there are any.
         let pack_first = crate::freepack::chosen();
-        let freshen = crate::tweaks::more().freshen_engines;
+        let freshen = crate::freshen::on();
+        let fresh_res = (pack_first && freshen).then(crate::freepack::game_engine_res).flatten();
+        let engine_res = fresh_res.as_deref().unwrap_or(res);
         let mut banks: [Option<Bank>; 5] = Default::default();
         for &c in &present {
             let pack = || crate::freepack::engine_dir(CLASSES[c]).and_then(|dir| Bank::load_dir(&dir, divisor(c)));
             let original = || {
                 let class = CLASSES[ORIGINAL[c]];
-                Bank::load(res, options.sixteen_bit, class, divisor(c), freshen)
-                    .or_else(|| options.sixteen_bit.then(|| Bank::load(res, false, class, divisor(c), freshen)).flatten())
+                Bank::load(engine_res, options.sixteen_bit, class, divisor(c), freshen)
+                    .or_else(|| options.sixteen_bit.then(|| Bank::load(engine_res, false, class, divisor(c), freshen)).flatten())
             };
-            banks[c] = if pack_first { pack().or_else(original) } else { original().or_else(pack) };
+            banks[c] = if pack_first && fresh_res.is_none() { pack().or_else(original) } else { original().or_else(pack) };
             if banks[c].is_none() {
                 eprintln!("no [{}] engine sounds", CLASSES[c]);
             }
