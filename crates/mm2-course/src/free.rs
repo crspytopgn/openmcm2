@@ -345,6 +345,19 @@ impl Course {
         best
     }
 
+    /// The curvature averaged over `window` feet either side, twice
+    /// (a soft bell), so a turn's bank builds up before it and dies away
+    /// after it instead of switching on at its first bend.
+    fn smoothed_curve(&self, window: f32) -> Vec<f32> {
+        let n = self.points.len();
+        let step = self.length / n as f32;
+        let w = ((window / step) as isize).max(1);
+        let pass = |v: &[f32]| -> Vec<f32> {
+            (0..n as isize).map(|i| (-w..=w).map(|k| v[(i + k).rem_euclid(n as isize) as usize]).sum::<f32>() / (2 * w + 1) as f32).collect()
+        };
+        pass(&pass(&self.curve))
+    }
+
     /// The point and direction at distance `s` along.
     fn at(&self, s: f32) -> ([f32; 2], [f32; 2]) {
         let n = self.points.len();
@@ -995,7 +1008,7 @@ struct Land {
     patch: Vec<(u8, f32)>,
     /// Where on the track each sample is: ft left of the centre line
     /// (negative right), the distance along, and the track's half width.
-    lane: Vec<[f32; 3]>,
+    lane: Vec<[f32; 4]>,
 }
 
 impl Land {
@@ -1009,7 +1022,7 @@ impl Land {
             wear: vec![0.0; size * size],
             steep: vec![0.0; size * size],
             patch: vec![(0, 0.0); size * size],
-            lane: vec![[f32::MAX, 0.0, 0.0]; size * size],
+            lane: vec![[f32::MAX, 0.0, 0.0, 0.0]; size * size],
         }
     }
 
@@ -1037,7 +1050,7 @@ impl Land {
 
     /// [`Land::lane`] at (x, z) ft, smoothly between samples where all
     /// four round it are on the same stretch of track.
-    fn lane_at(&self, x: f32, z: f32) -> [f32; 3] {
+    fn lane_at(&self, x: f32, z: f32) -> [f32; 4] {
         let fx = (x / self.scale).clamp(0.0, (self.size - 1) as f32 - 0.001);
         let fz = (z / self.scale).clamp(0.0, (self.size - 1) as f32 - 0.001);
         let (ix, iz) = (fx as usize, fz as usize);
@@ -1049,7 +1062,7 @@ impl Land {
             return nearest;
         }
         let mix = |k: usize| lerp(lerp(q[0][k], q[1][k], tx), lerp(q[2][k], q[3][k], tx), tz);
-        [mix(0), mix(1), nearest[2]]
+        [mix(0), mix(1), nearest[2], mix(3)]
     }
 
     fn compute_steep(&mut self) {
@@ -1219,89 +1232,84 @@ impl Land {
     }
 
     fn carve(&mut self, course: &Course, half: f32, blend: f32, profile: &dyn Fn(f32) -> f32, features: &Features, bank: f32, sculpt: f32, calm: Option<(f32, f32)>, twist: f32) {
+        let _ = calm;
         let n = self.size;
         let reach = half + blend;
         let len = course.length;
-        // Shaped like a raced track: graded dirt pushed up in a lip along
-        // each edge (taller round the outside of turns), the edges ragged
-        // where dirt spills into the grass, a worn groove down the middle
-        // and sets of low rollers on the quieter straights.
+        // Shaped like a raced track, but smooth to ride: the dirt graded
+        // flat across, a low windrow of pushed-up dirt along each edge
+        // that grows into a berm round the outside of turns, and the
+        // berms building up and dying away over the turn's whole length
+        // (no lumps, rollers or grooves between the jumps, so the jumps
+        // and turns set the rhythm).
         let lip_w = (self.scale * 1.7).max(5.0);
         let seed = (len * 7.0) as u32;
-        let rolled: Vec<f32> = if sculpt > 0.0 {
-            let k = (len / 4.0).ceil() as usize;
-            (0..k)
-                .map(|j| {
-                    let s = j as f32 * 4.0;
-                    let near_jump = [-45.0f32, -20.0, 0.0, 20.0, 45.0].iter().any(|o| features.height((s + o).rem_euclid(len), len) > 0.05);
-                    let in_calm = calm.is_some_and(|(at, l)| (s - at).rem_euclid(len) < l + 60.0 || (at - s).rem_euclid(len) < 90.0);
-                    if near_jump || in_calm { return 0.0; }
-                    let set = smooth((noise(s / 260.0, 3.5, seed) - 0.5) * 5.0);
-                    set * (s / 46.0 * TAU).sin() * 1.1 * sculpt
-                })
-                .collect()
-        } else {
-            Vec::new()
+        let bend = course.smoothed_curve(45.0);
+        let count = bend.len();
+        let bend_at = |s: f32| {
+            let f = s.rem_euclid(len) / len * count as f32;
+            let i = f as usize % count;
+            lerp(bend[i], bend[(i + 1) % count], f.fract())
         };
-        // Rollers fade in and out smoothly between jumps.
-        let rolled: Vec<f32> = (0..rolled.len())
-            .map(|j| (-3i32..=3).map(|o| rolled[(j as i32 + o).rem_euclid(rolled.len() as i32) as usize]).sum::<f32>() / 7.0)
-            .collect();
+        let tight = |c: f32| (c * 120.0).clamp(-1.0, 1.0);
         for z in 0..n {
             for x in 0..n {
                 let p = [x as f32 * self.scale, z as f32 * self.scale];
                 let Some(near) = course.near(p, reach) else { continue };
                 let i = z * n + x;
-                let curve = course.curve[near.index];
+                let curve = bend_at(near.along);
                 // The outside of a turn rises: a berm.
                 let outside = -near.side * curve.signum();
-                let turn = (curve.abs() * 120.0).min(1.0);
+                let turn = tight(curve).abs();
                 // How this turn is cambered: mostly bermed, some flat, a
                 // few off-camber (the outside low, the inside high).
                 let camber = 1.0 + twist * ((noise(near.along / 300.0, 7.7, seed + 21) - 0.5) * 4.4 + 0.15);
                 let across = smooth(near.distance / half);
                 let berm = if camber >= 0.0 {
-                    if outside > 0.0 { bank * turn * across * camber } else { 0.0 }
+                    // A berm's face curves up like a bowl, steepest at its top.
+                    if outside > 0.0 { bank * turn * camber * across * (0.35 + 0.65 * across) } else { 0.0 }
                 } else {
                     // Off-camber: a steady tilt across the track, down to the outside.
                     bank * turn * camber * 0.45 * across * outside
                 };
                 let jump = if near.distance < half + 2.0 { features.height(near.along, course.length) } else { 0.0 };
                 let edge = smooth((near.distance - half) / blend);
-                let mut on = profile(near.along) + jump * (1.0 - smooth((near.distance - half + 3.0) / 5.0)) + berm;
+                // The racing line: wide into a turn, tight past its apex
+                // on the inside, wide again on the way out.
+                let line_at = half * (0.5 * tight(curve) - 0.35 * tight(bend_at(near.along + 50.0)) - 0.2 * tight(bend_at(near.along - 50.0))).clamp(-0.6, 0.6);
+                let line = (near.distance * near.side - line_at).abs();
+                // Where the bikes go the dirt is packed down a little: a
+                // broad, shallow bed along the line, smooth along its
+                // length so it guides the bike without bumping it.
+                let bed = -0.3 * sculpt * (-(line / (half * 0.28)).powi(2)).exp();
+                let on = profile(near.along) + jump * (1.0 - smooth((near.distance - half + 3.0) / 5.0)) + berm + bed;
                 let mut spill = 0.0;
                 if sculpt > 0.0 {
-                    let t = (near.distance / half).min(1.0);
-                    let groove = -0.7 * (1.0 - t * t);
-                    let roll = if rolled.is_empty() { 0.0 } else { rolled[((near.along / 4.0) as usize).min(rolled.len() - 1)] } * (1.0 - smooth((near.distance - half * 0.75) / (half * 0.3)));
-                    on += (groove + roll) * sculpt;
-                    // Ragged edges: the dirt wanders out into the grass.
+                    // Ragged edges (paint only): the dirt wanders out into the grass.
                     spill = (fbm(p[0] / 40.0, p[1] / 40.0, seed + 11) - 0.45) * 12.0 + smooth((fbm(p[0] / 18.0, p[1] / 18.0, seed + 12) - 0.58) * 6.0) * 9.0;
                 }
                 let mut h = lerp(on, self.heights[i], edge);
                 let mut lip_dirt = 0.0;
                 if sculpt > 0.0 {
-                    // The lip: broken here and there, higher on the outside of turns.
-                    // Low and often broken on the straights, so the ground
-                    // past the track stays easy to ride out onto; it builds
-                    // into a berm only round the outside of turns.
-                    let gap = smooth((noise(near.along / 45.0, near.side, seed + 13) - 0.45) * 5.0);
-                    let lip_h = (0.7 + 0.8 * noise(near.along / 30.0, near.side * 2.0, seed + 14)) * gap * (1.0 + if outside > 0.0 { 3.0 * turn } else { 0.0 });
+                    // The windrow: low and unbroken along the straights,
+                    // varying only slowly, so the ground past the track
+                    // stays easy to ride out onto; it builds into the
+                    // berm round the outside of turns.
+                    let lip_h = (0.45 + 0.35 * noise(near.along / 140.0, near.side * 2.0, seed + 14)) * (1.0 + if outside > 0.0 { 3.0 * turn } else { 0.0 });
                     let u = (near.distance - half - lip_w * 0.6) / lip_w;
                     let lip = lip_h * (1.0 - u * u).max(0.0).powf(1.5) * sculpt;
                     h += lip;
                     // The pushed-up dirt is bare, grass only on its back.
-                    lip_dirt = smooth(lip / 0.8) * (1.0 - smooth(u * 1.4));
+                    lip_dirt = smooth(lip / 0.6) * (1.0 - smooth(u * 1.4));
                 }
                 self.heights[i] = h;
                 let surface = (1.0 - smooth((near.distance - half - spill.max(-3.0)) / 6.0)).max(lip_dirt * 0.95);
                 self.track[i] = self.track[i].max(surface);
                 if near.distance < self.lane[i][0].abs() {
-                    self.lane[i] = [near.distance * near.side, near.along, half];
+                    self.lane[i] = [near.distance * near.side, near.along, half, line_at];
                 }
-                // The racing line: worn darker, wandering a little.
-                let line = (near.distance - half * 0.3 * (near.along / 90.0).sin()).abs();
-                self.wear[i] = self.wear[i].max(1.0 - smooth(line / (half * 0.7)));
+                // The racing line, worn darker.
+                self.wear[i] = self.wear[i].max(1.0 - smooth(line / (half * 0.55)));
             }
             if z % 256 == 0 {
                 eprint!(".");
@@ -1848,18 +1856,33 @@ fn paint(land: &Land, kind: Kind, biome: Biome, ground: &Ground, seed: u32) -> (
                             // Ruts: the lines the bikes take, packed dark
                             // into the dirt, wandering across the track as
                             // they go, most of them near the racing line.
-                            let (side, along, half) = (lane[0], lane[1], lane[2].max(1.0));
+                            let (side, along, half, line_at) = (lane[0], lane[1], lane[2].max(1.0), lane[3]);
+                            // Ruts: the lines the bikes take, packed dark
+                            // into the dirt. They follow the racing line
+                            // round the turns, a braid of them that bunches
+                            // up at the apex and spreads out on the
+                            // straights, each crossing the others now and
+                            // then, a pale lip of pushed-up dirt beside each.
+                            let spread = 0.45 + 0.55 * smooth((fbm(along / 90.0, 0.5, seed + 39) - 0.3) / 0.4);
                             let mut rut = 0.0f32;
-                            for k in 0..5u32 {
-                                let lane_at = half * (0.55 * (fbm(along / 70.0, k as f32 * 3.7, seed + 40 + k) - 0.5) * 2.0 + (k as f32 - 2.0) * 0.16);
-                                let width = 1.0 + 0.8 * fbm(along / 25.0, k as f32, seed + 50 + k);
-                                let depth = smooth((fbm(along / 40.0, k as f32 * 1.3, seed + 60 + k) - 0.3) / 0.3);
-                                rut = rut.max((-((side - lane_at) / width).powi(2)).exp() * depth);
+                            let mut lip = 0.0f32;
+                            for k in 0..7u32 {
+                                let fan = (k as f32 - 3.0) / 3.0;
+                                let wander = (fbm(along / 55.0, k as f32 * 3.7, seed + 40 + k) - 0.5) * 2.0;
+                                let lane_at = (line_at + half * spread * (fan * 0.5 + wander * 0.22)).clamp(-half * 0.9, half * 0.9);
+                                let width = 1.3 + 1.0 * fbm(along / 25.0, k as f32, seed + 50 + k);
+                                let depth = (0.45 + 0.55 * smooth((fbm(along / 40.0, k as f32 * 1.3, seed + 60 + k) - 0.25) / 0.35)) * (1.0 - fan.abs() * 0.45);
+                                let d = (side - lane_at) / width;
+                                rut = rut.max((-d * d).exp() * depth);
+                                lip = lip.max((-((d.abs() - 1.6) / 0.6).powi(2)).exp() * depth);
                             }
+                            // A smear of darker, packed dirt all along the line.
+                            let packed = (-((side - line_at) / (half * 0.35)).powi(2)).exp();
+                            ct = ct.map(|v| v * (1.0 - packed * 0.2) * (1.0 + lip * 0.12));
                             // Braking bumps across the track, ahead of the
                             // worn sections.
                             let bumps = (along / 3.2).sin().max(0.0).powi(3) * smooth((fbm(along / 60.0, 0.0, seed + 70) - 0.55) / 0.15) * wear;
-                            let dark = 1.0 - rut * 0.4 - bumps * 0.14;
+                            let dark = 1.0 - rut * 0.5 - bumps * 0.1;
                             ct = ct.map(|v| v * dark);
                         }
                         c = std::array::from_fn(|q| lerp(c[q], ct[q], t));
@@ -2209,11 +2232,16 @@ const NATIONAL_JUMPS: &[(f32, fn(&mut Rng) -> Shape)] = &[
         let height = r.range(9.0, 13.0);
         Shape::Gap { up: r.range(20.0, 26.0), gap: height * r.range(5.2, 6.0), down: r.range(28.0, 36.0), height }
     }),
+    // Mid-sized doubles and tables, the originals' bread and butter: a
+    // jump every few hundred feet sets the lap's rhythm.
+    (2.5, |r| {
+        let height = r.range(5.5, 8.0);
+        Shape::Gap { up: r.range(16.0, 20.0), gap: height * r.range(5.0, 5.8), down: r.range(22.0, 28.0), height }
+    }),
+    (2.0, |r| Shape::Table { up: r.range(16.0, 20.0), top: r.range(16.0, 30.0), down: r.range(20.0, 26.0), height: r.range(5.5, 7.5) }),
     (1.5, |r| Shape::Step { up: r.range(18.0, 22.0), top: r.range(40.0, 80.0), down: r.range(50.0, 80.0), height: r.range(6.0, 9.0) }),
-    (1.5, |r| Shape::Rollers { count: r.range(3.0, 5.99) as u32, spacing: r.range(26.0, 34.0), height: r.range(3.5, 5.0) }),
-    (1.2, |r| Shape::Whoops { count: r.range(6.0, 12.99) as u32, spacing: r.range(11.0, 14.0), height: r.range(1.8, 2.8) }),
-    (0.8, |r| Shape::Rollers { count: 2, spacing: r.range(22.0, 28.0), height: r.range(2.5, 3.5) }),
-    (0.4, |r| Shape::Rollers { count: 1, spacing: r.range(20.0, 26.0), height: r.range(2.5, 3.5) }),
+    (1.2, |r| Shape::Rollers { count: r.range(3.0, 4.99) as u32, spacing: r.range(30.0, 36.0), height: r.range(4.0, 5.5) }),
+    (0.5, |r| Shape::Whoops { count: r.range(6.0, 9.99) as u32, spacing: r.range(12.0, 14.0), height: r.range(1.8, 2.4) }),
 ];
 
 const QUARRY_JUMPS: &[(f32, fn(&mut Rng) -> Shape)] = &[
@@ -2226,8 +2254,8 @@ const SX_JUMPS: &[(f32, fn(&mut Rng) -> Shape)] = &[
     (2.5, |r| Shape::Gap { up: r.range(14.0, 16.0), gap: r.range(58.0, 70.0), down: r.range(18.0, 22.0), height: r.range(9.0, 11.0) }),
     (3.0, |r| Shape::Gap { up: r.range(12.0, 14.0), gap: r.range(34.0, 46.0), down: r.range(15.0, 18.0), height: r.range(7.0, 8.5) }),
     // Rhythm rollers spaced to roll or double, and whoops to skim.
-    (2.5, |r| Shape::Rollers { count: r.range(3.0, 5.99) as u32, spacing: r.range(22.0, 26.0), height: r.range(2.4, 3.0) }),
-    (1.5, |r| Shape::Whoops { count: r.range(8.0, 12.99) as u32, spacing: r.range(9.5, 11.0), height: r.range(1.9, 2.5) }),
+    (1.4, |r| Shape::Rollers { count: r.range(3.0, 5.99) as u32, spacing: r.range(22.0, 26.0), height: r.range(3.0, 4.0) }),
+    (1.0, |r| Shape::Whoops { count: r.range(8.0, 12.99) as u32, spacing: r.range(9.5, 11.0), height: r.range(1.9, 2.5) }),
     (1.5, |r| Shape::Table { up: r.range(13.0, 15.0), top: r.range(15.0, 30.0), down: r.range(14.0, 17.0), height: r.range(6.0, 8.0) }),
     (1.0, |r| Shape::Step { up: r.range(12.0, 14.0), top: r.range(18.0, 28.0), down: r.range(18.0, 26.0), height: r.range(4.5, 6.0) }),
     (0.8, |r| Shape::Rollers { count: 2, spacing: r.range(20.0, 24.0), height: r.range(2.8, 3.4) }),
@@ -2340,6 +2368,11 @@ fn national(def: &Def) -> Made {
     }
     let mound = [centre[0] + rng.range(-250.0, 250.0), centre[1] + rng.range(-250.0, 250.0)];
     let mound_h = rng.range(15.0, 35.0);
+    // Knolls, spurs and hollows across the track's own ground, so the
+    // lap climbs over rises, runs along ridges and drops into dips like
+    // the originals' do (their ground under the line rises and falls
+    // about twice as much over 50 to 150 ft as a gentle slope would).
+    let knoll_h = if def.style == Style::Hillside { 52.0 } else { 42.0 };
     let n = land.size;
     for z in 0..n {
         for x in 0..n {
@@ -2348,7 +2381,9 @@ fn national(def: &Def) -> Made {
             let along = (dx * cd + dz * sd) / 700.0;
             let hill = climb * smooth((along + 1.0) / 2.0);
             let m = mound_h * (-((fx - mound[0]).powi(2) + (fz - mound[1]).powi(2)) / (260.0f32 * 260.0)).exp();
-            let gentle = (fbm(fx / 520.0, fz / 520.0, seed + 1) - 0.5) * 24.0;
+            let gentle = (fbm(fx / 520.0, fz / 520.0, seed + 1) - 0.5) * 24.0
+                + (fbm(fx / 230.0, fz / 230.0, seed + 5) - 0.5) * 3.0 * knoll_h
+                + (ridged(fx / 420.0, fz / 420.0, seed + 6) - 0.5) * knoll_h;
             // Out past the track, real hills.
             let out_x = (lo[0] - 150.0 - fx).max(fx - hi[0] - 150.0).max(0.0);
             let out_z = (lo[1] - 150.0 - fz).max(fz - hi[1] - 150.0).max(0.0);
@@ -2362,14 +2397,19 @@ fn national(def: &Def) -> Made {
     land.valley(&[&course], 70.0, 340.0, relief * 0.7, 20.0, relief * 0.8, seed);
     land.mountains(&[&course], 260.0, 850.0, 420.0, seed);
     land.soften(&[&course], 40.0, 2, 3);
-    let raw = land.profile(&course, 120.0);
+    // The course follows the lie of the land closely: smoothed over 55 ft
+    // either way, enough to take out steps but keep the climbs and drops.
+    let raw = land.profile(&course, 55.0);
     let runs = straights(&course, 140.0);
     let (s0, sl) = longest(&runs);
+    // Jumps also go on the gentle bends (no tighter than 85 ft), as on the
+    // originals, so the lap has a jump every few hundred feet.
+    let jump_runs = straights(&course, 85.0);
     if std::env::var_os("FT_DEBUG").is_some() {
         eprintln!("runs {:?}", runs.iter().map(|r| r.1 as i32).collect::<Vec<_>>());
     }
     let line = (s0 + sl * 0.3) % course.length;
-    let features = fill_straights(&course, &runs, &mut rng, &mut |r, room| pick_shape(r, room, NATIONAL_JUMPS), 20.0, 18.0, (14.0, 40.0), Some(((line - 80.0).rem_euclid(course.length), 80.0 + (sl * 0.7).min(300.0))));
+    let features = fill_straights(&course, &jump_runs, &mut rng, &mut |r, room| pick_shape(r, room, NATIONAL_JUMPS), 16.0, 16.0, (40.0, 110.0), Some(((line - 80.0).rem_euclid(course.length), 80.0 + (sl * 0.7).min(300.0))));
     if std::env::var_os("FT_DEBUG").is_some() {
         eprintln!("{} features: {:?}", features.0.len(), features.0.iter().map(|f| format!("{:.0}:{:?}", f.0, f.1)).collect::<Vec<_>>());
     }
@@ -2421,19 +2461,20 @@ fn national(def: &Def) -> Made {
         let (x, z) = (p0[0] + left[0] * (START_HALF + 14.0) * sign, p0[1] + left[1] * (START_HALF + 14.0) * sign);
         models.push(model("fp_banner", &land, x, z, [left[0] * -sign, left[1] * -sign]));
     }
-    // Bales round the outside of the tight turns.
-    for (_, p, out, radius) in apexes(&course, 70.0) {
+    // A bale or two on the outside of only the tightest few turns (the
+    // originals' Nationals have none; a whole wall of them looks fake).
+    let mut tight_turns = apexes(&course, 45.0);
+    tight_turns.sort_by(|a, b| a.3.total_cmp(&b.3));
+    for (_, p, out, radius) in tight_turns.into_iter().take(3) {
         let across = [-out[1], out[0]];
-        for k in -1..=1 {
-            let off = half + 4.0 + radius.min(40.0) * 0.05;
-            let (x, z) = (p[0] + out[0] * off + across[0] * k as f32 * 9.0, p[1] + out[1] * off + across[1] * k as f32 * 9.0);
-            let name = format!("triplebale0{}", 1 + (rng.next() * 8.0) as u32 % 8);
-            models.push(model(&name, &land, x, z, across));
-        }
+        let off = half + 8.0 + radius.min(40.0) * 0.05;
+        let (x, z) = (p[0] + out[0] * off, p[1] + out[1] * off);
+        let name = format!("triplebale0{}", 1 + (rng.next() * 8.0) as u32 % 8);
+        models.push(model(&name, &land, x, z, across));
     }
-    // A flagman beside each big jump's take-off.
+    // A flagman beside the big jumps' take-offs only.
     for (at, shape) in &features.0 {
-        if matches!(shape, Shape::Gap { .. } | Shape::Table { .. }) {
+        if matches!(shape, Shape::Gap { height, .. } | Shape::Table { height, .. } if *height >= 9.0) {
             let (p, d) = course.at(*at);
             let side = if rng.next() < 0.5 { -1.0 } else { 1.0 };
             let left = [-d[1] * side, d[0] * side];
@@ -2473,20 +2514,21 @@ fn national_dressing(course: &Course, land: &Land, half: f32, line: f32, feature
         let side = if curve.abs() > 0.004 { -curve.signum() } else { -last_side };
         last_side = side;
         let left = [-d[1] * side, d[0] * side];
-        let off = half + 16.0 + rng.range(0.0, 6.0);
+        let off = half + 22.0 + rng.range(0.0, 14.0);
         let at = [p[0] + left[0] * off, p[1] + left[1] * off];
         if clear(at, off - 3.0) && ((at[0] - pits[0]).powi(2) + (at[1] - pits[1]).powi(2)).sqrt() > 130.0 {
             models.push(model(RACE_BANNERS[(rng.next() * 6.0) as usize % 6], land, at[0], at[1], [-left[0], -left[1]]));
-            // A sponsor's feather flags either side of its banner.
-            let flag = 1 + (rng.next() * 4.0) as usize % 4;
-            for along in [-12.0f32, 12.0] {
-                let q = [at[0] + d[0] * along + left[0] * 2.0, at[1] + d[1] * along + left[1] * 2.0];
+            // Now and then a sponsor's feather flag beside its banner.
+            if rng.next() < 0.3 {
+                let flag = 1 + (rng.next() * 4.0) as usize % 4;
+                let q = [at[0] + d[0] * 12.0 + left[0] * 2.0, at[1] + d[1] * 12.0 + left[1] * 2.0];
                 if clear(q, off - 2.0) {
                     models.push(model(&format!("fp_flag_{flag}"), land, q[0], q[1], d));
                 }
             }
         }
-        s += rng.range(60.0, 100.0);
+        // Spread out like the originals' 15 to 30 billboards a lap.
+        s += rng.range(150.0, 240.0);
     }
     // An inflatable sponsor arch over the track on a quiet straight,
     // half a lap from the start, as race day puts up.
@@ -2799,7 +2841,10 @@ fn supercross(def: &Def) -> Made {
         });
     // The finish arch up the straight, past the gate.
     let finish = (line + (run - 60.0).clamp(30.0, 120.0)) % course.length;
-    let features = fill_straights(&course, &runs, &mut rng, &mut |r, room| pick_shape(r, room, SX_JUMPS), 24.0, 20.0, (8.0, 22.0), Some(((line - 40.0).rem_euclid(course.length), 200.0)));
+    // Jumps fill every lane, gentle bends too, as the originals' 23 to 43
+    // jumps a lap do: a rhythm all the way round.
+    let jump_runs = straights(&course, 80.0);
+    let features = fill_straights(&course, &jump_runs, &mut rng, &mut |r, room| pick_shape(r, room, SX_JUMPS), 16.0, 14.0, (8.0, 22.0), Some(((line - 40.0).rem_euclid(course.length), 200.0)));
     let half = 13.5;
     land.carve(&course, half, 6.0, &|_| floor + 0.3, &features, 3.0, 0.0, None, 0.0);
     land.widen_start(&course, line, half, SX_START_HALF, 4.0, &|_| floor + 0.3);
@@ -3391,7 +3436,8 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
 /// a track built by an older one is built again. Change it whenever a
 /// change here moves anything on an existing track.
 /// "10": the Free Pack's ground got 20 % more colour (tools/freepack/saturate.py).
-pub const MADE: &str = "10";
+/// "11": smoother free tracks over real hills, worn ruts, more jumps, less clutter.
+pub const MADE: &str = "11";
 
 /// The free track whose file is `stem` (`FPNAT01`), any case.
 pub fn find(stem: &str) -> Option<&'static Def> {
