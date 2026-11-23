@@ -255,8 +255,18 @@
     </div>
     <div id="freekept" hidden>
       <button id="playfree" title="Starts with the Free Pack, fetching any update first.">Play</button>
-      <button id="forgetpack" class="plain" title="Forgets the Free Pack this browser kept.">Use another Free Pack</button>
+      <button id="forgetpack" class="plain" title="Deletes the Free Pack from this browser to free the space. Your saves and own tracks stay. Download it again, or pick another, any time.">Remove the Free Pack</button>
     </div>
+  </div>
+  <div id="startertip" class="tip" style="margin-top:1rem" hidden>
+    <p><b>Want more tracks?</b> <span id="starterwhy">The demo has two tracks of its own.</span> Players have made thousands more.
+      The starter set is ten of the most raced: a National, five Supercross tracks, three Baja maps and an Enduro map.</p>
+    <div class="row">
+      <button type="button" id="startertipget"
+        title="Downloads the ten starter tracks from our copy beside the Free Pack and adds them to the track lists for their events. They stay in this browser, and each one belongs to the player who made it. Remove them any time under Your own tracks.">Get the starter set</button>
+      <button type="button" class="plain" id="startertipno" title="Hides this. The starter set is still under Your own tracks.">No thanks</button>
+    </div>
+    <p class="hint" id="startertipstatus"></p>
   </div>
   <div id="playtime" class="playtime" hidden
     title="How long you've played in this browser, and everyone's time added up on the OpenMCM2 server. Unless you tick &quot;Don't add my time to everyone's&quot; in Settings and extras, how long you play each event, track and bike class is added to everyone's, with no name or anything else that says who you are.">
@@ -1330,9 +1340,14 @@ addEventListener("drop", async (e) => {
 
 $("forget").addEventListener("click", async () => {
   await fs.forgetGame();
+  kept = null;
+  $("forget").textContent = "Use another folder";
+  $("forget").title = "Forgets the game files this browser kept, so you can pick others.";
   $("kept").hidden = true;
   $("pick").hidden = false;
   status("");
+  showReady();
+  showStarterTip().catch(() => {});
 });
 
 // A new release while the page is open: offer a reload. Your game files
@@ -1493,8 +1508,13 @@ $("popularget").addEventListener("click", async () => {
   const have = await popularHave();
   const pick = popularStarter() ? (t) => t.starter : (t) => want.has(t.event);
   const todo = popular.filter((t) => pick(t) && !t.envs.every((e) => have.has(popularKey(t, e))));
-  const status = $("popularstatus");
+  await addPopular(todo, $("popularstatus"));
+});
+// Downloads `todo` (popular tracks) into this browser's own tracks,
+// telling `status` how it goes.
+async function addPopular(todo, status) {
   status.dataset.busy = "1";
+  $("popularstatus").dataset.busy = "1";
   $("popularget").disabled = true;
   let done = 0;
   const failed = [];
@@ -1513,18 +1533,21 @@ $("popularget").addEventListener("click", async () => {
     }
   }
   delete status.dataset.busy;
+  delete $("popularstatus").dataset.busy;
   $("popularget").disabled = false;
   await listTracks();
   await showPopular();
   status.textContent =
     `Added ${done} track${done === 1 ? "" : "s"}.` + (failed.length ? ` ${failed.length} couldn't be added: ${failed.join(", ")}.` : "");
-});
+  showStarterTip().catch(() => {});
+  return done;
+}
 $("popularremove").addEventListener("click", async () => {
   const have = await fs.userFiles(TRACKS).catch(() => []);
   const ours = new Set(popular.flatMap((t) => t.envs.map((e) => popularKey(t, e))));
   for (const path of have) if (ours.has(path.slice(TRACKS.length).toLowerCase())) await fs.forgetUser(path);
   await listTracks();
-  await showPopular();
+  await showPopular();  showStarterTip();
 });
 // "Start in the Course Builder": kept in this browser, not in the
 // address. The game reads it from the address, so start() puts it there
@@ -2155,6 +2178,7 @@ $("forgetpack").addEventListener("click", async () => {
   $("freekept").hidden = true;
   $("freepick").hidden = false;
   showReady();
+  showStarterTip().catch(() => {});
 });
 
 // The Course Builder button: straight into the builder, with the graphics
@@ -2176,8 +2200,54 @@ if (kept) {
   $("pick").hidden = true;
   $("kept").hidden = false;
   status(isDemo(kept) ? "The free demo is kept in this browser." : "Your game folder is remembered in this browser.");
+  if (isDemo(kept)) {
+    $("forget").textContent = "Remove the demo";
+    $("forget").title = "Deletes the demo from this browser to free the space. Your saves and own tracks stay.";
+  }
   $("play").addEventListener("click", () => go(kept, false));
 }
+// The starter set, suggested to players without the full game (the demo,
+// or the Free Pack alone) until they have it or say no thanks.
+let starterNo = false;
+try {
+  starterNo = localStorage.getItem("mm2starterno") === "1";
+} catch {}
+async function showStarterTip() {
+  const box = $("startertip");
+  const fullGame = kept && !isDemo(kept);
+  const canPlay = kept || keptPack || downloaded;
+  if (starterNo || fullGame || !canPlay) return void (box.hidden = true);
+  if (!popular) {
+    await loadPopular();
+    if (!popular) return void (box.hidden = true);
+  }
+  const have = await popularHave();
+  const starter = popular.filter((t) => t.starter);
+  const missing = starter.filter((t) => !t.envs.every((e) => have.has(popularKey(t, e))));
+  // Just added from here: stays up to say how it went.
+  if (!missing.length && !$("startertipstatus").textContent) return void (box.hidden = true);
+  $("starterwhy").textContent = isDemo(kept) ? "The demo has two tracks of its own." : "Without the original game there are only a few tracks to ride.";
+  const mb = Math.max(1, Math.round(missing.reduce((n, t) => n + (t.size || 0), 0) / 1e6));
+  $("startertipget").textContent = missing.length === starter.length ? `Get the starter set (about ${mb} MB)` : `Get the other ${missing.length} (about ${mb} MB)`;
+  $("startertipget").hidden = !missing.length;
+  box.hidden = false;
+}
+$("startertipget").addEventListener("click", async () => {
+  const have = await popularHave();
+  const todo = popular.filter((t) => t.starter && !t.envs.every((e) => have.has(popularKey(t, e))));
+  $("startertipget").disabled = true;
+  await addPopular(todo, $("startertipstatus"));
+  $("startertipget").disabled = false;
+});
+$("startertipno").addEventListener("click", () => {
+  starterNo = true;
+  try {
+    localStorage.setItem("mm2starterno", "1");
+  } catch {}
+  $("startertip").hidden = true;
+});
+showStarterTip();
+
 // Back from switching the look: straight into the game again.
 if (!(again && ((free && keptPack) || (!free && kept)))) loader.hide();
 if (again && free && keptPack) go(keptPack, true);

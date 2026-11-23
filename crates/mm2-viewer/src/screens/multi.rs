@@ -427,7 +427,11 @@ impl Multi {
         // Only the host's own track: never another one in its place.
         let Some(at) = self.host_track(cx.ui, info) else {
             let line = if crate::share::original_track(&info.track) {
-                format!("Can't ride {}: it's one of Motocross Madness 2's own tracks, and needs the game's files.", info.track)
+                if ["NAT04", "QUARRY01"].iter().any(|t| t.eq_ignore_ascii_case(&info.track)) {
+                    format!("Can't ride {}: it's a Motocross Madness 2 track. Get the free MM2 demo (in the launcher, or Play the free MM2 demo in a browser) to ride it.", info.track)
+                } else {
+                    format!("Can't ride {}: it's one of Motocross Madness 2's own tracks, and needs the game's files.", info.track)
+                }
             } else {
                 format!("Can't ride {}: it isn't here yet.", info.track)
             };
@@ -628,7 +632,7 @@ impl Multi {
         let game = ui.game().to_path_buf();
         self.tracks
             .entry(event)
-            .or_insert_with(|| list_tracks(&game.join(event.folder()), event))
+            .or_insert_with(|| crate::frontend::picker_tracks(list_tracks(&game.join(event.folder()), event)))
             .clone()
     }
 

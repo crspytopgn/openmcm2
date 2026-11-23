@@ -1902,7 +1902,7 @@ impl Frontend {
         let game = self.ui.game().to_path_buf();
         self.tracks
             .entry(event)
-            .or_insert_with(|| list_tracks(&game.join(event.folder()), event))
+            .or_insert_with(|| picker_tracks(list_tracks(&game.join(event.folder()), event)))
     }
 
     fn start(&mut self) -> Next {
@@ -2142,6 +2142,23 @@ pub fn free_entries(path: &Path, def: &mm2_course::free::Def, event: EventKind) 
             .collect()
     } else {
         vec![TrackEntry { path: path.to_path_buf(), course: 0, name: def.name.to_string(), preview: format!("{stem}.tga") }]
+    }
+}
+
+/// An event's tracks as the single race and multiplayer pickers list them:
+/// without our own free tracks (the Free Pack's) unless the free tracks
+/// extra is on, or the event has nothing else. The Pro Circuit, replays
+/// and joining a host's race use [`list_tracks`] as it is.
+pub fn picker_tracks(list: Vec<TrackEntry>) -> Vec<TrackEntry> {
+    if crate::tweaks::more().free_tracks {
+        return list;
+    }
+    let ours = |t: &TrackEntry| t.path.file_stem().and_then(|s| s.to_str()).and_then(mm2_course::free::find).is_some();
+    let others: Vec<TrackEntry> = list.iter().filter(|t| !ours(t)).cloned().collect();
+    if others.is_empty() {
+        list
+    } else {
+        others
     }
 }
 
