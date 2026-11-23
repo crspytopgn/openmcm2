@@ -621,7 +621,14 @@ struct OwnMotion {
 /// `tools/freepack/free_motions.py`; see there for the layout).
 fn own_table() -> &'static [OwnMotion] {
     static TABLE: std::sync::OnceLock<Vec<OwnMotion>> = std::sync::OnceLock::new();
-    TABLE.get_or_init(|| read_own(include_bytes!("free_motions.bin")).unwrap_or_default())
+    TABLE.get_or_init(|| {
+        // `MM2_FREE_MOTIONS=FILE`: try a freshly made table without a rebuild.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(t) = std::env::var_os("MM2_FREE_MOTIONS").and_then(|p| std::fs::read(p).ok()).and_then(|d| read_own(&d)) {
+            return t;
+        }
+        read_own(include_bytes!("free_motions.bin")).unwrap_or_default()
+    })
 }
 
 fn read_own(data: &[u8]) -> Option<Vec<OwnMotion>> {
