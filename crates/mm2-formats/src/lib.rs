@@ -20,6 +20,7 @@ pub mod font;
 pub mod glb;
 pub mod hires;
 pub mod lzw;
+pub mod ogg;
 pub mod pe;
 mod reader;
 pub mod rs2;

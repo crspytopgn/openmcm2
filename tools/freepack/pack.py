@@ -30,7 +30,8 @@ import zipfile
 # About this much per part: small enough that one changed file costs
 # little, few enough for a release page.
 PART_BYTES = 48 << 20
-FORMAT = 1
+# 2: the sounds are Ogg Vorbis (.ogg), which OpenMCM2 before 0.7.7 can't play.
+FORMAT = 2
 
 
 def sha256(path):

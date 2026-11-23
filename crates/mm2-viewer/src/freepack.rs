@@ -2,8 +2,9 @@
 //! run without the original's files. It is a plain folder:
 //!
 //! * `sound/engine/<class>/` for the classes `125`, `250`, `400`, `500` and
-//!   `600`: one WAV per engine sample, named after its list and a number
-//!   (`Idle01.wav`, `LowTorque02.wav`, ... `Rev01.wav`), and an optional
+//!   `600`: one sound per engine sample (Ogg Vorbis, or a WAV), named
+//!   after its list and a number (`Idle01.ogg`, `LowTorque02.ogg`, ...
+//!   `Rev01.ogg`), and an optional
 //!   `bands.ini` with the original's `LowTorqueMaxSpeed`,
 //!   `MidTorqueMaxSpeed` and `HighTorqueMaxSpeed` (mph).
 //!   With an `engine.ini` there (`OnLoop`, `OffLoop`, `IdleLoop` file
@@ -11,8 +12,8 @@
 //!   `IdleLoopRpm`; `IdleRpm`, `MaxRpm`, and optionally `GearTopSpeeds` in mph), the class
 //!   plays those three steady loops pitched to the bike's revs instead.
 //! * `sound/fx/`: the race effects under the original's names
-//!   (`landhard01.wav`, `wreck01.wav`, `fall01.wav`, `crowdloop.wav`,
-//!   `applause01.wav` ...). Any it lacks fall back to the original's.
+//!   (`landhard01`, `wreck01`, `fall01`, `crowdloop`, `applause01` ...),
+//!   as `.ogg` or `.wav`. Any it lacks fall back to the original's.
 //!
 //! * `stockmap.toml`: the stand-ins for the original's models, as
 //!   `[model]` and `[eco]` tables of `name = { file = "objects/x.glb" }`
@@ -1744,10 +1745,13 @@ pub fn menu_layout(name: &str) -> Option<Vec<u8>> {
     })
 }
 
-/// The Free Pack's own menu sound `file` (`Beep13.wav`), from `sound/ui`.
+/// The Free Pack's own menu sound `file` (`Beep13.wav`), from `sound/ui`:
+/// as Ogg Vorbis (`Beep13.ogg`) first, else the WAV.
 pub fn ui_sound(file: &str) -> Option<Vec<u8>> {
     let dir = ui_root()?.join("sound").join("ui");
-    crate::fs::read(dir.join(file)).ok()
+    mm2_formats::wav::other_name(file)
+        .and_then(|ogg| crate::fs::read(dir.join(ogg)).ok())
+        .or_else(|| crate::fs::read(dir.join(file)).ok())
 }
 
 /// Whether the pack has menus of its own.

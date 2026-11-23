@@ -56,6 +56,9 @@ pub struct Part {
     pub sha256: String,
 }
 
+/// The newest pack list this launcher reads.
+const FORMAT: u64 = 2;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Manifest {
     pub version: String,
@@ -90,7 +93,9 @@ impl Manifest {
         let s = |v: &serde_json::Value, k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or_default().to_string();
         let n = |v: &serde_json::Value, k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
         let list = |k: &str| json.get(k).and_then(|x| x.as_array()).cloned().unwrap_or_default();
-        if json.get("format").and_then(|x| x.as_u64()) != Some(1) {
+        // Format 2 is format 1 with sounds as Ogg Vorbis (`.ogg`), which an
+        // OpenMCM2 before 0.7.7 can't play.
+        if !json.get("format").and_then(|x| x.as_u64()).is_some_and(|f| (1..=FORMAT).contains(&f)) {
             return Err("this Free Pack needs a newer OpenMCM2: update it first (Updates)".into());
         }
         let files: Vec<Entry> = list("files")
@@ -262,7 +267,7 @@ fn run(dir: &Path, p: &Progress, menus: bool) -> Result<(), String> {
 
 fn json_of(m: &Manifest) -> serde_json::Value {
     serde_json::json!({
-        "format": 1,
+        "format": FORMAT,
         "version": m.version,
         "parts": m.parts.iter().map(|p| serde_json::json!({"name": p.name, "file": p.file, "size": p.size, "sha256": p.sha256})).collect::<Vec<_>>(),
         "files": m.files.iter().map(|f| serde_json::json!({"path": f.path, "size": f.size, "sha256": f.sha256, "part": f.part})).collect::<Vec<_>>(),
@@ -460,7 +465,8 @@ mod tests {
     #[test]
     fn refuses_paths_outside() {
         assert!(Manifest::parse(&TEXT.replace("a/one.png", "../x")).is_err());
-        assert!(Manifest::parse(&TEXT.replace("\"format\":1", "\"format\":2")).is_err());
+        assert!(Manifest::parse(&TEXT.replace("\"format\":1", "\"format\":2")).is_ok());
+        assert!(Manifest::parse(&TEXT.replace("\"format\":1", "\"format\":3")).is_err());
     }
 
     /// Downloads the pack `MM2_FREEPACK_URL` names into `MM2_FREEPACK_DIR`:

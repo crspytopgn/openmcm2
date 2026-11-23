@@ -19,6 +19,34 @@ impl Sound {
     }
 }
 
+/// A sound file of either kind, told apart by its first bytes: a WAV
+/// (the original game's, and the Free Pack's older ones) or Ogg Vorbis
+/// (the Free Pack's).
+pub fn decode(bytes: &[u8]) -> Result<Sound> {
+    if crate::ogg::is_ogg(bytes) {
+        crate::ogg::parse(bytes)
+    } else {
+        parse(bytes)
+    }
+}
+
+/// `name` with its other sound extension: `a.wav` and `a.ogg` (any case),
+/// so a file named for a WAV is found as Ogg Vorbis, and back.
+pub fn other_name(name: &str) -> Option<String> {
+    let (stem, ext) = name.rsplit_once('.')?;
+    match ext.to_ascii_lowercase().as_str() {
+        "wav" => Some(format!("{stem}.ogg")),
+        "ogg" => Some(format!("{stem}.wav")),
+        _ => None,
+    }
+}
+
+/// Whether `name` is a sound file the game reads (`.wav` or `.ogg`).
+pub fn is_sound_name(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.ends_with(".wav") || n.ends_with(".ogg")
+}
+
 pub fn parse(bytes: &[u8]) -> Result<Sound> {
     let mut r = Reader::new(bytes, 0);
     if r.take(4, "riff")? != b"RIFF" {
