@@ -419,8 +419,10 @@ export default {
 // One room in Europe and one in North America (where each Durable Object
 // lives: its location hint), so everyone has one near.
 export const ROOMS = {
-  "copper-eu": { name: "OpenMCM2 Free Roam (Europe)", event: 2, track: "FPNAT01", title: "Copper Ridge", where: "weur" },
-  "copper-us": { name: "OpenMCM2 Free Roam (America)", event: 2, track: "FPNAT01", title: "Copper Ridge", where: "enam" },
+// Both on the MM2 demo's Voodoo Basin (NAT04): everyone with the game or
+// the free demo has it, and a room has no files to send.
+  "voodoo-eu": { name: "OpenMCM2 Free Roam (Europe)", event: 2, track: "NAT04", title: "Voodoo Basin", where: "weur" },
+  "voodoo-us": { name: "OpenMCM2 Free Roam (America)", event: 2, track: "NAT04", title: "Voodoo Basin", where: "enam" },
 };
 const ROOM_PLACES = 8;
 const EMPTY = 254;

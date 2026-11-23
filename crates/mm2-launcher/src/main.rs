@@ -147,6 +147,8 @@ struct Launcher {
     menus_update: Slot<Option<freepack::Update>>,
     /// The last thing to tell the player, and whether it's bad news.
     note: Option<(String, bool)>,
+    /// A Remove button pressed once, waiting for "Yes, remove it".
+    removing: Option<Removable>,
     /// Exit was pressed once while something was copying.
     exit_asked: bool,
     /// Where this copy of OpenMCM2 is installed, if it can update itself.
@@ -434,6 +436,61 @@ impl Tracks {
     }
 }
 
+/// A file in the OpenMCM2 folder that says the starter set was turned
+/// down ("No thanks"), so the Play page stops suggesting it.
+const STARTER_NO: &str = "starter-set-no-thanks.txt";
+
+fn starter_declined() -> bool {
+    settings::user_dir().join(STARTER_NO).is_file()
+}
+
+/// What the launcher downloaded and can remove again.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Removable {
+    FreePack,
+    Menus,
+    Demo,
+}
+
+impl Removable {
+    /// Its folder in the OpenMCM2 folder.
+    fn folder(self) -> &'static str {
+        match self {
+            Removable::FreePack => "FreePack",
+            Removable::Menus => "NewMenus",
+            Removable::Demo => "GAME",
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Removable::FreePack => "Remove the Free Pack",
+            Removable::Menus => "Remove the new look menus",
+            Removable::Demo => "Remove the demo",
+        }
+    }
+    fn about(self) -> &'static str {
+        match self {
+            Removable::FreePack => "Deletes the downloaded Free Pack to free the space. Your profiles and saves stay, but tracks you built or added that live in its folder go with it. You can download it again any time.",
+            Removable::Menus => "Deletes the downloaded new look menus. The game shows the original menus until you download them again.",
+            Removable::Demo => "Deletes the downloaded MM2 demo to free the space. Your profiles and saves stay, but tracks you built or added that live in its folder go with it. You can download it again any time.",
+        }
+    }
+    fn ask(self) -> &'static str {
+        match self {
+            Removable::FreePack => "Remove the Free Pack from this computer? Tracks you built or added in its folder go too.",
+            Removable::Menus => "Remove the new look menus from this computer?",
+            Removable::Demo => "Remove the demo from this computer? Tracks you built or added in its folder go too.",
+        }
+    }
+    fn done(self) -> &'static str {
+        match self {
+            Removable::FreePack => "The Free Pack is removed.",
+            Removable::Menus => "The new look menus are removed.",
+            Removable::Demo => "The demo is removed.",
+        }
+    }
+}
+
 /// What a check for updates found, once it's done.
 type Checked = Arc<Mutex<Option<Result<Option<update::Release>, String>>>>;
 
@@ -513,6 +570,7 @@ impl Launcher {
             menus_update: Arc::new(Mutex::new(None)),
             running: None,
             note: None,
+            removing: None,
             exit_asked: false,
             install,
             update: Update::Idle,
@@ -936,6 +994,7 @@ impl Launcher {
         look::page_title(ui, "Ready to ride", "Motocross Madness 2, running natively on your computer.");
         self.update_banner(ui, busy);
         self.graphics_choice_card(ui, busy);
+        self.starter_card(ui, busy);
         if self.settings.free_graphics {
             self.freepack_card(ui, busy);
         } else {
@@ -1124,9 +1183,12 @@ impl Launcher {
                     .clicked()
                 {
                     self.note = None;
-                    self.menus_download = Some(freepack::install_menus(dir));
+                    self.menus_download = Some(freepack::install_menus(dir.clone()));
                 }
             });
+            if self.settings.menus_pack.as_deref() == Some(dir.as_path()) {
+                self.remove_row(ui, busy, Removable::Menus);
+            }
         });
     }
 
@@ -1220,7 +1282,118 @@ impl Launcher {
                     }
                 });
             });
+            // Only one downloaded or unpacked here: a folder picked
+            // elsewhere is the player's own, and is left alone.
+            if self.settings.freepack.as_deref() == Some(here.as_path()) {
+                self.remove_row(ui, busy, Removable::FreePack);
+            }
         });
+    }
+
+    /// The starter set of player-made tracks, suggested on the Play page
+    /// to players without the full game (the demo, or the Free Pack
+    /// alone) until they have it, or say no thanks.
+    fn starter_card(&mut self, ui: &mut egui::Ui, busy: bool) {
+        let game = self.settings.game.as_deref();
+        let is_demo = game.is_some_and(mm2_settings::is_demo);
+        if (game.is_some() && !is_demo) || !self.can_play() || busy || starter_declined() {
+            return;
+        }
+        let homes: Vec<std::path::PathBuf> = [self.settings.game.clone(), self.settings.freepack.clone()].into_iter().flatten().collect();
+        let Some(home) = homes.first().cloned() else { return };
+        let t = &mut self.tracks;
+        t.homes = homes;
+        if t.popular.is_none() && t.popular_fetch.is_none() && t.popular_error.is_none() {
+            t.fetch_popular();
+        }
+        // Nothing to say until the list is in (or when it can't be had).
+        let Some(list) = &t.popular else { return };
+        let starter: Vec<tracks::Track> = list.iter().filter(|x| x.starter).cloned().collect();
+        let missing: Vec<tracks::Track> = starter.iter().filter(|x| !t.added.has(&home, &x.url)).cloned().collect();
+        let working = t.queued > 0;
+        if starter.is_empty() || (missing.is_empty() && !working) {
+            return;
+        }
+        let mut no = false;
+        look::card(ui, look::icon::ICON_ROUTE, "Want more tracks?", |ui| {
+            let ours = if is_demo { "The demo has two tracks of its own." } else { "Without the original game there are only a few tracks to ride." };
+            ui.label(format!(
+                "{ours} Players have made thousands more. The starter set is {} of the most raced: a National, five Supercross tracks, three Baja maps and an Enduro map.",
+                starter.len()
+            ));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if working {
+                    let left = t.queue.len() + t.jobs.len();
+                    let done = t.queued.saturating_sub(left);
+                    ui.add(egui::ProgressBar::new(done as f32 / t.queued.max(1) as f32).desired_width(180.0).text(format!("{done} of {}", t.queued)));
+                    return;
+                }
+                let mb = (missing.iter().map(|x| x.size).sum::<u64>() >> 20).max(1);
+                let label = if missing.len() == starter.len() { format!("Get the starter set ({mb} MB)") } else { format!("Get the other {} ({mb} MB)", missing.len()) };
+                let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_DOWNLOAD, &label)).color(look::ON_ACCENT)).fill(look::ACCENT);
+                if ui
+                    .add(b)
+                    .on_hover_text("Downloads the starter tracks from our copy (MDX Racing if that's down) and adds them to the track lists for their events, with either graphics. Each one belongs to the player who made it. Remove them any time on the Tracks page.")
+                    .clicked()
+                {
+                    t.queued = missing.len();
+                    t.queue.extend(missing.iter().cloned());
+                }
+                no = ui.button("No thanks").on_hover_text("Hides this. The starter set is still on the Tracks page.").clicked();
+            });
+        });
+        if no {
+            let _ = std::fs::create_dir_all(settings::user_dir());
+            let _ = std::fs::write(settings::user_dir().join(STARTER_NO), "no thanks\n");
+        }
+    }
+
+    /// A Remove button for something the launcher downloaded, asking once
+    /// more before it goes.
+    fn remove_row(&mut self, ui: &mut egui::Ui, busy: bool, what: Removable) {
+        ui.add_space(2.0);
+        if self.removing == Some(what) {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(what.ask());
+                if ui.button(look::with(look::icon::ICON_DELETE, "Yes, remove it")).clicked() {
+                    self.removing = None;
+                    self.remove(what);
+                }
+                if ui.button("Keep it").clicked() {
+                    self.removing = None;
+                }
+            });
+        } else if ui
+            .add_enabled(!busy && self.running.is_none(), egui::Button::new(look::with(look::icon::ICON_DELETE, what.label())))
+            .on_hover_text(what.about())
+            .clicked()
+        {
+            self.removing = Some(what);
+        }
+    }
+
+    /// Deletes `what` from the OpenMCM2 folder and forgets it.
+    fn remove(&mut self, what: Removable) {
+        let dir = settings::user_dir().join(what.folder());
+        if let Err(e) = std::fs::remove_dir_all(&dir) {
+            if dir.exists() {
+                self.note = Some((format!("Couldn't remove {}: {e}", dir.display()), true));
+                return;
+            }
+        }
+        match what {
+            Removable::FreePack => {
+                self.settings.freepack = None;
+                self.settings.free_graphics = false;
+            }
+            Removable::Menus => self.settings.menus_pack = None,
+            Removable::Demo => self.settings.game = None,
+        }
+        let _ = self.settings.save();
+        self.saved = self.settings.clone();
+        self.tracks.added = tracks::Added::load();
+        self.note = Some((what.done().into(), false));
     }
 
     /// The playtime tracker: the player's own, and everyone's.
@@ -1350,6 +1523,12 @@ impl Launcher {
                     }
                 });
             });
+            // The demo, downloaded here: a copy of the real game is never
+            // offered for removal.
+            let here = settings::user_dir().join("GAME");
+            if self.settings.game.as_deref() == Some(here.as_path()) && mm2_settings::is_demo(&here) {
+                self.remove_row(ui, busy, Removable::Demo);
+            }
         });
     }
 
@@ -1588,6 +1767,7 @@ impl Launcher {
             tile(ui, &mut s.more.all_gear, "All gear in every event", "The bikes and outfits the Pro Circuit gives out, in single races too.");
             tile(ui, &mut s.more.track_filter, "Track filter", "All tracks, the base game's or only the ones you added, on the event page.");
             tile(ui, &mut s.more.drive_vehicles, "Drive the scenery", "In Practice and free roam, press V (or the pad's D-pad down) next to one of a track's cars, trucks or trains to get in and drive it, or press V anywhere to jump into the nearest plane, helicopter or blimp in the sky and fly it. Each one has its own springs, weight, power and grip. Each one sounds like what it is, and your bike goes quiet meanwhile. V again puts you back on your bike beside it. The Enduro tracks (Airfield, Farm, Open Pit, Ski Lodge, Trailer) have the most, and the free tracks get a car park by the start and planes, a helicopter, a blimp and a UFO out on open ground.");
+            tile(ui, &mut s.more.free_tracks, "Our own free tracks", "The tracks we made for the Free Pack, in the single race and multiplayer track lists. Off, they only show for an event that has no other track, so add player-made tracks (the starter set on the Tracks page) to ride those instead. The Pro Circuit with the Free Pack and races hosted on one of them work either way.");
             tile(ui, &mut s.more.demo_tracks, "Rebuilt demo tracks", "Only with the free MM2 demo. The demo has the full ground for just two tracks; for the others it keeps the route, the scenery and the menu pictures. This adds those 27 tracks to the event lists, rebuilt: the original's route and scenery on new ground with jumps of our own, so the hills and jumps are not the original's. Each one is built the first time you ride it, which takes a few seconds (longer in a browser). Their names end in (Rebuilt). The Stunt Quarry and Tag arenas have no route in the demo and aren't included.");
             slider(ui, "Riders on the gate", "Up to 30 riders in a single race. 0 is the original game's count.", &mut s.more.riders, 0..=mm2_settings::RIDERS_MOST, 1.0, "");
             ui.label(look::weak("Extra art for added tracks goes in the game's RES/ADDONS folder; it never replaces the game's own."));
@@ -2453,6 +2633,29 @@ mod shots {
         let image = h.render().expect("render");
         let image = image::imageops::crop_imm(&image, 8, 8, width as u32, height as u32).to_image();
         image.save(format!("{dir}/tracks_hover.png")).expect("save");
+    }
+
+    /// The Play page's starter set card for a Free Pack player, from the
+    /// list at the trackpack's URL, drawn into `MM2_SHOTS`.
+    #[test]
+    #[ignore]
+    fn starter_shot() {
+        let dir = std::env::var("MM2_SHOTS").expect("MM2_SHOTS: where to draw it");
+        let mut s = Settings::default();
+        s.free_graphics = true;
+        s.freepack = Some("C:/Users/rider/AppData/Roaming/mm2/FreePack".into());
+        let mut l = Launcher::with(s, Err("built from source".into()));
+        l.tracks.popular = Some(tracks::popular().expect("the list"));
+        let (width, height) = (1200.0, 1000.0);
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([width + 16.0, height + 16.0])
+            .with_theme(egui::Theme::Light)
+            .with_context_setup(|ctx| look::apply(ctx))
+            .build_ui_state(|ui, l: &mut Launcher| l.draw(ui), l);
+        h.run();
+        let image = h.render().expect("render");
+        let image = image::imageops::crop_imm(&image, 8, 8, width as u32, height as u32).to_image();
+        image.save(format!("{dir}/play_starter.png")).expect("save");
     }
 
     /// Draws each page into the folder `MM2_SHOTS`, to look at:
