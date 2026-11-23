@@ -630,7 +630,7 @@ export class Room extends DurableObject {
           ws.serializeAttachment(me);
           this.send(ws, new Writer().u8(M.WELCOME).u8(me.id).done());
           this.send(ws, new Writer().u8(M.GAME).game(room).done());
-          this.send(ws, new Writer().u8(M.CHAT).str(`Server: Welcome to free roam at ${room.title}! Press Ready to ride, and leave the race any time to come back here.`).done());
+          this.send(ws, new Writer().u8(M.CHAT).str(`Server: Free roam at ${room.title}. Press Ready to ride!`).done());
           this.tellPlayers();
           await this.count();
           return;
