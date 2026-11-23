@@ -2137,7 +2137,10 @@ fn write_scene(s: &Scene) -> String {
         span / 2.0 + from[0] * 3000.0, from[1] * 3000.0, span / 2.0 + from[2] * 3000.0,
         span / 2.0, span / 2.0
     );
-    let _ = write!(o, "\r\n[Fog]\r\nColorRGB={},{},{}\r\n\r\n[Sounds]\r\nCrowdPresent={}\r\n", fog[0], fog[1], fog[2], if matches!(d.kind, Kind::Supercross | Kind::National) { "T" } else { "F" });
+    // A crowd only where the original has one: its 17 stadiums and 3
+    // Moto-Tag arenas. Its outdoor tracks are quiet, so a pass there gets
+    // no applause and no crowd loop plays.
+    let _ = write!(o, "\r\n[Fog]\r\nColorRGB={},{},{}\r\n\r\n[Sounds]\r\nCrowdPresent={}\r\n", fog[0], fog[1], fog[2], if matches!(d.kind, Kind::Supercross | Kind::Tag) { "T" } else { "F" });
     // Zone 1: the track (dust and dirt); 2: the open ground; 3: rock and
     // concrete (no dust).
     let _ = write!(o, "\r\n[TerrainZone1]\r\nGenerateDust=T\r\nGenerateDirt=T\r\n[TerrainZone2]\r\nSurfaceFriction=1.0\r\nSurfaceDrag=1.0\r\nSurfaceTraction=1.0\r\nGenerateDust=F\r\nGenerateDirt=T\r\n[TerrainZone3]\r\nSurfaceFriction=1.0\r\nSurfaceDrag=1.0\r\nSurfaceTraction=1.0\r\nGenerateDust=F\r\nGenerateDirt=F\r\n");
@@ -3390,7 +3393,7 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
 /// Which making of the recipes a built track is from (its `.made` file):
 /// a track built by an older one is built again. Change it whenever a
 /// change here moves anything on an existing track.
-pub const MADE: &str = "9";
+pub const MADE: &str = "10";
 
 /// The free track whose file is `stem` (`FPNAT01`), any case.
 pub fn find(stem: &str) -> Option<&'static Def> {
