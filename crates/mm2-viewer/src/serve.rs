@@ -53,7 +53,7 @@ impl Options {
         let title = flag("--title").unwrap_or_else(|| if track.eq_ignore_ascii_case("FPNAT01") { "Copper Ridge".into() } else { track.clone() });
         let game = GameInfo { event, mode: net::ROAM_MODE, laps: 99, track, ..Default::default() };
         let welcome = flag("--welcome").unwrap_or_else(|| {
-            format!("Server: Welcome to free roam at {title}! Press Ready to ride, and leave the race any time to come back here.")
+            format!("Server: Free roam at {title}. Press Ready to ride!")
         });
         Ok(Options {
             name: flag("--name").unwrap_or_else(|| "OpenMCM2 Free Roam".into()),

@@ -929,6 +929,34 @@ fn tip_text(c: &Control) -> Option<String> {
         .map(|t| t.replace("&&", "&"))
 }
 
+/// `line` broken at spaces into lines no wider than `width`; a word wider
+/// than that on its own is broken between letters.
+fn break_line(ui: &mut Ui, gfx: &mut Gfx, line: &str, width: f32, pt: f32, bold: bool) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for word in line.split(' ') {
+        let tried = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
+        if ui.text_width(gfx, &tried, pt, bold) <= width {
+            cur = tried;
+            continue;
+        }
+        if !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+        }
+        for ch in word.chars() {
+            let mut next = cur.clone();
+            next.push(ch);
+            if !cur.is_empty() && ui.text_width(gfx, &next, pt, bold) > width {
+                out.push(std::mem::replace(&mut cur, ch.to_string()));
+            } else {
+                cur = next;
+            }
+        }
+    }
+    out.push(cur);
+    out
+}
+
 /// A greyed button's text (0x9c9c9c).
 const GREYED: i32 = 0x9c9c9c;
 
@@ -997,6 +1025,11 @@ pub struct Ctl {
     /// The text breaks into lines at the control's width (the game's
     /// `0x1e8`, set for prompts).
     pub wrap: bool,
+    /// A list box whose lines break at its width (the lobby chat): the
+    /// unbroken lines, and the width they were last broken at (0 until
+    /// they have been).
+    lines: Option<Vec<String>>,
+    broken_at: f32,
     /// The archive its pictures come from, when not the dialog's: a
     /// control borrowed from another dialog (the fork's).
     pack: Option<String>,
@@ -1143,6 +1176,8 @@ impl Dlg {
                 mark: None,
                 selectable: false,
                 wrap: false,
+                lines: None,
+                broken_at: 0.0,
                 pack: None,
                 face: None,
             })
@@ -1970,6 +2005,47 @@ impl Dlg {
         }
     }
 
+    /// Fills a list box with lines that break at its width, showing the
+    /// last of them (the lobby chat: a long line goes on below, rather
+    /// than past the box and under its scroll bar).
+    pub fn set_broken_items(&mut self, name: &str, lines: Vec<String>) {
+        if let Some(c) = self.ctl(name) {
+            c.lines = Some(lines);
+            c.broken_at = 0.0;
+        }
+    }
+
+    /// Breaks the lines of the lists that asked for it, once per width.
+    fn break_lists(&mut self, ui: &mut Ui, gfx: &mut Gfx) {
+        for i in 0..self.ctls.len() {
+            if self.ctls[i].lines.is_none() {
+                continue;
+            }
+            let c = &self.dialog.controls[i];
+            let rect = self.rect(i);
+            let lm = c.props.int("TextLMargin").unwrap_or(0) as f32;
+            let width = (rect[2] - 2.0 * lm).max(20.0);
+            if self.ctls[i].broken_at == width {
+                continue;
+            }
+            let (pt, bold) = self.font(c);
+            let mut items = Vec::new();
+            for line in self.ctls[i].lines.as_deref().unwrap_or_default() {
+                items.extend(break_line(ui, gfx, line, width, pt, bold));
+            }
+            let rows = (rect[3] / self.line(i)).floor().max(1.0) as usize;
+            let group = attach(c);
+            let ctl = &mut self.ctls[i];
+            ctl.selected = items.len().saturating_sub(1);
+            ctl.scroll = items.len().saturating_sub(rows);
+            ctl.items = items;
+            ctl.broken_at = width;
+            if let Some(group) = group {
+                self.follow_lists(group);
+            }
+        }
+    }
+
     /// Lets the pointer pick a list box's lines.
     pub fn set_wrap(&mut self, name: &str, on: bool) {
         if let Some(c) = self.ctl(name) {
@@ -2144,6 +2220,7 @@ impl Dlg {
     /// for a screen that draws something between them (the main menu's
     /// movie).
     pub fn draw_controls(&mut self, ui: &mut Ui, gfx: &mut Gfx, now: f32) {
+        self.break_lists(ui, gfx);
         self.draw_some(ui, gfx, now, 0..self.ctls.len());
     }
 
