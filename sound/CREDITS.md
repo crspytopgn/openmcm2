@@ -2,7 +2,7 @@
 
 Every Freesound recording used in `engine/` and `fx/`. CC0 clips need no credit (they are listed anyway). CC BY clips **must** be credited as below in any release.
 
-## Engines 125, 400 and the 250 riding sounds: recordings by crspytopgn
+## Engines 125, 250 and 400: recordings by crspytopgn
 
 The 125 (SX125 two-stroke) and 400 (CRF450R four-stroke) folders, and the 250 folder (riding and idle from the TC250 and YZ250 two-strokes, off-throttle Sputter, Decel and Rev from the FC250), are cut from engine recordings made by **crspytopgn**, released under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). They are cut into the original game's slots and take counts, with steady stretches tiled into seamless clips, equal-power crossfades for the decel and rev chains, a gentle tone match, loudness matching and short fades. They have no engine.ini, so the game plays them as whole samples the way MM2 does.
 
@@ -10,7 +10,7 @@ Credit line: "Engine sounds (125, 250, 400) recorded by crspytopgn, CC BY 4.0."
 
 ## Engine 500: YouTube recordings
 
-These classes are untouched stretches of real onboard recordings, cut into the original game's engine slots (LowTorque, MidTorque, HighTorque, PowerBand, Sputter, Decel, Idle, Rev). The only edits are cuts, 10 ms fades, loudness matching and, for the idles, a 0.1 s loop crossfade. They have no engine.ini, so the game plays them as whole samples the way MM2 does. The Freesound table below no longer applies to the 125, 250, 400 or 500 folders except where noted here.
+This class is untouched stretches of real onboard recordings, cut into the original game's engine slots (LowTorque, MidTorque, HighTorque, PowerBand, Sputter, Decel, Idle, Rev). The only edits are cuts, 10 ms fades, loudness matching and, for the idles, a 0.1 s loop crossfade. They have no engine.ini, so the game plays them as whole samples the way MM2 does. The Freesound table below no longer applies to the 125, 250, 400 or 500 folders except where noted here.
 
 | Class | Recording | Uploader | Licence | Files |
 |---|---|---|---|---|
