@@ -1432,12 +1432,21 @@ impl Frontend {
     /// The profile's bike, outfit and plate on the Bike & Rider page, by
     /// name (`0x44fe50`); a name no longer listed keeps the current pick.
     fn load_ride(&mut self) {
+        if split_looks(&mut self.user.profile) {
+            self.user.save();
+        }
         let p = &self.user.profile;
-        if let Some(i) = self.roster.bikes.iter().position(|b| b.name == p.bike) {
+        // The free graphics' picks, or the game's own (the demo's too).
+        let (bike, outfit) = if crate::freepack::chosen() {
+            (p.free_bike.as_deref().unwrap_or(&p.bike), p.free_outfit.as_deref().unwrap_or(&p.outfit))
+        } else {
+            (p.bike.as_str(), p.outfit.as_str())
+        };
+        if let Some(i) = self.roster.bikes.iter().position(|b| b.name == bike) {
             self.bike = i;
             self.bike_picked = true;
         }
-        if let Some(i) = self.roster.outfits.iter().position(|o| o.name == p.outfit) {
+        if let Some(i) = self.roster.outfits.iter().position(|o| o.name == outfit) {
             self.outfit = i;
         }
         if (101..=999).contains(&p.plate) {
@@ -1480,18 +1489,24 @@ impl Frontend {
             String::new()
         };
         let p = &mut self.user.profile;
-        let before = (p.bike.clone(), p.outfit.clone(), p.plate, p.paint.clone());
+        let before = p.clone();
         p.paint = paint;
+        // Into the picks of the graphics being played with.
+        let (to_bike, to_outfit) = if crate::freepack::chosen() {
+            (p.free_bike.get_or_insert_with(String::new), p.free_outfit.get_or_insert_with(String::new))
+        } else {
+            (&mut p.bike, &mut p.outfit)
+        };
         if let Some(b) = bike {
-            p.bike = b;
+            *to_bike = b;
         }
         if let Some(o) = outfit {
-            p.outfit = o;
+            *to_outfit = o;
         }
         if let Some(n) = plate {
             p.plate = n;
         }
-        if (p.bike.clone(), p.outfit.clone(), p.plate, p.paint.clone()) != before {
+        if *p != before {
             self.user.save();
         }
     }
@@ -2295,4 +2310,20 @@ fn enable_seed_box(page: &mut Dlg, on: bool) {
     if !on && page.editing() == Some("EditSeed") {
         page.edit(None);
     }
+}
+
+/// A profile from before the free graphics kept picks of their own
+/// (`FreeBike=`/`FreeOutfit=`): a Free Pack bike or kit it saved was
+/// picked riding with the free graphics, so it moves to those, and the
+/// game's own (the demo's) rider and bike come back with its files.
+/// Whether the profile changed.
+fn split_looks(p: &mut crate::profile::Profile) -> bool {
+    if p.free_bike.is_some() || p.free_outfit.is_some() || crate::freepack::outfits().is_empty() {
+        return false;
+    }
+    let free_bike = p.bike.starts_with(&format!("{} ", crate::roster::FREE_MAKER));
+    let free_outfit = crate::freepack::outfits().iter().any(|o| o.name == p.outfit);
+    p.free_bike = Some(if free_bike { std::mem::take(&mut p.bike) } else { String::new() });
+    p.free_outfit = Some(if free_outfit { std::mem::take(&mut p.outfit) } else { String::new() });
+    true
 }

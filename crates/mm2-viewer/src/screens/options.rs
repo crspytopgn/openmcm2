@@ -1504,6 +1504,7 @@ impl Options {
                         q.name = self.p.name.clone();
                         q.bike = self.p.bike.clone();
                         q.outfit = self.p.outfit.clone();
+                        (q.free_bike, q.free_outfit) = (self.p.free_bike.clone(), self.p.free_outfit.clone());
                         q.plate = self.p.plate;
                         self.p = q;
                     }
