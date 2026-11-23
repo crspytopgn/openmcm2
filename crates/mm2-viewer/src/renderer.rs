@@ -151,6 +151,8 @@ pub struct TerrainRenderer {
     ground: crate::fine_ground::Views,
     grid: [f32; 4],
     depth: Option<(wgpu::TextureView, u32, u32)>,
+    /// The depth texture, destroyed when the next takes its place.
+    depth_held: crate::gpu_free::Held,
     objects: Option<ObjectRenderer>,
     sky: Option<crate::sky::SkyRenderer>,
     clear: wgpu::Color,
@@ -671,6 +673,7 @@ impl TerrainRenderer {
             detail,
             grid,
             depth: None,
+            depth_held: Default::default(),
             objects,
             sky: None,
             clear: SKY,
@@ -1062,7 +1065,12 @@ impl TerrainRenderer {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
             });
+            // The last one's memory back at once, in a browser too
+            // (crate::gpu_free): a browser's picture changes size while racing.
+            let mut held = crate::gpu_free::Held::default();
+            let depth = held.texture(depth);
             self.depth = Some((depth.create_view(&Default::default()), width, height));
+            self.depth_held = held;
         }
         let aspect = width as f32 / height.max(1) as f32;
         // The size the enhanced scene is drawn at, before it is stretched
