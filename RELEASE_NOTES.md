@@ -1,3 +1,19 @@
+# OpenMCM2 0.7.7
+
+* **Fresher original engine sounds.** With your own game or the demo,
+  the bikes' original engine samples are now freshened as they load: a
+  touch of EQ, a little more bite and level, and seamless loops. It is on
+  by default. Switch it off with *Freshened engine sounds* in the
+  launcher or *Original engine sounds, untouched* in the browser's
+  extras. Nothing is changed on disk and no sounds are shipped. With the
+  free graphics, your game's or the demo's own engines play when they
+  are there.
+* **A much smaller Free Pack sound download.** The Free Pack's sounds
+  are now Ogg Vorbis instead of WAV. That's about 3 MB instead of 20 MB,
+  and every clip keeps its exact length, so loops stay seamless. Update
+  OpenMCM2 before updating the Free Pack: older versions can't play the
+  new sounds, so they ask you to update first.
+
 # OpenMCM2 0.7.6
 
 * **More tracks for demo and Free Pack players.** Without the full game,
