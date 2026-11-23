@@ -1,3 +1,33 @@
+# OpenMCM2 0.7.8
+
+* **Free tracks that feel ridden-in.** Smooth between the jumps, with
+  berms that build into each turn, natural worn ruts along the racing
+  line, rolling hills under the Nationals, a jump-filled rhythm like the
+  originals on Nationals and Supercross, and far fewer banners, flags and
+  bales. Rebuilt demo tracks get the ruts and berms too. Your free tracks
+  rebuild once the first time you ride them.
+* **A free rider who sits on the bike like the original.** Knees tucked
+  in, elbows up, smooth joints working again, and a slimmer build with
+  square shoulders.
+* **Free bikes ride exactly like their MM2 class.** Each free bike now
+  shares its class's handling and collision shape, and the free 500 and
+  600 use the 250 and 400 engine sounds.
+* **Our own engine recordings.** The Free Pack's 125, 250 and 400
+  engines are new recordings. Engine sounds (125, 250, 400) recorded by
+  crspytopgn, CC BY 4.0.
+* **More colour in the free scenery.** The Free Pack's ground, skies,
+  plants and objects are about 20% more colourful, closer to the
+  original tracks.
+* **The crowd stays in the stadium.** Free outdoor tracks no longer have
+  a stadium crowd. As in the original, the crowd is only in Supercross
+  stadiums and Moto-Tag arenas.
+* **Smoother Rider and Helmet Cams.** No more judder when steering hard,
+  and the Helmet Cam now moves with the bike as one, like the original.
+* **Event clip in its frame.** With the new look menus, the main menu's
+  event clip plays inside its frame again.
+* **Lobby chat wraps.** Long chat lines in the multiplayer lobby wrap
+  inside the box instead of running past it.
+
 # OpenMCM2 0.7.7
 
 * **Fresher original engine sounds.** With your own game or the demo,
