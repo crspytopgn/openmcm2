@@ -705,7 +705,10 @@ impl RaceSounds {
         let engine_res = fresh_res.as_deref().unwrap_or(res);
         let mut banks: [Option<Bank>; 5] = Default::default();
         for &c in &present {
-            let pack = || crate::freepack::engine_dir(CLASSES[c]).and_then(|dir| Bank::load_dir(&dir, divisor(c)));
+            // The pack's recordings by the original's section too: its big
+            // two-strokes ride on the 250s' sounds and its big four-strokes
+            // on the 400s', as in the game.
+            let pack = || crate::freepack::engine_dir(CLASSES[ORIGINAL[c]]).and_then(|dir| Bank::load_dir(&dir, divisor(c)));
             let original = || {
                 let class = CLASSES[ORIGINAL[c]];
                 Bank::load(engine_res, options.sixteen_bit, class, divisor(c), freshen)
