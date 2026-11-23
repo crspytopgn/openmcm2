@@ -1,3 +1,32 @@
+# OpenMCM2 0.7.6
+
+* **More tracks for demo and Free Pack players.** Without the full game,
+  the launcher's *Play* page and the browser page now suggest the
+  *starter set*: ten of the most raced tracks made by players, about
+  55 MB. Press *Get the starter set*, or *No thanks* to hide the
+  suggestion.
+* **Player-made tracks first.** Our own free tracks are no longer in the
+  single race and multiplayer track lists. Switch on *Our own free
+  tracks* in the extras to bring them back. An event with no other track
+  still lists them, and the Pro Circuit, replays and races hosted on one
+  of them work as before.
+* **Remove what you downloaded.** The launcher can now remove the
+  downloaded Free Pack, the new look menus and the demo, and asks once
+  more before it does. In the browser the buttons say *Remove the Free
+  Pack* and *Remove the demo*.
+* **Free roam on Voodoo Basin.** Both always-open free roam rooms now
+  run the demo's Voodoo Basin, so everyone with the game or the free demo
+  can ride. Without either, the game says to get the free demo.
+* **The demo rides the original rider.** A profile saved while playing
+  with the free graphics no longer puts the free rider and bike into the
+  demo or the original game. The free graphics keep their own picks.
+* **A free rider who sits more like the original.** Less hunched over
+  the bars, knees bent as in the original, and elbows up.
+* **Smoother races in the browser on big screens.** Races are drawn at
+  a size the graphics can keep up with, smaller while frames come late
+  and sharp again once they keep time. This helps most on laptops with
+  built-in graphics and high-resolution screens. Menus stay sharp.
+
 # OpenMCM2 0.7.5
 
 * **Players' own tracks in one click.** The launcher's *Tracks* page and
