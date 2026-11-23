@@ -76,6 +76,17 @@ pub fn original_res() -> Option<PathBuf> {
     (has("BIKE.RES") || has("ENGINE.RES") || has("AUDIO.RES")).then_some(res)
 }
 
+/// The `RES` folder of the player's own game or demo with its
+/// `ENGINE.RES`, whichever graphics were picked: for the freshened engine
+/// sounds.
+pub fn game_engine_res() -> Option<PathBuf> {
+    GAME.get()
+        .map(|g| g.join("RES"))
+        .into_iter()
+        .chain(crate::find_game().map(|g| g.join("RES")))
+        .find(|res| crate::fs::is_file(res.join("ENGINE.RES")))
+}
+
 /// Whether the player picked the free graphics (`--freepack`), rather
 /// than a pack set up beside the original's files.
 pub fn chosen() -> bool {
