@@ -10,6 +10,9 @@ struct Globals {
     ambient: vec4<f32>,
     sun: vec4<f32>,
     to_sun: vec4<f32>,
+    shadow_view: mat4x4<f32>,
+    // How far the eco-system's billboards reach, ft (z).
+    shadow_on: vec4<f32>,
 };
 
 // The game's vertex light (0x4a0e40): ambient plus the sun's colour times
@@ -85,10 +88,9 @@ fn vertex_light(mode: u32, normal: vec3<f32>) -> vec3<f32> {
     return scene_light(dot(n, globals.to_sun.xyz));
 }
 
-// The eco-system's trees give way to their billboards here, ft, over a
-// dithered band (objects.rs TREE_FAR, TREE_BAND).
-const TREE_FAR: f32 = 450.0;
-const TREE_BAND: f32 = 60.0;
+// The eco-system's trees give way to their billboards at fog_range.z, ft,
+// over a dithered band fog_range.w deep (objects.rs TreeBand), and the
+// billboards reach shadow_on.z.
 
 // Where a far tree's billboard corner is: its quad turned round the
 // upright to face the camera, from the corner as stored facing along z
@@ -121,12 +123,12 @@ fn tree_hidden(world: vec3<f32>, pixel: vec2<f32>) -> bool {
         return false;
     }
     let dither = fract(52.9829189 * fract(dot(floor(pixel), vec2<f32>(0.06711056, 0.00583715)))) - 0.5;
-    let edge = TREE_FAR + dither * TREE_BAND;
+    let edge = globals.fog_range.z + dither * globals.fog_range.w;
     let d = length(world - globals.camera.xyz);
     if (kind < 1.5) {
         return d > edge;
     }
-    return d < edge;
+    return d < edge || d > globals.shadow_on.z;
 }
 
 @vertex

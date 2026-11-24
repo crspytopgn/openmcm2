@@ -4913,7 +4913,7 @@ impl App {
             bike_res: None,
         };
         if let Some(track) = &self.track {
-            Self::show_track(&mut state, track, self.visibility());
+            Self::show_track(&mut state, track, self.visibility(), self.ecosystem());
         }
         Ok(state)
     }
@@ -4928,7 +4928,17 @@ impl App {
         })
     }
 
-    fn show_track(state: &mut State, track: &Track, quality: u32) {
+    /// The Ecosystem detail, 0 to 9: the Advanced page's slider, else the
+    /// overall graphic quality.
+    fn ecosystem(&self) -> u32 {
+        let default = profile::GraphicsOptions::default().terrain;
+        self.front.as_ref().map_or(default, |f| {
+            let u = f.user();
+            u.settings.number("SldEcosystem", u.profile.graphics.terrain as i64).clamp(0, 9) as u32
+        })
+    }
+
+    fn show_track(state: &mut State, track: &Track, quality: u32, ecosystem: u32) {
         let mut renderer = TerrainRenderer::new(
             &state.device,
             &state.queue,
@@ -4964,6 +4974,7 @@ impl App {
         if let Some((visibility, haziness)) = track.haze {
             renderer.set_visibility(quality, visibility, haziness);
         }
+        renderer.set_ecosystem(ecosystem);
         if let Some(sheet) = &track.particle_sheet {
             renderer.set_dirt(&state.device, &state.queue, &sheet, state.config.format.add_srgb_suffix());
         }
@@ -5203,9 +5214,9 @@ impl App {
                     s
                 });
                 self.follow = self.race.is_some();
-                let quality = self.visibility();
+                let (quality, ecosystem) = (self.visibility(), self.ecosystem());
                 if let Some(state) = &mut self.state {
-                    Self::show_track(state, &track, quality);
+                    Self::show_track(state, &track, quality, ecosystem);
                 }
                 self.hud = track.hud();
                 if let (Some((_, hud)), Some(f)) = (&mut self.hud, &self.front) {
@@ -5752,6 +5763,9 @@ impl App {
         if let (Some(state), Some(track)) = (&mut self.state, &self.track) {
             if let (Some(renderer), Some((visibility, haziness))) = (&mut state.renderer, track.haze) {
                 renderer.set_visibility(q, visibility, haziness);
+            }
+            if let Some(renderer) = &mut state.renderer {
+                renderer.set_ecosystem(q);
             }
         }
         if let Some((ui, hud)) = &mut self.hud {

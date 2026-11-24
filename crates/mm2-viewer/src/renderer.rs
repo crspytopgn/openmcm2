@@ -160,6 +160,8 @@ pub struct TerrainRenderer {
     /// a scene without a sky box has none (0x4e2d70).
     fog: [f32; 3],
     fog_range: (f32, f32),
+    /// The original's trees at the Ecosystem detail ([`Self::set_ecosystem`]).
+    trees: crate::objects::TreeBand,
     lights: SceneLights,
     /// The dirt the bikes throw up.
     pub particles: crate::particles::Particles,
@@ -679,6 +681,7 @@ impl TerrainRenderer {
             clear: SKY,
             fog: [0.62, 0.74, 0.88],
             fog_range: NO_FOG,
+            trees: crate::objects::tree_band(crate::profile::GraphicsOptions::default().terrain),
             lights: SceneLights::default(),
             particles: crate::particles::Particles::new(),
             sky_on: true,
@@ -821,6 +824,13 @@ impl TerrainRenderer {
     /// the fog starts `1 − haziness` of the way from 128 ft out to it.
     pub fn set_visibility(&mut self, quality: u32, visibility: f32, haziness: f32) {
         self.fog_range = fog_range(quality, visibility, haziness);
+    }
+
+    /// The Ecosystem detail, 0 to 9: how near the trees turn to their
+    /// billboards and how far those reach, as the original (Enhanced keeps
+    /// its own, [`crate::objects::TreeBand::ENHANCED`]).
+    pub fn set_ecosystem(&mut self, level: u32) {
+        self.trees = crate::objects::tree_band(level);
     }
 
     /// The last frame's width over its height.
@@ -1160,17 +1170,18 @@ impl TerrainRenderer {
         }
         let real_sky = showing.is_some_and(|e| e.clouds && e.sky) && self.sky.is_some() && self.sky_on;
         let lights = day.as_ref().map_or(self.lights, |d| d.lights);
+        let trees = if showing.is_some() { crate::objects::TreeBand::ENHANCED } else { self.trees };
         let globals = Globals {
             view_proj: (proj * camera.view()).to_cols_array_2d(),
             camera: camera.position.extend(1.0).into(),
             grid: self.grid,
             fog: [self.fog[0], self.fog[1], self.fog[2], 1.0],
-            fog_range: [start, end, 0.0, 0.0],
+            fog_range: [start, end, trees.edge, trees.band],
             ambient: lights.globals().0,
             sun: lights.globals().1,
             to_sun: lights.globals().2,
             shadow_view: shadow_view.to_cols_array_2d(),
-            shadow_on: [shadow.is_some() as u32 as f32, lights.light_ground, 0.0, 0.0],
+            shadow_on: [shadow.is_some() as u32 as f32, lights.light_ground, trees.reach.min(1e9), 0.0],
         };
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         let seen = crate::cull::Frustum::new(plain * camera.view());
@@ -1352,6 +1363,7 @@ impl TerrainRenderer {
         }
         if let Some(objects) = &mut self.objects {
             objects.extras_shown = showing.is_some_and(|e| e.scenery);
+            objects.trees = trees;
             objects.update(queue, time);
             if !self.shadowless.1 {
                 objects.set_shadowless(device, &self.shadowless.0);

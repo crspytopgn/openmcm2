@@ -205,12 +205,12 @@ impl Preview {
             grid: [0.0; 4],
             // No fog in the menus' view.
             fog: [0.0; 4],
-            fog_range: [1e6, 2e6, 0.0, 0.0],
+            fog_range: [1e6, 2e6, crate::objects::TREE_FAR, crate::objects::TREE_BAND],
             ambient: crate::renderer::SceneLights::default().globals().0,
             sun: crate::renderer::SceneLights::default().globals().1,
             to_sun: crate::renderer::SceneLights::default().globals().2,
             shadow_view: Mat4::IDENTITY.to_cols_array_2d(),
-            shadow_on: [0.0; 4],
+            shadow_on: [0.0, 0.0, 1e9, 0.0],
         };
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         self.objects.update(queue, time);
