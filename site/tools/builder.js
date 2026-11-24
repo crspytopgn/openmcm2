@@ -697,7 +697,10 @@ export async function mount(app, panel) {
     rg.setIndex(ri);
     rg.computeVertexNormals();
     const ribbon = new THREE.Mesh(rg, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+    // Watching, the ribbon shows only from far off (close up, the riders
+    // ride the baked ground under it).
     ribbon.visible = !real;
+    if (real) lap.ribbon = ribbon;
     group.add(ribbon);
     viewer.clear();
     viewer.show(group);
