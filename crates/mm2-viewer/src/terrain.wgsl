@@ -477,6 +477,9 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     var rut = 0.0;
     var worn = 0.0;
     var lip = 0.0;
+    // How much smoother and shinier the tyres have packed the ground: the
+    // gentle wear only; the ruts are loose, matte dirt.
+    var packed = 0.0;
     if (enh.ruts.w > 1.5) {
         // The gentle wear: where the tyres have run, again and again, the
         // ground packs a little darker and smoother, a soft band with no
@@ -489,6 +492,7 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
             sum += textureSampleLevel(rut_map, rut_sampler, ruv + o, 0.0).r;
         }
         worn = smoothstep(0.0, 0.05, sum / 9.0);
+        packed = worn;
     } else if (enh.ruts.w > 0.5) {
         // Tyre marks that build up into ruts: each pass of a tyre adds a
         // little to the map (ruts.rs), so a line ridden once is a faint,
@@ -525,7 +529,7 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
         // The rut's walls, from its shape round about.
         let hx = rut_shape(px) - rut_shape(nx);
         let hz = rut_shape(pz) - rut_shape(nz);
-        bent = normalize(bent + vec3<f32>(hx, 0.0, hz) * 1.2 * close * near);
+        bent = normalize(bent + vec3<f32>(hx, 0.0, hz) * 0.8 * close * near);
     }
     // Take out the light the painter put in: as the scene's sun would
     // have lit the land's shape, half of it.
@@ -590,12 +594,12 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     // A sheen off the smoother and the wet ground.
     let v = normalize(globals.camera.xyz - in.world);
     let h = normalize(globals.to_sun.xyz + v);
-    let r = clamp(mix(rough, 0.15, enh.world.y) - rut * 0.1 - worn * 0.25, 0.08, 1.0);
+    let r = clamp(mix(rough, 0.15, enh.world.y) - packed * 0.25, 0.08, 1.0);
     let power = 2.0 / (r * r * r * r) - 2.0;
     let glint = pow(max(dot(bent, h), 0.0), power) * (power + 2.0) / 8.0 * 0.04 * sun * max(dot(bent, globals.to_sun.xyz), 0.0);
     lit += globals.sun.rgb * glint;
     // Under a stadium's floodlights the packed dirt catches their glints.
-    let lamp = lamps(bent, v, clamp(1.0 - r, 0.0, 1.0) * 0.5 + worn * 0.2);
+    let lamp = lamps(bent, v, clamp(1.0 - r, 0.0, 1.0) * 0.5 + packed * 0.2);
     lit += (albedo * lamp.x + albedo * lamp.y * 1.5) * vec3<f32>(1.0, 0.97, 0.92);
     return lit;
 }
