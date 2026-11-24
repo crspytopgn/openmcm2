@@ -151,6 +151,10 @@ struct Launcher {
     removing: Option<Removable>,
     /// Exit was pressed once while something was copying.
     exit_asked: bool,
+    /// Change was pressed on the Play page: the ways to play show again.
+    choosing: bool,
+    /// The free version's Free Pack choices are showing.
+    show_free: bool,
     /// Where this copy of OpenMCM2 is installed, if it can update itself.
     install: Result<update::Install, String>,
     update: Update,
@@ -578,6 +582,8 @@ impl Launcher {
             note: None,
             removing: None,
             exit_asked: false,
+            choosing: false,
+            show_free: false,
             install,
             update: Update::Idle,
             tracks: Tracks { added: tracks::Added::load(), ..Default::default() },
@@ -720,6 +726,8 @@ impl Launcher {
                         }
                         self.note = Some((format!("Game data ready in {}", dir.display()), false));
                         self.settings.game = Some(dir);
+                        self.settings.free_graphics = false;
+                        self.choosing = false;
                     }
                     Err(e) => self.note = Some((e, true)),
                 }
@@ -735,6 +743,7 @@ impl Launcher {
                     Ok(dir) => {
                         self.settings.game = Some(dir);
                         self.settings.free_graphics = false;
+                        self.choosing = false;
                         if self.settings.freepack.is_none() && self.pack_download.is_none() {
                             // The demo's missing tracks, bikes and screens
                             // come from the Free Pack.
@@ -760,6 +769,7 @@ impl Launcher {
                         self.note = Some((format!("Free Pack ready in {}", dir.display()), false));
                         self.settings.freepack = Some(dir);
                         self.settings.free_graphics = true;
+                        self.choosing = false;
                     }
                     Err(e) => self.note = Some((e, true)),
                 }
@@ -778,6 +788,7 @@ impl Launcher {
                         // With the demo, the pack fills in under the demo's
                         // own look rather than replacing it.
                         self.settings.free_graphics = !self.settings.game.as_deref().is_some_and(mm2_settings::is_demo);
+                        self.choosing = false;
                         let _ = self.settings.save();
                         *self.pack_update.lock().unwrap() = Some(Ok(None));
                     }
@@ -894,7 +905,7 @@ impl Launcher {
                     ui.set_max_width(ui.available_width().min(1000.0));
                     match self.page {
                         Page::Play => self.play_page(ui, busy),
-                        Page::Graphics => self.graphics_page(ui),
+                        Page::Graphics => self.graphics_page(ui, busy),
                         Page::Extras => self.extras_page(ui),
                         Page::Tracks => self.tracks_page(ui, busy),
                         Page::Updates => self.updates_page(ui),
@@ -999,21 +1010,28 @@ impl Launcher {
     fn play_page(&mut self, ui: &mut egui::Ui, busy: bool) {
         look::page_title(ui, "Ready to ride", "Motocross Madness 2, running natively on your computer.");
         self.update_banner(ui, busy);
-        self.graphics_choice_card(ui, busy);
-        self.starter_card(ui, busy);
-        if self.settings.free_graphics {
-            self.freepack_card(ui, busy);
+        // Coming back: what was picked last time, and one big Play. The
+        // first time (or after Change, or while something is coming in):
+        // the MM2 way first, the free version below it.
+        let working = self.import.is_some() || self.demo_download.is_some() || self.pack_import.is_some() || self.pack_download.is_some();
+        if self.can_play() && !self.choosing && !working {
+            self.ready_card(ui, busy);
         } else {
-            self.game_card(ui, busy);
-            // The new menus come with the Free Pack, or on their own as a
-            // small download.
-            if self.settings.new_menus && self.settings.freepack.is_none() {
-                self.menus_card(ui, busy);
+            self.mm2_card(ui, busy);
+            self.free_row(ui, busy);
+            if self.choosing && self.can_play() && !working {
+                if ui.button("Back").on_hover_text("Keeps what you had picked.").clicked() {
+                    self.choosing = false;
+                }
+                ui.add_space(8.0);
             }
         }
+        self.starter_card(ui, busy);
+        self.make_card(ui, busy);
         self.summary_card(ui);
         self.playtime_card(ui);
         self.display_card(ui);
+        self.kept_card(ui, busy);
     }
 
     /// Whether Play has what it needs: the game data, or the Free Pack.
@@ -1024,63 +1042,312 @@ impl Launcher {
         }
     }
 
-    /// The big choice: the original game's graphics or the Free Pack's,
-    /// and the Course Builder beside them.
-    fn graphics_choice_card(&mut self, ui: &mut egui::Ui, busy: bool) {
+    /// Saves the settings and starts the game.
+    fn start(&mut self, ctx: &egui::Context) {
+        let _ = self.settings.save();
+        self.saved = self.settings.clone();
+        self.play(ctx);
+    }
+
+    /// What was picked last time, ready to go: Play, or Change.
+    fn ready_card(&mut self, ui: &mut egui::Ui, busy: bool) {
         use look::icon;
-        let free = self.settings.free_graphics;
-        let (has_game, has_pack) = (self.settings.game.is_some(), self.settings.freepack.is_some());
-        let is_demo = self.settings.game.as_deref().is_some_and(mm2_settings::is_demo);
-        let has_menus = self.settings.menus_pack.is_some();
-        let mut pick = None;
-        let mut pick_menus = None;
-        look::card(ui, icon::ICON_PALETTE, "How do you want to play?", |ui| {
+        let s = &self.settings;
+        let is_demo = s.game.as_deref().is_some_and(mm2_settings::is_demo);
+        let (title, why) = match (s.free_graphics, is_demo) {
+            (true, _) => ("The free version", "All-new art and sound made for OpenMCM2, from the Free Pack.".to_string()),
+            (false, true) => (
+                "The free MM2 demo",
+                "Microsoft's demo with the original look. The Free Pack fills in the other tracks, so every event is open.".to_string(),
+            ),
+            (false, false) => ("Your MM2 game", match &s.game {
+                Some(g) => format!("From {}", g.display()),
+                None => String::new(),
+            }),
+        };
+        let menus = if s.new_menus || s.game.is_none() { "New look menus" } else { "Original menus" };
+        let mut go = false;
+        let mut change = false;
+        look::card(ui, icon::ICON_PLAY_CIRCLE, title, |ui| {
+            look::tag(ui, "Ready");
+            ui.add(egui::Label::new(look::weak(why)).wrap());
+            ui.add_space(2.0);
+            ui.horizontal_wrapped(|ui| look::chip(ui, menus));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let ready = !busy && self.running.is_none();
+                let label = if self.running.is_some() { "Running…".to_string() } else { look::with(icon::ICON_PLAY_CIRCLE, "PLAY") };
+                go = ui
+                    .allocate_ui(egui::vec2(260.0, 54.0), |ui| look::big_button(ui, &label, 54.0, ready))
+                    .inner
+                    .on_hover_text(if self.settings.free_graphics {
+                        "Starts the free version, with the settings on these pages."
+                    } else {
+                        "Starts the game with your Motocross Madness 2 files, with the settings on these pages."
+                    })
+                    .clicked();
+                ui.add_space(8.0);
+                change = ui
+                    .add_enabled(!busy && self.running.is_none(), egui::Button::new(look::with(icon::ICON_TUNE, "Change")).min_size(egui::vec2(110.0, 54.0)))
+                    .on_hover_text("Pick another way to play: your own MM2 files, the free MM2 demo or the free version. Nothing on this computer is deleted.")
+                    .clicked();
+            });
+        });
+        if go {
+            let ctx = ui.ctx().clone();
+            self.start(&ctx);
+        }
+        if change {
+            self.choosing = true;
+        }
+    }
+
+    /// Recommended: the original game, from the player's own copy, or
+    /// Microsoft's free demo.
+    fn mm2_card(&mut self, ui: &mut egui::Ui, busy: bool) {
+        use look::icon;
+        let game = self.settings.game.clone();
+        let is_demo = game.as_deref().is_some_and(mm2_settings::is_demo);
+        let mut use_it = false;
+        look::card(ui, icon::ICON_DISC_FULL, "Play Motocross Madness 2", |ui| {
+            look::tag(ui, "Recommended");
+            ui.label(look::weak("The original game: its own bikes, tracks, menus and sound."));
+            if let Some(g) = &game {
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    look::status(ui, true, &if is_demo { "The free demo is ready".to_string() } else { format!("Ready: {}", g.display()) });
+                    if (self.settings.free_graphics || self.choosing) && !busy {
+                        use_it = ui
+                            .button(look::with(icon::ICON_PLAY_CIRCLE, if is_demo { "Play the demo" } else { "Play with it" }))
+                            .on_hover_text("Plays with these Motocross Madness 2 files, as they are set up here.")
+                            .clicked();
+                    }
+                });
+            }
+            ui.add_space(8.0);
             let gap = 12.0;
             let w = ((ui.available_width() - gap) / 2.0).max(220.0);
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
-                if look::pick_tile(
+                look::way(
                     ui,
-                    !free,
-                    icon::ICON_DISC_FULL,
-                    "MM2 graphics",
-                    "The original game's own art and sound, from your copy of Motocross Madness 2. The full game: every event, the menus, the Pro Circuit and multiplayer.",
-                    "Plays with the art, sounds and menus from your own Motocross Madness 2 CD, CD image or install. This is the game as it was, and it's the default.",
+                    icon::ICON_DRIVE_FOLDER_UPLOAD,
+                    "I have the game",
+                    "Pick your CD, a CD image of it (.iso, .bin/.cue, .mdf/.mds, .img), a .zip of either, or the folder it's installed in. OpenMCM2 doesn't include the game: it uses your own copy.",
                     w,
-                    |ui| match has_game {
-                        true if is_demo => look::status(ui, true, "Free demo ready"),
-                        true => look::status(ui, true, "Game data ready"),
-                        false => look::status(ui, false, "Needs your MM2 files"),
+                    |ui| {
+                        ui.add_enabled_ui(!busy, |ui| {
+                            if ui
+                                .button(look::with(icon::ICON_DISC_FULL, "Choose CD image or zip…"))
+                                .on_hover_text("Your game CD's image (.iso, .bin/.cue, .img, .mdf/.mds or .nrg), or a .zip of the game folder or of a CD image. It's copied next to your settings.")
+                                .clicked()
+                            {
+                                if let Some(f) = rfd::FileDialog::new()
+                                    .set_title("Your Motocross Madness 2 CD image or zip")
+                                    .add_filter("CD image or zip", &["iso", "bin", "cue", "img", "mdf", "mds", "nrg", "zip", "exe"])
+                                    .add_filter("All files", &["*"])
+                                    .pick_file()
+                                {
+                                    self.pick(f);
+                                }
+                            }
+                            if ui
+                                .button(look::with(icon::ICON_DRIVE_FOLDER_UPLOAD, "Choose CD or install folder…"))
+                                .on_hover_text("The folder Motocross Madness 2 is installed in (the one with the UI, RES and TERAFORM folders in it), or the CD itself. An install is used where it is; a CD is copied.")
+                                .clicked()
+                            {
+                                if let Some(d) = rfd::FileDialog::new().set_title("Your Motocross Madness 2 CD or install folder").pick_folder() {
+                                    self.pick(d);
+                                }
+                            }
+                        });
                     },
-                ) {
-                    pick = Some(false);
-                }
-                if look::pick_tile(
+                );
+                // No copy of the game: Microsoft's free demo, which never
+                // replaces a real copy set up here.
+                let no_game = game.as_deref().is_none_or(mm2_settings::is_demo);
+                look::way(
                     ui,
-                    free,
-                    icon::ICON_FOREST,
-                    "Free graphics",
-                    "New art and sound made for OpenMCM2, free for anyone. No MM2 files needed: the full menus, free tracks, bikes and riders, and the Course Builder.",
-                    "Plays with the Free Pack instead of the original's files: new bikes, riders, ground, trees, stadium, tracks and engine sounds, all openly licensed. Every menu works as in the original; only what's in them changes.",
+                    icon::ICON_DOWNLOAD,
+                    "No copy? Try the demo",
+                    "Microsoft's free Motocross Madness 2 demo from 2000, with the original look. The Free Pack fills in the other tracks, so every event is open.",
                     w,
-                    |ui| match has_pack {
-                        true => look::status(ui, true, "Free Pack ready"),
-                        false => look::status(ui, false, "Free Pack not added yet"),
+                    |ui| {
+                        let can = no_game && !busy && !is_demo;
+                        if ui
+                            .add_enabled(can, egui::Button::new(look::with(icon::ICON_DOWNLOAD, "Play the free demo (43 MB)")))
+                            .on_hover_text(
+                                "Downloads Microsoft's free Motocross Madness 2 demo from 2000 from the Internet Archive, checks it, and plays it with the original graphics: the Voodoo Basin national track and the Donner Pass stunt quarry. The Free Pack fills in everything else, so every event, the Pro Circuit and multiplayer are open. Nothing of the demo comes with OpenMCM2 itself.",
+                            )
+                            .on_disabled_hover_text(if is_demo { "The demo is already here." } else { "Your own copy of the game is set up, so the demo isn't needed." })
+                            .clicked()
+                        {
+                            self.note = None;
+                            self.demo_download = Some(demo::install(None, settings::user_dir().join("GAME")));
+                        }
                     },
-                ) {
-                    pick = Some(true);
+                );
+            });
+            if let Some(p) = &self.import {
+                let total = p.total.load(Ordering::Relaxed).max(1);
+                let done = p.done.load(Ordering::Relaxed);
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.add(egui::ProgressBar::new(done as f32 / total as f32).show_percentage().desired_width(ui.available_width() - 90.0));
+                    if ui.button("Cancel").clicked() {
+                        p.cancel.store(true, Ordering::Relaxed);
+                    }
+                });
+                ui.label(look::weak(format!("Copying game data… {} of {} MB", done >> 20, total >> 20)));
+            }
+            if let Some(p) = &self.demo_download {
+                let total = p.total.load(Ordering::Relaxed).max(1);
+                let done = p.done.load(Ordering::Relaxed);
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.add(egui::ProgressBar::new(done as f32 / total as f32).show_percentage().desired_width(ui.available_width() - 90.0));
+                    if ui.button("Cancel").clicked() {
+                        p.cancel.store(true, Ordering::Relaxed);
+                    }
+                });
+                let stage = p.stage.lock().unwrap().clone();
+                ui.label(look::weak(if total > 1 << 20 { format!("{stage} {} of {} MB", done >> 20, total >> 20) } else { stage }));
+            }
+        });
+        if use_it {
+            self.settings.free_graphics = false;
+            self.choosing = false;
+        }
+    }
+
+    /// The free version, smaller, under the MM2 card: the Free Pack.
+    fn free_row(&mut self, ui: &mut egui::Ui, busy: bool) {
+        use look::icon;
+        let has_pack = self.settings.freepack.is_some();
+        let open = self.show_free || self.pack_download.is_some() || self.pack_import.is_some();
+        let mut pick = false;
+        egui::Frame::new()
+            .fill(look::SUNKEN)
+            .stroke(egui::Stroke::new(1.0, look::LINE))
+            .corner_radius(12)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_max_width((ui.available_width() - 220.0).max(240.0));
+                        ui.label(egui::RichText::new(look::with(icon::ICON_FOREST, "Or play the free version")).color(look::TEXT).family(look::bold_family()));
+                        ui.add(egui::Label::new(look::weak("All-new art and sound made for OpenMCM2, free for anyone. No MM2 files needed.")).wrap());
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let hover = "Plays with the Free Pack instead of the original's files: new bikes, riders, ground, trees, stadium and engine sounds, all openly licensed. Every menu works as in the original; only what's in them changes.";
+                        if has_pack {
+                            pick = ui.add_enabled(!busy, egui::Button::new(look::with(icon::ICON_PLAY_CIRCLE, "Play the free version"))).on_hover_text(hover).clicked();
+                        } else if !open {
+                            self.show_free = ui.add_enabled(!busy, egui::Button::new("Get the free version")).on_hover_text(hover).clicked();
+                        }
+                    });
+                });
+                if open || has_pack {
+                    ui.add_space(6.0);
+                    self.freepack_body(ui, busy);
                 }
             });
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(6.0);
-            // The menus' look, with either graphics. The original's need
-            // the game's files; the new look needs the Free Pack.
-            ui.label(egui::RichText::new("Menus").color(look::TEXT).family(look::bold_family()));
+        ui.add_space(12.0);
+        if pick {
+            self.settings.free_graphics = true;
+            self.choosing = false;
+        }
+    }
+
+    /// The Course Builder, and the tracks players made.
+    fn make_card(&mut self, ui: &mut egui::Ui, busy: bool) {
+        use look::icon;
+        let mut tracks = false;
+        look::card(ui, icon::ICON_EDIT_ROAD, "Course Builder", |ui| {
+            ui.label(look::weak("Make your own track and ride it. It works with either graphics, and it's on the game's main menu too (the shovel on the chain)."));
             ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                let can = self.can_play() && !busy && self.running.is_none();
+                if ui
+                    .add_enabled(can, egui::Button::new(look::with(icon::ICON_CONSTRUCTION, "Open the Course Builder")))
+                    .on_hover_text("Starts the game straight in the Course Builder, with the way to play picked above. Draw the track's line, drop in jumps, shape and paint the ground, then press Ride it. Your tracks join the game's track lists.")
+                    .clicked()
+                {
+                    let _ = self.settings.save();
+                    self.saved = self.settings.clone();
+                    let ctx = ui.ctx().clone();
+                    self.play_with(&ctx, &["--course-builder"]);
+                }
+                tracks = ui
+                    .button(look::with(icon::ICON_ROUTE, "Add tracks players made"))
+                    .on_hover_text("The Tracks page: the most raced tracks players have made, and thousands more from MDX Racing. They join the game's track lists.")
+                    .clicked();
+            });
+        });
+        if tracks {
+            self.page = Page::Tracks;
+        }
+    }
+
+    /// What the launcher downloaded here, with a way to remove each.
+    fn kept_card(&mut self, ui: &mut egui::Ui, busy: bool) {
+        let user = settings::user_dir();
+        let demo = user.join("GAME");
+        let pack = user.join("FreePack");
+        let menus = user.join("NewMenus");
+        let s = &self.settings;
+        let mut kept = Vec::new();
+        if s.game.as_deref() == Some(demo.as_path()) && mm2_settings::is_demo(&demo) {
+            kept.push(Removable::Demo);
+        }
+        if s.freepack.as_deref() == Some(pack.as_path()) {
+            kept.push(Removable::FreePack);
+        }
+        if s.menus_pack.as_deref() == Some(menus.as_path()) {
+            kept.push(Removable::Menus);
+        }
+        if kept.is_empty() {
+            return;
+        }
+        look::card(ui, look::icon::ICON_DELETE, "Downloaded on this computer", |ui| {
+            ui.label(look::weak("What OpenMCM2 downloaded for you. Your profiles, saves and own tracks elsewhere stay."));
+            for what in kept {
+                self.remove_row(ui, busy, what);
+            }
+        });
+    }
+
+    /// The menus' look, with either graphics. The original's need the
+    /// game's files; the new look needs the Free Pack or the menus alone.
+    fn menus_choice_card(&mut self, ui: &mut egui::Ui, busy: bool) {
+        use look::icon;
+        let (has_game, has_pack, has_menus) = (self.settings.game.is_some(), self.settings.freepack.is_some(), self.settings.menus_pack.is_some());
+        let mut pick_menus = None;
+        look::card(ui, icon::ICON_AUTO_AWESOME, "Menus", |ui| {
+            let gap = 12.0;
+            let w = ((ui.available_width() - gap) / 2.0).max(220.0);
             let new = self.settings.new_menus || !has_game;
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
+                let r = ui.add_enabled_ui(has_game, |ui| {
+                    look::pick_tile(
+                        ui,
+                        !new,
+                        icon::ICON_HISTORY,
+                        "Original",
+                        "The menus exactly as Motocross Madness 2 had them, chain and all.",
+                        "The original game's own menus, art and sounds. They come from your MM2 files or the demo.",
+                        w,
+                        |ui| match has_game {
+                            true => look::status(ui, true, "Game data ready"),
+                            false => look::status(ui, false, "Needs your MM2 files"),
+                        },
+                    )
+                });
+                if r.inner && has_game {
+                    pick_menus = Some(false);
+                }
                 if look::pick_tile(
                     ui,
                     new,
@@ -1097,50 +1364,15 @@ impl Launcher {
                 ) {
                     pick_menus = Some(true);
                 }
-                let r = ui.add_enabled_ui(has_game, |ui| {
-                    look::pick_tile(
-                        ui,
-                        !new,
-                        icon::ICON_HISTORY,
-                        "Original menus",
-                        "The menus exactly as Motocross Madness 2 had them, chain and all.",
-                        "The original game's own menus, art and sounds. Needs your Motocross Madness 2 files, as they come from your copy of the game.",
-                        w,
-                        |ui| match has_game {
-                            true => look::status(ui, true, "Game data ready"),
-                            false => look::status(ui, false, "Needs your MM2 files"),
-                        },
-                    )
-                });
-                if r.inner && has_game {
-                    pick_menus = Some(false);
-                }
             });
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(4.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.label(egui::RichText::new(look::with(icon::ICON_EDIT_ROAD, "Course Builder")).color(look::TEXT).family(look::bold_family()));
-                ui.label(look::weak("Make your own track and ride it. It works with either graphics, and it's on the game's main menu too (the shovel on the chain)."));
-            });
-            ui.add_space(4.0);
-            let can = self.can_play() && !busy && self.running.is_none();
-            if ui
-                .add_enabled(can, egui::Button::new(look::with(icon::ICON_CONSTRUCTION, "Open the Course Builder")))
-                .on_hover_text("Starts the game straight in the Course Builder, with the graphics picked above. Draw the track's line, drop in jumps, shape and paint the ground, then press Ride it. Your tracks join the game's track lists.")
-                .clicked()
-            {
-                let _ = self.settings.save();
-                self.saved = self.settings.clone();
-                let ctx = ui.ctx().clone();
-                self.play_with(&ctx, &["--course-builder"]);
-            }
         });
-        if let Some(free) = pick {
-            self.settings.free_graphics = free;
-        }
         if let Some(new) = pick_menus {
             self.settings.new_menus = new;
+        }
+        // The new menus come with the Free Pack, or on their own as a
+        // small download.
+        if !self.settings.free_graphics && self.settings.new_menus && self.settings.freepack.is_none() {
+            self.menus_card(ui, busy);
         }
     }
 
@@ -1198,10 +1430,10 @@ impl Launcher {
         });
     }
 
-    /// Setting up the Free Pack: its zip, or its folder.
-    fn freepack_card(&mut self, ui: &mut egui::Ui, busy: bool) {
+    /// Setting up the Free Pack: downloaded, its zip, or its folder.
+    fn freepack_body(&mut self, ui: &mut egui::Ui, busy: bool) {
         use look::icon;
-        look::card(ui, icon::ICON_FOREST, "Free Pack", |ui| {
+        {
             match &self.settings.freepack {
                 Some(p) => look::status(ui, true, &format!("Ready: {}", p.display())),
                 None => look::status(ui, false, "Not added yet"),
@@ -1288,13 +1520,9 @@ impl Launcher {
                     }
                 });
             });
-            // Only one downloaded or unpacked here: a folder picked
-            // elsewhere is the player's own, and is left alone.
-            if self.settings.freepack.as_deref() == Some(here.as_path()) {
-                self.remove_row(ui, busy, Removable::FreePack);
-            }
-        });
+        }
     }
+
 
     /// The starter set of player-made tracks, suggested on the Play page
     /// to players without the full game (the demo, or the Free Pack
@@ -1460,81 +1688,6 @@ impl Launcher {
                 "Sends how long you play each event, track and bike class to the OpenMCM2 server, added to everyone's. No name or anything else that says who you are.",
                 ui.available_width(),
             );
-        });
-    }
-
-    fn game_card(&mut self, ui: &mut egui::Ui, busy: bool) {
-        look::card(ui, look::icon::ICON_DISC_FULL, "Game data", |ui| {
-            match &self.settings.game {
-                Some(g) => look::status(ui, true, &format!("Ready: {}", g.display())),
-                None => look::status(ui, false, "Not set up yet"),
-            }
-            ui.label(look::weak(
-                "OpenMCM2 doesn't include the game. Point it at your own Motocross Madness 2: the CD, a CD image of it (.iso, .bin/.cue, .mdf/.mds, .img), a .zip of either, or the folder it's installed in.",
-            ));
-            if let Some(p) = &self.import {
-                let total = p.total.load(Ordering::Relaxed).max(1);
-                let done = p.done.load(Ordering::Relaxed);
-                ui.horizontal(|ui| {
-                    ui.add(egui::ProgressBar::new(done as f32 / total as f32).show_percentage().desired_width(ui.available_width() - 90.0));
-                    if ui.button("Cancel").clicked() {
-                        p.cancel.store(true, Ordering::Relaxed);
-                    }
-                });
-                ui.label(look::weak(format!("Copying game data… {} of {} MB", done >> 20, total >> 20)));
-            }
-            if let Some(p) = &self.demo_download {
-                let total = p.total.load(Ordering::Relaxed).max(1);
-                let done = p.done.load(Ordering::Relaxed);
-                ui.horizontal(|ui| {
-                    ui.add(egui::ProgressBar::new(done as f32 / total as f32).show_percentage().desired_width(ui.available_width() - 90.0));
-                    if ui.button("Cancel").clicked() {
-                        p.cancel.store(true, Ordering::Relaxed);
-                    }
-                });
-                let stage = p.stage.lock().unwrap().clone();
-                ui.label(look::weak(if total > 1 << 20 { format!("{stage} {} of {} MB", done >> 20, total >> 20) } else { stage }));
-            }
-            ui.add_space(2.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.add_enabled_ui(!busy, |ui| {
-                    if ui.button(look::with(look::icon::ICON_DISC_FULL, "Choose CD image or zip…")).clicked() {
-                        if let Some(f) = rfd::FileDialog::new()
-                            .set_title("Your Motocross Madness 2 CD image or zip")
-                            .add_filter("CD image or zip", &["iso", "bin", "cue", "img", "mdf", "mds", "nrg", "zip", "exe"])
-                            .add_filter("All files", &["*"])
-                            .pick_file()
-                        {
-                            self.pick(f);
-                        }
-                    }
-                    if ui.button(look::with(look::icon::ICON_DRIVE_FOLDER_UPLOAD, "Choose CD or install folder…")).clicked() {
-                        if let Some(d) = rfd::FileDialog::new().set_title("Your Motocross Madness 2 CD or install folder").pick_folder() {
-                            self.pick(d);
-                        }
-                    }
-                    // No copy of the game: Microsoft's free demo, which
-                    // never replaces a real copy set up here.
-                    let no_game = self.settings.game.as_deref().is_none_or(mm2_settings::is_demo);
-                    if no_game
-                        && ui
-                            .button(look::with(look::icon::ICON_DOWNLOAD, "Get the free MM2 demo (43 MB)"))
-                            .on_hover_text(
-                                "No copy of the game? This downloads Microsoft's free Motocross Madness 2 demo from 2000 from the Internet Archive, checks it, and plays it with the original graphics: the Voodoo Basin national track and the Donner Pass stunt quarry. The Free Pack fills in everything else, so every event, the Pro Circuit and multiplayer are open. Nothing of the demo comes with OpenMCM2 itself.",
-                            )
-                            .clicked()
-                    {
-                        self.note = None;
-                        self.demo_download = Some(demo::install(None, settings::user_dir().join("GAME")));
-                    }
-                });
-            });
-            // The demo, downloaded here: a copy of the real game is never
-            // offered for removal.
-            let here = settings::user_dir().join("GAME");
-            if self.settings.game.as_deref() == Some(here.as_path()) && mm2_settings::is_demo(&here) {
-                self.remove_row(ui, busy, Removable::Demo);
-            }
         });
     }
 
@@ -2028,9 +2181,10 @@ impl Launcher {
 
     // ---- Graphics ----
 
-    fn graphics_page(&mut self, ui: &mut egui::Ui) {
+    fn graphics_page(&mut self, ui: &mut egui::Ui, busy: bool) {
         use look::{icon, Choice};
         look::page_title(ui, "Graphics", "How the game looks. F3 switches between the original look and the enhanced one while racing.");
+        self.menus_choice_card(ui, busy);
         let s = &mut self.settings;
         look::card(ui, icon::ICON_PALETTE, "Look", |ui| {
             let choices = [
@@ -2768,6 +2922,8 @@ mod shots {
             ("play_free_new", Page::Play, true, 1300.0),
             // A first start with no game yet: the CD picker and the demo.
             ("play_new", Page::Play, true, 1300.0),
+            // After Change: the ways to play again, with the game set up.
+            ("play_change", Page::Play, true, 1300.0),
             // The window as it opens, and a Steam Deck's screen.
             ("window", Page::Play, true, 675.0),
             ("deck", Page::Play, true, 800.0),
@@ -2804,6 +2960,7 @@ mod shots {
             }
             let mut l = Launcher::with(s, Err("built from source".into()));
             l.page = page;
+            l.choosing = name == "play_change";
             // No listing fetched from the net.
             l.tracks.error = Some("(not fetched in this picture)".into());
             // The popular tracks from a saved list (`MM2_SHOTS_POPULAR`).

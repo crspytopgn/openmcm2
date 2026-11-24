@@ -376,6 +376,41 @@ pub fn pick_tile(ui: &mut Ui, picked: bool, i: MaterialIcon, title: &str, about:
     r.clicked()
 }
 
+/// A small accent tag over a card's text, as "Recommended" or "Ready".
+pub fn tag(ui: &mut Ui, text: &str) {
+    let b = egui::Button::new(RichText::new(text.to_uppercase()).size(11.5).color(ON_ACCENT).family(bold_family()))
+        .fill(ACCENT)
+        .stroke(Stroke::NONE)
+        .corner_radius(10)
+        .sense(Sense::hover());
+    ui.add(b);
+    ui.add_space(2.0);
+}
+
+/// One of the ways in, side by side in a card: an icon, a title, a line
+/// on it, then the buttons `body` adds.
+pub fn way(ui: &mut Ui, i: MaterialIcon, title: &str, about: &str, width: f32, body: impl FnOnce(&mut Ui)) {
+    egui::Frame::new()
+        .fill(SUNKEN)
+        .stroke(Stroke::new(1.0, LINE))
+        .corner_radius(10)
+        .inner_margin(egui::Margin::symmetric(14, 12))
+        .show(ui, |ui| {
+            ui.set_width(width - 30.0);
+            ui.set_min_height(150.0);
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(String::from(i)).size(20.0).color(ACCENT));
+                    ui.label(RichText::new(title.to_uppercase()).size(18.0).color(TEXT).family(title_family()));
+                });
+                ui.add_space(2.0);
+                ui.add(egui::Label::new(weak(about)).wrap());
+                ui.add_space(6.0);
+                body(ui);
+            });
+        });
+}
+
 /// A small coloured status line: an icon and the text, good or bad.
 pub fn status(ui: &mut Ui, good: bool, text: &str) {
     let (i, c) = if good { (icon::ICON_CHECK_CIRCLE, GOOD) } else { (icon::ICON_ERROR, BAD) };
