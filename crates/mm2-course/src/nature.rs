@@ -136,6 +136,13 @@ fn density(course: &Course) -> (usize, [Vec<f32>; 3]) {
                 }
             }
         };
+        if let Some(pic) = s.map.as_ref().and_then(|m| m.read()) {
+            for k in 0..n * n {
+                let (x, z) = ((k % n) as f32 * CELL, (k / n) as f32 * CELL);
+                put(k, pic.grey_at(x / side, z / side));
+            }
+            continue;
+        }
         if s.everywhere {
             for k in 0..n * n {
                 put(k, 1.0);
@@ -270,7 +277,7 @@ pub fn scenery(course: &Course) -> Vec<crate::Planting> {
         seed = seed.wrapping_mul(31).wrapping_add((p.x as i64 * 7 + p.z as i64 * 13) as u64);
     }
     let mut dice = Dice(seed);
-    let stroke = |flora, radius, density, dabs| Planting { flora, radius, density, clear: false, everywhere: false, dabs, auto: true };
+    let stroke = |flora, radius, density, dabs| Planting { flora, radius, density, clear: false, everywhere: false, dabs, auto: true, map: None };
     let mut out = Vec::new();
     // Over the rest of the land.
     if g.scatter_trees > 0.0 {
@@ -674,7 +681,7 @@ mod tests {
     #[test]
     fn plants_grow_off_the_track_and_read_back() {
         let mut c = Course::new(Mode::National);
-        c.plants.push(Planting { flora: Flora::Mixed, radius: 300.0, density: 0.8, clear: false, everywhere: true, dabs: Vec::new(), auto: false });
+        c.plants.push(Planting { flora: Flora::Mixed, radius: 300.0, density: 0.8, clear: false, everywhere: true, dabs: Vec::new(), auto: false, map: None });
         let land = crate::bake::land(&c, 4);
         let field = crate::bake::bake(&c, 4, &land);
         let plants = plants(&c, &field);
@@ -716,7 +723,7 @@ mod tests {
     #[test]
     fn dressing_again_follows_the_line_and_keeps_own_plants() {
         let mut c = Course::new(Mode::National);
-        let own = Planting { flora: Flora::Trees, radius: 50.0, density: 1.0, clear: true, everywhere: false, dabs: vec![[100.0, 100.0]], auto: false };
+        let own = Planting { flora: Flora::Trees, radius: 50.0, density: 1.0, clear: true, everywhere: false, dabs: vec![[100.0, 100.0]], auto: false, map: None };
         c.plants.push(own.clone());
         redress(&mut c);
         let first = c.plants.clone();

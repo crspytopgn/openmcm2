@@ -400,18 +400,23 @@ pub fn files(
     tdf: impl FnOnce() -> Vec<u8>,
     wpt: impl FnOnce() -> String,
     start: ([f32; 2], [f32; 2]),
+    original: bool,
 ) -> Result<Vec<(String, Vec<u8>)>, String> {
     let (textures, tiles) = repainted(c, src, field, ready);
-    let terrain = trn::Build {
+    let (textures, tiles) = if original {
+        crate::env::fit_textures(field, textures, tiles, crate::env::ORIGINAL_TEXTURES)
+    } else {
+        (textures, tiles)
+    };
+    let build = trn::Build {
         size: field.n,
         heights: &field.heights,
         surfaces: &field.surfaces,
         scale: src.scale,
         textures: &textures,
         tiles: &tiles,
-    }
-    .write()
-    .map_err(|e| e.to_string())?;
+    };
+    let terrain = if original { build.write_original() } else { build.write() }.map_err(|e| e.to_string())?;
     let redrawn = !same_line(c, src);
     let laps = c.mode.laps();
     let (tdf_stem, _) = src.tdf.split_at(src.tdf.len() - 4);

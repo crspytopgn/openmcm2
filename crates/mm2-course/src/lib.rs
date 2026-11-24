@@ -23,6 +23,7 @@ pub mod kit;
 pub mod land;
 pub mod nature;
 pub mod path;
+pub mod picture;
 pub mod preview;
 
 pub use bake::Field;
@@ -56,6 +57,9 @@ pub struct Course {
     /// Planes, helicopters and the blimp, each flying its own loop.
     pub flights: Vec<Flight>,
     pub look: Look,
+    /// Models of the player's own, packed into the track.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<UserModel>,
     /// Things the bake adds along the track by itself.
     pub dress: Dress,
     /// For a copy of a track that already exists: which one.
@@ -176,6 +180,8 @@ pub struct Land {
     pub hills: f32,
     /// How bumpy the ground is between them, 0 to 1.
     pub rough: f32,
+    /// A height map picture to raise the land from.
+    pub heightmap: Option<picture::HeightMap>,
 }
 
 impl Default for Land {
@@ -185,6 +191,7 @@ impl Default for Land {
             seed: 1,
             hills: 0.5,
             rough: 0.3,
+            heightmap: None,
         }
     }
 }
@@ -244,6 +251,15 @@ pub struct Line {
     pub berms: f32,
     /// Where the start is, ft along the line.
     pub start: f32,
+    /// Gates placed by hand (Baja and Enduro), ft along the line; none
+    /// for gates every few hundred feet.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub gates: Vec<f32>,
+    /// A start off the line (Baja and Enduro): where the riders line up
+    /// in the open, x and z ft and the way they face (degrees from +z
+    /// towards +x), to funnel into the track.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_spot: Option<[f32; 3]>,
 }
 
 /// One point the line passes through.
@@ -364,6 +380,28 @@ pub struct Paint {
     pub dabs: Vec<[f32; 2]>,
 }
 
+/// A model of the player's own (the original builder's user models): an
+/// `.slt` and the `.tga` pictures it names, packed into the track, so it
+/// shows in the original game too. Placed as an [`Object`] by its name.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UserModel {
+    pub slt: picture::Embedded,
+    pub textures: Vec<picture::Embedded>,
+}
+
+impl UserModel {
+    /// The name objects place it by.
+    pub fn name(&self) -> &str {
+        &self.slt.name
+    }
+
+    /// Its files, as packed into the track.
+    pub fn files(&self) -> Vec<(String, Vec<u8>)> {
+        std::iter::once(&self.slt).chain(&self.textures).map(|f| (f.name.clone(), f.bytes())).collect()
+    }
+}
+
 /// A stock object placed by name (`MODELS.RES` or the free pack's stand-in).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Object {
@@ -420,6 +458,11 @@ pub struct Planting {
     /// so the next press can grow it again round the line as it is then.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto: bool,
+    /// A plant map: a picture over the whole land, white where these grow
+    /// thickest and black where none do (the original builder's
+    /// placement maps), its top the far side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map: Option<picture::Shared>,
 }
 
 /// A river: its middle line, how wide and deep it is, ft. It runs
@@ -504,7 +547,37 @@ pub struct Look {
     pub sun_turn: f32,
     /// Supercross: the stadium, by its `COLSEG.RES` name.
     pub stadium: String,
+    /// How bright the shade is (the ambient light), 0 (dark shadows) to 1
+    /// (soft, bright shade).
+    pub ambient: f32,
+    /// The haze in the distance: one of [`FOGS`] by name, or empty for the
+    /// land's own.
+    pub fog: String,
+    /// A picture of the player's own laid over the whole land.
+    pub ground: Option<GroundPicture>,
 }
+
+/// A ground picture: the whole land seen from above, its top the map's
+/// far (north) side, as the original builder's 960 x 960 ground textures.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GroundPicture {
+    pub picture: picture::Shared,
+    /// Draws the track's own dirt over the picture.
+    pub track_on_top: bool,
+}
+
+/// The haze colours a track can have, by name; the original game lets a
+/// scene change only the colour of its fog.
+pub const FOGS: [(&str, [u8; 3]); 7] = [
+    ("Clear blue", [176, 182, 190]),
+    ("Morning mist", [211, 210, 210]),
+    ("Desert dust", [196, 186, 170]),
+    ("Warm evening", [214, 178, 140]),
+    ("Grey storm", [128, 132, 138]),
+    ("Night", [40, 44, 60]),
+    ("Arena", [125, 125, 183]),
+];
 
 impl Default for Look {
     fn default() -> Self {
@@ -513,6 +586,9 @@ impl Default for Look {
             sun: 0.7,
             sun_turn: 30.0,
             stadium: "B1B_02.seg".into(),
+            ambient: 0.5,
+            fog: String::new(),
+            ground: None,
         }
     }
 }
@@ -623,6 +699,7 @@ impl Course {
                     seed: 1,
                     hills: 0.0,
                     rough: 0.0,
+                    heightmap: None,
                 },
                 Dress {
                     edge_bales: true,
@@ -636,6 +713,7 @@ impl Course {
                     seed: 1,
                     hills: 0.5,
                     rough: 0.4,
+                    heightmap: None,
                 },
                 Dress {
                     trees: 0.15,
@@ -648,6 +726,7 @@ impl Course {
                     seed: 1,
                     hills: 0.45,
                     rough: 0.35,
+                    heightmap: None,
                 },
                 Dress::default(),
             ),
@@ -664,6 +743,7 @@ impl Course {
                 closed: true,
                 berms: 0.5,
                 start: 0.0,
+                ..Line::default()
             },
             jumps: Vec::new(),
             strokes: Vec::new(),
@@ -680,6 +760,7 @@ impl Course {
                 },
                 ..Look::default()
             },
+            models: Vec::new(),
             dress,
             base: None,
             source: None,

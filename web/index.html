@@ -931,6 +931,47 @@ globalThis.mm2page = {
   canRumble(id) {
     return gamepads.canRumble(id);
   },
+  // A file the game made (the Course Builder's track for the original
+  // game), to the downloads.
+  saveFile(name, bytes) {
+    const blob = new Blob([bytes.slice()], { type: "application/octet-stream" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    return true;
+  },
+  // The Course Builder asks for a picture or a model: the files come
+  // back through pickedCount/pickedName/pickedBytes once read.
+  picked: null,
+  pickFiles(accept, many) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept;
+    input.multiple = many;
+    input.onchange = async () => {
+      const list = [];
+      for (const f of input.files) list.push({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) });
+      this.picked = list;
+    };
+    input.click();
+    return true;
+  },
+  pickedCount() {
+    return this.picked ? this.picked.length : -1;
+  },
+  pickedName(i) {
+    return this.picked[i].name;
+  },
+  pickedBytes(i) {
+    return this.picked[i].bytes;
+  },
+  pickedClear() {
+    this.picked = null;
+  },
   // Photo mode's Enter: the picture just drawn, as a PNG in the
   // downloads. Asked as the frame is shown, before the browser clears it.
   savePicture() {

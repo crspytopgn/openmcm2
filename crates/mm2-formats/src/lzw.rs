@@ -114,6 +114,78 @@ fn first_of(code: u32, dict: &[(u32, u8, u8)]) -> u8 {
     }
 }
 
+/// The game's dictionary holds 35023 entries; codes stay within 15 bits.
+const MOST_CODE: u32 = 0x7fff;
+
+/// Packs `data` the way [`decompress`] (and the game's `ExpandLzw`)
+/// reads it: a big-endian word with the packed size, then codes from 9
+/// bits wide, widened by [`WIDEN`] and restarted by [`CLEAR`] when the
+/// dictionary fills, ended by [`END`] and padded to whole words.
+pub fn compress(data: &[u8]) -> Vec<u8> {
+    struct Out {
+        bytes: Vec<u8>,
+        acc: u64,
+        n: u32,
+    }
+    impl Out {
+        fn put(&mut self, code: u32, width: u32) {
+            self.acc = self.acc << width | u64::from(code);
+            self.n += width;
+            while self.n >= 8 {
+                self.n -= 8;
+                self.bytes.push((self.acc >> self.n) as u8);
+            }
+        }
+    }
+    let mut out = Out { bytes: vec![0; 4], acc: 0, n: 0 };
+    let mut dict: std::collections::HashMap<(u32, u8), u32> = std::collections::HashMap::new();
+    let mut width = 9;
+    let mut next = FIRST_FREE;
+    let mut bump = 511;
+    let mut current: Option<u32> = None;
+    for &b in data {
+        let Some(cur) = current else {
+            current = Some(u32::from(b));
+            continue;
+        };
+        if let Some(&code) = dict.get(&(cur, b)) {
+            current = Some(code);
+            continue;
+        }
+        out.put(cur, width);
+        if next > MOST_CODE {
+            out.put(CLEAR, width);
+            dict.clear();
+            width = 9;
+            next = FIRST_FREE;
+            bump = 511;
+        } else {
+            dict.insert((cur, b), next);
+            next += 1;
+            if next > bump {
+                out.put(WIDEN, width);
+                width += 1;
+                bump = bump << 1 | 1;
+            }
+        }
+        current = Some(u32::from(b));
+    }
+    if let Some(cur) = current {
+        out.put(cur, width);
+    }
+    out.put(END, width);
+    if out.n > 0 {
+        let pad = 8 - out.n;
+        out.put(0, pad);
+    }
+    while out.bytes.len() % 4 != 0 {
+        out.bytes.push(0);
+    }
+    let len = out.bytes.len() as u32;
+    out.bytes[..4].copy_from_slice(&len.to_be_bytes());
+    out.bytes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +232,20 @@ mod tests {
     fn pads_short_streams_with_zeros() {
         let src = pack(&[(b'a' as u32, 9), (END, 9)]);
         assert_eq!(decompress(&src, 3).unwrap(), b"a\0\0");
+    }
+
+    #[test]
+    fn compress_round_trips() {
+        let mut seed = 1u32;
+        let mut data = Vec::new();
+        for i in 0..300_000u32 {
+            seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+            data.push(if i % 7 < 4 { (i / 97) as u8 } else { (seed >> 24) as u8 });
+        }
+        for len in [0usize, 1, 2, 300, 0x908, 70_000, data.len()] {
+            let packed = compress(&data[..len]);
+            assert_eq!(packed.len() % 4, 0);
+            assert_eq!(decompress(&packed, len).unwrap(), &data[..len]);
+        }
     }
 }

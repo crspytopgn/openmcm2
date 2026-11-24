@@ -63,6 +63,40 @@ extern "C" {
     fn js_typing(text: Option<String>) -> Result<(), JsValue>;
     #[wasm_bindgen(js_name = savePicture, catch)]
     fn js_save_picture() -> Result<bool, JsValue>;
+    /// Puts a file in the downloads; false if it can't.
+    #[wasm_bindgen(js_name = saveFile, catch)]
+    fn js_save_file(name: &str, bytes: &[u8]) -> Result<bool, JsValue>;
+    /// Asks the player for files (`accept`, as an input's); the answer
+    /// comes later (pickedCount).
+    #[wasm_bindgen(js_name = pickFiles, catch)]
+    fn js_pick_files(accept: &str, many: bool) -> Result<bool, JsValue>;
+    /// How many files were picked, or -1 while none are (or still read).
+    #[wasm_bindgen(js_name = pickedCount, catch)]
+    fn js_picked_count() -> Result<i32, JsValue>;
+    #[wasm_bindgen(js_name = pickedName, catch)]
+    fn js_picked_name(i: u32) -> Result<String, JsValue>;
+    #[wasm_bindgen(js_name = pickedBytes, catch)]
+    fn js_picked_bytes(i: u32) -> Result<Vec<u8>, JsValue>;
+    #[wasm_bindgen(js_name = pickedClear, catch)]
+    fn js_picked_clear() -> Result<(), JsValue>;
+}
+
+/// Asks for files; see [`picked`].
+pub fn pick_files(accept: &str, many: bool) -> bool {
+    js_pick_files(accept, many).unwrap_or(false)
+}
+
+/// The files the player picked, once read: (name, bytes) each.
+pub fn picked() -> Option<Vec<(String, Vec<u8>)>> {
+    let n = js_picked_count().ok().filter(|&n| n >= 0)?;
+    let out = (0..n as u32).filter_map(|i| Some((js_picked_name(i).ok()?, js_picked_bytes(i).ok()?))).collect();
+    let _ = js_picked_clear();
+    Some(out)
+}
+
+/// A file the game made (a track for the original game), to the downloads.
+pub fn save_file(name: &str, bytes: &[u8]) -> bool {
+    js_save_file(name, bytes).unwrap_or(false)
 }
 
 /// Whether the browser can vibrate the pad named `id` (gilrs can't here).

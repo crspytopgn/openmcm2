@@ -431,7 +431,7 @@ fn read_image_in(r: &mut Reader, size: u32, stored: Stored, palette: Option<&[u8
 }
 
 /// A level half the size of `level`, each pixel the mean of four.
-fn halve(level: &[u16], side: usize, format: PixelFormat) -> Vec<u16> {
+pub(crate) fn halve(level: &[u16], side: usize, format: PixelFormat) -> Vec<u16> {
     // Each layout's fields: shift and bit count.
     let fields: &[(u16, u16)] = match format {
         PixelFormat::Rgb555 => &[(10, 5), (5, 5), (0, 5)],
@@ -587,7 +587,7 @@ pub struct Build<'a> {
 }
 
 /// Heights are stored as whole steps of this many terrain units.
-const WRITE_UNIT: f32 = 1.0 / 128.0;
+pub(crate) const WRITE_UNIT: f32 = 1.0 / 128.0;
 
 impl Build<'_> {
     pub fn write(&self) -> Result<Vec<u8>> {

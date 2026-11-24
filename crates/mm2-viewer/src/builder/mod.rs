@@ -96,7 +96,9 @@ pub struct GameTrack {
 pub enum Ask {
     Stay,
     /// Ride the track baked at this path.
-    Ride { env: PathBuf, mode: Mode, name: String },
+    /// Ride the track; with `watch`, the computer rides it while the
+    /// player watches (the original builder's Test Computer Bike).
+    Ride { env: PathBuf, mode: Mode, name: String, watch: bool },
     /// Leave the builder.
     Exit,
 }
@@ -203,6 +205,25 @@ enum Hover {
     Ground,
 }
 
+/// What a file the player is picking is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PickFor {
+    Heights,
+    Ground,
+    Plants,
+    Model,
+}
+
+/// What a click does with the Line tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineMode {
+    Draw,
+    /// Baja and Enduro: a click on the track adds a gate, or takes one away.
+    Gates,
+    /// Moves the start: along a lap, or anywhere for a funnel start.
+    Start,
+}
+
 /// What the Nature tool does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NatureMode {
@@ -285,6 +306,9 @@ pub struct Builder {
     paint_radius: f32,
     object: usize,
     nature: NatureMode,
+    line_mode: LineMode,
+    /// Which page of the Land tool shows.
+    land_tab: usize,
     flora: Flora,
     plant_radius: f32,
     plant_density: f32,
@@ -316,6 +340,12 @@ pub struct Builder {
     now: f32,
     ui: Option<ui::Ui>,
     bake_job: Option<(Job<Result<PathBuf, String>>, bool)>,
+    /// Making the track for the original game: its file name and bytes.
+    export_job: Option<Job<Result<(String, Vec<u8>), String>>>,
+    /// Files asked for in a browser, not yet given.
+    picking: Option<PickFor>,
+    /// The next ride is the computer's, to watch.
+    watch: bool,
     /// A Free Pack track being built from its recipe to copy.
     copy_job: Option<Job<Result<Course, String>>>,
     ask: Option<Ask>,
@@ -365,6 +395,8 @@ impl Builder {
             paint_radius: 25.0,
             object: 1,
             nature: NatureMode::Plant,
+            line_mode: LineMode::Draw,
+            land_tab: 0,
             flora: Flora::Mixed,
             plant_radius: 60.0,
             plant_density: 0.6,
@@ -390,6 +422,9 @@ impl Builder {
             now: 0.0,
             ui: None,
             bake_job: None,
+            export_job: None,
+            picking: None,
+            watch: false,
             copy_job: None,
             ask: None,
             saved_at: 0.0,
@@ -596,15 +631,210 @@ impl Builder {
         self.bake_job = Some((job, ride));
     }
 
+    /// Makes the track for the original Motocross Madness 2 on another
+    /// thread: a browser downloads it, a computer saves it beside the
+    /// builder's tracks, in a folder named for the original's.
+    fn export_original(&mut self) {
+        if self.export_job.is_some() {
+            return;
+        }
+        self.save();
+        let course = self.course.clone();
+        self.export_job = Some(Job::spawn(move || {
+            let env = mm2_course::env::write_original(&course, &crate::fine_ground::builder_pictures())?;
+            Ok((format!("{}.ENV", course.stem()), env))
+        }));
+        self.say("Making the track for the original game...");
+    }
+
+    /// Where an export for the original game goes on a computer.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn export_dir(&self) -> PathBuf {
+        crate::profile::user_dir().join("For original MM2").join("Teraform").join(self.course.mode.name())
+    }
+
+    /// An export for the original game that has finished.
+    /// Asks the player for a picture (or a model's files).
+    fn ask_file(&mut self, what: PickFor) {
+        let (title, exts, many): (&str, &[&str], bool) = match what {
+            PickFor::Heights => ("A height map picture", &["png", "tga", "raw", "r16", "r8"], false),
+            PickFor::Ground | PickFor::Plants => ("A picture", &["png", "tga"], false),
+            PickFor::Model => ("A model and its pictures", &["slt", "tga"], true),
+        };
+        match crate::pick::ask(title, exts, many) {
+            Some(files) => self.picked(what, files),
+            None => self.picking = Some(what),
+        }
+    }
+
+    /// The files picked for `what`.
+    fn picked(&mut self, what: PickFor, files: Vec<crate::pick::Picked>) {
+        use mm2_course::picture::{Embedded, HeightMap, Picture, Shared};
+        if what == PickFor::Model {
+            self.add_model(files);
+            return;
+        }
+        let Some((name, bytes)) = files.into_iter().next() else {
+            return;
+        };
+        if let Err(e) = Picture::read(&name, &bytes) {
+            self.say(&format!("Couldn't read that picture: {e}"));
+            return;
+        }
+        let file = Embedded::new(&name, &bytes);
+        self.remember();
+        match what {
+            PickFor::Heights => {
+                let old = self.course.land.heightmap.take().unwrap_or_default();
+                let mut m = HeightMap::new(file);
+                m.tallest = old.tallest;
+                m.mix = old.mix;
+                self.course.land.heightmap = Some(m);
+                self.say("Height map loaded: the land is raised from it");
+            }
+            PickFor::Ground => {
+                self.course.look.ground = Some(mm2_course::GroundPicture { picture: Shared::new(file), track_on_top: true });
+                self.say("Ground picture laid over the land");
+            }
+            PickFor::Plants => {
+                self.course.plants.push(Planting {
+                    flora: self.flora,
+                    radius: 0.0,
+                    density: self.plant_density,
+                    clear: false,
+                    everywhere: false,
+                    dabs: Vec::new(),
+                    auto: false,
+                    map: Some(Shared::new(file)),
+                });
+                self.say("Plants grown from the map: white grows thickest");
+            }
+            PickFor::Model => {}
+        }
+        self.changed();
+    }
+
+    /// The player's own model: its `.slt` and the `.tga` pictures it names.
+    fn add_model(&mut self, files: Vec<crate::pick::Picked>) {
+        use mm2_course::picture::Embedded;
+        let is = |n: &str, e: &str| n.to_ascii_lowercase().ends_with(e);
+        let Some((name, slt)) = files.iter().find(|(n, _)| is(n, ".slt")).cloned() else {
+            if !files.is_empty() {
+                self.say("Pick the model's .slt file, with its .tga pictures");
+            }
+            return;
+        };
+        if let Err(e) = mm2_formats::slt::parse(&slt) {
+            self.say(&format!("Couldn't read {name}: {e}"));
+            return;
+        }
+        // The pictures it names, from those picked.
+        let text = String::from_utf8_lossy(&slt).to_ascii_lowercase();
+        let wanted: Vec<String> = text
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("texturemap="))
+            .map(|t| t.trim().trim_matches('"').rsplit(['\\', '/']).next().unwrap_or("").to_string())
+            .filter(|t| !t.is_empty())
+            .collect();
+        let textures: Vec<Embedded> = files
+            .iter()
+            .filter(|(n, _)| is(n, ".tga") && (wanted.is_empty() || wanted.contains(&n.to_ascii_lowercase())))
+            .map(|(n, b)| Embedded::new(n, b))
+            .collect();
+        let missing: Vec<&String> = wanted.iter().filter(|w| !textures.iter().any(|t| t.name.eq_ignore_ascii_case(w))).collect();
+        self.remember();
+        self.course.models.retain(|m| !m.name().eq_ignore_ascii_case(&name));
+        self.course.models.push(mm2_course::UserModel { slt: Embedded::new(&name, &slt), textures });
+        self.object = OBJECTS.len() + self.course.models.len() - 1;
+        self.tool = Tool::Objects;
+        self.changed();
+        if missing.is_empty() {
+            self.say(&format!("{name} added: click the ground to place it"));
+        } else {
+            let list: Vec<&str> = missing.iter().map(|s| s.as_str()).collect();
+            self.say(&format!("{name} added, but these pictures weren't picked: {}", list.join(", ")));
+        }
+    }
+
+    /// The model the Objects tool places.
+    fn object_model(&self) -> String {
+        match self.object.checked_sub(OBJECTS.len()) {
+            Some(k) => self.course.models.get(k).map_or(OBJECTS[0].1.to_string(), |m| m.name().to_string()),
+            None => OBJECTS[self.object.min(OBJECTS.len() - 1)].1.to_string(),
+        }
+    }
+
+    /// Keeps the ground as the bake colours it as a picture, to paint over
+    /// and load back.
+    fn save_ground(&mut self) {
+        let png = mm2_course::env::ground_png(&self.course, 960);
+        let name = format!("{} ground.png", self.course.stem());
+        match crate::pick::save(&name, &png) {
+            Ok(Some(at)) => self.say(&format!("Saved {at}")),
+            Ok(None) => {}
+            Err(e) => self.say(&format!("Couldn't save the picture: {e}")),
+        }
+    }
+
+    fn finish_export(&mut self) {
+        if !self.export_job.as_ref().is_some_and(|j| j.is_finished()) {
+            return;
+        }
+        let job = self.export_job.take().unwrap();
+        let (name, env) = match job.join() {
+            Ok(Ok(made)) => made,
+            Ok(Err(e)) => {
+                eprintln!("making the track for the original game: {e}");
+                self.say("Couldn't make the track for the original game");
+                return;
+            }
+            Err(_) => {
+                self.say("Couldn't make the track for the original game");
+                return;
+            }
+        };
+        let folder = self.course.mode.name();
+        #[cfg(target_arch = "wasm32")]
+        {
+            if crate::web::save_file(&name, &env) {
+                self.say(&format!("{name} is in your downloads. Put it in Motocross Madness 2's Teraform\\{folder} folder."));
+            } else {
+                self.say("Couldn't download the track");
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let dir = self.export_dir();
+            let path = dir.join(&name);
+            match crate::fs::create_dir_all(&dir).and_then(|()| crate::fs::write(&path, &env)) {
+                Ok(()) => {
+                    self.say(&format!("Saved {}. Copy it into Motocross Madness 2's Teraform\\{folder} folder.", path.display()));
+                    open_folder(&dir);
+                }
+                Err(e) => {
+                    eprintln!("{}: {e}", path.display());
+                    self.say("Couldn't save the track for the original game");
+                }
+            }
+        }
+    }
+
     /// What the builder wants the game to do now.
     pub fn take_ask(&mut self) -> Ask {
+        self.finish_export();
+        if let Some(what) = self.picking {
+            if let Some(files) = crate::pick::poll() {
+                self.picking = None;
+                self.picked(what, files);
+            }
+        }
         if self.bake_job.as_ref().is_some_and(|(j, _)| j.is_finished()) {
             let (job, ride) = self.bake_job.take().unwrap();
             match job.join() {
                 Ok(Ok(path)) => {
                     if ride {
                         self.rode = true;
-                        return Ask::Ride { env: path, mode: self.course.mode, name: self.course.name.clone() };
+                        return Ask::Ride { env: path, mode: self.course.mode, name: self.course.name.clone(), watch: std::mem::take(&mut self.watch) };
                     }
                     self.say("Saved, and in the track list");
                 }
@@ -992,6 +1222,44 @@ impl Builder {
             return;
         };
         match self.tool {
+            Tool::Line if self.line_mode == LineMode::Gates && !self.course.mode.laps() => {
+                if let Hover::Line(s) = self.hover {
+                    self.remember();
+                    let near = self.course.line.gates.iter().position(|&at| (at - s).abs() < 30.0);
+                    match near {
+                        Some(k) => {
+                            self.course.line.gates.remove(k);
+                        }
+                        None => self.course.line.gates.push(s),
+                    }
+                    self.changed();
+                }
+            }
+            Tool::Line if self.line_mode == LineMode::Start => {
+                if self.course.mode.laps() {
+                    if let Hover::Line(s) = self.hover {
+                        self.remember();
+                        self.course.line.start = s;
+                        self.changed();
+                    }
+                } else {
+                    // Out in the open, facing the line's start.
+                    self.remember();
+                    let to = self.line.at(self.course.line.start);
+                    let yaw = (to[0] - g.x).atan2(to[1] - g.z).to_degrees();
+                    let on_line = self.line.nearest([g.x, g.z]).is_some_and(|n| n.side.abs() < self.line.width[n.i] / 2.0);
+                    if on_line {
+                        // On the track: an ordinary start there.
+                        self.course.line.start_spot = None;
+                        if let Hover::Line(s) = self.hover {
+                            self.course.line.start = s;
+                        }
+                    } else {
+                        self.course.line.start_spot = Some([g.x, g.z, yaw]);
+                    }
+                    self.changed();
+                }
+            }
             Tool::Line => match self.hover {
                 Hover::Point(i) => {
                     self.remember();
@@ -1063,7 +1331,8 @@ impl Builder {
                         let d = self.line.dir[n.i];
                         d[0].atan2(d[1]).to_degrees()
                     });
-                    self.course.objects.push(Object { model: OBJECTS[self.object].1.into(), x: g.x, z: g.z, yaw, scale: 1.0 });
+                    let model = self.object_model();
+                    self.course.objects.push(Object { model, x: g.x, z: g.z, yaw, scale: 1.0 });
                     self.drag = Drag::Object(self.course.objects.len() - 1);
                     self.changed();
                 }
@@ -1090,7 +1359,7 @@ impl Builder {
                 _ => {
                     self.remember();
                     let clear = self.nature == NatureMode::Clear;
-                    self.course.plants.push(Planting { flora: self.flora, radius: self.plant_radius, density: self.plant_density, clear, everywhere: false, dabs: vec![[g.x, g.z]], auto: false });
+                    self.course.plants.push(Planting { flora: self.flora, radius: self.plant_radius, density: self.plant_density, clear, everywhere: false, dabs: vec![[g.x, g.z]], auto: false, map: None });
                     self.drag = Drag::Brush;
                     self.changed();
                 }
@@ -1619,6 +1888,24 @@ impl Builder {
                 p.label(top, &if last { "FINISH".to_string() } else { format!("GATE {}", k + 1) }, [1.0, 0.75, 0.7, 1.0]);
             }
         }
+        // A funnel start out in the open.
+        if let Some([x, z, yaw]) = self.course.line.start_spot.filter(|_| !self.course.mode.laps()) {
+            let y = self.height(x, z) + 1.0;
+            let (sn, cs) = yaw.to_radians().sin_cos();
+            let to = line.at(self.course.line.start);
+            if let (Some(a), Some(b)) = (self.project(vp, Vec3::new(x, y, z)), self.project(vp, Vec3::new(to[0], self.height(to[0], to[1]) + 1.0, to[1]))) {
+                p.line(a, b, 1.5, [ACCENT[0], ACCENT[1], ACCENT[2], 0.6]);
+            }
+            for s in [-1.0f32, 1.0] {
+                let e = Vec3::new(x - cs * 30.0 * s, y, z + sn * 30.0 * s);
+                if let (Some(a), Some(b)) = (self.project(vp, Vec3::new(x, y, z)), self.project(vp, e)) {
+                    p.line(a, b, 3.0, [ACCENT[0], ACCENT[1], ACCENT[2], 1.0]);
+                }
+            }
+            if let Some(a) = self.project(vp, Vec3::new(x, y + 6.0, z)) {
+                p.label([a[0], a[1] - 10.0], "FUNNEL START", [0.85, 1.0, 0.6, 1.0]);
+            }
+        }
         // The stadium's floor, which a Supercross track stays on.
         if self.course.mode == Mode::Supercross {
             let (lo, hi) = (FLOOR.0, FLOOR.1);
@@ -1770,6 +2057,9 @@ impl Builder {
         }
         let common = "Right-drag turns the view, middle-drag or WASD moves, wheel zooms, Tab looks straight down.";
         let what = match (self.tool, self.hover) {
+            (Tool::Line, _) if self.line_mode == LineMode::Gates && !self.course.mode.laps() => "Click the track to add a gate there, or click a gate to take it away. The finish stays at the end.",
+            (Tool::Line, _) if self.line_mode == LineMode::Start && self.course.mode.laps() => "Click the track to put the start and finish line there.",
+            (Tool::Line, _) if self.line_mode == LineMode::Start => "Click the track to start there, or open ground beside it for a funnel start.",
             (Tool::Line, Hover::Point(_)) => "Drag to move this point. Wheel: track width here. Right-click or Delete removes it.",
             (Tool::Line, Hover::Line(_)) => "Click to add a point here and drag it. T moves the start here.",
             (Tool::Line, _) => "Click the ground to add a point to the line.",
@@ -1858,6 +2148,18 @@ impl Builder {
         if right(p, input, "ride", if riding { "Baking..." } else { "RIDE IT  (R)" }, "Bake the track and ride it now. Esc comes back here.", 84.0, true) {
             self.bake_track(true);
         }
+        let exporting = self.export_job.is_some();
+        if right(
+            p,
+            input,
+            "export",
+            if exporting { "Making..." } else { "For MM2" },
+            "Make a copy of this track that plays in the original Motocross Madness 2, to put in its Teraform folder. Anyone can then race it without OpenMCM2.",
+            62.0,
+            false,
+        ) {
+            self.export_original();
+        }
         if right(p, input, "save", "Save", "Save the track and put it in the game's track list (Ctrl+S).", 44.0, false) {
             self.bake_track(false);
             self.say("Saving...");
@@ -1906,7 +2208,12 @@ impl Builder {
         input.panel_height = y - top;
 
         // ---- the view ----
-        p.panel(input, [w - 152.0, 430.0, 148.0, 26.0]);
+        p.panel(input, [w - 214.0, 430.0, 210.0, 26.0]);
+        let busy = self.bake_job.is_some();
+        if p.button(input, "watch", [w - 211.0, 433.0, 59.0, 20.0], if busy && self.watch { "Baking..." } else { "Watch AI" }, "Bake the track and watch a computer rider lap it, to see how it rides, as the original builder's Test Computer Bike (P takes over). Esc comes back here.", false) && !busy {
+            self.watch = true;
+            self.bake_track(true);
+        }
         if p.button(input, "top", [w - 149.0, 433.0, 66.0, 20.0], "Top view", "Look straight down on the track, or back (Tab).", self.cam.pitch > 1.5) {
             self.top_view();
         }
@@ -2187,8 +2494,59 @@ impl Builder {
         out
     }
 
+    /// Draw, place gates, or move the start.
+    fn line_modes(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {
+        let laps = self.course.mode.laps();
+        let modes: &[(LineMode, &str, &str)] = if laps {
+            &[(LineMode::Draw, "Draw", "Click the ground to add points; drag them to move."), (LineMode::Start, "Move start", "Click the track to put the start and finish line there (or press T over it).")]
+        } else {
+            &[
+                (LineMode::Draw, "Draw", "Click the ground to add points; drag them to move."),
+                (LineMode::Gates, "Gates", "Place the checkpoint gates yourself: click the track to add one, click a gate to take it away. The finish stays at the end."),
+                (LineMode::Start, "Start", "Click the track to start there, or the open ground beside it for a funnel start: the riders line up out in the open and race into the track."),
+            ]
+        };
+        let w = col / modes.len() as f32;
+        for (k, (m, label, tip)) in modes.iter().enumerate() {
+            if p.button(input, label, [left + k as f32 * w, *y, w - 2.0, 20.0], label, tip, self.line_mode == *m) {
+                if *m == LineMode::Gates && self.course.line.gates.is_empty() {
+                    // Start from the gates the track has now.
+                    self.remember();
+                    let line = &self.line;
+                    let last = self.gates.len().saturating_sub(1);
+                    self.course.line.gates = self.gates.iter().take(last).filter_map(|(g, _)| line.nearest(*g).map(|n| n.s)).collect();
+                    self.changed();
+                }
+                self.line_mode = *m;
+            }
+        }
+        *y += 26.0;
+        let half = col / 2.0 - 1.0;
+        let mut row = false;
+        if !laps && !self.course.line.gates.is_empty() {
+            row = true;
+            if p.button(input, "gauto", [left, *y, half, 20.0], "Gates by themselves", "Back to a gate every few hundred feet.", false) {
+                self.remember();
+                self.course.line.gates.clear();
+                self.changed();
+            }
+        }
+        if !laps && self.course.line.start_spot.is_some() {
+            row = true;
+            if p.button(input, "sauto", [left + half + 2.0, *y, half, 20.0], "Start on the track", "No funnel: the riders line up on the track at its start.", false) {
+                self.remember();
+                self.course.line.start_spot = None;
+                self.changed();
+            }
+        }
+        if row {
+            *y += 26.0;
+        }
+    }
+
     fn line_options(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {
         Self::heading(p, y, left, "THE LINE");
+        self.line_modes(p, input, y, left, col);
         let closed = self.course.line.closed;
         if p.button(input, "loop", [left, *y, col / 2.0 - 2.0, 20.0], "Loop", "The line comes round to its start: a lap.", closed) && !closed {
             self.remember();
@@ -2435,13 +2793,17 @@ impl Builder {
         let half = col / 2.0 - 1.0;
         if p.button(input, "plall", [left, *y, half, 20.0], "Cover the land", "Grows the chosen plants over the whole land at this density, off the track. Paint or clear on top after.", false) {
             self.remember();
-            self.course.plants.push(Planting { flora: self.flora, radius: 0.0, density: self.plant_density, clear: false, everywhere: true, dabs: Vec::new(), auto: false });
+            self.course.plants.push(Planting { flora: self.flora, radius: 0.0, density: self.plant_density, clear: false, everywhere: true, dabs: Vec::new(), auto: false, map: None });
             self.changed();
         }
         if p.button(input, "plnone", [left + half + 2.0, *y, half, 20.0], "Clear all", "Takes every plant away. Undo brings them back.", false) {
             self.remember();
             self.course.plants.clear();
             self.changed();
+        }
+        *y += 26.0;
+        if p.button(input, "plmap", [left, *y, col, 20.0], "Grow from a plant map...", "Grows the chosen plants from a grey picture over the whole land: white where they grow thickest at this density, black where none do. Its top is the far side of the map.", false) && !stadium {
+            self.ask_file(PickFor::Plants);
         }
         *y += 26.0;
         Self::note(p, y, left, col, &format!("{} plants. They never grow on the track, and they show in the original game too.", self.plants.len()));
@@ -2509,6 +2871,32 @@ impl Builder {
             }
         }
         *y += OBJECTS.len().div_ceil(2) as f32 * 20.0 + 4.0;
+        Self::heading(p, y, left, "YOUR OWN MODELS");
+        let mut remove = None;
+        for (k, m) in self.course.models.iter().enumerate() {
+            let at = OBJECTS.len() + k;
+            let name = m.name().to_string();
+            if p.button(input, &format!("um{k}"), [left, *y, col - 24.0, 18.0], &name, "Your own model, packed into the track. Click the ground to place it.", self.object == at) {
+                self.object = at;
+            }
+            if p.button(input, &format!("umx{k}"), [left + col - 22.0, *y, 22.0, 18.0], "x", "Takes this model out of the track, with every one placed.", false) {
+                remove = Some(k);
+            }
+            *y += 20.0;
+        }
+        if let Some(k) = remove {
+            self.remember();
+            let name = self.course.models.remove(k).slt.name;
+            self.course.objects.retain(|o| !o.model.eq_ignore_ascii_case(&name));
+            if self.object >= OBJECTS.len() {
+                self.object = 0;
+            }
+            self.changed();
+        }
+        if p.button(input, "umadd", [left, *y, col, 20.0], "Add a model...", "Bring in a model of your own, as the original builder's user models: pick its .slt file and the .tga pictures it uses together. It goes inside the track, so it shows in the original game too.", false) {
+            self.ask_file(PickFor::Model);
+        }
+        *y += 26.0;
         let on = self.course.dress.edge_bales;
         if p.button(input, "bales", [left, *y, col, 20.0], if on { "Bales along the edges: on" } else { "Bales along the edges: off" }, "Lines both edges of the track with wrapped bales, as the stadiums do.", on) {
             self.remember();
@@ -2517,6 +2905,73 @@ impl Builder {
         }
         *y += 26.0;
         Self::note(p, y, left, col, &format!("{} placed. Objects face along the track when placed.", self.course.objects.len()));
+    }
+
+    /// The height map and the ground picture.
+    fn picture_options(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {
+        Self::heading(p, y, left, "HEIGHT MAP");
+        match self.course.land.heightmap.clone() {
+            None => {
+                if p.button(input, "hmload", [left, *y, col, 20.0], "Load a height map picture...", "Raise the land from a grey picture: black is the lowest ground, white the highest, its top the far side of the map. PNG (8 or 16-bit), TGA (as the original builder's 257 x 257, or POV-Ray's 16-bit) or raw 16-bit squares. Any size.", false) {
+                    self.ask_file(PickFor::Heights);
+                }
+                *y += 26.0;
+            }
+            Some(m) => {
+                Self::note(p, y, left, col, &format!("From {}.", m.picture.name));
+                if let Some(v) = self.slider(p, input, y, left, col, "hmtall", "Tallest", "How high white stands above black.", m.tallest, (10.0, 1500.0), format!("{:.0} ft", m.tallest)) {
+                    if let Some(h) = &mut self.course.land.heightmap {
+                        h.tallest = v;
+                    }
+                    self.changed();
+                }
+                if let Some(v) = self.slider(p, input, y, left, col, "hmmix", "Picture", "How much of the land is the picture's: all of it, or blended with the hills above.", m.mix, (0.0, 1.0), format!("{:.0}%", m.mix * 100.0)) {
+                    if let Some(h) = &mut self.course.land.heightmap {
+                        h.mix = v;
+                    }
+                    self.changed();
+                }
+                let half = col / 2.0 - 1.0;
+                if p.button(input, "hmagain", [left, *y, half, 20.0], "Another...", "Load a different height map picture.", false) {
+                    self.ask_file(PickFor::Heights);
+                }
+                if p.button(input, "hmoff", [left + half + 2.0, *y, half, 20.0], "Remove", "Back to the hills above.", false) {
+                    self.remember();
+                    self.course.land.heightmap = None;
+                    self.changed();
+                }
+                *y += 26.0;
+            }
+        }
+        Self::heading(p, y, left, "GROUND PICTURE");
+        let half = col / 2.0 - 1.0;
+        match self.course.look.ground.clone() {
+            None => {
+                if p.button(input, "gpload", [left, *y, half, 20.0], "Load...", "Lay a picture of your own over the whole land, seen from above, its top the far side (960 x 960 as the original builder's, or any size). Save the ground first to paint over it.", false) {
+                    self.ask_file(PickFor::Ground);
+                }
+            }
+            Some(g) => {
+                Self::note(p, y, left, col, &format!("{} covers the land.", g.picture.file.name));
+                if p.button(input, "gptrack", [left, *y, col, 20.0], "Track's dirt drawn on top", "On: the track keeps its own dirt over your picture. Off: your picture alone, track and all.", g.track_on_top) {
+                    self.remember();
+                    if let Some(g) = &mut self.course.look.ground {
+                        g.track_on_top = !g.track_on_top;
+                    }
+                    self.changed();
+                }
+                *y += 26.0;
+                if p.button(input, "gpoff", [left, *y, half, 20.0], "Remove", "Back to the ground the builder paints.", false) {
+                    self.remember();
+                    self.course.look.ground = None;
+                    self.changed();
+                }
+            }
+        }
+        if p.button(input, "gpsave", [left + half + 2.0, *y, half, 20.0], "Save it...", "Keep the ground as a 960 x 960 picture, track and all, to paint over in any paint program and load back.", false) {
+            self.save_ground();
+        }
+        *y += 26.0;
     }
 
     fn land_options(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {
@@ -2528,14 +2983,40 @@ impl Builder {
             Self::note(p, y, left, col, "Click the name in the top bar to rename the copy.");
             return;
         }
+        let sx = self.course.mode == Mode::Supercross;
+        // Three pages (two in a stadium), so each fits on the screen.
+        let tabs: &[(&str, &str)] = if sx {
+            &[("Race", "The kind of race and the stadium."), ("Light", "The sun, the shade and the haze.")]
+        } else {
+            &[("Land", "The kind of race and the land under the track."), ("Pictures", "Raise the land from a height map, or lay your own picture over the ground."), ("Sky", "The sky, the sun, the shade and the haze.")]
+        };
+        self.land_tab = self.land_tab.min(tabs.len() - 1);
+        let w = col / tabs.len() as f32;
+        for (k, (label, tip)) in tabs.iter().enumerate() {
+            if p.button(input, &format!("ltab{k}"), [left + k as f32 * w, *y, w - 2.0, 20.0], label, tip, self.land_tab == k) {
+                self.land_tab = k;
+            }
+        }
+        *y += 28.0;
+        match (sx, self.land_tab) {
+            (false, 0) | (true, 0) => {
         Self::heading(p, y, left, "KIND OF RACE");
         let label = format!("{}  (change)", self.course.mode.name());
         if p.button(input, "kind-land", [left, *y, col, 20.0], &label, "Make this a Supercross, National, Baja or Enduro track. Your line, jumps and the rest move to fit.", false) {
             self.popup = Some(Popup::Kind);
         }
         *y += 26.0;
-        let sx = self.course.mode == Mode::Supercross;
-        if !sx {
+                if sx {
+            Self::heading(p, y, left, "STADIUM");
+            let st = mm2_course::STADIUMS;
+            let at = st.iter().position(|(f, _)| f.eq_ignore_ascii_case(&self.course.look.stadium)).unwrap_or(0);
+            if p.button(input, "stadium", [left, *y, col, 20.0], st[at].1, "Click for the next stadium. Keep the track inside its floor.", false) {
+                self.remember();
+                self.course.look.stadium = st[(at + 1) % st.len()].0.into();
+                self.changed();
+            }
+            *y += 26.0;
+                        } else {
             Self::heading(p, y, left, "LAND");
             for (k, kind) in LandKind::ALL.iter().enumerate() {
                 let tip = match kind {
@@ -2569,6 +3050,11 @@ impl Builder {
                 self.changed();
             }
             *y += 26.0;
+                }
+            }
+            (false, 1) => self.picture_options(p, input, y, left, col),
+            _ => {
+                if !sx {
             Self::heading(p, y, left, "SKY");
             let skies = mm2_course::SKIES;
             let at = skies.iter().position(|(f, _)| f.eq_ignore_ascii_case(&self.course.look.sky)).unwrap_or(0);
@@ -2578,21 +3064,37 @@ impl Builder {
                 self.changed();
             }
             *y += 26.0;
-        } else {
-            Self::heading(p, y, left, "STADIUM");
-            let st = mm2_course::STADIUMS;
-            let at = st.iter().position(|(f, _)| f.eq_ignore_ascii_case(&self.course.look.stadium)).unwrap_or(0);
-            if p.button(input, "stadium", [left, *y, col, 20.0], st[at].1, "Click for the next stadium. Keep the track inside its floor.", false) {
-                self.remember();
-                self.course.look.stadium = st[(at + 1) % st.len()].0.into();
-                self.changed();
-            }
-            *y += 26.0;
-        }
+                }
         let sun = self.course.look.sun;
         if let Some(v) = self.slider(p, input, y, left, col, "sun", "Sun", "Low evening sun to high midday sun.", sun, (0.0, 1.0), if sun < 0.35 { "Evening".into() } else if sun < 0.7 { "Afternoon".into() } else { "Midday".into() }) {
             self.course.look.sun = v;
             self.changed();
+        }
+        let turn = self.course.look.sun_turn.rem_euclid(360.0);
+        let compass = ["North", "North-east", "East", "South-east", "South", "South-west", "West", "North-west"][((turn + 22.5) / 45.0) as usize % 8];
+        if let Some(v) = self.slider(p, input, y, left, col, "sunturn", "Sun from", "Which way the sunlight comes from, so the shadows fall where you want them.", turn, (0.0, 359.0), compass.into()) {
+            self.course.look.sun_turn = v;
+            self.changed();
+        }
+        let amb = self.course.look.ambient;
+        if let Some(v) = self.slider(p, input, y, left, col, "ambient", "Shade", "How dark the shadows are: deep shade to soft, bright shade.", amb, (0.0, 1.0), if amb < 0.35 { "Dark".into() } else if amb < 0.7 { "Normal".into() } else { "Bright".into() }) {
+            self.course.look.ambient = v;
+            self.changed();
+        }
+        let fogs = mm2_course::FOGS;
+        let at = fogs.iter().position(|(n, _)| n.eq_ignore_ascii_case(&self.course.look.fog));
+        let label = format!("Haze: {}", at.map_or("the land's own", |i| fogs[i].0));
+        if p.button(input, "fog", [left, *y, col, 20.0], &label, "The colour of the haze in the distance. Click for the next.", false) {
+            self.remember();
+            self.course.look.fog = match at {
+                None => fogs[0].0.into(),
+                Some(i) if i + 1 < fogs.len() => fogs[i + 1].0.into(),
+                Some(_) => String::new(),
+            };
+            self.changed();
+        }
+        *y += 26.0;
+            }
         }
         Self::note(p, y, left, col, "Click the name in the top bar to rename the track.");
     }
@@ -2652,4 +3154,17 @@ mod pad_tests {
         b.pad_view([rx, ry], z, [0.0; 2], 1.0 / 60.0);
         assert!(b.cam.yaw != yaw);
     }
+}
+
+/// Shows `dir` in the computer's file browser.
+#[cfg(not(target_arch = "wasm32"))]
+fn open_folder(dir: &std::path::Path) {
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    let _ = std::process::Command::new(opener).arg(dir).spawn();
 }
