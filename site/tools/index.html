@@ -156,10 +156,19 @@
         <button id="qb-reland" title="New hills of the same kind, in other places.">Other hills</button>
 
         <h3>Your track</h3>
+        <div class="row qb-for" title="Which game the saved track is for.">
+          <span>Save for</span>
+          <div class="seg" role="group" aria-label="Save for">
+            <button id="qb-for-open" aria-pressed="true" title="OpenMCM2, in this browser or the desktop app: kept in this browser, in the browser game's track lists, and the full Course Builder opens on it. You can download its .ENV for the desktop app too.">OpenMCM2</button>
+            <button id="qb-for-orig" aria-pressed="false" title="The original Motocross Madness 2 from 2000: downloads an .ENV to put in the game's TERAFORM folder, in the folder for its race (SX, NATIONAL, BAJA or ENDURO). OpenMCM2 loads these too, but the OpenMCM2 save keeps the builder's finer ground and can be opened again here.">Original MM2</button>
+          </div>
+        </div>
         <div class="buttons">
           <button class="primary" id="qb-ride" title="Saves the track and rides it in the browser version of the game. In the game, Esc comes back to the full Course Builder on this track.">Ride it</button>
-          <button id="qb-save" title="Saves the track in this browser. It joins the browser game's track lists, and the full Course Builder opens on it.">Save</button>
-          <button id="qb-export" title="Makes a copy of the track that plays in the original Motocross Madness 2 (it takes up to a minute). Put the .ENV in the game's TERAFORM folder, in the folder for its race (SX, NATIONAL, BAJA or ENDURO).">For original MM2</button>
+          <button id="qb-save" title="Saves the track for the game picked above.">Save</button>
+        </div>
+        <div class="qb-progress" id="qb-progress" hidden><progress max="1" value="0"></progress><span></span></div>
+        <div class="buttons">
           <label class="tbtn" for="qb-open" title="Open a track made in the Course Builder: a .course file, or a builder .ENV.">Open file</label>
           <input id="qb-open" type="file" accept=".course,.env,.ENV" hidden>
           <button id="qb-download" title="Downloads the track's .course file, to keep it or open it in the desktop app's Course Builder.">Download .course</button>
