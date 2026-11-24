@@ -787,14 +787,14 @@ export async function mount(app, panel) {
     say(`Saved as ${stem}. It's in the browser game's ${event().name} track list, and the full Course Builder opens on it.`);
   }
   async function exportOpen() {
-    say("Making a copy for other OpenMCM2 players…");
+    say("Making a copy for OpenMCM2…");
     const stem = await keepCourse();
     const env = await baked("bake");
     download(new Blob([env]), `${stem}.ENV`);
     say(`Downloaded ${stem}.ENV. Other players put it in OpenMCM2's TERAFORM\\${event().folder} folder (or add it on the browser game's Your own tracks).`);
   }
   async function saveOriginal() {
-    say("Making a copy for other MM2 players… (a big track takes up to a minute)");
+    say("Making a copy for MM2… (a big track takes up to a minute)");
     const stem = mm.course_stem(text());
     keepCourse().catch(() => {});
     const bytes = await baked("original");

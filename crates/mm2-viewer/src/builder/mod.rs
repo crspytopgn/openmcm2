@@ -348,7 +348,7 @@ pub struct Builder {
     bake_job: Option<(Job<Result<PathBuf, String>>, bool)>,
     /// Making the track for the original game: its file name and bytes.
     export_job: Option<Job<Result<(String, Vec<u8>), String>>>,
-    /// The running export is for other OpenMCM2 players (else for the
+    /// The running export is for OpenMCM2 (else for the
     /// original game's).
     export_open: bool,
     /// When the running bake or export began, for its bar.
@@ -671,7 +671,7 @@ impl Builder {
         }));
         self.export_open = open;
         self.busy_since = self.now;
-        self.say(if open { "Making the track for other OpenMCM2 players..." } else { "Making the track for the original game..." });
+        self.say(if open { "Making the track for OpenMCM2..." } else { "Making the track for the original game..." });
     }
 
     fn mode_index(&self) -> usize {
@@ -681,7 +681,7 @@ impl Builder {
     /// Where an export for the original game goes on a computer.
     #[cfg(not(target_arch = "wasm32"))]
     fn export_dir(&self) -> PathBuf {
-        let top = if self.export_open { "For OpenMCM2 players" } else { "For original MM2" };
+        let top = if self.export_open { "For OpenMCM2" } else { "For original MM2" };
         crate::profile::user_dir().join(top).join("Teraform").join(self.course.mode.name())
     }
 
@@ -2497,8 +2497,8 @@ impl Builder {
                 let bw = pw - 28.0;
                 let choices: [(&str, &str, &str); 3] = [
                     ("save-game", "Save into my game", "Save the track and put it in this game's track list for its race, ready to race (Ctrl+S)."),
-                    ("save-open", "Export for other OpenMCM2 players", "Make a copy of the track to share with players of OpenMCM2. It keeps the builder's finer ground, and they can open it in their Course Builder too."),
-                    ("save-orig", "Export for other MM2 players", "Make a copy that plays in the original Motocross Madness 2 from 2000, for its Teraform folder. Anyone can race it without OpenMCM2 (OpenMCM2 plays it too)."),
+                    ("save-open", "Export for OpenMCM2 (.ENV)", "Make a copy of the track to share with players of OpenMCM2. It keeps the builder's finer ground, and they can open it in their Course Builder too."),
+                    ("save-orig", "Export for MM2 (.ENV)", "Make a copy that plays in the original Motocross Madness 2 from 2000, for its Teraform folder. Anyone can race it without OpenMCM2 (OpenMCM2 plays it too)."),
                 ];
                 for (k, (id, label, tip)) in choices.iter().enumerate() {
                     if p.button(input, id, [px + 14.0, py + 38.0 + k as f32 * 36.0, bw, 30.0], label, tip, k == 0) {
