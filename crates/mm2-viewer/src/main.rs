@@ -1572,8 +1572,14 @@ fn throw_dirt(race: &Race, ground: &TrackGround, sun: Vec3, dirt: &mut particles
     let full = |b: &mm2_physics::Bike| {
         let (traction, spin, throw) = b.roost();
         let crashed = b.crash.is_some();
+        let mut tyres = b.tyre_contacts().map(|t| t.filter(|_| !crashed).map(|(at, on)| tyre(at, on)));
+        // A crashed bike sliding on its frame raises dust where the frame
+        // touches (0x52c2d0's third pass).
+        if crashed {
+            tyres[0] = b.frame_contact().map(|at| tyre(at, false));
+        }
         particles::Feed {
-            tyres: b.tyre_contacts().map(|t| t.filter(|_| !crashed).map(|(at, on)| tyre(at, on))),
+            tyres,
             traction,
             spin,
             throw,
@@ -1678,19 +1684,78 @@ fn feel_wrecks(race: &mut Race, renderer: &TerrainRenderer) {
         let Some(pelvis) = renderer.object_frame_index(r.object + 1, "Pelvis") else {
             continue;
         };
-        let frames: Vec<usize> = parts.iter().map(|p| p.0).chain([pelvis]).collect();
+        let bones: Option<Vec<usize>> = RIDER_PROBES.iter().map(|(bone, _)| renderer.object_frame_index(r.object + 1, bone)).collect();
+        let bones = bones.unwrap_or_default();
+        let frames: Vec<usize> = parts.iter().map(|p| p.0).chain(bones.iter().copied()).chain([pelvis]).collect();
         let posed = renderer.object_frames(r.object + 1, &frames, race.time);
         let Some(Some(at)) = posed.last().copied() else {
             continue;
         };
         let to_body = at.inverse();
+        let probes: Vec<Vec3> = posed[parts.len()..parts.len() + bones.len()]
+            .iter()
+            .zip(RIDER_PROBES)
+            .filter_map(|(m, (_, p))| m.map(|m| (to_body * m).transform_point3(Vec3::from(p))))
+            .collect();
+        let posed = &posed[..parts.len()];
         let points: Vec<Vec3> = posed
             .iter()
             .zip(parts)
             .filter_map(|(m, (_, corners))| m.map(|m| (to_body * m, corners)))
             .flat_map(|(m, corners)| corners.iter().map(move |c| m.transform_point3(*c)))
             .collect();
-        r.bike.set_wreck_pose(place.inverse() * at, points);
+        r.bike.set_wreck_pose(place.inverse() * at, points, probes);
+    }
+}
+
+/// The Wrecker's probes (Bike::CreateWrecker, 0x40c0f0): a bone and a
+/// point in its frame.
+const RIDER_PROBES: [(&str, [f32; 3]); 15] = [
+    ("Pelvis", [0.0, 0.0, -0.35]),
+    ("UprTorso", [0.0, 0.0, 0.0]),
+    ("Head", [0.0, 0.75, 0.0]),
+    ("UprArmL", [0.0, 0.0, 0.0]),
+    ("UprArmR", [0.0, 0.0, 0.0]),
+    ("LwrArmL", [0.0, 0.0, 0.0]),
+    ("HandL", [0.0, -0.5, 0.0]),
+    ("LwrArmR", [0.0, 0.0, 0.0]),
+    ("HandR", [0.0, -0.5, 0.0]),
+    ("LwrLegL", [0.0, 0.0, 0.0]),
+    ("FootL", [0.0, -0.5, 0.75]),
+    ("FootL", [0.0, -1.0, 0.0]),
+    ("LwrLegR", [0.0, 0.0, 0.0]),
+    ("FootR", [0.0, -0.5, 0.75]),
+    ("FootR", [0.0, -1.0, 0.0]),
+];
+
+/// Hands each riding rider's probes, as the riding motion poses them, to
+/// the bike: the original physics crashes when the body's upper probes go
+/// under the ground.
+fn feel_riders(race: &mut Race, renderer: &TerrainRenderer) {
+    for r in &mut race.racers {
+        if r.bike.wreck().is_some() {
+            continue;
+        }
+        let rider = r.object + 1;
+        let frames: Option<Vec<usize>> = RIDER_PROBES.iter().map(|(bone, _)| renderer.object_frame_index(rider, bone)).collect();
+        let Some(frames) = frames else {
+            continue;
+        };
+        let posed = renderer.object_frames(rider, &frames, race.time);
+        let place = if r.pose.crossed() {
+            r.bike.place()
+        } else {
+            r.bike.place() * Mat4::from_quat(r.bike.drawn_turn())
+        };
+        let to_model = place.inverse();
+        let points: Option<Vec<Vec3>> = posed
+            .iter()
+            .zip(RIDER_PROBES)
+            .map(|(m, (_, at))| m.map(|m| to_model.transform_point3(m.transform_point3(Vec3::from(at)))))
+            .collect();
+        if let Some(points) = points {
+            r.bike.set_rider_probes(points);
+        }
     }
 }
 
@@ -4193,6 +4258,7 @@ impl Film {
         let shown = web_time::Instant::now();
         show(race, track, &mut self.renderer, eye, None);
         feel_wrecks(race, &self.renderer);
+        feel_riders(race, &self.renderer);
         let shown = shown.elapsed().as_secs_f64();
         if let Some(b) = &mut self.bench {
             let (w, h) = self.size;
@@ -6645,6 +6711,7 @@ impl App {
                     let view = cues::Eye { at: eye, target, fov: r.fov(), aspect: renderer.aspect() };
                     show(r, track, renderer, eye, Some(view));
                     feel_wrecks(r, renderer);
+                    feel_riders(r, renderer);
                     if let Some(d) = &self.drive {
                         drive_show(d, r, track, renderer);
                     }

@@ -6,6 +6,8 @@
 /// What one held key adds (0x449cc0's 0x3c9374bc) and how often (0x3c23d70a).
 const STEP: f32 = 0.018;
 const EVERY: f32 = 0.01;
+/// The frame time a fresh press loses: the game's own 50 Hz step.
+const FIRST_FRAME: f32 = 0.02;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct KeyAxis {
@@ -35,9 +37,12 @@ impl KeyAxis {
             (minus, fresh.0, &mut self.minus, -1.0),
             (plus, fresh.1, &mut self.plus, 1.0),
         ] {
-            // The frame a key goes down only starts its clock.
-            if held && !fresh {
-                *clock += dt;
+            // The frame a key goes down only starts its clock: in the
+            // game that frame's time is lost. Ours loses one 50 Hz frame
+            // (the game's step) whatever the frame rate, so the bars move
+            // the same at 30 fps as at 240.
+            if held {
+                *clock += if fresh { dt - FIRST_FRAME } else { dt };
                 while *clock > EVERY {
                     self.value = (self.value + sign * STEP).clamp(-1.0, 1.0);
                     *clock -= EVERY;
@@ -279,6 +284,22 @@ mod tests {
         // Everything is let go when the script ends.
         assert!(s.held(0.8).is_empty());
         assert_eq!(s.length(), 0.75);
+    }
+
+    #[test]
+    fn ramps_the_same_at_any_frame_rate() {
+        let at = |fps: f32| {
+            let mut a = KeyAxis::default();
+            let mut v = 0.0;
+            for _ in 0..(fps * 0.3).round() as usize {
+                v = a.update(false, true, 1.0 / fps);
+            }
+            v
+        };
+        let fifty = at(50.0);
+        for fps in [30.0, 60.0, 144.0, 240.0] {
+            assert!((at(fps) - fifty).abs() <= 0.018 + 1e-5, "{fps}: {} vs {fifty}", at(fps));
+        }
     }
 
     #[test]

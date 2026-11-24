@@ -45,6 +45,10 @@ pub struct Terrain {
     pub surfaces: Vec<u8>,
     /// World units per terrain unit.
     pub scale: f32,
+    /// The header word the game keeps at Terrain+0xbe8: 1 on most
+    /// tracks; anything else lowers the bike's nose-over limit
+    /// (Bike::UpdateCrashState) and the camera's follow rate.
+    pub kind: u32,
     pub textures: Vec<Texture>,
     /// Where each texture is drawn.
     pub tiles: Vec<Tile>,
@@ -227,7 +231,7 @@ pub fn parse(bytes: &[u8]) -> Result<Terrain> {
     // The demo's terrains keep their textures as indices into a palette
     // of 256 colours; the shipped game's are all 16-bit.
     let palette = if r.u32("palette flag")? != 0 { read_palette(&mut r)? } else { None };
-    r.u32("unknown")?;
+    let kind = r.u32("kind")?;
     let scale = r.f32("scale")?;
     let depth = r.u32("depth")?;
     let root_offset = r.u32("root offset")? as usize;
@@ -328,6 +332,7 @@ pub fn parse(bytes: &[u8]) -> Result<Terrain> {
         }
     }
     Ok(Terrain {
+        kind,
         size,
         heights,
         normals,

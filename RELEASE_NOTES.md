@@ -1,3 +1,51 @@
+# OpenMCM2 0.8.0: The Big Physics Update
+
+* **Riding physics copied 1:1 from the original.** The bike's whole
+  physics step now works the way the original game's does: tyres,
+  suspension, ground contact, air control, the mid-air riding pose, the
+  rider's body hitting the ground, the tumble after a crash and how
+  tyres meet jump ramps and solid objects. It was checked against 124
+  rides recorded in the original game, and it rides the same at any
+  frame rate, from 30 fps to uncapped.
+* **Little crash details.** A crashed bike sliding on its frame throws
+  up dust, and in Baja and Enduro you get up facing the next gate.
+* **Steering keys at any frame rate.** A fresh press on the keyboard
+  now ramps in exactly the same at 30 fps as at 240.
+* **Race cameras as the original's.** The chase camera, the camera
+  views, Rider Cam and the crash view now follow the original, and the
+  camera follows on through a roll-over until the rider lands.
+* **Computer riders as the original's.** Their riding, trick choices and
+  how they get up in gate races now match the original game.
+* **Start grid and scenery as the original.** Riders line up on the
+  start grid as in the original, trees turn to flat billboards and fade
+  out at a distance the way the original's do, scene sounds are flat,
+  and the Bike & Rider preview turns and drags like the original.
+* **Faster on every PC.** A quicker scenery collision grid, leaner
+  shadow maps, and less wasted work drawing the ground.
+* **Better in the browser on laptops and Macs.** When the graphics chip
+  can't be named, Auto starts at about Low and works its way up while
+  there is time to spare, and see-through leaves cost less to draw.
+* **Free bike engines, MX Bikes style.** The Free Pack's engines blend
+  between recordings as the revs rise, read MX Bikes style engine
+  layouts, and each bike's engine loops out of step with the others.
+  Engine sounds (125, 250, 400) recorded by crspytopgn, CC BY 4.0.
+* **Bounce light and AMD FSR upscaling** in Enhanced, both off by
+  default.
+* **Course Builder: export to the original game.** Tracks you build can
+  be exported for the original Motocross Madness 2, with heightmaps,
+  your own ground and models, hand-placed gates, plant maps, fog and
+  light, plus Watch AI to see computer riders take your track.
+* **Simpler play page.** The browser page puts Motocross Madness 2 first
+  and the free version second, with Tools and Settings below. The Tools
+  page has a Course Builder tab that opens the game straight into the
+  builder, using whatever you have kept, and asks clearly when there is
+  nothing yet.
+* **Tools: racing line and objects.** The track viewer lays the racing
+  line on the ground and finds a track's objects.
+* **Thanks to Andrew Boudreau.** His Motocross Madness 2 decompilation
+  was a huge help for matching the physics, cameras and computer riders
+  to the original.
+
 # OpenMCM2 0.7.8
 
 * **Free tracks that feel ridden-in.** Smooth between the jumps, with

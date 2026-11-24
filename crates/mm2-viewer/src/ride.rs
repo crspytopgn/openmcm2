@@ -1116,6 +1116,7 @@ mod tests {
     #[test]
     fn frozen_camera_stays_and_narrows_with_distance() {
         let terrain = Terrain {
+            kind: 1,
             size: 9,
             heights: vec![0.0; 81],
             normals: vec![[0, 127, 0]; 81],
@@ -1170,6 +1171,7 @@ mod tests {
     #[test]
     fn helmet_landing_dips_and_springs_back() {
         let terrain = Terrain {
+            kind: 1,
             size: 9,
             heights: vec![0.0; 81],
             normals: vec![[0, 127, 0]; 81],
@@ -1207,6 +1209,7 @@ mod tests {
     #[test]
     fn helmet_looks_where_the_bike_points_and_leans_with_it() {
         let terrain = Terrain {
+            kind: 1,
             size: 9,
             heights: vec![0.0; 81],
             normals: vec![[0, 127, 0]; 81],
@@ -1294,6 +1297,7 @@ mod trace {
             normals: vec![[0, 127, 0]; 81],
             surfaces: vec![0; 81],
             scale: 300.0,
+            kind: 1,
             textures: Vec::new(),
             tiles: Vec::new(),
         };
@@ -1345,6 +1349,7 @@ mod trace {
             normals: vec![[0, 127, 0]; 81],
             surfaces: vec![0; 81],
             scale: 300.0,
+            kind: 1,
             textures: Vec::new(),
             tiles: Vec::new(),
         }

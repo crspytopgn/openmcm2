@@ -185,6 +185,7 @@ mod tests {
 
     fn terrain(size: usize, height: impl Fn(usize, usize) -> f32) -> Terrain {
         Terrain {
+            kind: 1,
             size,
             heights: (0..size * size)
                 .map(|i| height(i % size, i / size))
