@@ -6353,9 +6353,14 @@ impl App {
             Some(r) => {
                 r.buttons = buttons;
                 let held = |a: usize| self.follow && acts[a];
+                let pad = |k: KeyCode| self.follow && self.keys.contains(&k);
                 r.cam_keys = ride::CamKeys {
                     thrill: held(input::THRILL_CAM),
                     reverse: held(input::REVERSE_CAM),
+                    up: pad(KeyCode::Numpad8),
+                    down: pad(KeyCode::Numpad2),
+                    left: pad(KeyCode::Numpad4),
+                    right: pad(KeyCode::Numpad6),
                 };
                 let (clutch, back_up) = (held(input::CLUTCH), held(input::BACK_UP));
                 let me = r.player;
@@ -6535,6 +6540,10 @@ impl App {
                 let aspect = size.0 as f32 / size.1.max(1) as f32;
                 hud.view_proj = Mat4::perspective_rh(s.camera.fovy(aspect), aspect, 1.0, 20_000.0)
                     * s.camera.view();
+            }
+            if let Some(race) = &mut self.race {
+                let watched = &race.racers[race.watching()];
+                race.cam_head = renderer.object_frame(watched.object + 1, "Head", time);
             }
             if let (Some((_, hud)), Some(race), Some(track)) = (&mut self.hud, &self.race, &self.track) {
                 hud.heads = race.racers.iter().map(|r| renderer.object_frame(r.object + 1, "Head", time)).collect();
@@ -6970,6 +6979,13 @@ impl ApplicationHandler for App {
                                 };
                                 if let (Some(id), Some((ui, hud))) = (said, &mut self.hud) {
                                     hud.say(&ui.lang(id));
+                                }
+                            }
+                            // Numpad *: the view as it is becomes the User
+                            // Cam (0x466ad0's key 0x37).
+                            KeyCode::NumpadMultiply if self.follow => {
+                                if let Some(r) = &mut self.race {
+                                    r.save_user_camera();
                                 }
                             }
                             KeyCode::Numpad0 if self.follow => {

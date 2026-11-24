@@ -692,6 +692,7 @@ impl Bike {
         crate::ride::Followed {
             position: place.w_axis.truncate(),
             forward,
+            nose: place.z_axis.truncate().normalize_or(forward),
             up: place.y_axis.truncate().normalize_or(Vec3::Y),
             velocity,
             speed,
@@ -701,6 +702,12 @@ impl Bike {
                 Bike::Player(b) => b.rear_depth() < -2.0,
                 _ => airborne,
             },
+            turn_rate: match self {
+                Bike::Player(b) => Some(b.turn_rate),
+                _ => None,
+            },
+            head: None,
+            finished_alone: false,
         }
     }
 
@@ -1840,6 +1847,9 @@ pub struct Race {
     pub autopilot: bool,
     /// The camera keys held this frame.
     pub cam_keys: crate::ride::CamKeys,
+    /// Where the watched rider's `Head` frame was last drawn, game
+    /// coordinates: the Rider Cam's eye and the crash view's aim.
+    pub cam_head: Option<Vec3>,
     /// Wreck Reset (Game page): a crash puts the player back on the
     /// course; off, where the bike came to rest (0x492cc0). Network races
     /// always reset.
@@ -1957,6 +1967,11 @@ impl Race {
         self.chase.roll()
     }
 
+    /// Numpad *: the camera's place now becomes the User Cam.
+    pub fn save_user_camera(&mut self) {
+        self.chase.save_user();
+    }
+
     /// Numpad 0: the camera freezes where it is, or goes back to its view.
     pub fn freeze_camera(&mut self) -> bool {
         self.chase.freeze()
@@ -2008,6 +2023,7 @@ impl Race {
             player,
             autopilot: false,
             cam_keys: Default::default(),
+            cam_head: None,
             wreck_reset: true,
             quick_get_up: crate::tweaks::get().quick_get_up,
             visual_cues: true,
@@ -2323,8 +2339,22 @@ impl Race {
             self.flag_girl
                 .update(self.time, me.laps, self.laps, me.finished.is_some(), ahead, behind);
         }
-        let me = self.racers[self.watching()].bike.followed();
+        let watched = &self.racers[self.watching()];
+        let me = crate::ride::Followed {
+            head: self.cam_head,
+            finished_alone: watched.finished.is_some() && self.net_players() <= 1,
+            ..watched.bike.followed()
+        };
         self.chase.follow(&me, self.cam_keys, ground.terrain, dt)
+    }
+
+    /// The riders racing here, the player and those over the network
+    /// (played from their tapes), not a ghost.
+    fn net_players(&self) -> usize {
+        let others = self.racers.iter().enumerate().filter(|&(i, r)| {
+            i != self.player && Some(i) != self.ghost && matches!(r.bike, Bike::Taped(_))
+        });
+        1 + others.count()
     }
 
     /// The rider the camera follows.
@@ -2428,7 +2458,7 @@ impl Race {
             // A jump along the tape: the camera starts afresh.
             self.chase = self.chase.restart(me.position(), me.forward());
         }
-        let me = me.followed();
+        let me = crate::ride::Followed { head: self.cam_head, ..me.followed() };
         self.chase.follow(&me, self.cam_keys, terrain, dt.clamp(0.0, 0.5))
     }
 
