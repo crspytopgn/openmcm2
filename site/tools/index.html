@@ -58,6 +58,7 @@
     <button role="tab" data-tab="garage" title="The bikes and riders in 3D, with their paints and outfits and every animation the game has.">Bikes &amp; riders</button>
     <button role="tab" data-tab="track" title="Any track in 3D: its ground, objects, trees and the racing line. Fly round it freely.">Tracks</button>
     <button role="tab" data-tab="paint" title="Paint a bike or a rider in 3D and save it as a skin the game picks up.">Skin painter</button>
+    <button role="tab" data-tab="builder" title="Make your own track and ride it: draw the line, drop in jumps, shape and paint the ground. It runs in the browser version of the game.">Course Builder</button>
   </nav>
 
   <!-- Files -->
@@ -102,6 +103,23 @@
       <div class="controls" id="paint-controls"><p class="hint">Pick your game or the Free Pack first.</p></div>
       <div class="view"><canvas id="paint-view" tabindex="0" aria-label="Painting"></canvas>
         <p class="viewhint" id="paint-hint">Paint by dragging on the model. Hold Space (or switch to Turn) to turn it.</p></div>
+    </div>
+  </section>
+
+  <!-- Course Builder: it lives in the game, so this opens the browser version straight into it. -->
+  <section class="panel" id="tab-builder" role="tabpanel" hidden>
+    <div class="builder">
+      <video class="builder-clip" src="../img/course-builder.mp4" poster="../img/course-builder-poster.jpg" muted loop playsinline autoplay preload="none" aria-label="The Course Builder"></video>
+      <div class="builder-text">
+        <h2 class="small">Make your own track and ride it</h2>
+        <p class="hint">Draw the track's line, drop in jumps and gates, shape and paint the ground, plant trees, then press Ride it.
+          Your tracks stay in this browser and join the game's track lists, and you can export them for the original game too.</p>
+        <p class="hint">The Course Builder is part of the game, so it opens in the browser version with whatever you play with there:
+          your MM2 files, the free demo or the free version. If you haven't picked one yet, it asks first, then opens the builder.</p>
+        <a class="tbtn primary" href="../play/?course-builder"
+          title="Opens the browser version of OpenMCM2 straight into the Course Builder. Esc in a ride comes back to it.">Open the Course Builder</a>
+        <p class="hint">It's on the game's main menu too: the shovel on the chain.</p>
+      </div>
     </div>
   </section>
 
