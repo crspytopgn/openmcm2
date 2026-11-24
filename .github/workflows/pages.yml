@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment-again.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       # The browser version, served at /play. It holds no game data: the
@@ -54,5 +54,15 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+      # deploy-pages looks the artifact up straight after the upload, and
+      # GitHub's artifact list can lag by a few seconds ("No artifacts named
+      # github-pages were found"), so wait a little and try once more.
+      - run: sleep 10
       - id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - if: steps.deployment.outcome == 'failure'
+        run: sleep 30
+      - id: deployment-again
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
