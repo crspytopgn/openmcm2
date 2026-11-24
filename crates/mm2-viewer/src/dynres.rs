@@ -17,7 +17,8 @@
 //! Where even the smallest scene comes late for a few seconds, a step of
 //! the costliest effects is set aside (crate::graphics::Enhanced::shed_to),
 //! and given back after a long spell of frames with time to spare. A
-//! browser keeps what it learned for the next time (web.rs `auto_shed`).
+//! browser, and the desktop with Auto, keeps what it learned for the next
+//! time (crate::graphics::remember_shed).
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -240,12 +241,10 @@ impl Governor {
         if self.shed != now {
             eprintln!("dynamic resolution: {} step(s) of effects set aside", self.shed);
             crate::graphics::set_shed(self.shed);
-            #[cfg(target_arch = "wasm32")]
-            crate::web::auto_shed(self.shed);
+            crate::graphics::remember_shed(self.shed);
         }
         if self.spare && !spare {
-            #[cfg(target_arch = "wasm32")]
-            crate::web::auto_shed(self.least_shed - 1);
+            crate::graphics::remember_shed(self.least_shed - 1);
         }
     }
 }

@@ -2673,8 +2673,8 @@ fn size_text((w, h): (u32, u32)) -> String {
 /// What a quality preset sets, for its hover text.
 fn preset_text(q: Quality) -> String {
     let effects = match q {
-        Quality::Low => "without ambient occlusion, light shafts, smooth hills, replay blur or 3D grass",
-        Quality::Medium => "without light shafts or smooth hills, with TAA rebuilding the scene at the screen's sharpness",
+        Quality::Low => "without ambient occlusion, light shafts, smooth hills, bounce light, replay blur or 3D grass",
+        Quality::Medium => "without light shafts, smooth hills or bounce light, with TAA rebuilding the scene at the screen's sharpness",
         Quality::RayTraced => "High's effects with ray tracing (needs a graphics card that can trace rays)",
         Quality::High => "every effect that's on unless changed",
         Quality::Ultra => "every effect but ray tracing, with lasting ruts",

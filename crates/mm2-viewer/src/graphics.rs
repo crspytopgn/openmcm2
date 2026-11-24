@@ -636,6 +636,23 @@ pub fn pick_auto(info: &wgpu::AdapterInfo) {
         .split(',')
         .map(|i| if i.trim() == "quality=auto" { format!("quality={q},dynamic") } else { i.trim().to_string() })
         .collect();
+    let mut list = list;
+    // A strong card on the desktop: the grass, hills and shadows reach
+    // further too, unless turned off.
+    if !cfg!(target_arch = "wasm32") && q == "high" && strong_card(&info.name) && !list.iter().any(|i| i == "no-far") {
+        list.push("far".into());
+    }
+    // What the desktop learned on this card last time, as a browser keeps
+    // it (`shed=`).
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        *AUTO_CARD.lock().unwrap() = Some(info.name.clone());
+        if let Some(n) = remembered_shed(&info.name).filter(|n| *n > 0) {
+            if !list.iter().any(|i| i.starts_with("shed=")) {
+                list.push(format!("shed={n}"));
+            }
+        }
+    }
     match Enhanced::parse(&list.join(",")) {
         Ok(mut e) => {
             // Unnamed in a browser: Medium made ready, started at what this
@@ -681,8 +698,7 @@ pub fn auto_quality(name: &str, kind: wgpu::DeviceType, backend: wgpu::Backend, 
     if browser && n.trim().is_empty() {
         return "medium";
     }
-    // Strong enough for High even on a 4K screen.
-    let strong = has(&["rtx", "rx 6", "rx 7", "rx 9", "arc b", " max", " ultra"]);
+    let strong = strong_card(name);
     let mut level = if n.contains("apple") {
         // Apple's chips: the first M1 and M2 Medium, the rest High.
         match (has(&[" pro", " max", " ultra"]), has(&["m1", "m2"])) {
@@ -710,6 +726,44 @@ pub fn auto_quality(name: &str, kind: wgpu::DeviceType, backend: wgpu::Backend, 
     }
     ["low", "medium", "high"][level.clamp(0, 2) as usize]
 }
+
+/// A graphics card strong enough for High even on a 4K screen, and for
+/// detail reaching further ([`pick_auto`]).
+pub fn strong_card(name: &str) -> bool {
+    let n = name.to_lowercase();
+    ["rtx", "rx 6", "rx 7", "rx 9", "arc b", " max", " ultra"].iter().any(|w| n.contains(w))
+}
+
+/// Where the desktop keeps how many steps of effects Auto last needed to
+/// set aside on this graphics card ([`remember_shed`]), as a browser does.
+#[cfg(not(target_arch = "wasm32"))]
+fn shed_file() -> std::path::PathBuf {
+    mm2_settings::user_dir().join("auto-shed.txt")
+}
+
+/// The steps Auto set aside on `card` last time, if it was this card.
+#[cfg(not(target_arch = "wasm32"))]
+fn remembered_shed(card: &str) -> Option<u8> {
+    let text = std::fs::read_to_string(shed_file()).ok()?;
+    let mut lines = text.lines();
+    (lines.next()? == format!("card={card}")).then_some(())?;
+    lines.next()?.strip_prefix("shed=")?.parse::<u8>().ok().map(|n| n.min(MOST_SHED))
+}
+
+/// Keeps how many steps of effects to set aside from the start next time
+/// on this card (desktop, with Auto): what dynamic resolution learned.
+pub fn remember_shed(steps: u8) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(card) = AUTO_CARD.lock().unwrap().clone() else { return };
+        let _ = std::fs::write(shed_file(), format!("card={card}\nshed={}\n", steps.min(MOST_SHED)));
+    }
+    #[cfg(target_arch = "wasm32")]
+    crate::web::auto_shed(steps);
+}
+
+/// The graphics card Auto picked for, on the desktop: set by [`pick_auto`].
+static AUTO_CARD: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 /// The most pixels a browser draws the enhanced scene at: 1080p's worth.
 pub const BROWSER_PIXELS: u32 = 1920 * 1080;
@@ -811,10 +865,10 @@ pub fn set_shed(n: u8) {
 impl Enhanced {
     /// Without the costliest effects, `n` steps of them, dearest for the
     /// least seen first: 1 the soft shadow edges, smooth hills, horizon
-    /// occlusion, reflections and light shafts (about Medium); 2 also the
-    /// grass, occlusion and contact shadows (about Low); 3 also the sun's
-    /// shadows and the dust clouds and flying dirt (with fewer puffs from
-    /// step 2). Only turned off, never on, so nothing
+    /// occlusion, reflections, light shafts and bounce light (about Medium);
+    /// 2 also the grass, occlusion, contact shadows and flying dirt (about
+    /// Low); 3 also the sun's shadows and the dust clouds (with fewer puffs
+    /// from step 2). Only turned off, never on, so nothing
     /// is needed that was not made when the race loaded; and the
     /// anti-aliasing and the scene's size are left to dynamic resolution.
     pub fn shed_to(mut self, n: u8) -> Enhanced {
@@ -833,11 +887,11 @@ impl Enhanced {
             self.grass = false;
             self.ao = false;
             self.contact = false;
+            self.roost = false;
         }
         if n >= 3 {
             self.shadows = false;
             self.dust = false;
-            self.roost = false;
         }
         self
     }
