@@ -22,6 +22,9 @@ usage:
   mm2-tools overlay <file.tga> <out.png>  convert an overlay picture from RES/GLOBAL.RES
   mm2-tools textures <GAME-dir> <out-dir>  export every texture as PNG for upscaling
   mm2-tools freetrack <out.env> [seed]      make a new free test track from scratch
+  mm2-tools ridecheck <TRACK.ENV> <ai.csv>      how a track rides, from mm2-viewer's --ai-csv tape
+  mm2-tools freetune <GAME-dir> <ground-dir> [only]  ride the free tracks with the computer riders and
+                                               print the jump fixes for mm2-course/src/free_tune.rs
   mm2-tools freetracks <GAME-dir> [ground-dir] [only]  make the free pack's tracks (only: a file or event folder)
   mm2-tools preview <track.env> <out.png>  draw a track's preview picture from its ground
   mm2-tools free-previews <ground-dir> <out-dir>  the free tracks' pictures (.tga), for the pack's previews/
@@ -51,6 +54,9 @@ fn main() -> ExitCode {
         ["original", from, out] => course(from, Path::new(out), true),
         ["rebuild", from, out] => rebuild(from, Path::new(out)),
         ["preview", env, out] => preview(env, out),
+        ["ridecheck", env, tape] => ridecheck(env, tape),
+        ["freetune", game, ground] => freetune(Path::new(game), Path::new(ground), None),
+        ["freetune", game, ground, only] => freetune(Path::new(game), Path::new(ground), Some(only)),
         ["free-previews", ground, out] => free_previews(Path::new(ground), Path::new(out)),
         ["free-menus", ui, text, out] => free_menus(Path::new(ui), Path::new(text), Path::new(out)),
         _ => {
@@ -637,4 +643,149 @@ fn credits_text(md: &str) -> String {
         flush(&mut names, &mut out);
     }
     out
+}
+
+/// `ridecheck TRACK.ENV ai.csv`: the jumps, turns and crashes of a ride.
+fn ridecheck(env: &str, tape: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let c = mm2_course::copy::import(&std::fs::read(env)?, env, None, 0, "check")?;
+    let src = c.source.clone().ok_or("no track")?;
+    let frames = mm2_course::ridecheck::read_tape(&std::fs::read_to_string(tape)?);
+    let report = mm2_course::ridecheck::check(&c.path(), c.mode.track_width() / 2.0, &|x, z| src.height(x, z), &frames);
+    print!("{}", report.text());
+    if let Some(r) = std::env::var("PROFILE").ok() {
+        let (a, b) = r.split_once(',').ok_or("PROFILE=a,b")?;
+        for (s, h) in mm2_course::ridecheck::profile(&c.path(), &|x, z| src.height(x, z), a.parse()?, b.parse()?) {
+            println!("{s:6.0} {h:6.1} {}", "#".repeat(((h - 20.0).max(0.0) * 2.0) as usize));
+        }
+    }
+    Ok(())
+}
+
+/// One ride of a built track by six computer riders (mm2-viewer beside this
+/// program), checked.
+fn ride_and_check(env: &Path, seconds: u32) -> Result<(mm2_course::ridecheck::Report, mm2_course::path::Path), Box<dyn std::error::Error>> {
+    let viewer = std::env::current_exe()?.with_file_name(if cfg!(windows) { "mm2-viewer.exe" } else { "mm2-viewer" });
+    let tape = std::env::temp_dir().join(format!("freetune-{}.csv", std::process::id()));
+    let shot = std::env::temp_dir().join(format!("freetune-{}.png", std::process::id()));
+    let status = std::process::Command::new(&viewer)
+        .arg(env)
+        .args(["--screenshot"])
+        .arg(&shot)
+        .args(["--size", "64x36", "--ride", &seconds.to_string(), "--riders", "6", "--laps", "30", "--no-share-playtime", "--ai-csv"])
+        .arg(&tape)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?;
+    if !status.success() {
+        return Err(format!("{} failed on {}", viewer.display(), env.display()).into());
+    }
+    let name = env.to_string_lossy().to_string();
+    let c = mm2_course::copy::import(&std::fs::read(env)?, &name, None, 0, "check")?;
+    let src = c.source.clone().ok_or("no track")?;
+    let frames = mm2_course::ridecheck::read_tape(&std::fs::read_to_string(&tape)?);
+    let _ = std::fs::remove_file(&tape);
+    let _ = std::fs::remove_file(&shot);
+    let path = c.path();
+    Ok((mm2_course::ridecheck::check(&path, c.mode.track_width() / 2.0, &|x, z| src.height(x, z), &frames), path))
+}
+
+/// `freetune GAME ground [only]`: builds each free track, has the computer
+/// ride it, fixes the jumps that ride badly (never making one smaller
+/// than it was: see free::Fix) and rides again, up to three rounds,
+/// keeping a round only if the track is no tamer and no rougher for it.
+fn freetune(game: &Path, ground: &Path, only: Option<&str>) -> BoxResult {
+    use mm2_course::free::{self, Fix};
+    use mm2_course::ridecheck::Trouble;
+    let mut table = String::new();
+    for def in free::SET {
+        if only.is_some_and(|o| !def.file.eq_ignore_ascii_case(o) && !def.kind.folder().eq_ignore_ascii_case(o)) {
+            continue;
+        }
+        // Lap tracks: a quarry is for stunts, a Baja or Enduro for gates.
+        if !matches!(def.kind, free::Kind::National | free::Kind::Supercross) {
+            continue;
+        }
+        let mut fixes: Vec<(usize, Fix)> = Vec::new();
+        let mut best: Option<(Vec<(usize, Fix)>, mm2_course::ridecheck::Score)> = None;
+        let mut base: Option<mm2_course::ridecheck::Score> = None;
+        for round in 0..4 {
+            let spec: Vec<String> = fixes
+                .iter()
+                .map(|(k, f)| match f {
+                    Fix::Long(o) => format!("{k}:L{o:.0}"),
+                    Fix::Short(c) => format!("{k}:S{c:.0}"),
+                    Fix::Soften => format!("{k}:C"),
+                })
+                .collect();
+            std::env::set_var("FT_TUNE", spec.join(","));
+            let env = free::build_one(def, game, Some(ground)).map_err(|e| e.to_string())?;
+            let laid = free::laid_jumps();
+            let (report, path) = ride_and_check(&env, 300)?;
+            let s = &report.score;
+            eprintln!("{} round {round}: air {:.1} s/lap, jumps {:.1}, big {:.1}, hard {}, crashes {:.2}/lap, {} fixes", def.file, s.air, s.jumps, s.big, s.hard, s.crashes, fixes.len());
+            // Better: no tamer than the track was before any fix (air and
+            // big jumps within 5 %, about the noise of one ride) and fewer
+            // crashes than the best so far.
+            if base.is_none() {
+                base = Some(s.clone());
+            }
+            let first = base.as_ref().unwrap();
+            let keep = match &best {
+                None => true,
+                Some((_, b)) => s.air >= first.air * 0.95 && s.big >= first.big * 0.95 && s.crashes < b.crashes * 0.97,
+            };
+            if keep {
+                best = Some((fixes.clone(), s.clone()));
+            } else if round > 0 {
+                // That round's new fixes made it worse: go back to the best.
+                fixes = best.as_ref().unwrap().0.clone();
+                break;
+            }
+            if round == 3 {
+                break;
+            }
+            let mut added = 0;
+            for j in &report.jumps {
+                let Some(trouble) = j.trouble() else { continue };
+                let lip = path.at(j.at);
+                let Some(&(number, _)) = laid
+                    .iter()
+                    .filter(|(_, p)| (p[0] - lip[0]).hypot(p[1] - lip[1]) < 45.0)
+                    .min_by(|a, b| (a.1[0] - lip[0]).hypot(a.1[1] - lip[1]).total_cmp(&(b.1[0] - lip[0]).hypot(b.1[1] - lip[1])))
+                else {
+                    continue;
+                };
+                let fix = match trouble {
+                    Trouble::Long => Fix::Long(j.long_by.clamp(6.0, 40.0)),
+                    Trouble::Short => Fix::Short(j.short_by.clamp(4.0, 25.0)),
+                    Trouble::Crashes => Fix::Soften,
+                };
+                if fixes.iter().filter(|(n, _)| *n == number).count() < 2 {
+                    fixes.push((number, fix));
+                    added += 1;
+                }
+            }
+            if added == 0 {
+                break;
+            }
+        }
+        std::env::remove_var("FT_TUNE");
+        let (fixes, score) = best.unwrap();
+        // Build it again as kept, so the track on disk is the tuned one.
+        let spec: Vec<String> = fixes
+            .iter()
+            .map(|(k, f)| match f {
+                Fix::Long(o) => format!("({k}, Fix::Long({o:.0}.0))"),
+                Fix::Short(c) => format!("({k}, Fix::Short({c:.0}.0))"),
+                Fix::Soften => format!("({k}, Fix::Soften)"),
+            })
+            .collect();
+        let b = base.unwrap_or_default();
+        eprintln!("{} kept {} fixes: air {:.1} -> {:.1} s/lap, big {:.1} -> {:.1}, jumps {:.1} -> {:.1}, crashes {:.2} -> {:.2}/lap", def.file, fixes.len(), b.air, score.air, b.big, score.big, b.jumps, score.jumps, b.crashes, score.crashes);
+        if !fixes.is_empty() {
+            table.push_str(&format!("    (\"{}\", &[{}]),\n", def.file, spec.join(", ")));
+        }
+    }
+    println!("{table}");
+    Ok(())
 }

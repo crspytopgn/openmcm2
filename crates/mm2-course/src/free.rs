@@ -816,6 +816,7 @@ fn fill_straights(course: &Course, runs: &[(f32, f32)], rng: &mut Rng, make: &mu
             }
         }
     }
+    tune(course, &mut out);
     Features(out)
 }
 
@@ -951,6 +952,106 @@ impl Shape {
 /// Shapes placed along a course: where each starts.
 struct Features(Vec<(f32, Shape)>);
 
+/// What the ride check (crate::ridecheck) found a jump needs, applied to
+/// the jump by its number on the track (counted in the order the jumps
+/// are laid). The fixes keep a jump as big or make it bigger: a jump the
+/// riders overshoot gets a longer landing, one they come up short on is
+/// brought within reach with a little more height, and one they crash on
+/// gets gentler faces.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Fix {
+    /// Most riders fly this many ft past the landing.
+    Long(f32),
+    /// Most land this many ft short of it.
+    Short(f32),
+    /// Most crash on it.
+    Soften,
+}
+
+thread_local! {
+    /// The fixes for the track being made, the next jump's number, and
+    /// each jump laid so far: (number, where its take-off's lip is).
+    static TUNE: std::cell::RefCell<(Vec<(usize, Fix)>, usize, Vec<(usize, [f32; 2])>)> = Default::default();
+}
+
+/// Starts making a track with these fixes (from [`crate::free_tune`],
+/// plus `FT_TUNE=3:L30,5:S12,7:C` to try more).
+fn begin_tune(file: &str) {
+    // `FT_TUNE_OFF=1` makes the track as it was before any fix.
+    let mut fixes: Vec<(usize, Fix)> = if std::env::var_os("FT_TUNE_OFF").is_some() { Vec::new() } else { crate::free_tune::fixes(file).to_vec() };
+    if let Ok(more) = std::env::var("FT_TUNE") {
+        for part in more.split(',').filter(|p| !p.is_empty()) {
+            let Some((k, f)) = part.split_once(':') else { continue };
+            let Ok(k) = k.parse() else { continue };
+            let amount = f[1..].parse().unwrap_or(0.0);
+            let fix = match &f[..1] {
+                "L" => Fix::Long(amount),
+                "S" => Fix::Short(amount),
+                _ => Fix::Soften,
+            };
+            fixes.push((k, fix));
+        }
+    }
+    TUNE.with(|t| *t.borrow_mut() = (fixes, 0, Vec::new()));
+}
+
+/// The jumps laid on the last track made: (number, where the lip is).
+pub fn laid_jumps() -> Vec<(usize, [f32; 2])> {
+    TUNE.with(|t| t.borrow().2.clone())
+}
+
+fn tune(course: &Course, out: &mut [(f32, Shape)]) {
+    TUNE.with(|t| {
+        let mut t = t.borrow_mut();
+        for k in 0..out.len() {
+            let number = t.1 + k;
+            let room = match out.get(k + 1) {
+                Some((next, _)) => (next - out[k].0).rem_euclid(course.length) - out[k].1.length() - 12.0,
+                None => 60.0,
+            }
+            .max(0.0);
+            for &(n, fix) in &t.0 {
+                if n == number {
+                    out[k].1 = out[k].1.fixed(fix, room);
+                }
+            }
+            let (at, shape) = out[k];
+            let lip = match shape {
+                Shape::Table { up, .. } | Shape::Gap { up, .. } | Shape::Step { up, .. } => up,
+                _ => 0.0,
+            };
+            let (p, _) = course.at(at + lip);
+            t.2.push((number, p));
+        }
+        t.1 += out.len();
+    });
+}
+
+impl Shape {
+    /// The shape with `fix` made, growing by at most `room` ft.
+    fn fixed(self, fix: Fix, room: f32) -> Shape {
+        let grow = |want: f32| want.clamp(0.0, room);
+        let shape = match (self, fix) {
+            (Shape::Table { up, top, down, height }, Fix::Long(o)) => {
+                let g = grow(o);
+                Shape::Table { up, top: top + 0.6 * g, down: down + 0.4 * g, height }
+            }
+            (Shape::Gap { up, gap, down, height }, Fix::Long(o)) => {
+                let g = grow(o);
+                Shape::Gap { up, gap: gap + 0.6 * g, down: down + 0.4 * g, height }
+            }
+            (Shape::Step { up, top, down, height }, Fix::Long(o)) => Shape::Step { up, top: top + grow(o), down, height },
+            (Shape::Table { up, top, down, height }, Fix::Short(c)) => Shape::Table { up, top: (top - 0.7 * c).max(top * 0.6).max(6.0), down, height: height * 1.1 },
+            (Shape::Gap { up, gap, down, height }, Fix::Short(c)) => Shape::Gap { up, gap: (gap - 0.7 * c).max(gap * 0.7).max(12.0), down, height: height * 1.1 },
+            (Shape::Table { up, top, down, height }, Fix::Soften) => Shape::Table { up: up * 1.15, top, down: down * 1.35, height },
+            (Shape::Gap { up, gap, down, height }, Fix::Soften) => Shape::Gap { up: up * 1.15, gap, down: down * 1.35, height },
+            (Shape::Step { up, top, down, height }, Fix::Soften) => Shape::Step { up: up * 1.2, top, down: down * 1.3, height },
+            (other, _) => other,
+        };
+        shape.tamed()
+    }
+}
+
 impl Features {
     fn height(&self, along: f32, length: f32) -> f32 {
         self.0
@@ -987,6 +1088,7 @@ fn place_features(course: &Course, rng: &mut Rng, make: &mut dyn FnMut(&mut Rng)
             s += 12.0;
         }
     }
+    tune(course, &mut out);
     Features(out)
 }
 
@@ -1009,6 +1111,11 @@ struct Land {
     /// Where on the track each sample is: ft left of the centre line
     /// (negative right), the distance along, and the track's half width.
     lane: Vec<[f32; 4]>,
+    /// How tall the berm's lip stands where each sample's turn is banked,
+    /// ft, + when the outside is to the left (the lane's + side).
+    berm: Vec<f32>,
+    /// The seed the berms' wear was laid with (see [`crate::berm::shape`]).
+    berm_seed: u32,
 }
 
 impl Land {
@@ -1023,6 +1130,8 @@ impl Land {
             steep: vec![0.0; size * size],
             patch: vec![(0, 0.0); size * size],
             lane: vec![[f32::MAX, 0.0, 0.0, 0.0]; size * size],
+            berm: vec![0.0; size * size],
+            berm_seed: 0,
         }
     }
 
@@ -1244,6 +1353,7 @@ impl Land {
         // and turns set the rhythm).
         let lip_w = (self.scale * 1.7).max(5.0);
         let seed = (len * 7.0) as u32;
+        self.berm_seed = seed;
         let bend = course.smoothed_curve(45.0);
         let count = bend.len();
         let bend_at = |s: f32| {
@@ -1265,12 +1375,16 @@ impl Land {
                 // few off-camber (the outside low, the inside high).
                 let camber = 1.0 + twist * ((noise(near.along / 300.0, 7.7, seed + 21) - 0.5) * 4.4 + 0.15);
                 let across = smooth(near.distance / half);
+                // A berm: a bowl up the outside of the turn to a rounded
+                // lip of pushed-out dirt, as tall as the turn is tight
+                // (see crate::berm).
+                let tall = if camber > 0.0 { bank * crate::berm::strength(curve) * camber.min(1.6) } else { 0.0 };
+                let rise = crate::berm::shape(outside * near.distance, half, tall, near.along, seed);
                 let berm = if camber >= 0.0 {
-                    // A berm's face curves up like a bowl, steepest at its top.
-                    if outside > 0.0 { bank * turn * camber * across * (0.35 + 0.65 * across) } else { 0.0 }
+                    if outside * near.distance <= half { rise.height } else { 0.0 }
                 } else {
                     // Off-camber: a steady tilt across the track, down to the outside.
-                    bank * turn * camber * 0.45 * across * outside
+                    bank * 0.75 * turn * camber * 0.45 * across * outside
                 };
                 let jump = if near.distance < half + 2.0 { features.height(near.along, course.length) } else { 0.0 };
                 let edge = smooth((near.distance - half) / blend);
@@ -1282,7 +1396,8 @@ impl Land {
                 // broad, shallow bed along the line, smooth along its
                 // length so it guides the bike without bumping it.
                 let bed = -0.3 * sculpt * (-(line / (half * 0.28)).powi(2)).exp();
-                let on = profile(near.along) + jump * (1.0 - smooth((near.distance - half + 3.0) / 5.0)) + berm + bed;
+                let floor = profile(near.along) + jump * (1.0 - smooth((near.distance - half + 3.0) / 5.0));
+                let on = floor + berm + bed;
                 let mut spill = 0.0;
                 if sculpt > 0.0 {
                     // Ragged edges (paint only): the dirt wanders out into the grass.
@@ -1290,17 +1405,29 @@ impl Land {
                 }
                 let mut h = lerp(on, self.heights[i], edge);
                 let mut lip_dirt = 0.0;
+                if outside * near.distance > half && tall > 0.0 {
+                    // Past the edge the berm's lip and back stand on the
+                    // ground, meeting it where they fall away.
+                    let was = h;
+                    h = crate::berm::meet(was, floor, rise.height, tall);
+                    if h > was + 0.3 {
+                        lip_dirt = rise.dirt;
+                    }
+                }
                 if sculpt > 0.0 {
-                    // The windrow: low and unbroken along the straights,
+                    // The windrow: low and unbroken along the edges,
                     // varying only slowly, so the ground past the track
-                    // stays easy to ride out onto; it builds into the
-                    // berm round the outside of turns.
-                    let lip_h = (0.45 + 0.35 * noise(near.along / 140.0, near.side * 2.0, seed + 14)) * (1.0 + if outside > 0.0 { 3.0 * turn } else { 0.0 });
+                    // stays easy to ride out onto; round the outside of
+                    // a bermed turn the berm's own lip takes its place.
+                    let lip_h = (0.45 + 0.35 * noise(near.along / 140.0, near.side * 2.0, seed + 14)) * if outside > 0.0 { 1.0 - smooth(tall / 2.0) } else { 1.0 };
                     let u = (near.distance - half - lip_w * 0.6) / lip_w;
                     let lip = lip_h * (1.0 - u * u).max(0.0).powf(1.5) * sculpt;
                     h += lip;
                     // The pushed-up dirt is bare, grass only on its back.
-                    lip_dirt = smooth(lip / 0.6) * (1.0 - smooth(u * 1.4));
+                    lip_dirt = f32::max(lip_dirt, smooth(lip / 0.6) * (1.0 - smooth(u * 1.4)));
+                }
+                if near.distance < self.lane[i][0].abs() {
+                    self.berm[i] = -tall * curve.signum();
                 }
                 self.heights[i] = h;
                 let surface = (1.0 - smooth((near.distance - half - spill.max(-3.0)) / 6.0)).max(lip_dirt * 0.95);
@@ -1864,12 +1991,20 @@ fn paint(land: &Land, kind: Kind, biome: Biome, ground: &Ground, seed: u32) -> (
                             // straights, each crossing the others now and
                             // then, a pale lip of pushed-up dirt beside each.
                             let spread = 0.45 + 0.55 * smooth((fbm(along / 90.0, 0.5, seed + 39) - 0.3) / 0.4);
-                            let mut rut = 0.0f32;
+                            // Round a bermed turn the bikes rail the berm:
+                            // the ruts swing out and up its face, and its
+                            // lip and back are loose, paler pushed-up dirt.
+                            let bermed = land.sample(&land.berm, x, z);
+                            let tall = bermed.abs();
+                            let push = bermed.signum() * half * 0.4 * smooth(tall / 4.0);
+                            let berm = crate::berm::shape(side * bermed.signum(), half, tall, along, land.berm_seed);
+                            let loose = if side * bermed.signum() > half { berm.dirt * smooth(tall / 2.0) } else { 0.0 };
+                            let mut rut = (berm.rut / 0.4).min(1.0) * smooth(tall / 2.0);
                             let mut lip = 0.0f32;
                             for k in 0..7u32 {
                                 let fan = (k as f32 - 3.0) / 3.0;
                                 let wander = (fbm(along / 55.0, k as f32 * 3.7, seed + 40 + k) - 0.5) * 2.0;
-                                let lane_at = (line_at + half * spread * (fan * 0.5 + wander * 0.22)).clamp(-half * 0.9, half * 0.9);
+                                let lane_at = (line_at + push + half * spread * (fan * 0.5 + wander * 0.22)).clamp(-half * 0.95, half * 0.95);
                                 let width = 1.3 + 1.0 * fbm(along / 25.0, k as f32, seed + 50 + k);
                                 let depth = (0.45 + 0.55 * smooth((fbm(along / 40.0, k as f32 * 1.3, seed + 60 + k) - 0.25) / 0.35)) * (1.0 - fan.abs() * 0.45);
                                 let d = (side - lane_at) / width;
@@ -1884,6 +2019,11 @@ fn paint(land: &Land, kind: Kind, biome: Biome, ground: &Ground, seed: u32) -> (
                             let bumps = (along / 3.2).sin().max(0.0).powi(3) * smooth((fbm(along / 60.0, 0.0, seed + 70) - 0.55) / 0.15) * wear;
                             let dark = 1.0 - rut * 0.5 - bumps * 0.1;
                             ct = ct.map(|v| v * dark);
+                            if loose > 0.0 {
+                                let clods = hash((x / 1.1).floor() as i32, (z / 1.1).floor() as i32, seed + 35);
+                                let dry = 1.0 + loose * (0.1 + 0.12 * fbm(x / 4.0, z / 4.0, seed + 36)) - loose * smooth((clods - 0.8) / 0.1) * 0.25;
+                                ct = ct.map(|v| (v * dry).clamp(0.0, 1.0));
+                            }
                         }
                         c = std::array::from_fn(|q| lerp(c[q], ct[q], t));
                     }
@@ -2419,7 +2559,7 @@ fn national(def: &Def) -> Made {
     let half = 20.0;
     {
         let profile = profile_fn(&course, raw);
-        land.carve(&course, half, cell / 2.0 - half, &profile, &features, 5.0, 1.0, Some(((line - 80.0).rem_euclid(course.length), 80.0 + (sl * 0.7).min(320.0))), 1.0);
+        land.carve(&course, half, cell / 2.0 - half, &profile, &features, 6.5, 1.0, Some(((line - 80.0).rem_euclid(course.length), 80.0 + (sl * 0.7).min(320.0))), 1.0);
         land.widen_start(&course, line, half, START_HALF, 12.0, &profile);
         if std::env::var_os("FT_DEBUG").is_some() {
             let (p, _) = course.at(line);
@@ -2849,7 +2989,7 @@ fn supercross(def: &Def) -> Made {
     let jump_runs = straights(&course, 80.0);
     let features = fill_straights(&course, &jump_runs, &mut rng, &mut |r, room| pick_shape(r, room, SX_JUMPS), 16.0, 14.0, (8.0, 22.0), Some(((line - 40.0).rem_euclid(course.length), 200.0)));
     let half = 13.5;
-    land.carve(&course, half, 6.0, &|_| floor + 0.3, &features, 3.0, 0.0, None, 0.0);
+    land.carve(&course, half, 6.0, &|_| floor + 0.3, &features, 5.0, 0.0, None, 0.0);
     land.widen_start(&course, line, half, SX_START_HALF, 4.0, &|_| floor + 0.3);
     land.compute_steep();
     let mut models = vec![Model { name: "fp_arena".into(), at: [cx, floor, cz], look: [0.0, 1.0], scale: 1.0 }];
@@ -3153,7 +3293,7 @@ fn open_country(def: &Def) -> Made {
             land.grade(course, 90.0, &profile);
             continue;
         }
-        land.carve(course, *half, if desert { 40.0 } else { 26.0 }, &profile, &features, 3.0, 0.0, None, 0.0);
+        land.carve(course, *half, if desert { 40.0 } else { 26.0 }, &profile, &features, 4.0, 0.0, None, 0.0);
         let start_s = *gates.last().unwrap_or(&0.0);
         land.widen_start(course, start_s, *half, START_HALF, if desert { 40.0 } else { 20.0 }, &profile);
     }
@@ -3226,7 +3366,7 @@ fn quarry(def: &Def) -> Made {
     {
         let raw = land.profile(&course, 200.0);
         let profile = profile_fn(&course, raw);
-        land.carve(&course, 18.0, 30.0, &profile, &features, 4.0, 0.6, None, 0.5);
+        land.carve(&course, 18.0, 30.0, &profile, &features, 4.5, 0.6, None, 0.5);
     }
     let mut models = Vec::new();
     for k in 0..rng.range(4.0, 8.0) as usize {
@@ -3350,6 +3490,7 @@ fn tag(def: &Def) -> Made {
 /// (`(file name, bytes)`). `ground` reads one of the pack's ground
 /// pictures (`grass.png`) by name; without them the ground is painted flat.
 pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(String, Vec<u8>)>, Box<dyn std::error::Error>> {
+    begin_tune(def.file);
     let mut made = match def.kind {
         Kind::National => national(def),
         Kind::Supercross => supercross(def),
@@ -3442,7 +3583,10 @@ pub fn make(def: &Def, ground: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<(
 /// "12": a crowd only in stadiums and Tag arenas, as in the original.
 /// "13": smoother free tracks over real hills, worn ruts, more jumps, less
 /// clutter (the private engine's 11).
-pub const MADE: &str = "13";
+/// "14": natural berms (crate::berm): a bowl up to a rounded lip of
+/// pushed-out dirt, as tall as the turn is tight, ruts up the face; and
+/// jumps fixed where the computer riders crashed (crate::free_tune).
+pub const MADE: &str = "14";
 
 /// The free track whose file is `stem` (`FPNAT01`), any case.
 pub fn find(stem: &str) -> Option<&'static Def> {

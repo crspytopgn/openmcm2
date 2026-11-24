@@ -103,6 +103,9 @@ pub enum Ask {
     /// Ride the track; with `watch`, the computer rides it while the
     /// player watches (the original builder's Test Computer Bike).
     Ride { env: PathBuf, mode: Mode, name: String, watch: bool },
+    /// Check how the track baked at this path rides: computer riders lap
+    /// it out of sight and [`Builder::checked`] gets their laps.
+    Check { env: PathBuf },
     /// Leave the builder.
     Exit,
 }
@@ -350,6 +353,10 @@ pub struct Builder {
     picking: Option<PickFor>,
     /// The next ride is the computer's, to watch.
     watch: bool,
+    /// The next bake is for a ride check, and its findings once done.
+    check_next: bool,
+    pub checking: bool,
+    check: Option<mm2_course::ridecheck::Report>,
     /// A Free Pack track being built from its recipe to copy.
     copy_job: Option<Job<Result<Course, String>>>,
     ask: Option<Ask>,
@@ -429,6 +436,9 @@ impl Builder {
             export_job: None,
             picking: None,
             watch: false,
+            check_next: false,
+            checking: false,
+            check: None,
             copy_job: None,
             ask: None,
             saved_at: 0.0,
@@ -546,6 +556,8 @@ impl Builder {
     fn changed(&mut self) {
         self.dirty = true;
         self.unsaved = true;
+        // The ride check's marks were for the track as it was.
+        self.check = None;
     }
 
     fn undo(&mut self) {
@@ -572,6 +584,25 @@ impl Builder {
     fn dice(&mut self) -> u32 {
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u32).unwrap_or(1);
         t ^ (self.now * 1000.0) as u32
+    }
+
+    /// The computer riders' laps from a ride check: what it found goes on
+    /// the map.
+    pub fn checked(&mut self, frames: &[mm2_course::ridecheck::Frame]) {
+        self.checking = false;
+        let half = self.course.mode.track_width() / 2.0;
+        let report = mm2_course::ridecheck::check(&self.line, half, &|x, z| self.height(x, z), frames);
+        let bad = report.jumps.iter().filter(|j| j.worrying()).count()
+            + report.turns.iter().filter(|t| t.crashes >= 4).count();
+        let s = &report.score;
+        self.say(&format!(
+            "Ride check: {} jumps, {:.0} s of air a lap, {:.1} crashes a lap (the original tracks: 3.5 to 5). {}",
+            report.jumps.iter().filter(|j| j.tries >= 3).count(),
+            s.air,
+            s.crashes,
+            if bad == 0 { "Nothing to fix.".to_string() } else { format!("{bad} marked on the map.") }
+        ));
+        self.check = Some(report);
     }
 
     fn say(&mut self, text: &str) {
@@ -840,6 +871,11 @@ impl Builder {
             let (job, ride) = self.bake_job.take().unwrap();
             match job.join() {
                 Ok(Ok(path)) => {
+                    if ride && std::mem::take(&mut self.check_next) {
+                        self.checking = true;
+                        self.say("Riding your track with computer riders...");
+                        return Ask::Check { env: path };
+                    }
                     if ride {
                         self.rode = true;
                         return Ask::Ride { env: path, mode: self.course.mode, name: self.course.name.clone(), watch: std::mem::take(&mut self.watch) };
@@ -1836,6 +1872,32 @@ impl Builder {
             }
             s += arrow_every;
         }
+        // What the ride check found: each jump or turn that rides badly,
+        // with what to change.
+        if let Some(report) = &self.check {
+            let mark = |p: &mut Painter, s: f32, up: f32, text: &str, colour: [f32; 4]| {
+                let q = line.at(s.rem_euclid(line.length.max(1.0)));
+                if let Some(at) = self.project(vp, Vec3::new(q[0], self.height(q[0], q[1]) + up, q[1])) {
+                    p.label(at, text, colour);
+                }
+            };
+            // Flying long or coming up short is everyday riding in this
+            // game (the original tracks are full of it): only jumps where
+            // riders crash are marked, with what most likely causes it.
+            for j in report.jumps.iter().filter(|j| j.worrying()) {
+                let text = if j.short > j.long && j.short > j.clean / 2 {
+                    format!("{} of {} riders crash, most come up {:.0} ft short: more run-up or a nearer landing", j.crashed, j.tries, j.short_by)
+                } else if j.long > j.clean / 2 {
+                    format!("{} of {} riders crash, most fly {:.0} ft past the landing: make it longer", j.crashed, j.tries, j.long_by)
+                } else {
+                    format!("{} of {} riders crash here: gentler faces", j.crashed, j.tries)
+                };
+                mark(p, j.at, 10.0, &text, [1.0, 0.55, 0.4, 1.0]);
+            }
+            for t in report.turns.iter().filter(|t| t.crashes >= 4) {
+                mark(p, t.at, 6.0, &format!("{} crashes in this turn: widen it or bank it more", t.crashes), [1.0, 0.75, 0.4, 1.0]);
+            }
+        }
         // Jumps: their stretch of line in amber, with their name.
         for (ji, j) in self.course.jumps.iter().enumerate() {
             let hot = self.tool == Tool::Jumps && (self.hover == Hover::Jump(ji) || self.picked == Some(ji));
@@ -2240,6 +2302,14 @@ impl Builder {
         if p.button(input, "watch", [w - 211.0, 433.0, 59.0, 20.0], if busy && self.watch { "Baking..." } else { "Watch AI" }, "Bake the track and watch a computer rider lap it, to see how it rides, as the original builder's Test Computer Bike (P takes over). Esc comes back here.", false) && !busy {
             self.watch = true;
             self.bake_track(true);
+        }
+        p.panel(input, [w - 214.0, 404.0, 210.0, 26.0]);
+        let label = if self.checking { "Riding it..." } else if busy && self.check_next { "Baking..." } else { "Check ride" };
+        if p.button(input, "check", [w - 211.0, 407.0, 204.0, 20.0], label, "Six computer riders lap your track out of sight for three minutes, then each jump and turn that rides badly is marked on the map with what to change: riders casing a jump, flying past its landing or crashing. Click again to clear the marks.", self.check.is_some()) && !busy && !self.checking {
+            if self.check.take().is_none() {
+                self.check_next = true;
+                self.bake_track(true);
+            }
         }
         if p.button(input, "top", [w - 149.0, 433.0, 66.0, 20.0], "Top view", "Look straight down on the track, or back (Tab).", self.cam.pitch > 1.5) {
             self.top_view();
