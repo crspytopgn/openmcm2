@@ -30,6 +30,10 @@ pub struct Field {
     /// against the racing line: ft left of it, the distance along and the
     /// track's half width; empty on others.
     pub ruts: Vec<[f32; 3]>,
+    /// Where a berm stands, for painting it: ft towards the outside of
+    /// the turn, the distance along, the track's half width and how tall
+    /// the berm's lip stands; NaN where there is none.
+    pub berms: Vec<[f32; 4]>,
 }
 
 impl Field {
@@ -148,13 +152,14 @@ fn grade_window(mode: Mode) -> f32 {
     }
 }
 
-/// The tallest a fully banked berm stands on its outside, ft.
+/// How tall a fully banked berm's lip stands, ft, with the Berms slider
+/// at its middle (the slider runs from none to twice this).
 fn bank_most(mode: Mode) -> f32 {
     match mode {
         Mode::Supercross => 5.0,
-        Mode::National => 9.0,
-        Mode::Enduro => 5.0,
-        Mode::Baja => 6.0,
+        Mode::National => 6.5,
+        Mode::Enduro => 4.0,
+        Mode::Baja => 4.5,
     }
 }
 
@@ -206,15 +211,21 @@ impl Bed {
         let mut grade = path.smooth(&raw, window);
         // Twice, for a gentler ride over the hills.
         grade = path.smooth(&grade, window);
-        let most = bank_most(course.mode) * course.line.berms.clamp(0.0, 1.0);
-        // A rebuilt track's berms build up into each turn and die away
-        // after it, as a raced-on track's do, rather than starting at its
-        // first bend.
-        let turn = if worn(course) { path.smooth(&path.smooth(&path.turn, 90.0), 90.0) } else { path.turn.clone() };
-        // Full banking on a corner of about a 60 ft radius.
-        let bank = turn
-            .iter()
-            .map(|t| (t.abs() * 60.0).clamp(0.0, 1.0) * most * t.signum())
+        let most = bank_most(course.mode) * (course.line.berms * 2.0).clamp(0.0, 2.0);
+        // Berms build up into each turn and die away after it, as a
+        // raced-on track's do, rather than starting at its first bend; a
+        // rebuilt track's over a longer stretch. They stand tallest just
+        // past the apex, where the bikes push the dirt out.
+        let window = if worn(course) { 90.0 } else { 50.0 };
+        let turn = path.smooth(&path.smooth(&path.turn, window), window);
+        let late = (8.0 / crate::path::STEP) as isize;
+        let m = turn.len() as isize;
+        let bank = (0..m)
+            .map(|i| {
+                let j = if path.closed { (i - late).rem_euclid(m) } else { (i - late).clamp(0, m - 1) } as usize;
+                let t = turn[j];
+                crate::berm::strength(t) * most * t.signum()
+            })
             .collect();
         Bed { grade, bank }
     }
@@ -272,9 +283,13 @@ pub fn bake(course: &Course, every: usize, land: &[f32]) -> Field {
     let mut heights = land.to_vec();
     let mut track = vec![f32::MAX; n * n];
     let mut ruts = if worn { vec![[f32::NAN; 3]; n * n] } else { Vec::new() };
+    // Samples a berm's lip or back covers in bare dirt.
+    let mut bermed = vec![false; n * n];
+    let mut berms = vec![[f32::NAN; 4]; n * n];
+    let seed = course.land.seed;
     // The track, by rows on a few threads.
     {
-        let mut both: Vec<(f32, f32, [f32; 3])> = heights.iter().map(|&h| (h, f32::MAX, [f32::NAN; 3])).collect();
+        let mut both: Vec<(f32, f32, [f32; 3], bool, [f32; 4])> = heights.iter().map(|&h| (h, f32::MAX, [f32::NAN; 3], false, [f32::NAN; 4])).collect();
         rows(&mut both, n, |z, row| {
             for (x, cell) in row.iter_mut().enumerate() {
                 let p = [x as f32 * step, z as f32 * step];
@@ -296,11 +311,14 @@ pub fn bake(course: &Course, every: usize, land: &[f32]) -> Field {
                 // The outside of a corner (the side away from the turn)
                 // rises into a berm.
                 let b = bed.bank[i];
-                if b != 0.0 {
-                    let outer = (-b.signum() * near.side / hw).max(0.0);
-                    top += b.abs()
-                        * smoothstep(0.05, 1.0, outer.min(1.0))
-                        * (1.0 + 0.3 * (outer - 1.0).clamp(0.0, 0.6));
+                let out = -b.signum() * near.side;
+                let berm = crate::berm::shape(out, hw, b.abs(), near.s, seed);
+                let floor = top;
+                if out <= hw {
+                    top += berm.height;
+                }
+                if b.abs() > 0.3 && out > 0.0 {
+                    cell.4 = [out, near.s, hw, b.abs()];
                 }
                 if worn {
                     // Where the bikes go the dirt is packed down a little:
@@ -320,12 +338,23 @@ pub fn bake(course: &Course, every: usize, land: &[f32]) -> Field {
                 } else {
                     cell.0 = top * (1.0 - t) + cell.0 * t;
                 }
+                if out > hw {
+                    // Past the edge the berm's lip and back stand on the
+                    // ground, meeting it where they fall away.
+                    let was = cell.0;
+                    cell.0 = crate::berm::meet(was, floor, berm.height, b.abs());
+                    if berm.dirt > 0.5 && cell.0 > was + 0.3 {
+                        cell.3 = true;
+                    }
+                }
                 cell.1 = d / hw;
             }
         });
-        for (k, (h, d, r)) in both.into_iter().enumerate() {
+        for (k, (h, d, r, b, m)) in both.into_iter().enumerate() {
             heights[k] = h;
             track[k] = d;
+            bermed[k] = b;
+            berms[k] = m;
             if worn {
                 ruts[k] = r;
             }
@@ -338,7 +367,7 @@ pub fn bake(course: &Course, every: usize, land: &[f32]) -> Field {
             if let Some(src) = &course.source {
                 return src.surface((k % n) as f32 * step, (k / n) as f32 * step);
             }
-            if d <= 1.06 {
+            if d <= 1.06 || bermed[k] {
                 Surface::Dirt.zone()
             } else {
                 ground.zone()
@@ -368,6 +397,7 @@ pub fn bake(course: &Course, every: usize, land: &[f32]) -> Field {
         water,
         rivers,
         ruts,
+        berms,
     }
 }
 

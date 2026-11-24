@@ -1388,6 +1388,55 @@ fn ai_check(
     Ok(())
 }
 
+/// The Course Builder's ride check: six computer riders lap a baked track
+/// with no picture, their every frame taped for [`mm2_course::ridecheck`].
+struct RideCheck {
+    track: Track,
+    race: Race,
+    frames: Vec<mm2_course::ridecheck::Frame>,
+    left: f32,
+}
+
+impl RideCheck {
+    /// How long the riders ride, s.
+    const SECONDS: f32 = 180.0;
+
+    fn start(env: &Path) -> Option<RideCheck> {
+        let track = load_track(env, 0, 6, Vec::new(), PLAYER, None, None).map_err(|e| eprintln!("ride check: {e}")).ok()?;
+        let mut race = make_race_as(&track, 99, PLAYER)?;
+        race.autopilot = race.course.is_some();
+        race.practice = true;
+        race.time = race.lead;
+        Some(RideCheck { track, race, frames: Vec::new(), left: Self::SECONDS })
+    }
+
+    /// Rides on `seconds` more; true once done.
+    fn step(&mut self, seconds: f32) -> bool {
+        const FRAME: f32 = 1.0 / 30.0;
+        let mut t = 0.0;
+        while t < seconds && self.left > 0.0 {
+            let c = ride::Controls { throttle: 1.0, ..Default::default() };
+            self.race.update(&self.track.ground(), c, FRAME);
+            let clock = self.race.clock();
+            for (i, rc) in self.race.racers.iter().enumerate() {
+                let b = &rc.bike;
+                let p = b.position();
+                self.frames.push(mm2_course::ridecheck::Frame {
+                    t: clock,
+                    bike: i,
+                    pos: [p.x, p.y, p.z],
+                    speed: b.velocity().length(),
+                    airborne: b.airborne(),
+                    crashed: b.crashed(),
+                });
+            }
+            t += FRAME;
+            self.left -= FRAME;
+        }
+        self.left <= 0.0
+    }
+}
+
 fn make_race_as(track: &Track, laps: u32, player: usize) -> Option<Race> {
     let mut race = make_race_on(track, laps, player)?;
     race.tricks = track.tricks.clone();
@@ -4670,6 +4719,9 @@ struct App {
     photo_note: Option<(String, Instant)>,
     /// The Course Builder (an extra), open over the menus.
     builder: Option<builder::Builder>,
+    /// The builder's ride check under way: computer riders lapping the
+    /// track out of sight, a little each frame.
+    checking: Option<RideCheck>,
     /// The Course Builder was asked for while the page was still reading
     /// files in (the browser): it opens on this once they are.
     builder_waiting: Option<Option<PathBuf>>,
@@ -4835,6 +4887,7 @@ impl App {
             photo_follow: false,
             photo_note: None,
             builder: None,
+            checking: None,
             builder_waiting: None,
             quit: false,
         }
@@ -5582,6 +5635,13 @@ impl App {
             }
         }
         b.update(dt, now);
+        if let Some(c) = &mut self.checking {
+            // A browser has the one thread: a little a frame there.
+            if c.step(if cfg!(target_arch = "wasm32") { 0.5 } else { 1.5 }) {
+                b.checked(&c.frames);
+                self.checking = None;
+            }
+        }
         match b.take_ask() {
             builder::Ask::Stay => {}
             builder::Ask::Exit => {
@@ -5597,6 +5657,12 @@ impl App {
                     if rode {
                         f.main_menu();
                     }
+                }
+            }
+            builder::Ask::Check { env } => {
+                self.checking = RideCheck::start(&env);
+                if self.checking.is_none() {
+                    b.checked(&[]);
                 }
             }
             builder::Ask::Ride { env, mode, name, watch } => {

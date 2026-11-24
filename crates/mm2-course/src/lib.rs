@@ -14,11 +14,14 @@
 
 pub mod auto;
 pub mod bake;
+pub mod berm;
 pub mod copy;
 pub mod rebuild;
+pub mod ridecheck;
 pub mod env;
 pub mod flight;
 pub mod free;
+pub mod free_tune;
 pub mod kit;
 pub mod land;
 pub mod nature;

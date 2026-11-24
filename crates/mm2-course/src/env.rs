@@ -820,7 +820,8 @@ fn tile(field: &Field, tx: usize, tz: usize, seed: u32, sx: bool, ready: &[Optio
             let shade = 1.0 + big * 0.07 + fine * 0.05
                 - slope * 0.06
                 - on_line * if sx { 0.10 } else { 0.07 }
-                - worn_ruts(field, x0, z0, ax, az, seed);
+                - worn_ruts(field, x0, z0, ax, az, seed)
+                - berm_paint(field, x0, z0, ax, az, seed);
             let c = [
                 c[0] * shade + dry * 0.6,
                 c[1] * shade + dry * 0.4,
@@ -870,6 +871,40 @@ fn worn_ruts(field: &Field, x0: usize, z0: usize, ax: f32, az: f32, seed: u32) -
     }
     let packed = (-(side / (half * 0.35)).powi(2)).exp();
     rut * 0.45 + packed * 0.15 - lip * 0.1
+}
+
+/// How much darker a berm makes a pixel: the ruts the bikes cut up its
+/// face where they rail it, and paler loose dirt on its lip and back
+/// (negative is paler).
+fn berm_paint(field: &Field, x0: usize, z0: usize, ax: f32, az: f32, seed: u32) -> f32 {
+    let n = field.n;
+    let Some(near) = field.berms.get((z0 + (az >= 0.5) as usize).min(n - 1) * n + (x0 + (ax >= 0.5) as usize).min(n - 1)) else {
+        return 0.0;
+    };
+    if near[0].is_nan() {
+        return 0.0;
+    }
+    let q = [field.berms[z0 * n + x0], field.berms[z0 * n + x0 + 1], field.berms[(z0 + 1) * n + x0], field.berms[(z0 + 1) * n + x0 + 1]];
+    let [out, along, half, tall] = if q.iter().all(|r| !r[0].is_nan() && (r[1] - near[1]).abs() < 30.0) {
+        let mix = |k: usize| (q[0][k] * (1.0 - ax) + q[1][k] * ax) * (1.0 - az) + (q[2][k] * (1.0 - ax) + q[3][k] * ax) * az;
+        [mix(0), mix(1), near[2], mix(3)]
+    } else {
+        *near
+    };
+    let berm = crate::berm::shape(out, half, tall, along, seed);
+    let full = smoothstep(0.5, 3.0, tall);
+    // Rut lines up the face, wandering a little, bunched where the bikes
+    // rail it.
+    let mut rut = (berm.rut / 0.4).min(1.0);
+    for k in 0..4u32 {
+        let at = half * (0.5 + 0.13 * k as f32 + 0.06 * land::fbm(along / 40.0, k as f32 * 2.3, seed ^ (90 + k), 2));
+        let width = 1.0 + 0.8 * (land::fbm(along / 22.0, k as f32, seed ^ (95 + k), 2) * 0.5 + 0.5);
+        let d = (out - at) / width;
+        rut = rut.max((-d * d).exp() * (0.8 - 0.12 * k as f32));
+    }
+    let loose = if out > half { berm.dirt } else { 0.0 };
+    let clods = land::noise(out / 1.3, along / 1.3, seed ^ 99);
+    (rut * 0.35 - loose * (0.12 + 0.05 * clods)) * full
 }
 
 fn smoothstep(a: f32, b: f32, x: f32) -> f32 {

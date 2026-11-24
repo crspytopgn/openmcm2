@@ -21,7 +21,7 @@ const GROUNDED: f32 = 6.0;
 /// How much higher (feet) scenery must sit than what's under it to be on it.
 const STACKED: f32 = 2.5;
 
-pub const MADE: &str = "6";
+pub const MADE: &str = "7";
 
 /// The name of the scene file in `files`, and its text.
 fn scene_of(files: &[(String, Vec<u8>)]) -> Option<(&str, String)> {
