@@ -488,8 +488,10 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     // paint and print, not bumps.
     let polished = enh.more.w > 0.5 && in.moving > 0.5;
     // Only a touch of bump from the texture's brightness: more reads as an
-    // over-sharpened picture.
-    var strength = select(select(0.2, 0.45, in.mode == PLANT), 0.08, polished);
+    // over-sharpened picture. None on the bikes and riders unless
+    // polished: their print and seams came out embossed, speckled, with
+    // white lines along the edges of the jersey's panels.
+    var strength = select(select(0.2, 0.45, in.mode == PLANT), select(0.0, 0.08, polished), in.moving > 0.5);
     // The trial track's objects: the grain of the photo material each is
     // made of, its colour taken out so the game's paint stays, and its
     // bumps in place of the texture's brightness (which sparkle on fine

@@ -173,8 +173,8 @@ impl Quality {
     /// as `--enhanced=quality=` sets it.
     pub fn has(self, name: &str) -> bool {
         let off: &[&str] = match self {
-            Quality::Low => &["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr"],
-            Quality::Medium => &["shafts", "smooth", "gtao", "ssr"],
+            Quality::Low => &["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr", "bounce"],
+            Quality::Medium => &["shafts", "smooth", "gtao", "ssr", "bounce"],
             _ => &[],
         };
         // On with this preset though off unless asked. The trackside
@@ -281,13 +281,15 @@ pub const UPGRADES: [(&str, &str, bool); 31] = [
     // The Max preset's own.
     ("supersample", "Supersampling (sharper than the screen)", false),
     ("far", "Detail reaching further", false),
-    ("roost", "Flying dirt (roost)", false),
+    ("roost", "Flying dirt (roost)", true),
     // Holds the frame rate by drawing the scene a little softer while
     // frames come late; the preset's own size while they keep time.
     ("dynamic", "Keep the frame rate (dynamic resolution)", true),
-    // Newer light and upscaling, off unless turned on.
-    ("bounce", "Bounce light", false),
-    ("fsr", "AMD FSR upscaling", false),
+    // Newer light and upscaling: bounce light from High up, FSR on every
+    // preset (it only works when the scene is drawn smaller than the
+    // screen, or with TAA).
+    ("bounce", "Bounce light", true),
+    ("fsr", "AMD FSR upscaling", true),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
