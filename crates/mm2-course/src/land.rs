@@ -65,6 +65,15 @@ pub const BASE: f32 = 40.0;
 
 /// The land's height at (x, z), ft, on a map `side` ft across.
 pub fn height(land: &Land, side: f32, x: f32, z: f32) -> f32 {
+    match land.heightmap.as_ref().and_then(|m| Some((m.height(side, x, z)?, m.mix.clamp(0.0, 1.0)))) {
+        Some((h, mix)) if mix >= 0.999 => h,
+        Some((h, mix)) => h * mix + recipe(land, side, x, z) * (1.0 - mix),
+        None => recipe(land, side, x, z),
+    }
+}
+
+/// The land's height from its recipe alone.
+fn recipe(land: &Land, side: f32, x: f32, z: f32) -> f32 {
     let seed = land.seed;
     let c = side / 2.0;
     let (u, v) = ((x - c) / c, (z - c) / c);
@@ -139,6 +148,7 @@ mod tests {
                 seed: 4,
                 hills: 1.0,
                 rough: 1.0,
+                heightmap: None,
             };
             for i in 0..400 {
                 let (x, z) = ((i * 37 % 3840) as f32, (i * 91 % 3840) as f32);
@@ -146,5 +156,22 @@ mod tests {
                 assert!(h > 0.0 && h < 1200.0, "{kind:?} {h}");
             }
         }
+    }
+
+    #[test]
+    fn height_map_raises_the_land() {
+        use crate::picture::{Embedded, HeightMap, Picture};
+        // Black on the left, white on the right.
+        let pic = Picture::from_grey(2, 2, vec![0.0, 1.0, 0.0, 1.0]);
+        let mut land = Land {
+            heightmap: Some(HeightMap::new(Embedded::new("h.png", &pic.to_png()))),
+            ..Land::default()
+        };
+        assert_eq!(height(&land, 1000.0, 0.0, 500.0), 0.0);
+        assert!((height(&land, 1000.0, 500.0, 500.0) - 150.0).abs() < 1.0);
+        assert!((height(&land, 1000.0, 1000.0, 500.0) - 300.0).abs() < 0.5);
+        land.heightmap.as_mut().unwrap().mix = 0.5;
+        let half = height(&land, 1000.0, 1000.0, 500.0);
+        assert!((half - (150.0 + recipe(&land, 1000.0, 1000.0, 500.0) * 0.5)).abs() < 0.5);
     }
 }

@@ -161,6 +161,92 @@ pub fn write(course: &Course) -> Baked {
 /// Bakes `course` at full size into an `.ENV` archive, its ground painted
 /// from `pictures` where it has them.
 pub fn write_with(course: &Course, pictures: &Pictures) -> Baked {
+    bake_for(course, pictures, false)
+}
+
+/// Bakes `course` into an `.ENV` the original Motocross Madness 2 loads
+/// unchanged: 256-pixel ground pictures (at most [`ORIGINAL_TEXTURES`]),
+/// the terrain's level of detail and heights filled in for the original's
+/// drawing ([`trn::Build::write_original`]), and none of this port's own
+/// extras (the fine ground map and the builder's `.course`).
+pub fn write_original(course: &Course, pictures: &Pictures) -> Result<Vec<u8>, String> {
+    let baked = bake_for(course, pictures, true);
+    if baked.env.is_empty() {
+        return Err("the ground could not be written for the original game".into());
+    }
+    // The original reads only tracks in its own cipher (whose key comes
+    // from the extension alone).
+    mm2_formats::faoe::encode(&baked.env, "track.env").map_err(|e| e.to_string())
+}
+
+/// A Course Builder track (an `.ENV` the builder wrote, which carries its
+/// `.course`) made again for the original game ([`write_original`]). A
+/// copy of another track needs that track's file, which `base` gives by
+/// the name the copy was made from.
+pub fn export_original(env: &[u8], base: impl Fn(&str) -> Option<Vec<u8>>, pictures: &Pictures) -> Result<Vec<u8>, String> {
+    let mut course = course_in(env).ok_or("this track wasn't made in the Course Builder, so it plays in the original game as it is")?;
+    if let Some(b) = course.base.clone() {
+        let bytes = base(&b.file).ok_or_else(|| format!("it is a copy of {}, which isn't here", b.file))?;
+        crate::copy::attach(&mut course, &bytes)?;
+    }
+    write_original(&course, pictures)
+}
+
+/// The original game finds a track's files by the `.ENV`'s own name
+/// (`<NAME>.scn`, `<NAME>.trn`, `<NAME>01.tdf`, `<NAME>01s.tga`), so a copy
+/// keeps none of the copied track's names, and each Baja or Enduro course
+/// gets its small picture.
+fn finish_original(files: &mut Vec<(String, Vec<u8>)>, stem: &str, laps: bool) {
+    let ends = |n: &str, e: &str| n.to_ascii_lowercase().ends_with(e);
+    if let Some(old) = files.iter().find(|(n, _)| ends(n, ".scn")).map(|(n, _)| n[..n.len() - 4].to_string()) {
+        if !old.eq_ignore_ascii_case(stem) {
+            let lower = old.to_ascii_lowercase();
+            for (name, data) in files.iter_mut() {
+                if name.to_ascii_lowercase().starts_with(&lower) {
+                    *name = format!("{stem}{}", &name[old.len()..]);
+                }
+                if ends(name, ".scn") {
+                    // File names in the scene (TerrainFile=...).
+                    let text = String::from_utf8_lossy(data).to_string();
+                    let fixed: Vec<String> = text
+                        .split_inclusive('\n')
+                        .map(|line| match line.split_once('=') {
+                            Some((key, value)) if key.contains("File") && value.trim_start().to_ascii_lowercase().starts_with(&lower) => {
+                                let at = line.len() - value.trim_start().len();
+                                format!("{}{stem}{}", &line[..at], &line[at + old.len()..])
+                            }
+                            _ => line.to_string(),
+                        })
+                        .collect();
+                    *data = fixed.concat().into_bytes();
+                }
+            }
+        }
+    }
+    if !laps {
+        let courses: Vec<String> = files.iter().filter(|(n, _)| ends(n, ".tdf")).map(|(n, _)| n[..n.len() - 4].to_string()).collect();
+        for c in courses {
+            let small = format!("{c}s.tga");
+            if files.iter().any(|(n, _)| n.eq_ignore_ascii_case(&small)) {
+                continue;
+            }
+            if let Some(rgb) = crate::preview::picture(&c, files, crate::preview::SMALL) {
+                let tga = crate::preview::tga16(&rgb, crate::preview::SMALL);
+                files.push((small, tga));
+            }
+        }
+    }
+    // One file a name: a copy's renamed pictures may now meet ours.
+    let mut seen = std::collections::HashSet::new();
+    files.retain(|(n, _)| seen.insert(n.to_ascii_lowercase()));
+}
+
+/// The ground pictures a track for the original game keeps, under the 425
+/// its terrain has room for.
+pub const ORIGINAL_TEXTURES: usize = 400;
+
+fn bake_for(course: &Course, pictures: &Pictures, original: bool) -> Baked {
+    let tex = if original { 256 } else { TEX };
     let land = bake::land(course, 1);
     let field = bake::bake(course, 1, &land);
     let path = course.path();
@@ -170,7 +256,7 @@ pub fn write_with(course: &Course, pictures: &Pictures) -> Baked {
     } else {
         gates(course, &path)
     };
-    let texel_ft = 64.0 * field.step / TEX as f32;
+    let texel_ft = 64.0 * field.step / tex as f32;
     let ready: Vec<Option<Ready>> = GROUND
         .iter()
         .enumerate()
@@ -182,16 +268,25 @@ pub fn write_with(course: &Course, pictures: &Pictures) -> Baked {
     if let Some(src) = &course.source {
         let added = objects(course, &field, &path);
         let st = if path.is_empty() { ([0.0; 2], [0.0, 1.0]) } else { let (p, d, _) = start(course, &path); (p, d) };
-        let made = crate::copy::files(course, src, &field, &ready, &added, || tdf(course, &field, &path), || wpt(&gates), st);
+        let made = crate::copy::files(course, src, &field, &ready, &added, || tdf(course, &field, &path), || wpt(&gates), st, original);
         if let Ok(mut files) = made {
-            files.push((format!("{stem}.course"), course.to_json().into_bytes()));
+            add_models(course, &mut files);
+            if !original {
+                files.push((format!("{stem}.course"), course.to_json().into_bytes()));
+            }
             crate::preview::add(&stem, &mut files);
+            if original {
+                finish_original(&mut files, &stem, course.mode.laps());
+            }
             let refs: Vec<(&str, &[u8])> = files.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
             let env = rs2::build(&refs);
             return Baked { field, path, gates, env };
         }
     }
-    let terrain = terrain(course, &field, &ready);
+    let terrain = terrain(course, &field, &ready, tex, original);
+    if terrain.is_empty() {
+        return Baked { field, path, gates, env: Vec::new() };
+    }
     let mut scene = scene(course, &field, &path, &stem);
     let (living, flights) = living(course, &field, &stem, None, 1);
     if !flights.is_empty() {
@@ -207,7 +302,8 @@ pub fn write_with(course: &Course, pictures: &Pictures) -> Baked {
     ];
     // The ground map: the viewer lays each material's full-size picture
     // over the baked tiles, so the ground is crisp close up.
-    if ready.iter().any(Option::is_some) {
+    add_models(course, &mut files);
+    if !original && course.look.ground.is_none() && ready.iter().any(Option::is_some) {
         files.push((format!("{stem}.gmt"), ground_map(course, &field, texel_ft)));
     }
     if course.mode.laps() {
@@ -218,10 +314,15 @@ pub fn write_with(course: &Course, pictures: &Pictures) -> Baked {
     }
     files.extend(living);
     // The builder's own file rides along, so a shared track can be opened
-    // and changed again.
-    files.push((format!("{stem}.course"), course.to_json().into_bytes()));
+    // and changed again (not for the original game, which has no use for it).
+    if !original {
+        files.push((format!("{stem}.course"), course.to_json().into_bytes()));
+    }
     // Pictures for the event page, as the game's own tracks carry.
     crate::preview::add(&stem, &mut files);
+    if original {
+        finish_original(&mut files, &stem, course.mode.laps());
+    }
     let refs: Vec<(&str, &[u8])> = files
         .iter()
         .map(|(n, b)| (n.as_str(), b.as_slice()))
@@ -232,6 +333,17 @@ pub fn write_with(course: &Course, pictures: &Pictures) -> Baked {
         path,
         gates,
         env,
+    }
+}
+
+/// The player's own models' files, packed into the track where both
+/// games look for a track maker's models first. A name already there
+/// (the track's own) is left as it is.
+fn add_models(course: &Course, files: &mut Vec<(String, Vec<u8>)>) {
+    for (name, bytes) in course.models.iter().flat_map(|m| m.files()) {
+        if !files.iter().any(|(n, _)| n.eq_ignore_ascii_case(&name)) {
+            files.push((name, bytes));
+        }
     }
 }
 
@@ -249,6 +361,25 @@ pub fn course_in(env: &[u8]) -> Option<Course> {
 pub fn gates(course: &Course, path: &Path) -> Vec<([f32; 2], [f32; 2])> {
     if path.is_empty() {
         return Vec::new();
+    }
+    // Placed by hand: in order from the start, the finish at the end.
+    if !course.line.gates.is_empty() {
+        let end = if path.closed { path.length } else { path.length - 8.0 };
+        let from_start = |s: f32| if path.closed { path.ahead(course.line.start, s).rem_euclid(path.length.max(1.0)) } else { s - course.line.start };
+        let mut at: Vec<f32> = course.line.gates.iter().copied().filter(|&s| from_start(s) > 20.0 && s <= end).collect();
+        at.sort_by(|a, b| from_start(*a).total_cmp(&from_start(*b)));
+        at.dedup_by(|a, b| (from_start(*a) - from_start(*b)).abs() < 20.0);
+        if at.last().is_none_or(|&l| (from_start(end) - from_start(l)).abs() > 40.0) {
+            at.push(end);
+        }
+        at.truncate(MOST_GATES);
+        return at
+            .into_iter()
+            .map(|s| {
+                let i = path.index_at(s);
+                (path.pts[i], path.dir[i])
+            })
+            .collect();
     }
     let spacing = match course.mode {
         Mode::Baja => 700.0,
@@ -404,6 +535,32 @@ pub fn colour(s: Surface) -> [f32; 3] {
 /// bytes, zero padded) and feet a repeat (f32), the baked feet a texel
 /// (f32), then per sample the first material, the second, the second's
 /// share (0..255) and a spare byte.
+/// The ground as the bake colours it, seen from above, as a `size` x
+/// `size` PNG (its top the far side): to paint over and load back as the
+/// track's own ground picture, as the original builder's texture export.
+pub fn ground_png(course: &Course, size: usize) -> Vec<u8> {
+    let land = bake::land(course, 1);
+    let field = bake::bake(course, 1, &land);
+    let n = field.n;
+    let line = colour(Surface::Dirt).map(|v| v * 0.9);
+    let mut rgb = Vec::with_capacity(size * size);
+    for j in 0..size {
+        for i in 0..size {
+            let x = ((i as f32 + 0.5) / size as f32 * (n - 1) as f32).round() as usize;
+            let z = ((j as f32 + 0.5) / size as f32 * (n - 1) as f32).round() as usize;
+            let k = z.min(n - 1) * n + x.min(n - 1);
+            let c = match &course.look.ground {
+                Some(g) if g.picture.read().is_some() => g.picture.read().unwrap().rgb_at(x as f32 / (n - 1) as f32, z as f32 / (n - 1) as f32).map(|v| v / 255.0),
+                _ => colour(Surface::from_zone(field.surfaces[k])),
+            };
+            let on = (1.0 - field.track[k].min(1.0)).clamp(0.0, 1.0);
+            let c: [f32; 3] = std::array::from_fn(|q| c[q] * (1.0 - on) + line[q] * on);
+            rgb.push(c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8));
+        }
+    }
+    crate::picture::Picture { w: size, h: size, grey: Vec::new(), rgb }.to_png()
+}
+
 fn ground_map(course: &Course, field: &Field, texel_ft: f32) -> Vec<u8> {
     let n = field.n;
     let line = if course.mode == Mode::Supercross { SXCLAY } else { TRACKDIRT };
@@ -431,19 +588,21 @@ fn ground_map(course: &Course, field: &Field, texel_ft: f32) -> Vec<u8> {
     out
 }
 
-fn terrain(course: &Course, field: &Field, ready: &[Option<Ready>]) -> Vec<u8> {
+fn terrain(course: &Course, field: &Field, ready: &[Option<Ready>], tex: usize, original: bool) -> Vec<u8> {
     let n = field.n;
     let tiles_side = (n - 1) / 64;
     let seed = course.land.seed;
     let sx = course.mode == Mode::Supercross;
-    let mut textures = vec![(TEX as u32, Vec::new()); tiles_side * tiles_side];
+    let side = course.mode.side();
+    let ground = course.look.ground.as_ref().and_then(|g| Some((g.picture.read()?, g.track_on_top, side)));
+    let mut textures = vec![(tex as u32, Vec::new()); tiles_side * tiles_side];
     let pixels: Vec<Vec<u16>> = {
         let mut slots: Vec<Vec<u16>> = vec![Vec::new(); tiles_side * tiles_side];
         let threads = crate::bake::threads();
         let per = tiles_side.div_ceil(threads);
         if threads == 1 {
             for (t, slot) in slots.iter_mut().enumerate() {
-                *slot = tile(field, t % tiles_side, t / tiles_side, seed, sx, ready);
+                *slot = tile(field, t % tiles_side, t / tiles_side, seed, sx, ready, tex, ground);
             }
         } else {
         std::thread::scope(|s| {
@@ -451,7 +610,7 @@ fn terrain(course: &Course, field: &Field, ready: &[Option<Ready>]) -> Vec<u8> {
                 s.spawn(move || {
                     for (k, slot) in part.iter_mut().enumerate() {
                         let t = band * per * tiles_side + k;
-                        *slot = tile(field, t % tiles_side, t / tiles_side, seed, sx, ready);
+                        *slot = tile(field, t % tiles_side, t / tiles_side, seed, sx, ready, tex, ground);
                     }
                 });
             }
@@ -468,33 +627,111 @@ fn terrain(course: &Course, field: &Field, ready: &[Option<Ready>]) -> Vec<u8> {
             let next = textures.len() as u16;
             let at = *seen.entry(px.clone()).or_insert(next);
             if at == next {
-                textures.push((TEX as u32, px));
+                textures.push((tex as u32, px));
             }
             Some(at)
         })
         .collect();
-    trn::Build {
+    let (textures, tiles) = if original { fit_textures(field, textures, tiles, ORIGINAL_TEXTURES) } else { (textures, tiles) };
+    let build = trn::Build {
         size: n,
         heights: &field.heights,
         surfaces: &field.surfaces,
         scale: course.mode.scale(),
         textures: &textures,
         tiles: &tiles,
+    };
+    if original { build.write_original() } else { build.write() }.unwrap_or_default()
+}
+
+/// At most `most` ground pictures: the tiles farthest from the track give
+/// up their own picture for the kept one that looks most like it, as the
+/// shipped tracks share pictures over their far hills.
+pub(crate) fn fit_textures(
+    field: &Field,
+    textures: Vec<(u32, Vec<u16>)>,
+    mut tiles: Vec<Option<u16>>,
+    most: usize,
+) -> (Vec<(u32, Vec<u16>)>, Vec<Option<u16>>) {
+    if textures.len() <= most {
+        return (textures, tiles);
     }
-    .write()
-    .unwrap_or_default()
+    let n = field.n;
+    let side = (n - 1) / 64;
+    // How near each picture comes to the track: its nearest tile's sample.
+    let mut near = vec![f32::MAX; textures.len()];
+    for (slot, t) in tiles.iter().enumerate() {
+        let Some(t) = *t else { continue };
+        let (tx, tz) = (slot % side, slot / side);
+        let mut d = f32::MAX;
+        for j in (0..=64).step_by(8) {
+            for i in (0..=64).step_by(8) {
+                let k = (tz * 64 + j).min(n - 1) * n + (tx * 64 + i).min(n - 1);
+                d = d.min(field.track.get(k).copied().unwrap_or(f32::MAX));
+            }
+        }
+        if let Some(v) = near.get_mut(t as usize) {
+            *v = v.min(d);
+        }
+    }
+    let mut rank: Vec<usize> = (0..textures.len()).collect();
+    rank.sort_by(|&a, &b| near[a].total_cmp(&near[b]));
+    let keep: Vec<usize> = rank[..most].to_vec();
+    // A small average of each picture to match by.
+    let thumb = |(size, px): &(u32, Vec<u16>)| -> Vec<[f32; 3]> {
+        let s = *size as usize;
+        let cell = (s / 8).max(1);
+        let mut out = vec![[0.0f32; 3]; 64];
+        for (k, p) in px.iter().enumerate() {
+            let (x, z) = ((k % s / cell).min(7), (k / s / cell).min(7));
+            let c = &mut out[z * 8 + x];
+            c[0] += f32::from(p >> 10 & 31);
+            c[1] += f32::from(p >> 5 & 31);
+            c[2] += f32::from(p & 31);
+        }
+        out
+    };
+    let thumbs: Vec<Vec<[f32; 3]>> = textures.iter().map(|t| thumb(t)).collect();
+    let mut new_index = vec![0u16; textures.len()];
+    for (i, &k) in keep.iter().enumerate() {
+        new_index[k] = i as u16;
+    }
+    for &d in &rank[most..] {
+        let best = keep
+            .iter()
+            .enumerate()
+            .map(|(i, &k)| {
+                let e: f32 = thumbs[d].iter().zip(&thumbs[k]).map(|(a, b)| (0..3).map(|q| (a[q] - b[q]).powi(2)).sum::<f32>()).sum();
+                (i, e)
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map_or(0, |(i, _)| i);
+        new_index[d] = best as u16;
+    }
+    for t in tiles.iter_mut().flatten() {
+        *t = new_index[*t as usize];
+    }
+    let mut textures = textures;
+    let mut slots: Vec<Option<(u32, Vec<u16>)>> = textures.drain(..).map(Some).collect();
+    let kept = keep.iter().map(|&k| slots[k].take().unwrap()).collect();
+    (kept, tiles)
 }
 
 /// One tile's texture: the surfaces blended softly, with low-contrast
 /// grain, darker on the packed racing line and on steep faces.
-fn tile(field: &Field, tx: usize, tz: usize, seed: u32, sx: bool, ready: &[Option<Ready>]) -> Vec<u16> {
+/// A player's own picture laid over the whole land: the picture, whether
+/// the track's dirt is drawn over it, and the land's side (ft).
+type Ground<'a> = Option<(&'a crate::picture::Picture, bool, f32)>;
+
+#[allow(clippy::too_many_arguments)]
+fn tile(field: &Field, tx: usize, tz: usize, seed: u32, sx: bool, ready: &[Option<Ready>], tex: usize, ground: Ground) -> Vec<u16> {
     let n = field.n;
     let pictures = ready.iter().any(Option::is_some);
     let line = if sx { SXCLAY } else { TRACKDIRT };
-    let mut px = Vec::with_capacity(TEX * TEX);
-    let per = 64.0 / TEX as f32;
-    for j in 0..TEX {
-        for i in 0..TEX {
+    let mut px = Vec::with_capacity(tex * tex);
+    let per = 64.0 / tex as f32;
+    for j in 0..tex {
+        for i in 0..tex {
             let (fx, fz) = (
                 tx as f32 * 64.0 + (i as f32 + 0.5) * per,
                 tz as f32 * 64.0 + (j as f32 + 0.5) * per,
@@ -548,6 +785,12 @@ fn tile(field: &Field, tx: usize, tz: usize, seed: u32, sx: bool, ready: &[Optio
                 }
                 c = p;
             }
+            if let Some((pic, track, side)) = ground {
+                let g = pic.rgb_at(wx / side, wz / side).map(|v| v / 255.0);
+                let keep = if track { on_line.clamp(0.0, 1.0) } else { 0.0 };
+                c = std::array::from_fn(|q| g[q] * (1.0 - keep) + c[q] * keep);
+                on_line *= keep;
+            }
             let big = land::fbm(wx / 60.0, wz / 60.0, seed ^ 31, 3);
             let fine = land::noise(wx / 3.0, wz / 3.0, seed ^ 41) * 0.6
                 + land::noise(wx / 1.1, wz / 1.1, seed ^ 43) * 0.4;
@@ -564,7 +807,11 @@ fn tile(field: &Field, tx: usize, tz: usize, seed: u32, sx: bool, ready: &[Optio
             // and with nothing that changes from place to place, the open
             // ground's tiles come out alike and share one picture, keeping
             // a track within the browser's 256 terrain pictures.
-            let (big, fine, slope, on_line) = if pictures {
+            let (big, fine, slope, on_line) = if ground.is_some() {
+                // The player's own picture, as it is.
+                dry = 0.0;
+                (0.0, 0.0, 0.0, on_line * 0.6)
+            } else if pictures {
                 dry = 0.0;
                 (0.0, 0.0, 0.0, on_line * 0.6)
             } else {
@@ -722,10 +969,14 @@ fn objects(course: &Course, field: &Field, path: &Path) -> Vec<Placed> {
 fn scene(course: &Course, field: &Field, path: &Path, stem: &str) -> String {
     let mode = course.mode;
     let side = mode.side();
-    let (p, d, _) = if path.is_empty() {
-        ([side / 2.0; 2], [0.0, 1.0], 10.0)
-    } else {
-        start(course, path)
+    let (p, d, _) = match course.line.start_spot {
+        // A funnel start out in the open.
+        Some([x, z, yaw]) if !mode.laps() => {
+            let (s, c) = yaw.to_radians().sin_cos();
+            ([x, z], [s, c], 10.0)
+        }
+        _ if path.is_empty() => ([side / 2.0; 2], [0.0, 1.0], 10.0),
+        _ => start(course, path),
     };
     let y = field.height(p[0], p[1]) + 4.0;
     let mut s = String::new();
@@ -742,7 +993,8 @@ fn scene(course: &Course, field: &Field, path: &Path, stem: &str) -> String {
     );
     s += &format!("DefaultStartDirection={:.3},0.0,{:.3}\r\n", d[0], d[1]);
     if !mode.laps() {
-        s += "NumberOfWaypointRaces=1\r\n";
+        // The original lists a gate race by its name.
+        s += &format!("NumberOfWaypointRaces=1\r\nWaypointRaceName1=\"{}\"\r\n", course.name.replace('"', "'"));
     }
     s += "\r\n[Environment]\r\n";
     s += &format!("TerrainFile={stem}.trn\r\n");
@@ -772,6 +1024,9 @@ fn scene(course: &Course, field: &Field, path: &Path, stem: &str) -> String {
     } else {
         [112.0, 114.0, 122.0]
     };
+    // Brighter or darker shade about the usual (0.5).
+    let k = 0.55 + course.look.ambient.clamp(0.0, 1.0) * 0.9;
+    let amb = amb.map(|v: f32| (v * k).min(220.0));
     s += "[Lights]\r\nNumberOfLights=2\r\n";
     s += &format!(
         "[Light1]\r\nType=Ambient\r\nColorRGB={:.0},{:.0},{:.0}\r\n",
@@ -782,6 +1037,10 @@ fn scene(course: &Course, field: &Field, path: &Path, stem: &str) -> String {
         sun_col[0], sun_col[1], sun_col[2], sun[0], sun[1], sun[2]
     );
     let fog = match (mode, course.land.kind) {
+        _ if !course.look.fog.is_empty() => crate::FOGS
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(&course.look.fog))
+            .map_or([176, 182, 190], |(_, c)| *c),
         (Mode::Supercross, _) => [125, 125, 183],
         (_, crate::LandKind::Desert) => [196, 186, 170],
         _ => [176, 182, 190],
@@ -882,7 +1141,7 @@ mod tests {
     fn plants_rivers_and_flights_go_into_the_track() {
         let mut c = Course::new(Mode::Enduro);
         let side = c.mode.side();
-        c.plants.push(crate::Planting { flora: crate::Flora::Mixed, radius: 200.0, density: 0.7, clear: false, everywhere: false, dabs: vec![[side * 0.3, side * 0.3], [side * 0.35, side * 0.3]], auto: false });
+        c.plants.push(crate::Planting { flora: crate::Flora::Mixed, radius: 200.0, density: 0.7, clear: false, everywhere: false, dabs: vec![[side * 0.3, side * 0.3], [side * 0.35, side * 0.3]], auto: false, map: None });
         c.rivers.push(crate::River { points: vec![[side * 0.1, side * 0.5], [side * 0.9, side * 0.55]], width: 28.0, depth: 2.0 });
         c.flights.push(crate::Flight { craft: crate::Craft::Biplane, points: vec![[side * 0.5, 160.0, side * 0.5]], speed: 110.0 });
         let baked = write(&c);

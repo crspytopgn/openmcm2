@@ -67,6 +67,7 @@ pub fn land(course: &Course, every: usize) -> Vec<f32> {
     let land = if course.mode == Mode::Supercross {
         crate::Land {
             kind: crate::LandKind::Flat,
+            heightmap: None,
             ..course.land.clone()
         }
     } else {
@@ -183,6 +184,7 @@ impl Bed {
         let land = if course.mode == Mode::Supercross {
             crate::Land {
                 kind: crate::LandKind::Flat,
+                heightmap: None,
                 ..course.land.clone()
             }
         } else {

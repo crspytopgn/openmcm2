@@ -40,6 +40,8 @@ cpal = { version = "0.16.0", features = ["wasm-bindgen"], optional = true }
 # The leaderboard server (online.rs); a browser uses fetch.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ureq = "3"
+# The Course Builder's pictures and models (pick.rs).
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "wayland"] }
 # Network play with browsers (net/rtc.rs): WebRTC data channels, introduced
 # by the PeerJS server the browser build uses.
 bytes = "1"

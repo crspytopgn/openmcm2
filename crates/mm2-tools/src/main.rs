@@ -25,7 +25,8 @@ usage:
   mm2-tools freetracks <GAME-dir> [ground-dir] [only]  make the free pack's tracks (only: a file or event folder)
   mm2-tools preview <track.env> <out.png>  draw a track's preview picture from its ground
   mm2-tools free-previews <ground-dir> <out-dir>  the free tracks' pictures (.tga), for the pack's previews/
-  mm2-tools course <in.course|mode|track.env> <out.env>  bake a Course Builder track (mode: sx, national, baja, enduro; an .env: a copy of it)";
+  mm2-tools course <in.course|mode|track.env> <out.env>  bake a Course Builder track (mode: sx, national, baja, enduro; an .env: a copy of it)
+  mm2-tools original <in.course|mode|track.env> <out.env>  the same, made for the original game";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -46,7 +47,8 @@ fn main() -> ExitCode {
         ["freetracks", game, ground] => freetracks::build(Path::new(game), Some(Path::new(ground)), None).map_err(|e| e.to_string().into()),
         ["freetracks", game, ground, only] => freetracks::build(Path::new(game), Some(Path::new(ground)).filter(|g| g.as_os_str() != "-"), Some(only)).map_err(|e| e.to_string().into()),
         ["dialog", file, out] => dialog(file, Some(out)),
-        ["course", from, out] => course(from, Path::new(out)),
+        ["course", from, out] => course(from, Path::new(out), false),
+        ["original", from, out] => course(from, Path::new(out), true),
         ["rebuild", from, out] => rebuild(from, Path::new(out)),
         ["preview", env, out] => preview(env, out),
         ["free-previews", ground, out] => free_previews(Path::new(ground), Path::new(out)),
@@ -96,7 +98,7 @@ fn ground_pictures() -> Result<mm2_course::env::Pictures, Box<dyn std::error::Er
 }
 
 /// Bakes a Course Builder file (or a new track of a mode) into an `.ENV`.
-fn course(from: &str, out: &Path) -> BoxResult {
+fn course(from: &str, out: &Path, original: bool) -> BoxResult {
     use mm2_course::{Course, Mode};
     let c = match from.to_ascii_lowercase().as_str() {
         "sx" | "supercross" => Course::new(Mode::Supercross),
@@ -136,6 +138,12 @@ fn course(from: &str, out: &Path) -> BoxResult {
             let rgb = rgb.chunks_exact(3).map(|p| [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0]).collect();
             pictures.by_name.insert(name.to_string(), std::sync::Arc::new(mm2_course::env::Picture { side: w, rgb }));
         }
+    }
+    if original {
+        let env = mm2_course::env::write_original(&c, &pictures)?;
+        std::fs::write(out, &env)?;
+        eprintln!("{} {} for the original game: {:.1} MB in {:.1} s", c.mode.name(), out.display(), env.len() as f32 / 1e6, t.elapsed().as_secs_f32());
+        return Ok(());
     }
     let baked = mm2_course::env::write_with(&c, &pictures);
     std::fs::write(out, &baked.env)?;

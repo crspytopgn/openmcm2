@@ -31,6 +31,7 @@ pub mod tdf;
 pub mod texture;
 pub mod tga;
 pub mod trn;
+pub mod trn_original;
 pub mod vcr;
 pub mod wav;
 

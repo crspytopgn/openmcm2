@@ -161,6 +161,10 @@ struct Launcher {
     page: Page,
     /// A game pad's presses, as keys.
     pad: Option<pad::PadKeys>,
+    /// The Course Builder track picked to make for the original game.
+    export_pick: Option<PathBuf>,
+    /// That track being made: where it goes, once written.
+    export_job: Option<Slot<PathBuf>>,
 }
 
 /// What a background job gives back, once it has.
@@ -569,6 +573,8 @@ impl Launcher {
             menus_download: None,
             menus_update: Arc::new(Mutex::new(None)),
             running: None,
+            export_pick: None,
+            export_job: None,
             note: None,
             removing: None,
             exit_asked: false,
@@ -1802,7 +1808,88 @@ impl Launcher {
                 let ctx = ui.ctx().clone();
                 self.play_with(&ctx, &["--course-builder"]);
             }
+            ui.add_space(8.0);
+            self.export_original(ui);
         });
+    }
+
+    /// Making a Course Builder track for the original Motocross Madness 2:
+    /// pick one of the builder's tracks and where to save it, and the game
+    /// writes it (`--export-original`) with no window.
+    fn export_original(&mut self, ui: &mut egui::Ui) {
+        use look::icon;
+        ui.label(egui::RichText::new("Play your tracks in the original game").color(look::TEXT).family(look::bold_family()));
+        ui.label(look::weak("Makes one of your tracks into a file the original Motocross Madness 2 loads as it is. Put it in the original's Teraform folder for its event (Teraform\\National, SX, Baja or Enduro), and anyone with the original can race it, no OpenMCM2 needed. The game's own ground shading and level of detail are filled in, so it looks and rides as the original's tracks do."));
+        let dir = settings::user_dir().join("Courses");
+        let mut courses: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .map(|r| r.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("course"))).collect())
+            .unwrap_or_default();
+        courses.sort();
+        if courses.is_empty() {
+            ui.label(look::weak("You haven't made a track yet. Open the Course Builder and press Save."));
+            return;
+        }
+        if self.export_pick.as_ref().is_none_or(|p| !courses.contains(p)) {
+            self.export_pick = courses.first().cloned();
+        }
+        let name = |p: &PathBuf| p.file_stem().map_or(String::new(), |s| s.to_string_lossy().to_string());
+        let picked = self.export_pick.clone().unwrap();
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt("export_course")
+                .selected_text(name(&picked))
+                .show_ui(ui, |ui| {
+                    for c in &courses {
+                        if ui.selectable_label(*c == picked, name(c)).clicked() {
+                            self.export_pick = Some(c.clone());
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Your Course Builder tracks, by the short name the game files them under.");
+            let busy = self.export_job.is_some();
+            if ui
+                .add_enabled(!busy, egui::Button::new(look::with(icon::ICON_DOWNLOAD, if busy { "Making it..." } else { "Make it for the original..." })))
+                .on_hover_text("Asks where to save it, then makes the track's .ENV for the original game. Takes a few seconds.")
+                .clicked()
+            {
+                let file = format!("{}.ENV", name(&picked).to_ascii_uppercase());
+                if let Some(out) = rfd::FileDialog::new().set_title("Save the track for the original game").set_file_name(&file).add_filter("Track", &["env", "ENV"]).save_file() {
+                    match settings::viewer() {
+                        None => self.note = Some(("Can't find mm2-viewer next to the launcher.".into(), true)),
+                        Some(viewer) => {
+                            let slot: Slot<PathBuf> = Arc::new(Mutex::new(None));
+                            let back = slot.clone();
+                            let mut cmd = Command::new(viewer);
+                            cmd.args(self.settings.args()).arg("--export-original").arg(&picked).arg(&out).stdout(Stdio::null()).stderr(Stdio::piped());
+                            #[cfg(windows)]
+                            {
+                                use std::os::windows::process::CommandExt;
+                                cmd.creation_flags(0x0800_0000);
+                            }
+                            let ctx = ui.ctx().clone();
+                            std::thread::spawn(move || {
+                                let done = match cmd.output() {
+                                    Ok(o) if o.status.success() => Ok(out),
+                                    Ok(o) => Err(String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("it stopped").to_string()),
+                                    Err(e) => Err(e.to_string()),
+                                };
+                                *back.lock().unwrap() = Some(done);
+                                ctx.request_repaint();
+                            });
+                            self.export_job = Some(slot);
+                        }
+                    }
+                }
+            }
+        });
+        let finished = self.export_job.as_ref().and_then(|s| s.lock().unwrap().take());
+        if let Some(done) = finished {
+            self.export_job = None;
+            self.note = Some(match done {
+                Ok(p) => (format!("Saved {}. Copy it into the original game's Teraform folder for its event.", p.display()), false),
+                Err(e) => (format!("Couldn't make the track for the original game: {e}"), true),
+            });
+        }
     }
 
     /// Network races: lobby downloads, the server browser and its list.

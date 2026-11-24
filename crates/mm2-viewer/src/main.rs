@@ -65,6 +65,7 @@ mod pace;
 mod dynres;
 mod bars;
 mod builder;
+mod pick;
 mod eco;
 mod enhance;
 mod rt;
@@ -232,6 +233,30 @@ fn main() -> Result<(), BoxError> {
     if args.iter().any(|a| a == "--serve") {
         let options = serve::Options::from_args(|f| flag(f).cloned())?;
         return serve::run(options);
+    }
+    // A Course Builder track made for the original game, with no window
+    // (`--export-original <track.course or .env> <out.env>`; the launcher's
+    // Course Builder card).
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(i) = args.iter().position(|a| a == "--export-original") {
+        let (Some(from), Some(to)) = (args.get(i + 1), args.get(i + 2)) else {
+            return Err("usage: --export-original <track.course or .env> <out.env>".into());
+        };
+        let bytes = std::fs::read(from).map_err(|e| format!("{from}: {e}"))?;
+        let pictures = fine_ground::builder_pictures();
+        let env = if from.to_ascii_lowercase().ends_with(".course") {
+            let mut course = mm2_course::Course::from_json(&String::from_utf8_lossy(&bytes))?;
+            if let Some(base) = course.base.clone() {
+                let track = std::fs::read(&base.file).map_err(|e| format!("{}: {e}", base.file))?;
+                mm2_course::copy::attach(&mut course, &track)?;
+            }
+            mm2_course::env::write_original(&course, &pictures)?
+        } else {
+            mm2_course::env::export_original(&bytes, |f| std::fs::read(f).ok(), &pictures)?
+        };
+        std::fs::write(to, &env).map_err(|e| format!("{to}: {e}"))?;
+        eprintln!("{to}: {:.1} MB for the original game", env.len() as f32 / 1e6);
+        return Ok(());
     }
     // The enhanced graphics, all of them or less those named after `=`.
     if let Some(arg) = args.iter().find(|a| *a == "--enhanced" || a.starts_with("--enhanced=")) {
@@ -4527,6 +4552,8 @@ struct App {
     track: Option<Track>,
     state: Option<State>,
     keys: HashSet<KeyCode>,
+    /// The next race is the builder's Watch AI: the computer rides.
+    watch_lap: bool,
     /// The steering and lean keys as the game's key axes.
     steer_keys: input::KeyAxis,
     lean_keys: input::KeyAxis,
@@ -4743,6 +4770,7 @@ impl App {
             track,
             state: None,
             keys: HashSet::new(),
+            watch_lap: false,
             steer_keys: input::KeyAxis::default(),
             lean_keys: input::KeyAxis::default(),
             key_map: input::KeyMap::factory(),
@@ -5571,7 +5599,8 @@ impl App {
                     }
                 }
             }
-            builder::Ask::Ride { env, mode, name } => {
+            builder::Ask::Ride { env, mode, name, watch } => {
+                self.watch_lap = watch;
                 use frontend::EventKind;
                 let event = match mode {
                     mm2_course::Mode::Supercross => EventKind::Supercross,
@@ -6453,6 +6482,10 @@ impl App {
         match &mut self.race {
             Some(r) => {
                 r.buttons = buttons;
+                // The builder's Watch AI: the computer rides for the player.
+                if std::mem::take(&mut self.watch_lap) {
+                    r.autopilot = true;
+                }
                 let held = |a: usize| self.follow && acts[a];
                 let pad = |k: KeyCode| self.follow && self.keys.contains(&k);
                 r.cam_keys = ride::CamKeys {
