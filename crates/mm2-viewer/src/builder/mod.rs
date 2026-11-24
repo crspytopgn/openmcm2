@@ -348,6 +348,9 @@ pub struct Builder {
     bake_job: Option<(Job<Result<PathBuf, String>>, bool)>,
     /// Making the track for the original game: its file name and bytes.
     export_job: Option<Job<Result<(String, Vec<u8>), String>>>,
+    /// The running export is for other OpenMCM2 players (else for the
+    /// original game's).
+    export_open: bool,
     /// When the running bake or export began, for its bar.
     busy_since: f32,
     /// How long the last bake (0) and export for the original (1) of each
@@ -434,6 +437,7 @@ impl Builder {
             ui: None,
             bake_job: None,
             export_job: None,
+            export_open: false,
             busy_since: 0.0,
             took: [[4.0, 9.0, 15.0, 9.0], [12.0, 35.0, 50.0, 35.0]],
             picking: None,
@@ -652,18 +656,22 @@ impl Builder {
     /// Makes the track for the original Motocross Madness 2 on another
     /// thread: a browser downloads it, a computer saves it beside the
     /// builder's tracks, in a folder named for the original's.
-    fn export_original(&mut self) {
+    /// Makes a copy of the track to give other players: OpenMCM2's own
+    /// (`open`), or one the original game plays.
+    fn export(&mut self, open: bool) {
         if self.export_job.is_some() {
             return;
         }
         self.save();
         let course = self.course.clone();
         self.export_job = Some(Job::spawn(move || {
-            let env = mm2_course::env::write_original(&course, &crate::fine_ground::builder_pictures())?;
+            let pictures = crate::fine_ground::builder_pictures();
+            let env = if open { mm2_course::env::write_with(&course, &pictures).env } else { mm2_course::env::write_original(&course, &pictures)? };
             Ok((format!("{}.ENV", course.stem()), env))
         }));
+        self.export_open = open;
         self.busy_since = self.now;
-        self.say("Making the track for the original game...");
+        self.say(if open { "Making the track for other OpenMCM2 players..." } else { "Making the track for the original game..." });
     }
 
     fn mode_index(&self) -> usize {
@@ -673,7 +681,8 @@ impl Builder {
     /// Where an export for the original game goes on a computer.
     #[cfg(not(target_arch = "wasm32"))]
     fn export_dir(&self) -> PathBuf {
-        crate::profile::user_dir().join("For original MM2").join("Teraform").join(self.course.mode.name())
+        let top = if self.export_open { "For OpenMCM2 players" } else { "For original MM2" };
+        crate::profile::user_dir().join(top).join("Teraform").join(self.course.mode.name())
     }
 
     /// An export for the original game that has finished.
@@ -805,7 +814,8 @@ impl Builder {
         }
         let job = self.export_job.take().unwrap();
         let k = self.mode_index();
-        self.took[1][k] = (self.now - self.busy_since).max(1.0);
+        self.took[if self.export_open { 0 } else { 1 }][k] = (self.now - self.busy_since).max(1.0);
+        let game = if self.export_open { "OpenMCM2" } else { "Motocross Madness 2" };
         let (name, env) = match job.join() {
             Ok(Ok(made)) => made,
             Ok(Err(e)) => {
@@ -822,7 +832,7 @@ impl Builder {
         #[cfg(target_arch = "wasm32")]
         {
             if crate::web::save_file(&name, &env) {
-                self.say(&format!("{name} is in your downloads. Put it in Motocross Madness 2's Teraform\\{folder} folder."));
+                self.say(&format!("{name} is in your downloads. Players put it in {game}'s Teraform\\{folder} folder."));
             } else {
                 self.say("Couldn't download the track");
             }
@@ -833,7 +843,7 @@ impl Builder {
             let path = dir.join(&name);
             match crate::fs::create_dir_all(&dir).and_then(|()| crate::fs::write(&path, &env)) {
                 Ok(()) => {
-                    self.say(&format!("Saved {}. Copy it into Motocross Madness 2's Teraform\\{folder} folder.", path.display()));
+                    self.say(&format!("Saved {}. Players copy it into {game}'s Teraform\\{folder} folder.", path.display()));
                     open_folder(&dir);
                 }
                 Err(e) => {
@@ -2261,7 +2271,7 @@ impl Builder {
         p.text([10.0, 465.0], &hint, 11.0, false, [0.85, 0.85, 0.8, 1.0]);
         // Saved / baking state at the right of the hint line.
         let busy = if self.export_job.is_some() {
-            Some((1, "Making it for MM2"))
+            Some((if self.export_open { 0 } else { 1 }, if self.export_open { "Exporting" } else { "Exporting for MM2" }))
         } else if self.bake_job.is_some() {
             Some((0, "Saving"))
         } else {
@@ -2478,25 +2488,30 @@ impl Builder {
                 }
             }
             Some(Popup::Save) => {
-                let (pw, ph) = (340.0, 150.0);
-                let (px, py) = ((w - pw) / 2.0, 110.0);
+                let (pw, ph) = (360.0, 196.0);
+                let (px, py) = ((w - pw) / 2.0, 100.0);
                 p.fill([0.0, 0.0, w, 480.0], [0.0, 0.0, 0.0, 0.35]);
                 p.panel(input, [px, py, pw, ph]);
-                p.text([px + 14.0, py + 12.0], "SAVE / EXPORT FOR", 14.0, true, [ACCENT[0], ACCENT[1], ACCENT[2], 1.0]);
-                let say = "OpenMCM2 loads both, but its own save keeps the finer ground and opens again here.";
-                for (k, line) in panel::wrap(p, say, pw - 28.0, 11.0).iter().enumerate() {
-                    p.text([px + 14.0, py + 32.0 + k as f32 * 13.0], line, 11.0, false, [0.85, 0.85, 0.8, 1.0]);
-                }
+                p.text([px + 14.0, py + 12.0], "SAVE / EXPORT", 14.0, true, [ACCENT[0], ACCENT[1], ACCENT[2], 1.0]);
                 let mut keep = true;
-                let half = (pw - 32.0) / 2.0;
-                if p.button(input, "save-open", [px + 14.0, py + 70.0, half, 30.0], "OpenMCM2", "Save the track and put it in OpenMCM2's track list for its race (Ctrl+S).", true) {
-                    self.bake_track(false);
-                    self.say("Saving...");
-                    keep = false;
-                }
-                if p.button(input, "save-orig", [px + 18.0 + half, py + 70.0, half, 30.0], "Original MM2", "Make a copy that plays in the original Motocross Madness 2 from 2000, to put in its Teraform folder. Anyone can then race it without OpenMCM2.", false) {
-                    self.export_original();
-                    keep = false;
+                let bw = pw - 28.0;
+                let choices: [(&str, &str, &str); 3] = [
+                    ("save-game", "Save into my game", "Save the track and put it in this game's track list for its race, ready to race (Ctrl+S)."),
+                    ("save-open", "Export for other OpenMCM2 players", "Make a copy of the track to share with players of OpenMCM2. It keeps the builder's finer ground, and they can open it in their Course Builder too."),
+                    ("save-orig", "Export for other MM2 players", "Make a copy that plays in the original Motocross Madness 2 from 2000, for its Teraform folder. Anyone can race it without OpenMCM2 (OpenMCM2 plays it too)."),
+                ];
+                for (k, (id, label, tip)) in choices.iter().enumerate() {
+                    if p.button(input, id, [px + 14.0, py + 38.0 + k as f32 * 36.0, bw, 30.0], label, tip, k == 0) {
+                        match k {
+                            0 => {
+                                self.bake_track(false);
+                                self.say("Saving...");
+                            }
+                            1 => self.export(true),
+                            _ => self.export(false),
+                        }
+                        keep = false;
+                    }
                 }
                 if p.button(input, "save-close", [px + pw - 84.0, py + ph - 30.0, 70.0, 20.0], "Close", "Don't save now.", false) {
                     keep = false;

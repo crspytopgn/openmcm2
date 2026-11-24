@@ -782,29 +782,24 @@ export async function mount(app, panel) {
     await fs.keepUser(`/user/Tracks/${event().folder}/${stem}.ENV`, env);
     return { stem, env };
   }
-  async function saveOpen() {
-    const { stem, env } = await saveTrack();
-    $("qb-status").replaceChildren(
-      `Saved as ${stem}. It's in the browser game's ${event().name} track list, and the full Course Builder opens on it. `,
-      Object.assign(document.createElement("a"), {
-        href: "#",
-        textContent: "Download its .ENV for the desktop app",
-        title: `Put it in OpenMCM2's TERAFORM\\${event().folder} folder.`,
-        onclick: (e) => {
-          e.preventDefault();
-          download(new Blob([env]), `${stem}.ENV`);
-        },
-      }),
-    );
-    $("qb-status").classList.remove("err");
+  async function saveGame() {
+    const { stem } = await saveTrack();
+    say(`Saved as ${stem}. It's in the browser game's ${event().name} track list, and the full Course Builder opens on it.`);
+  }
+  async function exportOpen() {
+    say("Making a copy for other OpenMCM2 players…");
+    const stem = await keepCourse();
+    const env = await baked("bake");
+    download(new Blob([env]), `${stem}.ENV`);
+    say(`Downloaded ${stem}.ENV. Other players put it in OpenMCM2's TERAFORM\\${event().folder} folder (or add it on the browser game's Your own tracks).`);
   }
   async function saveOriginal() {
-    say("Making the track for the original Motocross Madness 2… (a big track takes up to a minute)");
+    say("Making a copy for other MM2 players… (a big track takes up to a minute)");
     const stem = mm.course_stem(text());
     keepCourse().catch(() => {});
     const bytes = await baked("original");
     download(new Blob([bytes]), `${stem}.ENV`);
-    say(`Downloaded ${stem}.ENV. Put it in the original game's TERAFORM\\${event().folder} folder and it shows in the ${event().name} track list. OpenMCM2 loads it too.`);
+    say(`Downloaded ${stem}.ENV. MM2 players put it in the game's TERAFORM\\${event().folder} folder and it shows in the ${event().name} track list. OpenMCM2 loads it too.`);
   }
   $("qb-save").addEventListener("click", () => !busy && askFor($("qb-for").hidden));
   $("qb-for-no").addEventListener("click", () => askFor(false));
@@ -822,7 +817,8 @@ export async function mount(app, panel) {
       $("qb-save").disabled = false;
     }
   };
-  $("qb-for-open").addEventListener("click", () => saveFor(saveOpen));
+  $("qb-for-game").addEventListener("click", () => saveFor(saveGame));
+  $("qb-for-open").addEventListener("click", () => saveFor(exportOpen));
   $("qb-for-orig").addEventListener("click", () => saveFor(saveOriginal));
   $("qb-download").addEventListener("click", () => {
     download(new Blob([JSON.stringify(c, null, 2)], { type: "application/json" }), `${mm.course_stem(text())}.course`);
