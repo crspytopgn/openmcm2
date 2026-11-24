@@ -322,6 +322,46 @@ ft/s (0..199, 154 entries non-zero). They are force-like values that fall with s
 
 Dump them straight from the exe at RVA 0x16d05c, for example with pefile `pe.get_data(0x16d05c, 2400)`.
 
+### 4.1 Cross-check against the demo decompilation (2026-11-24)
+
+Andrew Boudreau's decompilation of the MM2 demo
+(github.com/andrewboudreau/motocross-madness-2-decomp, `BikeAI.cpp`) was read
+side by side with the port. It is a reference only: nothing of it is copied
+here. The whole BikeAI unit sits 0xe00 higher in the full game than in the
+demo, and the bike's field offsets are the same:
+
+| demo | full game | what | port |
+|---|---|---|---|
+| 0x40d200 | 0x40e000 | jump planner along the line | `ai::Path::plan_jump` |
+| 0x40e370 | 0x40f170 | flight ahead (6 ft over the ground) | `computer::flight` |
+| 0x40e510 | 0x40f310 | line aim (look-ahead walk) | `ai::Path::direction` |
+| 0x40eca0 | 0x40faa0 | two-wheel solver | `computer::Rider::solve` |
+| 0x413200 | 0x414000 | AI frame | `computer::Rider::step` |
+| 0x414370 | 0x415170 | AI controller (line, limit, power, tricks) | `race.rs` `Racer::plan`, `ai_trick` |
+| 0x415640 | 0x416440 | obstacle scan | `ai::scan` |
+
+The step, solver, line aim and scan already matched it line for line. What
+it changed:
+
+- The scan's "near only" flag (bike +0x11b0) was never set. The controller
+  sets it in a lap race while the rider is on the course, and in a gate race
+  within a second's riding of the gate. With it set, walls and objects more
+  than 10 ft along the scan are ignored, so riders on the course no longer
+  shy away from far-off solids.
+- The controller's own off-course reset is 5 s (+0x11b4, single-player
+  races), not the player's 6 s.
+- After the finish: in a gate race the rider pulls 40 ft off to its right
+  at 40 ft/s for 2 s (+0x80c) with no power, then stops. In a lap race the
+  pull-off direction is built from the course's z twice, `(±z, 0, −z)`, a
+  slip in the original kept as it is; finished and off the course, it stops.
+- The jump planner moves along the line by the level speed before the
+  ground turns it, and its level speeds use the table square root.
+- The wander's pick frame leaves the line's point at the origin.
+- The solver's final ground check: the rear's solid top is looked for where
+  the rear is now (its terrain where it stood), and both ends measure the
+  front spring along the up the last substep started with.
+- A bike more than 10000 ft up or down is put back at height 0.
+
 ## 5. Player model: Vehicle::Simulate 0x52ffb0 **[structure solid, some details likely]**
 
 Fixed-step accumulator, 0x506b20, and the step loop 0x52ffb0:

@@ -43,6 +43,12 @@ pub const START_LEAD: f32 = 5.2;
 /// Over this long off the course in a race, a bike is put back on it
 /// (0x492ac0, 6.0 at 0x555c2c).
 pub const OFF_COURSE_RESET: f32 = 6.0;
+/// A computer rider off the course this long is put back by its own
+/// controller (bike +0x11b4 in 0x415170, single-player races), s.
+pub const AI_OFF_COURSE_RESET: f32 = 5.0;
+/// After the finish of a Baja or Enduro, a computer rider pulls off to
+/// the side at 40 ft/s for this long, then stops (bike +0x80c, 0x415170).
+const GATE_PULL_OFF: f32 = 2.0;
 
 /// The fork's start in a lap race, so the computer riders don't funnel
 /// into each other off the gate: their lanes keep the gate's order, at
@@ -1041,6 +1047,9 @@ pub struct Racer {
     /// A computer rider's place on a Baja or Enduro course's line, which
     /// it follows toward the next gate (+0x44 in 0x415170).
     line_place: Option<Place>,
+    /// Seconds a computer rider has pulled off after finishing a gate
+    /// race (bike +0x80c).
+    pull_off: f32,
     on_course: bool,
     off_course: f32,
     /// Where a computer rider with no course is heading (the quarries).
@@ -1155,6 +1164,7 @@ impl Racer {
             wander: mm2_physics::ai::Wander::new(),
             place: None,
             line_place: None,
+            pull_off: 0.0,
             on_course: true,
             off_course: 0.0,
             timing: Timing::new(false),
@@ -1570,6 +1580,7 @@ impl Racer {
         level: usize,
         scale: f32,
         seed: &mut u32,
+        frame: f32,
     ) {
         let Bike::Computer(c) = &self.bike else {
             return;
@@ -1578,9 +1589,26 @@ impl Racer {
         let (at, speed) = (r.position, r.speed);
         let mut power = computer_power(level);
         let mut limit: f32 = 1000.0;
+        let mut lookahead = speed * 0.25;
         let raise = |p: Vec3| Vec3::new(p.x, at.y + 2.0, p.z);
         let mut widen = false;
-        let points: Vec<Vec3> = if let (Some(gate), Some(course)) = (gates.get(self.timing.gate), course) {
+        // Whether only obstacles within 10 ft count (bike +0x11b0). The
+        // wander branch leaves it as it was.
+        let mut near_only = r.near_only;
+        let gate_near = |g: Vec3| {
+            let (dx, dz) = (at.x - g.x, at.z - g.z);
+            mm2_physics::ai::rough_sqrt(dx * dx + dz * dz) < speed
+        };
+        let points: Vec<Vec3> = if !gates.is_empty() && self.finished.is_some() {
+            // Past the last gate: 40 ft off to the bike's right at 40 ft/s
+            // for two seconds, then a stop. The game returns before it
+            // sets the level's power, so the rider only slows.
+            self.pull_off += frame;
+            power = 0.0;
+            lookahead = 0.0;
+            limit = if self.pull_off < GATE_PULL_OFF { 40.0 } else { 0.0 };
+            vec![Vec3::new(at.x + r.look.z * 40.0, 0.0, at.z - r.look.x * 40.0)]
+        } else if let (Some(gate), Some(course)) = (gates.get(self.timing.gate), course) {
             // A Baja or Enduro course with its line: along the line from
             // the confirmed place toward the next gate's, ten seconds'
             // riding laid out a tenth at a time, while the place under the
@@ -1599,8 +1627,8 @@ impl Racer {
                 kept = here;
             }
             self.line_place = kept;
-            let off = flat(g - at).length();
-            if off < speed {
+            near_only = gate_near(g);
+            if near_only {
                 let to = (g - at).normalize_or_zero();
                 if to.dot(r.velocity.normalize_or_zero()) < 0.707_55 {
                     limit = 40.0;
@@ -1616,7 +1644,8 @@ impl Racer {
             let g = gate.centre;
             let look = gate.forward;
             let off = flat(g - at).length();
-            if speed > off {
+            near_only = gate_near(g);
+            if near_only {
                 let to = (g - at).normalize_or_zero();
                 let going = r.velocity.normalize_or_zero();
                 if to.dot(going) < 0.707_55 {
@@ -1632,24 +1661,41 @@ impl Racer {
             }
         } else if let Some(course) = course {
             widen = true;
+            near_only = self.on_course;
             match self.place {
                 None => vec![at + r.look * speed],
-                Some(place) if self.finished.is_some() => {
-                    // Off to the nearer side at 40 ft/s.
+                Some(place) if self.finished.is_some() && self.on_course => {
+                    // Off the course at 40 ft/s. The game meant to turn
+                    // square to the course, toward the nearer edge, but
+                    // builds the way from the course's z twice: (±z, 0, −z)
+                    // (0x415170; both decompiles agree). Kept as it is.
                     limit = 40.0;
                     let mut way = course.way(place);
                     if way.dot(r.look) < 0.0 {
                         way = -way;
                     }
-                    let mid = course.point(place);
-                    let right = Vec3::new(way.z, 0.0, -way.x);
-                    let side = if (at - mid).dot(right) >= 0.0 { right } else { -right };
-                    vec![at + side * 40.0]
+                    // How far the rider is to the course's right
+                    // (z, 0, −x), from its own way: nearer the left edge
+                    // when that is negative.
+                    let own = course.way(place);
+                    let across = (at - course.point(place)).dot(Vec3::new(own.z, 0.0, -own.x));
+                    let x = if across < 0.0 { way.z } else { -way.z };
+                    let dir = Vec3::new(x, 0.0, -way.z).normalize_or_zero();
+                    vec![at + dir * 40.0]
                 }
-                Some(place) if self.on_course => (0..100)
-                    .map(|i| raise(course.point(course.walk(place, i as f32 * 0.1 * speed))))
-                    .collect(),
-                Some(place) => vec![raise(course.point(course.walk(place, 100.0)))],
+                Some(place) => {
+                    if self.finished.is_some() {
+                        // Finished and off the course: it stops.
+                        limit = 0.0;
+                    }
+                    if self.on_course {
+                        (0..100)
+                            .map(|i| raise(course.point(course.walk(place, i as f32 * 0.1 * speed))))
+                            .collect()
+                    } else {
+                        vec![raise(course.point(course.walk(place, 100.0)))]
+                    }
+                }
             }
         } else {
             power = 1.5;
@@ -1659,11 +1705,14 @@ impl Racer {
             });
             vec![target]
         };
-        let mut path = mm2_physics::ai::Path::new(points, speed * 0.25);
+        let mut path = mm2_physics::ai::Path::new(points, lookahead);
         path.limit = limit;
         path.power = power;
         path.widen = widen;
         self.line = Some(path);
+        if let Bike::Computer(c) = &mut self.bike {
+            c.rider.near_only = near_only;
+        }
     }
 
     /// One frame of a computer rider: the controller's line, then the
@@ -1702,7 +1751,7 @@ impl Racer {
             (Some(course), Some(p)) if gates.is_empty() => Some((course.point(p), course.way(p))),
             _ => None,
         };
-        self.plan(course, gates, level, ground.terrain.scale, seed);
+        self.plan(course, gates, level, ground.terrain.scale, seed, frame);
         let busy = self.stunt.busy();
         let Bike::Computer(c) = &mut self.bike else {
             return;
@@ -1727,8 +1776,9 @@ impl Racer {
             }
             return;
         }
-        // Off the course too long: back on it (0x492ac0, 6 s).
-        if self.off_course > OFF_COURSE_RESET {
+        // Off the course too long: its controller puts it back on
+        // (0x415170, 5 s).
+        if self.off_course >= AI_OFF_COURSE_RESET {
             if let Some((at, way)) = reset_to {
                 let (lane, class) = (c.rider.lane, c.rider.class);
                 c.rider = mm2_physics::computer::Rider::new(ground, at - way * 3.5, way, lane, class);
@@ -1768,10 +1818,11 @@ impl Racer {
     /// point and picks another on reaching it (0x415170's last branch).
     fn roam(&mut self, scale: f32, seed: &mut u32) -> Controls {
         let at = self.bike.position();
-        let aim = self.wander.aim(at, scale, || {
+        self.wander.aim(at, scale, || {
             *seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
             (*seed >> 8) as f32 / (1u32 << 24) as f32
         });
+        let aim = self.wander.target;
         let forward = self.bike.forward();
         let right = Vec3::new(forward.z, 0.0, -forward.x);
         let steer = (flat(aim - at).normalize_or_zero().dot(right) * 2.5).clamp(-1.0, 1.0);

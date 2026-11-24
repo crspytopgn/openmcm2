@@ -230,7 +230,9 @@ impl Path {
         };
         let mut along = per_ft(d);
         let mut ghost = at;
-        let level = Vec3::new(velocity.x, 0.0, velocity.z).length();
+        // The game's level speeds here are its table square root
+        // (0x461ac0), a little short.
+        let level = rough_sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
         let mut v = steer(ghost, target(segment, t, d), level);
         v.y = velocity.y;
         let mut time = 0.0;
@@ -244,7 +246,10 @@ impl Path {
             if !(time < PLAN_AHEAD || flying) {
                 break;
             }
-            let speed = v.length();
+            let speed = rough_sqrt(v.length_squared());
+            // The ghost moves along the line by the level speed it had
+            // before the ground turned it (0x40e000 takes it at the top).
+            let moving = rough_sqrt(v.x * v.x + v.z * v.z);
             let (height, normal) = ground.terrain(ghost.x, ghost.z);
             let normal = normal.normalize_or(Vec3::Y);
             let g;
@@ -281,8 +286,8 @@ impl Path {
             ghost += Vec3::new(v.x, 0.0, v.z) * PLAN_STEP;
             ghost.y += g * PLAN_STEP * PLAN_STEP * 0.5 + v.y * PLAN_STEP;
             v.y += g * PLAN_STEP;
-            let level = Vec3::new(v.x, 0.0, v.z).length();
-            t += along * level * PLAN_STEP;
+            t += along * moving * PLAN_STEP;
+            let level = rough_sqrt(v.x * v.x + v.z * v.z);
             // The game takes a whole 1 off t per segment passed, whatever
             // the segments' lengths.
             while t > 1.0 && segment + 1 < n {
@@ -684,6 +689,10 @@ impl Wander {
                 0.0,
                 scale * WANDER_CENTRE + dir.z * WANDER_RADIUS * scale,
             );
+            // On the frame it picks, the game leaves the line's one point
+            // as its cleared array has it (0x415170 skips the copy), so
+            // the rider aims at the world's origin for that frame.
+            return Vec3::ZERO;
         }
         self.target
     }
@@ -859,12 +868,15 @@ mod tests {
     fn wanders_the_quarry() {
         let mut w = Wander::new();
         let mut r = [0.6_f32, 0.8].into_iter().cycle();
-        let t = w.aim(Vec3::ZERO, 1.0, || r.next().unwrap());
+        // The frame it picks, the line's point is the origin.
+        assert_eq!(w.aim(Vec3::ZERO, 1.0, || r.next().unwrap()), Vec3::ZERO);
+        let t = w.target;
         assert!((t - Vec3::new(666.66 + 266.4, 0.0, 666.66 + 355.2)).length() < 0.01);
         // Far from it, the rider keeps the target.
         assert_eq!(w.aim(Vec3::new(500.0, 30.0, 500.0), 1.0, || 0.0), t);
         // Within 50 ft it picks again.
-        let again = w.aim(t + Vec3::new(10.0, 0.0, 10.0), 1.0, || 1.0);
+        w.aim(t + Vec3::new(10.0, 0.0, 10.0), 1.0, || 1.0);
+        let again = w.target;
         assert!((again.x - (666.66 + 444.0 * std::f32::consts::FRAC_1_SQRT_2)).abs() < 0.1);
     }
 }

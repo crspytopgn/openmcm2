@@ -117,6 +117,11 @@ pub struct Rider {
     /// The air pose is on (`f_6fc`): in the air, unless a trick is
     /// running. The caller sets it.
     pub air_pose: bool,
+    /// Only obstacles within 10 ft count in the look-ahead scan (bike
+    /// +0x11b0, 0x416440's last argument). The controller sets it: in a
+    /// lap race while the rider is on the course, in a gate race within a
+    /// second's riding of the gate (0x415170).
+    pub near_only: bool,
     /// The bike's collision points (BIKE.RES `honda.col`) and how much
     /// the bike and rider weigh, lb, for [`Rider::hit_objects`].
     pub hull: Option<Arc<crate::bike::Hull>>,
@@ -161,6 +166,7 @@ impl Rider {
             previous: None,
             spin_axes: None,
             air_pose: true,
+            near_only: false,
         }
     }
 
@@ -208,6 +214,10 @@ impl Rider {
             } else {
                 0.1
             };
+        }
+        // A bike lost far off the map is put back at height 0 (0x414000).
+        if self.position.y.abs() > 10_000.0 {
+            self.position.y = 0.0;
         }
         let wanted = path.limit - self.speed;
         if self.airborne || wanted <= 0.0 {
@@ -409,6 +419,9 @@ impl Rider {
         let (mut front_down, mut rear_down) = (false, false);
         let mut airborne = true;
         let mut rear_query = pr;
+        // The up the last substep started with: the final ground check
+        // measures the front's spring along it (0x40faa0 keeps that copy).
+        let mut up_then = up;
         let mut elapsed = 0.0;
         if dt > 0.0 {
             while elapsed < dt {
@@ -416,6 +429,7 @@ impl Rider {
                 let mut ar = Vec3::new(0.0, -GRAVITY, 0.0);
                 let mut hit = 0.0;
                 rear_query = pr;
+                up_then = up;
                 let (gf, nf) = surface(ground, pf, 4.0, 5.0);
                 let (gr, nr) = surface(ground, pr, 4.0, 5.0);
                 side = look.cross(nr).normalize_or(side);
@@ -501,7 +515,7 @@ impl Rider {
                     let mut d = if front_down { dir } else { level(vf) };
                     let from = pf + Vec3::Y * 3.0;
                     let to = pf + (vf + vr) * 0.25 + Vec3::Y * 3.0;
-                    let scan = ai::scan(ground, from, to, 2.0, speed_f, movers, &[], false);
+                    let scan = ai::scan(ground, from, to, 2.0, speed_f, movers, &[], self.near_only);
                     if let (true, Some(o)) = (scan.blocked, scan.toward) {
                         let o = level(o);
                         let k = vf.dot(o);
@@ -604,13 +618,15 @@ impl Rider {
 
         // Last, out of the ground: the front by its own spring, the rear
         // by the front's, against where the rear stood a substep ago.
+        // The terrain is read where the rear stood, the solids' tops
+        // where it is now.
         let (gf, nf) = surface(ground, pf, 1.0, 2.0);
-        let (gr, nr) = surface(ground, rear_query, 1.0, 2.0);
-        let g = (pf + up * sf - Vec3::new(pf.x, gf, pf.z)).dot(nf);
+        let (gr, nr) = surface_split(ground, rear_query, pr, 1.0, 2.0);
+        let g = (pf + up_then * sf - Vec3::new(pf.x, gf, pf.z)).dot(nf);
         if g < 0.0 {
             pf -= nf * g;
         }
-        let g = (pr + up * sf - Vec3::new(rear_query.x, gr, rear_query.z)).dot(nr);
+        let g = (pr + up_then * sf - Vec3::new(rear_query.x, gr, rear_query.z)).dot(nr);
         if g < 0.0 {
             pr -= nr * g;
         }
@@ -660,6 +676,20 @@ fn path_aim(path: &mut Path, at: Vec3, lane: f32, look: Vec3) -> Vec3 {
 fn surface(ground: &dyn Ground, p: Vec3, above: f32, span: f32) -> (f32, Vec3) {
     let (mut h, mut n) = ground.terrain(p.x, p.z);
     let top = p + Vec3::Y * above;
+    if let Some(c) = ground.crossing(top, top - Vec3::Y * span) {
+        if c.point.y > h {
+            h = c.point.y;
+            n = c.normal;
+        }
+    }
+    (h, n.normalize_or(Vec3::Y))
+}
+
+/// [`surface`] with the terrain read under `terrain_at` and the solids'
+/// tops looked for over `solid_at`.
+fn surface_split(ground: &dyn Ground, terrain_at: Vec3, solid_at: Vec3, above: f32, span: f32) -> (f32, Vec3) {
+    let (mut h, mut n) = ground.terrain(terrain_at.x, terrain_at.z);
+    let top = solid_at + Vec3::Y * above;
     if let Some(c) = ground.crossing(top, top - Vec3::Y * span) {
         if c.point.y > h {
             h = c.point.y;
