@@ -17,9 +17,12 @@
 //!   solid (0x405fb0): 2400 a second for that frame.
 //! * The thrown rider sliding on the ground leaves dust (0x537690).
 //!
-//! Not ported: the dust and exhaust darken in shadow (0x507340 casts a
-//! ray to the sun every sixth frame), and the crashed bike's frame
-//! scraping the ground raises dust (0x52f430's third pass).
+//! In shadow (a line from just over the bike to the sun meets the ground,
+//! checked every sixth frame, every frame for the bike followed) the dust
+//! turns dark grey and unlit and the exhaust half grey (0x507340).
+//!
+//! Not ported: the crashed bike's frame scraping the ground raises dust
+//! (0x52f430's third pass).
 
 use crate::renderer::{from_game, DEPTH_FORMAT};
 use bytemuck::{Pod, Zeroable};
@@ -149,6 +152,9 @@ pub struct Feed {
     pub slide: Option<Vec3>,
     /// The bike was put somewhere new: no trail from where it was.
     pub moved: bool,
+    /// Whether the ground stands between the bike and the sun, found
+    /// when [`Particles::shade_due`] says so (`None` other frames).
+    pub shade: Option<bool>,
 }
 
 /// The dust trail (0x4bd150).
@@ -211,6 +217,11 @@ struct Emitters {
     /// The thrown rider's last place and the clod it was on (+0x120).
     slide: Option<Vec3>,
     slide_cell: usize,
+    /// In the ground's shadow, and the frame of six its check falls on,
+    /// against the frame it is on now.
+    shaded: bool,
+    phase: u8,
+    stagger: u8,
 }
 
 impl Emitters {
@@ -258,6 +269,9 @@ impl Emitters {
             gas: 0.0,
             slide: None,
             slide_cell: 0,
+            shaded: false,
+            phase: 0,
+            stagger: 0,
         }
     }
 }
@@ -277,6 +291,9 @@ pub struct Particles {
     /// Leaves the spinning tyre's dirt chunks undrawn (still made), for
     /// the enhanced drawing's flying dirt.
     pub hide_chunks: bool,
+    /// The next bike's frame of six for its shadow check (the physics
+    /// objects' count, 0 to 5, each new one taking the next).
+    phases: u8,
 }
 
 struct Gpu {
@@ -297,6 +314,7 @@ impl Particles {
             gpu: None,
             hide_trail: false,
             hide_chunks: false,
+            phases: 0,
         }
     }
 
@@ -335,11 +353,25 @@ impl Particles {
 
     /// Feeds bike `i`'s emitters for this frame and runs them (0x507340,
     /// then each emitter's update).
+    /// Whether bike `i` looks for the sun this frame: on its frame of six,
+    /// or always when it is the bike followed (KrustyBike's override of
+    /// the check, called from 0x507340).
+    pub fn shade_due(&self, i: usize, followed: bool) -> bool {
+        followed || self.bikes.get(i).is_none_or(|e| e.stagger == e.phase)
+    }
+
     pub fn bike(&mut self, i: usize, feed: &Feed, dt: f32) {
         while self.bikes.len() <= i {
-            let e = Emitters::new(&mut self.rand);
+            let mut e = Emitters::new(&mut self.rand);
+            e.phase = self.phases;
+            self.phases = if self.phases >= 5 { 0 } else { self.phases + 1 };
             self.bikes.push(e);
         }
+        if let Some(shaded) = feed.shade {
+            self.bikes[i].shaded = shaded;
+        }
+        let b = &mut self.bikes[i];
+        b.stagger = if b.stagger >= 5 { 0 } else { b.stagger + 1 };
         if dt <= 0.0 {
             return;
         }
@@ -391,17 +423,17 @@ impl Particles {
             e.sparks.velocity = Vec3::new(0.0, 12.0, 0.0);
             e.sparks.active = true;
         }
-        self.dust(&mut e.dust, dt);
+        self.dust(&mut e.dust, e.shaded, dt);
         self.chunks(&mut e.chunks, dt);
         self.sparks(&mut e.sparks, dt);
-        self.steam(&mut e.steam, dt);
+        self.steam(&mut e.steam, e.shaded, dt);
         self.slide(&mut e, feed.slide, dt);
         self.bikes[i] = e;
     }
 
     /// 0x4bd200: puffs spaced along the way the tyre went, sized by its
     /// speed; they start a quarter through their life and grow.
-    fn dust(&mut self, d: &mut Dust, dt: f32) {
+    fn dust(&mut self, d: &mut Dust, shaded: bool, dt: f32) {
         if !d.active {
             d.started = false;
             d.last = d.at;
@@ -429,13 +461,13 @@ impl Particles {
             self.add(Particle {
                 position: d.last + way * (k / n),
                 velocity: Vec3::ZERO,
-                colour: Vec3::ONE,
+                colour: if shaded { Vec3::splat(64.0 / 255.0) } else { Vec3::ONE },
                 cell: d.cell,
                 age: life * 0.25,
                 life,
                 size,
                 growth: size + size,
-                flags: GROWS | FADES | TRAIL,
+                flags: GROWS | FADES | TRAIL | if shaded { COLOURED } else { 0 },
             });
             d.cell = if d.cell >= 12 { 0 } else { d.cell + 1 };
             i += 1;
@@ -534,7 +566,7 @@ impl Particles {
 
     /// 0x4be7c0: puffs back along the way the exhaust went, 0.03 ft apart
     /// (five at once for a burst), white and fading.
-    fn steam(&mut self, s: &mut Steam, dt: f32) {
+    fn steam(&mut self, s: &mut Steam, shaded: bool, dt: f32) {
         if !s.on {
             return;
         }
@@ -562,7 +594,7 @@ impl Particles {
             self.add(Particle {
                 position: at,
                 velocity: Vec3::ZERO,
-                colour: Vec3::ONE,
+                colour: if shaded { Vec3::splat(128.0 / 255.0) } else { Vec3::ONE },
                 cell: s.cell,
                 age: 0.0,
                 life: 500.0,

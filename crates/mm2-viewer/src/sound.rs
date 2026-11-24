@@ -594,7 +594,9 @@ pub enum Site {
 /// and front to back (0x4024d0), or once, the first time the camera comes
 /// within its one-shot distance. Each time it comes in range it rolls its
 /// trigger chance once (0x4027b0). It is a 3D buffer with the scene's
-/// minimum and maximum distances, moving with what it hangs on (0x402870).
+/// minimum and maximum distances, moving with what it hangs on (0x402870),
+/// unless it is `SoundForce2D` (most are): then a flat buffer whose level
+/// follows the distance ([`flat_volume`]).
 struct Emitter {
     spec: scn::SoundSpec,
     site: Site,
@@ -611,6 +613,22 @@ struct Emitter {
 /// How far out a scene sound keeps playing, in maximum distances
 /// (0x5555e8).
 const EMITTER_REACH: f32 = 1.2;
+
+/// A `SoundForce2D` emitter's volume (0x402010, set each frame by 0x403100
+/// for the emitters in a plain 2D buffer): no 3D, no pan and no Doppler,
+/// only a level from its side-to-side and front-to-back distance: full
+/// inside its minimum distance, falling in a straight line in decibels to
+/// −25 dB at its maximum, and held at −25 dB out to where it stops.
+fn flat_volume(distance: f32, (min, max): (f32, f32)) -> f32 {
+    let hundredths = if distance >= max {
+        -2500.0
+    } else if distance <= min {
+        0.0
+    } else {
+        ((distance - min) / (max - min) * -2500.0).trunc()
+    };
+    10f32.powf(hundredths / 2000.0)
+}
 
 pub struct RaceSounds {
     /// By class; only the classes in the race are loaded.
@@ -1323,7 +1341,11 @@ impl RaceSounds {
             let e = &mut self.emitters[k];
             if let Some(v) = e.voice {
                 let range = (e.spec.min_distance, e.spec.max_distance);
-                let (volume, pan, pitch) = l.hear(here, velocity, range);
+                let (volume, pan, pitch) = if e.spec.force_2d {
+                    (flat_volume(distance, range), 0.0, 1.0)
+                } else {
+                    l.hear(here, velocity, range)
+                };
                 audio.place(v, volume * self.options.gain, pan, pitch);
             }
         }
@@ -1386,6 +1408,17 @@ impl RaceSounds {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A flat scene sound: full inside its minimum distance, −12.5 dB half
+    /// way to its maximum, −25 dB from there out.
+    #[test]
+    fn flat_volume_ramps_in_decibels() {
+        let r = (10.0, 350.0);
+        assert_eq!(flat_volume(5.0, r), 1.0);
+        assert!((flat_volume(180.0, r) - 10f32.powf(-1250.0 / 2000.0)).abs() < 1e-4);
+        assert!((flat_volume(350.0, r) - 10f32.powf(-1.25)).abs() < 1e-6);
+        assert_eq!(flat_volume(400.0, r), flat_volume(350.0, r));
+    }
 
     /// With the game's files beside the engine, every list has samples.
     #[test]
