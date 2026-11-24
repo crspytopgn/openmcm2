@@ -190,11 +190,23 @@ fn ground(in: VertexOut) -> vec3<f32> {
     let towards = vec2<i32>(select(-1, 1, f.x >= 0.5), select(-1, 1, f.y >= 0.5));
     let edge = min(f, 1.0 - f);
     let blend = 0.5 * (1.0 - smoothstep(vec2<f32>(0.0), vec2<f32>(BAND), edge));
+    // Most of a tile lies outside the bands (blend 0 there), where the
+    // neighbours' share is nothing and so they are not looked up: the
+    // colour is the same to the bit.
     let own = tile(t, cell, ddx, ddy);
-    let across_x = tile(t, cell + vec2<i32>(towards.x, 0), ddx, ddy);
-    let across_z = tile(t, cell + vec2<i32>(0, towards.y), ddx, ddy);
-    let corner = tile(t, cell + towards, ddx, ddy);
-    let base = mix(mix(own, across_x, blend.x), mix(across_z, corner, blend.x), blend.y) * fine_ground(in.terrain_xz);
+    var row = own;
+    if (blend.x > 0.0) {
+        row = mix(own, tile(t, cell + vec2<i32>(towards.x, 0), ddx, ddy), blend.x);
+    }
+    var mixed_tiles = row;
+    if (blend.y > 0.0) {
+        var other = tile(t, cell + vec2<i32>(0, towards.y), ddx, ddy);
+        if (blend.x > 0.0) {
+            other = mix(other, tile(t, cell + towards, ddx, ddy), blend.x);
+        }
+        mixed_tiles = mix(row, other, blend.y);
+    }
+    let base = mixed_tiles * fine_ground(in.terrain_xz);
     // The detail texture, once over each tile, blended over the texel in
     // the game's own colour space (its second texture stage,
     // BLENDTEXTUREALPHA).
