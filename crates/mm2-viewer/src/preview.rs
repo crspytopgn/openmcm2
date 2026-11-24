@@ -17,8 +17,12 @@ pub const VIEWPORT: [f32; 4] = [91.0, 108.0, 452.0, 220.0];
 const EYE: Vec3 = Vec3::new(0.0, 1.0, 15.0);
 const TARGET: Vec3 = Vec3::new(0.0, 3.0, 0.0);
 const FOV: f32 = 50.0;
-/// How fast it turns, radians a second (our pick).
-const TURN: f32 = 0.6;
+/// How fast it turns by itself, radians a second: π/8 (0x44fae0).
+const TURN: f32 = std::f32::consts::FRAC_PI_8;
+/// Dragged with the pointer: radians a pixel across (π/200), and feet the
+/// eye rises a pixel down, between 1 and 10 ft (0x44fae0).
+const DRAG_TURN: f32 = std::f32::consts::PI / 200.0;
+const DRAG_RISE: f32 = 0.1;
 
 pub struct Preview {
     ride: Ride,
@@ -31,6 +35,8 @@ pub struct Preview {
     /// preview goes (see [`crate::gpu_free`]).
     depth_texture: Option<wgpu::Texture>,
     angle: f32,
+    /// Where the eye stands (before the turn), as the pointer drags it.
+    eye: Vec3,
     /// Waiting (WaitR), or playing one of the idles since a time.
     idle: Option<f32>,
     seed: u32,
@@ -108,6 +114,7 @@ impl Preview {
             depth: None,
             depth_texture: None,
             angle: 0.0,
+            eye: EYE,
             idle: None,
             seed: 0x1234_5678,
         })
@@ -135,6 +142,17 @@ impl Preview {
             }
             Some(_) => {}
         }
+    }
+
+    /// Dragged `dx`, `dy` pixels of the 640×480 screen: the turn follows
+    /// the pointer across, and the eye rises with it down, staying as far
+    /// from what it looks at (0x44fae0).
+    pub fn drag(&mut self, dx: f32, dy: f32) {
+        self.angle += dx * DRAG_TURN;
+        let mut eye = self.eye;
+        eye.y = (eye.y + dy * DRAG_RISE).clamp(1.0, 10.0);
+        let reach = (EYE - TARGET).length();
+        self.eye = TARGET + (eye - TARGET).normalize_or(EYE - TARGET) * reach;
     }
 
     pub fn ride(&self) -> &Ride {
@@ -197,7 +215,7 @@ impl Preview {
         // The view's 50° spans the window's width.
         let fovy = 2.0 * ((FOV.to_radians() / 2.0).tan() / aspect).atan();
         let proj = Mat4::perspective_rh(fovy, aspect, 0.5, 200.0);
-        let (eye, target_at) = (from_game(EYE), from_game(TARGET));
+        let (eye, target_at) = (from_game(self.eye), from_game(TARGET));
         let view = Mat4::look_at_rh(eye, target_at, Vec3::Y);
         let globals = Globals {
             view_proj: (proj * view).to_cols_array_2d(),

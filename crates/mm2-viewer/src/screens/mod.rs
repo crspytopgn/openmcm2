@@ -188,6 +188,9 @@ pub trait Screen {
         None
     }
 
+    /// The bike and rider were dragged round: Auto Rotate goes off.
+    fn stop_turning(&mut self) {}
+
     /// The dialog whose archive sounds come from.
     fn pack(&mut self) -> String {
         self.layers()

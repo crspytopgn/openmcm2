@@ -4587,6 +4587,9 @@ struct App {
     frame: f32,
     /// The pointer on the 640×480 screen.
     pointer: (f32, f32),
+    /// Where the pointer last was while it drags the Bike & Rider page's
+    /// bike and rider round.
+    preview_drag: Option<(f32, f32)>,
     /// The pad's A and B last frame, to click and go back in the menus.
     pad_click: (bool, bool),
     /// The stick's smoothed steering and when it was last read (the pad
@@ -4774,6 +4777,7 @@ impl App {
             frame: 0.0,
             sounds,
             pointer: (0.0, 0.0),
+            preview_drag: None,
             pad_click: (false, false),
             pad_smooth: (0.0, None),
             pad_lean_logged: false,
@@ -6929,6 +6933,13 @@ impl ApplicationHandler for App {
                     let (x, y) = self.pointer;
                     if let Some(f) = &mut self.front {
                         f.mouse_move(&self.audio, x, y);
+                        if let (Some((lx, ly)), Some(p)) = (self.preview_drag, self.state.as_mut().and_then(|s| s.preview.as_mut())) {
+                            if (x, y) != (lx, ly) {
+                                p.drag(x - lx, y - ly);
+                                f.stop_turning();
+                                self.preview_drag = Some((x, y));
+                            }
+                        }
                     }
                 }
                 if let (Some(rp), Some((ui, _))) = (&mut self.replay, &mut self.hud) {
@@ -6950,8 +6961,12 @@ impl ApplicationHandler for App {
                 let (x, y) = self.pointer;
                 let Some(f) = &mut self.front else { return };
                 if state == ElementState::Pressed {
+                    let [wx, wy, ww, wh] = f.preview_window();
+                    let inside = x >= wx && x < wx + ww && y >= wy && y < wy + wh;
+                    self.preview_drag = (inside && f.preview().is_some()).then_some((x, y));
                     f.mouse_down(x, y);
                 } else {
+                    self.preview_drag = None;
                     let next = f.mouse_up(&self.audio, x, y, now);
                     self.next(next, event_loop);
                 }
