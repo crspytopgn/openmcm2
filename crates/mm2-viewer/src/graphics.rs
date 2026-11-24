@@ -662,6 +662,13 @@ pub fn auto_quality(name: &str, kind: wgpu::DeviceType, backend: wgpu::Backend, 
     if kind == D::Cpu || backend == wgpu::Backend::Gl || has(&["llvmpipe", "swiftshader", "software", "microsoft basic"]) {
         return "low";
     }
+    // A browser that names no card (Safari never does, Chrome and Edge
+    // mostly not): nothing to go on, so Low, the effects it can surely
+    // carry. Its dynamic resolution then draws the scene sharper, up to
+    // 1080p's worth, while frames keep time (renderer.rs).
+    if browser && n.trim().is_empty() {
+        return "low";
+    }
     // Strong enough for High even on a 4K screen.
     let strong = has(&["rtx", "rx 6", "rx 7", "rx 9", "arc b", " max", " ultra"]);
     let mut level = if n.contains("apple") {
@@ -692,6 +699,9 @@ pub fn auto_quality(name: &str, kind: wgpu::DeviceType, backend: wgpu::Backend, 
     ["low", "medium", "high"][level.clamp(0, 2) as usize]
 }
 
+/// The most pixels a browser draws the enhanced scene at: 1080p's worth.
+pub const BROWSER_PIXELS: u32 = 1920 * 1080;
+
 impl Enhanced {
     /// What a browser can carry: a browser's GPU work goes through more
     /// layers, a frame that takes too long can stall the whole computer,
@@ -700,7 +710,7 @@ impl Enhanced {
     /// with temporal anti-aliasing in place of 4x or 8x MSAA, and
     /// without the light shafts and replay blur, the costliest passes.
     pub fn for_browser(mut self) -> Enhanced {
-        const FULL_HD: u32 = 1920 * 1080;
+        const FULL_HD: u32 = BROWSER_PIXELS;
         self.raytracing = false;
         if self.msaa > 1 {
             self.msaa = 1;
@@ -914,9 +924,9 @@ mod tests {
         assert_eq!(q("Apple M4", D::IntegratedGpu, uhd), "medium");
         assert_eq!(q("Apple M4 Max", D::IntegratedGpu, uhd), "high");
         // A browser: at most Medium without a card of its own; not known
-        // (Safari names no card) is Medium.
+        // (Safari names no card) is Low.
         assert_eq!(auto_quality("Apple M4 Pro", D::IntegratedGpu, B::BrowserWebGpu, hd, true), "medium");
-        assert_eq!(auto_quality("", D::Other, B::BrowserWebGpu, hd, true), "medium");
+        assert_eq!(auto_quality("", D::Other, B::BrowserWebGpu, hd, true), "low");
     }
 
     #[test]

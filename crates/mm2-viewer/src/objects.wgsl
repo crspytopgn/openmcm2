@@ -465,6 +465,17 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     // far: its leaves a little thinner.
     let cut = select(0.5, 0.62, surface.z > 1.5);
     let edge = (texel.a - cut) / max(fwidth(texel.a), 1e-4) + 0.5;
+    // Cut out first, before the lighting's many reads: a see-through
+    // leaf or fence pixel costs next to nothing then, which tells most
+    // where leaves overlap (above all on tile-based GPUs, phones' and
+    // Apple's). A discarded pixel still helps its neighbours with the
+    // slopes below, as WGSL's discard only stops it being written.
+    if (edge <= 0.0 || (texel.a < 0.5 && enh.flags.x < 0.5) || tree_hidden(in.world, in.clip.xy)) {
+        discard;
+    }
+    if (in.ghost > 0.5 && ((u32(in.clip.x) + u32(in.clip.y)) & 1u) == 0u) {
+        discard;
+    }
     // A face seen from behind (leaves, flags) is lit on the side the eye
     // sees. Told by the eye's side of it, not by the triangle's turn: the
     // flip of z from the game's coordinates turns every triangle round.
@@ -472,7 +483,7 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
     if (dot(n, globals.camera.xyz - in.world) < 0.0) {
         n = -n;
     }
-    // Before any discard: it looks at the pixels around.
+    // (It looks at the pixels around: the cut-out ones still help.)
     // The bikes and riders, remastered, smooth: their textures' marks are
     // paint and print, not bumps.
     let polished = enh.more.w > 0.5 && in.moving > 0.5;
@@ -501,8 +512,8 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         strength *= 1.0 - 0.8 * near;
     }
     var bumped = normalize(bump(n, in.world, luminance(texel.rgb), strength) + bend * sign(dot(n, normalize(in.normal))));
-    // The free pack's physically based materials, read here before any
-    // discard (their normal's frame looks at the pixels around).
+    // The free pack's physically based materials (their normal's frame
+    // looks at the pixels around).
     let physical = look.maps.x > 0.5 && enh.ibl.x > 0.5;
     var mat: Pbr;
     mat.n = n;
@@ -535,12 +546,6 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         let a2 = mat.roughness * mat.roughness * mat.roughness * mat.roughness + min(dn * 0.5 + spread * 2.0, 0.3);
         mat.roughness = sqrt(sqrt(a2));
         bumped = mat.n;
-    }
-    if (edge <= 0.0 || (texel.a < 0.5 && enh.flags.x < 0.5) || tree_hidden(in.world, in.clip.xy)) {
-        discard;
-    }
-    if (in.ghost > 0.5 && ((u32(in.clip.x) + u32(in.clip.y)) & 1u) == 0u) {
-        discard;
     }
     let dist = length(in.world - globals.camera.xyz);
     var light = in.light;

@@ -45,12 +45,12 @@ export const UPGRADES = [
 const QUALITIES = [["auto", "Auto (picks for your computer)"], ["low", "Low"], ["medium", "Medium"], ["high", "High (a fast computer)"]];
 // Whether a quality preset keeps an upgrade on (Quality::has).
 function presetHas(quality, name) {
-  if (quality === "auto") quality = "medium"; // until the game knows the graphics card
+  if (quality === "auto") quality = "low"; // browsers seldom name the graphics card
   const off = { low: ["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr"], medium: ["shafts", "smooth", "gtao", "ssr"] }[quality] || [];
   return !off.includes(name) && UPGRADES.some(([n, , on]) => n === name && on);
 }
 
-const ABOUT_QUALITY = "A preset for the effects below. Auto looks at your graphics card when the game starts and picks Low, Medium or High for it. While you race it draws the 3D scene a little smaller if frames start coming late, and if that isn't enough it turns the costliest effects off, one step at a time, giving them back once there is time to spare. It remembers what this computer needed for next time. Medium suits most computers in a browser; High needs a fast one. Changing an effect below picks Medium with that change.";
+const ABOUT_QUALITY = "A preset for the effects below. Auto looks at your graphics card when the game starts and picks Low, Medium or High for it; most browsers don't say which card they have, and then it starts at Low and draws the 3D scene sharper while there is time to spare. While you race it draws the 3D scene a little smaller if frames start coming late, and if that isn't enough it turns the costliest effects off, one step at a time, giving them back once there is time to spare. It remembers what this computer needed for next time. Medium suits most computers in a browser; High needs a fast one. Changing an effect below picks Medium with that change.";
 const ABOUT_TIME = "Where the sun is: the track's own, or an hour of your choice.";
 const ABOUT_WEATHER = "Clear, overcast or rain, for looks only: the riding is the same.";
 const ABOUT_DETAIL = "How strongly the grain of the photo ground shows.";
