@@ -210,6 +210,19 @@ struct Loops {
 }
 
 impl Loops {
+    /// Whether the class's `engine.ini` asks for its loops over the
+    /// whole samples (`RevBlend = 1`).
+    fn wanted(dir: &Path) -> bool {
+        let Ok(text) = crate::fs::read_to_string(dir.join("engine.ini")) else {
+            return false;
+        };
+        let ini = scn::Ini::parse(&text);
+        ini.sections
+            .iter()
+            .find_map(|s| s.get("RevBlend"))
+            .is_some_and(|v| matches!(v.trim(), "1" | "true" | "yes"))
+    }
+
     fn load(dir: &Path) -> Option<Loops> {
         let ini = scn::Ini::parse(&crate::fs::read_to_string(dir.join("engine.ini")).ok()?);
         let get = |key: &str| ini.sections.iter().find_map(|s| s.get(key)).map(|v| v.trim().to_string());
@@ -466,7 +479,11 @@ impl Bank {
         let whole = [List::Idle, List::PowerBand, List::Decel]
             .iter()
             .all(|&l| !lists[LISTS.iter().position(|(k, _)| *k == l).unwrap_or(0)].is_empty());
-        let loops = if whole { None } else { Loops::load(dir) };
+        // Unless the class's `engine.ini` asks for its rev-step loops
+        // (`RevBlend = 1`, with `OnLoops`/`OffLoops` recorded every so many
+        // revs): then the loops play, blended by revs, on the gas, off it
+        // and in the air, and the whole samples are only for an older game.
+        let loops = if whole && !Loops::wanted(dir) { None } else { Loops::load(dir) };
         if lists.iter().all(|l| l.is_empty()) && loops.is_none() {
             return None;
         }
@@ -1449,6 +1466,11 @@ mod tests {
         let bank = Bank::load_dir(&dir, 1).unwrap();
         assert!(bank.loops.is_none());
         assert_eq!(bank.list(List::PowerBand).len(), 1);
+        // Asked for, the rev-step loops win, blended by revs.
+        let ini = "[Engine]\nRevBlend=1\nOnLoops=OnLoop.wav@3000, PowerBand01.wav@9000\nOffLoop=OffLoop.wav\nIdleLoop=IdleLoop.wav\nOffLoopRpm=5000\nIdleLoopRpm=1500\n";
+        std::fs::write(dir.join("engine.ini"), ini).unwrap();
+        let bank = Bank::load_dir(&dir, 1).unwrap();
+        assert_eq!(bank.loops.as_ref().map(|l| l.on.len()), Some(2));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
