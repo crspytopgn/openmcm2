@@ -141,3 +141,14 @@ h3.small { font-size: 14px; margin: 14px 0 4px; }
 .viewsliders label { display: flex; gap: 6px; align-items: center; }
 .viewsliders input { width: 90px; accent-color: var(--accent); }
 .preview .stage .viewsliders { top: 6px; right: 6px; }
+
+/* Full screen for any tool: its controls down the side, the view filling the rest. */
+.tabs .tabfs { margin-left: auto; font-size: 13px; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; margin-bottom: 6px; align-self: center; }
+.tabs .tabfs:hover { border-color: var(--accent); }
+.fsmax { position: fixed !important; inset: 0; z-index: 50; background: var(--bg); padding: 10px; margin: 0; height: 100vh; height: 100dvh; box-sizing: border-box; grid-template-rows: 100%; }
+.fsmax .controls { max-height: none; height: 100%; overflow-y: auto; box-sizing: border-box; }
+.fsmax .view, .fsmax .view canvas { height: 100%; min-height: 0; }
+.fsmax .tree { height: auto; min-height: 0; flex: 1; }
+.fsmax .preview { max-height: none; }
+.fsexit { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 51; }
+@media (max-width: 760px) { .fsmax.side { grid-template-columns: 1fr; grid-template-rows: 40% 60%; } }

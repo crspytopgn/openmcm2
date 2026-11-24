@@ -88,7 +88,7 @@ const loaders = {
   builder: () => import("./builder.js"),
 };
 app.show = async (name) => {
-  for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
+  for (const b of document.querySelectorAll(".tabs button[data-tab]")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
   for (const p of document.querySelectorAll(".panel")) p.hidden = p.id !== "tab-" + name;
   if (!app.tabs[name]) {
     const mod = await loaders[name]();
@@ -97,5 +97,35 @@ app.show = async (name) => {
   history.replaceState(null, "", "#" + name);
   return app.tabs[name];
 };
-for (const b of document.querySelectorAll(".tabs button")) b.addEventListener("click", () => app.show(b.dataset.tab));
+for (const b of document.querySelectorAll(".tabs button[data-tab]")) b.addEventListener("click", () => app.show(b.dataset.tab));
+
+// Full screen for the open tool (the Course Builder has its own button
+// over its view): the browser's own where it can, else the page filled.
+let fsBox = null;
+const exitBtn = Object.assign(document.createElement("button"), { className: "tbtn fsexit", textContent: "Exit full screen", hidden: true, title: "Back to the page (Esc)." });
+document.body.append(exitBtn);
+function fullScreen(on) {
+  if (!on && fsBox) {
+    fsBox.classList.remove("fsmax");
+    document.body.classList.remove("qb-maxed");
+    exitBtn.hidden = true;
+    fsBox = null;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  } else if (on) {
+    const panel = document.querySelector(".panel:not([hidden])");
+    if (panel?.id === "tab-builder") return panel.querySelector("#qb-fs")?.click();
+    fsBox = panel?.querySelector(".side, .split");
+    if (!fsBox) return;
+    fsBox.classList.add("fsmax");
+    document.body.classList.add("qb-maxed");
+    exitBtn.hidden = false;
+    fsBox.append(exitBtn);
+    fsBox.requestFullscreen?.().catch(() => {});
+  }
+  window.dispatchEvent(new Event("resize"));
+}
+$("fullscreen").addEventListener("click", () => fullScreen(true));
+exitBtn.addEventListener("click", () => fullScreen(false));
+document.addEventListener("fullscreenchange", () => !document.fullscreenElement && fsBox && fullScreen(false));
+document.addEventListener("keydown", (e) => e.key === "Escape" && fsBox && fullScreen(false));
 app.show(loaders[location.hash.slice(1)] ? location.hash.slice(1) : "files");
