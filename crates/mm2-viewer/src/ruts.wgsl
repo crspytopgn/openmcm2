@@ -1,5 +1,5 @@
 // A tyre's line since the last frame, drawn into the ruts' map (ruts.rs):
-// a groove deepest along the middle, kept where deeper than what is there.
+// a groove deepest along the middle, added to what is there.
 
 struct Out {
     @builtin(position) position: vec4<f32>,

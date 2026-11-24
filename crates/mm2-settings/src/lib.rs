@@ -182,7 +182,6 @@ impl Quality {
         // taste, left to the player.
         let on: &[&str] = match self {
             Quality::RayTraced => &["raytracing"],
-            Quality::Ultra => &["ruts"],
             Quality::Max => &["supersample", "far"],
             _ => &[],
         };
@@ -265,7 +264,7 @@ pub const UPGRADES: [(&str, &str, bool); 31] = [
     ("bikes", "Glossier bikes", false),
     ("shafts", "Light shafts", true),
     ("cinematic", "Replay blur and depth of field", false),
-    ("ruts", "Lasting tyre ruts", false),
+    ("ruts", "Tyre marks and ruts", true),
     ("scenery", "Trackside props and crowd", false),
     ("grade", "Colour grade", false),
     ("gtao", "Better ambient occlusion (GTAO)", true),
@@ -865,6 +864,9 @@ impl Settings {
                 // Before version 3 the bloom and glossy bikes were on by
                 // default; they start off now, so those files' are dropped.
                 "upgrade.bloom" | "upgrade.bikes" if version < 3 => {}
+                // Before version 5 the ruts were the old deep grooves, off
+                // by default; the tyre marks that build up start on now.
+                "upgrade.ruts" if version < 5 => {}
                 k => {
                     if let Some(i) = UPGRADES.iter().position(|u| k == format!("upgrade.{}", u.0)) {
                         s.upgrades[i] = yes(v);
@@ -885,7 +887,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=4\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nauto_quality={}\nquality={}\nantialiasing={}\nresolution={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nscreen={}x{}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nupdate_notice={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\nopengl={}\nforgiving_landings={}\n",
+            "version=5\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nauto_quality={}\nquality={}\nantialiasing={}\nresolution={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nscreen={}x{}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nupdate_notice={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\nopengl={}\nforgiving_landings={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -1175,7 +1177,7 @@ mod tests {
             s.args(),
             [
                 "/x/GAME",
-                "--enhanced=quality=high,msaa=2,no-shadows,ruts,time=dusk",
+                "--enhanced=quality=high,msaa=2,no-shadows,time=dusk",
                 "--window",
                 "1920x1080",
                 "--centred-display",
@@ -1298,6 +1300,11 @@ mod tests {
         // Files from before 0.5.3 saved lobby downloads off, the old default.
         assert!(Settings::parse("version=3\nlobby_downloads=0\n").more.lobby_downloads);
         assert!(!Settings::parse("version=4\nlobby_downloads=0\n").more.lobby_downloads);
+        // The tyre marks start on, even where an older file kept the old
+        // ruts off.
+        let ruts = UPGRADES.iter().position(|u| u.0 == "ruts").unwrap();
+        assert!(Settings::parse("version=4\nupgrade.ruts=0\n").upgrades[ruts]);
+        assert!(!Settings::parse("version=5\nupgrade.ruts=0\n").upgrades[ruts]);
         let none = More { leaderboard_url: String::new(), ..More::default() };
         assert_eq!(More::from_args(&none.args()).leaderboard_url, "");
         let kept = Settings { more: none.clone(), ..Settings::default() };

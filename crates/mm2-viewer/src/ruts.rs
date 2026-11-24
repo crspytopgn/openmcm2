@@ -1,15 +1,19 @@
-//! Lasting tyre ruts for the enhanced drawing ([`crate::graphics`]), none
-//! of them the game's: each frame every tyre on the ground draws the line
-//! it ran since the last into a map over the whole terrain, which the
-//! ground's shader cuts and darkens and the grass shuns. Only drawn: the
-//! ground the bikes ride is the game's.
+//! Tyre marks that build up into ruts for the enhanced drawing
+//! ([`crate::graphics`]), none of them the game's: each frame every tyre
+//! on the ground draws the line it ran since the last into a map over the
+//! whole terrain, adding to what is there, which the ground's shader
+//! darkens and shapes and the grass shuns. Only drawn: the ground the
+//! bikes ride is the game's, so the riding is the same with it or without.
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Vec2, Vec3};
 
-/// The groove's width, ft, and how deep it is (of 1).
+/// The groove's width, ft, and how much one tyre's pass adds to it (of
+/// 1): a handful of bikes make a full rut.
 const WIDTH: f32 = 0.5;
-const PASS: f32 = 0.7;
+const PASS: f32 = 0.15;
+/// One pass's share for the gentle wear instead.
+const WEAR_PASS: f32 = 0.1;
 /// Frames a tyre may be off the ground and its rut still join up.
 const HOP: u32 = 12;
 /// Further than this between two frames is a reset or a respawn, ft.
@@ -37,15 +41,15 @@ pub struct RutPainter {
     /// The map's corner (x, z) and side, ft.
     origin: Vec2,
     size: f32,
-    /// How deep one tyre's pass marks it: all at once for ruts, a tenth
-    /// for the wear, which adds up over the passes.
+    /// How deep one tyre's pass marks it; the passes add up.
     pass: f32,
+    /// The gentle wear rather than ruts.
+    wear: bool,
 }
 
 impl RutPainter {
     /// Over a terrain `size` ft a side, its corner at `origin`; for the
-    /// gentle track `wear` (passes add up) rather than ruts (the deepest
-    /// pass is kept).
+    /// gentle track `wear` rather than ruts.
     pub fn new(device: &wgpu::Device, origin: Vec2, size: f32, wear: bool) -> RutPainter {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ruts"),
@@ -74,7 +78,7 @@ impl RutPainter {
                         color: wgpu::BlendComponent {
                             src_factor: wgpu::BlendFactor::One,
                             dst_factor: wgpu::BlendFactor::One,
-                            operation: if wear { wgpu::BlendOperation::Add } else { wgpu::BlendOperation::Max },
+                            operation: wgpu::BlendOperation::Add,
                         },
                         alpha: wgpu::BlendComponent::REPLACE,
                     }),
@@ -101,14 +105,15 @@ impl RutPainter {
             pending: Vec::new(),
             origin,
             size,
-            pass: if wear { PASS / 7.0 } else { PASS },
+            pass: if wear { WEAR_PASS } else { PASS },
+            wear,
         }
     }
 
     /// The map's corner and side for the shaders: x, z, side, and 1 for
     /// ruts or 2 for the wear.
     pub fn uniform(&self) -> [f32; 4] {
-        [self.origin.x, self.origin.y, self.size, if self.pass < PASS { 2.0 } else { 1.0 }]
+        [self.origin.x, self.origin.y, self.size, if self.wear { 2.0 } else { 1.0 }]
     }
 
     /// Where each bike's tyres touch the ground this frame (game
