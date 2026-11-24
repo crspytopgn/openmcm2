@@ -19,8 +19,8 @@ port does. The engine note itself is in `physics.md` section 15. Code: `crates/m
   (0 → silence). In-Game Sound Effects off plays nothing (every play goes through 0x4ea510, which checks it).
 * 16-bit sound reads `Audio_16.ini` and its `16_*.wav` samples; 8-bit reads `Audio_08.ini`'s `8_*.wav`.
 * EAX (when on): environment 9 (arena) in Supercross and Moto-Tag, 17 (mountains) elsewhere. Not ported.
-* Hotkeys in a race: sound on/off (key 0x1f), EAX on/off (0x2f), and in Supercross the crowd volume, cycling
-  0, −5 dB and off (0x2e). Not ported.
+* Hotkeys in a race: Ctrl+S sound on/off (key 0x1f), Ctrl+V EAX on/off (0x2f), and in Supercross Ctrl+C the
+  crowd volume, cycling 0, −5 dB and off (0x2e). Ported.
 
 ## Engines (0x4e8720)
 
@@ -77,6 +77,10 @@ power lines, radios and more.
 * Coming in range it rolls its trigger chance once (`rand() / 32768 × 100 > percent` skips it) and plays,
   looping or once. Going out of range stops it.
 * It is a 3D buffer with its own min/max distance, at the frame it hangs on, with a velocity from its movement.
+* A `SoundForce2D` one (121 of them) is a plain 2D buffer instead: no 3D placing, pan or Doppler. Each frame
+  0x403100 sets its level from the same side-to-side and front-to-back distance (0x402010): 0 inside the
+  minimum distance, then a straight line in hundredths of a dB down to −2500 (−25 dB) at the maximum, and
+  −25 dB beyond it until it stops at 1.2 × the maximum. Ported (`flat_volume` in sound.rs).
 
 ## Music
 

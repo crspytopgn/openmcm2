@@ -694,13 +694,13 @@ fn main() -> Result<(), BoxError> {
                     *owed -= n as f64;
                     out.extend(audio.render(n).chunks(2).map(|f| (f[0] + f[1]) / 2.0));
                 }
-                throw_dirt(&r, &track.ground(), &mut dirt, frame);
+                throw_dirt(&r, &track.ground(), track.sun, &mut dirt, frame);
                 splash_water(&r, &track.water, &mut dirt, frame);
                 ride_tyres.push((tyre_places(&r, &track.ground()), frame));
                 // A film shows the dust and dirt too, fed as it goes.
                 if let Some(f) = &mut film {
                     f.renderer.tyres(ride_tyres.last().map_or(&[][..], |t| &t.0[..]), frame);
-                    throw_dirt(&r, &track.ground(), &mut f.renderer.particles, frame);
+                    throw_dirt(&r, &track.ground(), track.sun, &mut f.renderer.particles, frame);
                 }
                 if let Some(out) = &mut ai_csv {
                     use std::fmt::Write as _;
@@ -1477,7 +1477,7 @@ fn log_ride(out: &mut impl std::io::Write, r: &Race, acts: &[bool], dt: f32) {
     );
 }
 
-fn throw_dirt(race: &Race, ground: &TrackGround, dirt: &mut particles::Particles, dt: f32) {
+fn throw_dirt(race: &Race, ground: &TrackGround, sun: Vec3, dirt: &mut particles::Particles, dt: f32) {
     let tyre = |at: Vec3, on_object: bool| {
         let zone = if on_object { ground.zones[7] } else { ground.zone(at) };
         particles::Tyre {
@@ -1507,6 +1507,7 @@ fn throw_dirt(race: &Race, ground: &TrackGround, dirt: &mut particles::Particles
             hit: b.hit,
             slide: b.wreck.as_ref().filter(|w| w.touching).map(|w| w.position),
             moved: false,
+            shade: None,
         }
     };
     for (i, r) in race.racers.iter().enumerate() {
@@ -1544,7 +1545,16 @@ fn throw_dirt(race: &Race, ground: &TrackGround, dirt: &mut particles::Particles
                 }
             }
         };
-        dirt.bike(i, &feed, dt);
+        // In the ground's shadow: a line from 1.5 ft over the rear tyre's
+        // ground point (where its dust and dirt come from) to 3000 ft
+        // towards the sun meets the ground (0x507340, through Terrain's
+        // segment cast).
+        let followed = i == race.watched.unwrap_or(race.player);
+        let shade = dirt.shade_due(i, followed).then(|| {
+            let at = feed.tyres[1].map_or(r.bike.position(), |t| t.at) + Vec3::Y * 1.5;
+            crate::hud::ground_between(ground.terrain, at, at - sun * 3000.0)
+        });
+        dirt.bike(i, &particles::Feed { shade, ..feed }, dt);
     }
     dirt.update(dt);
 }
@@ -6405,7 +6415,7 @@ impl App {
                 };
                 let mut splashes = Vec::new();
                 if let Some(renderer) = &mut state.renderer {
-                    throw_dirt(r, &track.ground(), &mut renderer.particles, dt);
+                    throw_dirt(r, &track.ground(), track.sun, &mut renderer.particles, dt);
                     splashes = splash_water(r, &track.water, &mut renderer.particles, dt);
                     renderer.tyres(&tyre_places(r, &track.ground()), dt);
                 }
@@ -7085,6 +7095,16 @@ impl ApplicationHandler for App {
                                     hud.say_switch(ui, what, on);
                                 }
                                 self.keep_switches();
+                            }
+                            // N alone: the labels a shade darker (0x523f60).
+                            KeyCode::KeyN
+                                if ![KeyCode::ShiftLeft, KeyCode::ShiftRight, KeyCode::AltLeft, KeyCode::AltRight]
+                                    .iter()
+                                    .any(|k| self.keys.contains(k)) =>
+                            {
+                                if let Some((_, hud)) = &mut self.hud {
+                                    hud.cycle_label_shade();
+                                }
                             }
                             KeyCode::Home | KeyCode::End => {
                                 if let Some(r) = &mut self.race {

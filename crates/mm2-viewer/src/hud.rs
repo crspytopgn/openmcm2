@@ -274,6 +274,9 @@ pub struct Hud {
     /// Each rider's head, game coordinates, and each label's fading.
     pub heads: Vec<Option<Vec3>>,
     labels: Vec<Label>,
+    /// N: the labels' text from white down to black in six steps
+    /// (0x523f60 tints it `255 − 51 × shade`, held as 4 bits a colour).
+    pub label_shade: u8,
     /// Frames counted for the labels' looks, every fourth frame each.
     looks: usize,
     /// The speed the dial shows, mph; in the air it winds down.
@@ -297,6 +300,7 @@ impl Default for Hud {
             zoom: 2.0,
             message: None,
             told: false,
+            label_shade: 0,
         }
     }
 }
@@ -325,6 +329,12 @@ impl Hud {
                 label.saw(!ground_between(terrain, eye, *head + Vec3::Y * LABEL_OVER_HEAD));
             }
         }
+    }
+
+    /// N with no Ctrl, Shift or Alt: the labels one step darker, and
+    /// white again after black (the game's six steps).
+    pub fn cycle_label_shade(&mut self) {
+        self.label_shade = if self.label_shade >= 5 { 0 } else { self.label_shade + 1 };
     }
 
     /// Steps the radar's zoom (1 to 5).
@@ -407,7 +417,8 @@ impl Hud {
             let (w, h) = (w as f32, h as f32);
             let (sx, sy) = (((x + 1.0) * 320.0).trunc(), ((1.0 - y) * 240.0).trunc());
             gfx.sprites.in_view = true;
-            for (d, colour) in [(1.0, [0.0, 0.0, 0.0, alpha]), (0.0, [1.0, 1.0, 1.0, alpha])] {
+            let grey = label_grey(self.label_shade);
+            for (d, colour) in [(1.0, [0.0, 0.0, 0.0, alpha]), (0.0, [grey, grey, grey, alpha])] {
                 gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [sx + d, sy + d, w, h], colour);
             }
             gfx.sprites.in_view = false;
@@ -948,7 +959,14 @@ pub fn clock_text(t: f32) -> String {
 
 /// Whether the ground rises between `from` and `to` (0x50c600's test along
 /// the line), checked every 2 ft.
-fn ground_between(terrain: &mm2_formats::trn::Terrain, from: Vec3, to: Vec3) -> bool {
+/// The labels' text grey for shade 0 to 5: 255 less 51 a step, cut to
+/// the texture's 4 bits (0x523f60).
+fn label_grey(shade: u8) -> f32 {
+    let level = 255u8.saturating_sub(shade.min(5) * 51);
+    (level >> 4) as f32 / 15.0
+}
+
+pub fn ground_between(terrain: &mm2_formats::trn::Terrain, from: Vec3, to: Vec3) -> bool {
     let steps = ((to - from).length() / 2.0).ceil().clamp(1.0, 1000.0) as usize;
     (1..steps).any(|k| {
         let p = from.lerp(to, k as f32 / steps as f32);
