@@ -1250,6 +1250,15 @@ pub struct ObjectRenderer {
     /// shadow (signs over a rider) left as empty triangles, so the
     /// cascades' runs still match (see [`Objects::set_shadowless`]).
     cast_indices: Option<wgpu::Buffer>,
+    /// The indices as the sun's cascades take them, each block's
+    /// triangles sorted again into [`CAST_CELL`] cells (`cast_blocks`,
+    /// per draw), so a cascade leaves out more of what it needn't hold. A
+    /// depth pass keeps the nearest whatever the order, so it is the same.
+    /// Taken for [`ObjectRenderer::cast_indices`] once it is made.
+    cast_order: Option<Vec<u32>>,
+    cast_blocks: Vec<Vec<Block>>,
+    /// Whether the cascades draw from `cast_order`'s layout.
+    cast_sorted: bool,
     draw_ranges: Vec<std::ops::Range<u32>>,
     /// Each draw's kind for the trees' distance (ObjectMesh::lods).
     lods: Vec<u8>,
@@ -1281,6 +1290,10 @@ pub struct ObjectRenderer {
     pub extras_shown: bool,
     /// The enhanced drawing ([`crate::graphics`]), when on.
     enhanced: Option<Enhanced>,
+    /// Whether each draw is solid: no texel of its picture at any size,
+    /// times its vertices' colour, under fs_depth's cut (half), and not a
+    /// tree that fades by distance, so fs_depth never discards from it.
+    solid: Vec<bool>,
     /// The models' pictures and the draws' small buffers, which only their
     /// bind groups hold: destroyed with the renderer (see
     /// [`crate::gpu_free`]).
@@ -1325,6 +1338,12 @@ struct MotionViews {
 struct Enhanced {
     lit: wgpu::RenderPipeline,
     depth: wgpu::RenderPipeline,
+    /// The same with no fragment shader, for the draws no texel of which
+    /// is ever cut out ([`ObjectRenderer::solid`]): their depth is the
+    /// same, and the GPU can test it before it shades, at a fraction of
+    /// the cost (the sun cascades were the dearest part of a frame by
+    /// the scenery).
+    depth_solid: wgpu::RenderPipeline,
     /// Each cascade's view from the sun, for drawing it.
     cascades: Vec<(wgpu::Buffer, wgpu::BindGroup)>,
     /// The triangles of the moving models (bikes, riders, people), per
@@ -1648,6 +1667,32 @@ impl ObjectRenderer {
                 multiview_mask: None,
                 cache: None,
             });
+            let depth_solid = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("objects sun depth, solid"),
+                layout: Some(&shadow_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_caster"),
+                    compilation_options: Default::default(),
+                    buffers: &vertex_layout,
+                },
+                fragment: None,
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: crate::enhance::SHADOW_DEPTH,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                    stencil: Default::default(),
+                    bias: wgpu::DepthBiasState {
+                        constant: 2,
+                        slope_scale: 2.0,
+                        clamp: 0.0,
+                    },
+                }),
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            });
             // One more view than the cascades: the camera's, for the
             // ray-traced shadows' depth pass.
             let cascades = (0..crate::enhance::CASCADES + 1)
@@ -1690,7 +1735,7 @@ impl ObjectRenderer {
                 });
                 (buffer, moving_draws)
             });
-            Enhanced { lit, depth, cascades, moving }
+            Enhanced { lit, depth, depth_solid, cascades, moving }
         });
         let node_count = mesh.node_count.max(1) as usize;
         let nodes = device.create_texture(&wgpu::TextureDescriptor {
@@ -1901,6 +1946,7 @@ impl ObjectRenderer {
                 (range.clone(), group)
             })
             .collect();
+        let (cast_order, cast_blocks) = cast_cells(&mesh);
         Some(ObjectRenderer {
             pipeline,
             shadow_pipeline,
@@ -1909,6 +1955,9 @@ impl ObjectRenderer {
             shadow: None,
             cpu_indices: mesh.indices.clone(),
             cast_indices: None,
+            cast_order: Some(cast_order),
+            cast_blocks,
+            cast_sorted: false,
             vertex_nodes: mesh.vertices.iter().map(|v| v.node).collect(),
             draw_ranges: mesh.draws.iter().map(|(r, _)| r.clone()).collect(),
             lods: mesh.lods.clone(),
@@ -1929,6 +1978,7 @@ impl ObjectRenderer {
             extra_node: mesh.extra_node.map(|n| n as usize),
             extras_shown: true,
             enhanced,
+            solid: solid_draws(&mesh),
             held: held.into_inner(),
         })
     }
@@ -2191,10 +2241,19 @@ impl ObjectRenderer {
     /// The eco-system's full trees only as far as their billboards' band,
     /// and those only from it on, by how far each block is from `camera`.
     pub fn cull(&mut self, slot: usize, frustum: &crate::cull::Frustum, camera: Vec3) {
+        self.cull_cascade(slot, frustum, frustum, camera);
+    }
+
+    /// The same for a sun cascade's slot: what it must hold through
+    /// `tight` (enhance::cascade_reach), but the far trees' billboards,
+    /// whose blocks' bounds hold only their feet, through its own view
+    /// `wide`, as before.
+    pub fn cull_cascade(&mut self, slot: usize, tight: &crate::cull::Frustum, wide: &crate::cull::Frustum, camera: Vec3) {
         let Some(seen) = self.seen.get_mut(slot) else { return };
         seen.clear();
         let mut runs = Vec::new();
-        for (d, blocks) in self.blocks.iter().enumerate() {
+        let blocks = if slot > 0 && self.cast_sorted { &self.cast_blocks } else { &self.blocks };
+        for (d, blocks) in blocks.iter().enumerate() {
             let kind = self.lods.get(d).copied().unwrap_or(0);
             let wanted = |b: &&Block| {
                 let near = camera.clamp(b.0, b.1).distance(camera);
@@ -2205,6 +2264,7 @@ impl ObjectRenderer {
                     _ => true,
                 }
             };
+            let frustum = if kind == 2 { wide } else { tight };
             crate::cull::runs(blocks.iter().filter(|b| wanted(b) && frustum.sees(b.0, b.1)).map(|b| b.2.clone()), &mut runs);
             seen.extend(runs.drain(..).map(|r| (r, d)));
         }
@@ -2279,7 +2339,10 @@ impl ObjectRenderer {
             let n = self.vertex_nodes[i as usize] & NODE;
             !nodes.iter().any(|r| r.contains(&n))
         };
-        let mut all = self.cpu_indices.clone();
+        // In the cascades' own order, when there is one.
+        let sorted = self.cast_order.is_some();
+        let mut all = self.cast_order.take().unwrap_or_else(|| self.cpu_indices.clone());
+        self.cast_sorted = sorted;
         for tri in all.chunks_mut(3) {
             if tri.len() == 3 && !casts(tri[0]) {
                 tri.fill(0);
@@ -2342,7 +2405,7 @@ impl ObjectRenderer {
         pass.set_bind_group(2, group, &[]);
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-        self.draw_seen(pass, 0);
+        self.draw_seen_depth(pass, 0, e);
     }
 
     /// Draws every object, or with `moving_only` only the moving models,
@@ -2356,14 +2419,35 @@ impl ObjectRenderer {
         if moving_only {
             let Some((indices, draws)) = &e.moving else { return };
             pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
-            for (range, d) in draws {
-                pass.set_bind_group(1, &self.draws[*d].1, &[]);
-                pass.draw_indexed(range.clone(), 0, 0..1);
+            for solid in [true, false] {
+                pass.set_pipeline(if solid { &e.depth_solid } else { &e.depth });
+                for (range, d) in draws.iter().filter(|(_, d)| self.solid.get(*d).copied().unwrap_or(false) == solid) {
+                    pass.set_bind_group(1, &self.draws[*d].1, &[]);
+                    pass.draw_indexed(range.clone(), 0, 0..1);
+                }
             }
             return;
         }
         pass.set_index_buffer(self.cast_indices.as_ref().unwrap_or(&self.indices).slice(..), wgpu::IndexFormat::Uint32);
-        self.draw_seen(pass, 1 + cascade);
+        self.draw_seen_depth(pass, 1 + cascade, e);
+    }
+
+    /// Draws what view `slot` sees into a depth pass from the sun or the
+    /// camera: the solid draws first without their pictures, then the
+    /// ones with cut-outs. Only the nearest depth stays, whatever the
+    /// order, so it is the same.
+    fn draw_seen_depth(&self, pass: &mut wgpu::RenderPass<'_>, slot: usize, e: &Enhanced) {
+        for solid in [true, false] {
+            pass.set_pipeline(if solid { &e.depth_solid } else { &e.depth });
+            let mut bound = None;
+            for (range, d) in self.seen[slot].iter().filter(|(_, d)| self.solid.get(*d).copied().unwrap_or(false) == solid) {
+                if bound != Some(*d) {
+                    pass.set_bind_group(1, &self.draws[*d].1, &[]);
+                    bound = Some(*d);
+                }
+                pass.draw_indexed(range.clone(), 0, 0..1);
+            }
+        }
     }
 
     /// Draws what view `slot` sees, each run with its texture.
@@ -2403,6 +2487,81 @@ impl ObjectRenderer {
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
         self.draw_seen(pass, 0);
     }
+}
+
+/// The cells the cascades' blocks are cut into, ft a side.
+const CAST_CELL: f32 = 40.0;
+
+/// `mesh`'s indices with each still block's triangles sorted again into
+/// [`CAST_CELL`] cells, each cell's in their order, and each draw's
+/// blocks of those cells (the moving models' block as it was).
+fn cast_cells(mesh: &ObjectMesh) -> (Vec<u32>, Vec<Vec<Block>>) {
+    let mut out = mesh.indices.clone();
+    let mut all = Vec::with_capacity(mesh.blocks.len());
+    for blocks in &mesh.blocks {
+        let mut cells: Vec<Block> = Vec::new();
+        for b in blocks {
+            let (start, end) = (b.2.start as usize, b.2.end as usize);
+            // The moving models' block (unbounded), or an empty one.
+            if b.0.x == f32::MIN || start >= end || end > mesh.indices.len() {
+                cells.push(b.clone());
+                continue;
+            }
+            let point = |i: u32| mesh.vertices.get(i as usize).map_or(Vec3::ZERO, |v| Vec3::from(v.position));
+            let mut tris: Vec<((i32, i32), &[u32])> = mesh.indices[start..end]
+                .chunks_exact(3)
+                .map(|t| {
+                    let mid = (point(t[0]) + point(t[1]) + point(t[2])) / 3.0;
+                    (((mid.z / CAST_CELL).floor() as i32, (mid.x / CAST_CELL).floor() as i32), t)
+                })
+                .collect();
+            tris.sort_by_key(|t| t.0);
+            let mut at = start;
+            let mut last = None;
+            for (k, tri) in tris {
+                if last != Some(k) {
+                    cells.push((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN), at as u32..at as u32));
+                    last = Some(k);
+                }
+                let c = cells.last_mut().unwrap();
+                for &i in tri {
+                    c.0 = c.0.min(point(i));
+                    c.1 = c.1.max(point(i));
+                }
+                out[at..at + 3].copy_from_slice(tri);
+                at += 3;
+                c.2.end = at as u32;
+            }
+            // A ragged end (never, by how blocks are made) left as it was.
+        }
+        all.push(cells);
+    }
+    (out, all)
+}
+
+/// Whether each of `mesh`'s draws is solid in fs_depth: not a tree that
+/// fades by distance, and every texel of its picture, at every size,
+/// times the least of its vertices' colours' alpha, at least the cut (a
+/// little over half, for the filtering's rounding). A filtered texel is a
+/// blend of these, so it never falls under the cut either.
+fn solid_draws(mesh: &ObjectMesh) -> Vec<bool> {
+    mesh.draws
+        .iter()
+        .enumerate()
+        .map(|(d, (range, image))| {
+            if mesh.lods.get(d).copied().unwrap_or(0) != 0 {
+                return false;
+            }
+            let texel = image.as_ref().map_or(255, |i| i.levels.iter().flat_map(|l| l.chunks_exact(4).map(|p| p[3])).min().unwrap_or(255));
+            let corner = mesh.indices[range.start as usize..range.end as usize]
+                .iter()
+                .filter_map(|&i| mesh.vertices.get(i as usize))
+                .map(|v| v.color[3])
+                .min()
+                .unwrap_or(255);
+            (texel as f32 / 255.0) * (corner as f32 / 255.0) >= 0.51
+        })
+        .collect()
 }
 
 /// How far a decal is lifted off the face it lies on, and each side of a

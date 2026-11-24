@@ -620,11 +620,11 @@ impl Drive {
     /// slower than the timetable, and every car of it goes along.
     fn rail(&mut self, c: Controls, terrain: &Terrain, world: &World, traffic: &mut Traffic, dt: f32) {
         self.rate = (self.rate + (c.throttle * 0.25 - c.brake * 0.6) * dt).clamp(0.0, 3.0);
-        let statics = &world.solids[..traffic.first.min(world.solids.len())];
+        let statics = traffic.first.min(world.solids.len());
         for &i in &self.consist {
             let car = &mut traffic.cars[i];
             let above = car.vehicle.position.y + 6.0;
-            car.vehicle.update(dt * self.rate, |x, z| traffic::ground_at(terrain, statics, x, z, Some(above)));
+            car.vehicle.update(dt * self.rate, |x, z| traffic::ground_at(terrain, world, statics, x, z, Some(above)));
             car.vehicle.velocity *= self.rate;
         }
         let Seat::Car(index) = self.seat else { return };
@@ -646,7 +646,7 @@ impl Drive {
         let s = self.car;
         let Seat::Car(index) = self.seat else { return };
         let mine = traffic.cars.get(index).map(|c| c.solids.clone()).unwrap_or(0..0);
-        let statics = &world.solids[..traffic.first.min(world.solids.len())];
+        let statics = traffic.first.min(world.solids.len());
         let right = right_of(self.up, self.forward);
         let centre = self.position + self.up * s.cg;
         let forward_speed = self.velocity.dot(self.forward);
@@ -680,7 +680,7 @@ impl Drive {
         for (w, (sx, sz)) in [(-1.0, 1.0), (1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)].into_iter().enumerate() {
             let front = sz > 0.0;
             let mount = self.position + right * (sx * s.half_track) + self.forward * (sz * s.half_base) + self.up * s.wheel;
-            let (floor, normal) = traffic::ground_at(terrain, statics, mount.x, mount.z, Some(mount.y + 1.0));
+            let (floor, normal) = traffic::ground_at(terrain, world, statics, mount.x, mount.z, Some(mount.y + 1.0));
             let length = (mount.y - floor) / self.up.y.max(0.3);
             // On its side or its back, no wheel is on the ground.
             if length >= free || self.up.y < 0.35 {
@@ -742,14 +742,7 @@ impl Drive {
         let step = self.velocity * dt;
         for (bx, bz) in [(-1.0, 1.0), (1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)] {
             let corner = centre + right * (bx * s.half_track) + self.forward * (bz * (s.half_base + 2.0));
-            let hit = world
-                .solids
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| !mine.contains(i))
-                .filter_map(|(_, s)| s.crossing(corner, corner + step))
-                .chain(world.trunks.crossing(corner, corner + step))
-                .min_by(|a, b| a.along.total_cmp(&b.along));
+            let hit = world.crossing_among(corner, corner + step, |i| !mine.contains(&i), true);
             if let Some(hit) = hit {
                 let n = Vec3::new(hit.normal.x, 0.0, hit.normal.z).normalize_or(hit.normal);
                 let into = self.velocity.dot(n);

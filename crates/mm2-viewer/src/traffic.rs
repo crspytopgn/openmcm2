@@ -95,14 +95,13 @@ pub fn solids(model: &str, colseg: &rs2::Archive) -> Vec<Solid> {
 /// The ground a vehicle stands on at `x`, `z`: the terrain or a track
 /// object's top under `above` (30 ft over the terrain when not given), as
 /// its height and normal.
-pub fn ground_at(terrain: &Terrain, statics: &[Solid], x: f32, z: f32, above: Option<f32>) -> (f32, Vec3) {
+/// Only the still solids, the first `statics` of the world's, count.
+pub fn ground_at(terrain: &Terrain, world: &World, statics: usize, x: f32, z: f32, above: Option<f32>) -> (f32, Vec3) {
     let h = ride::ground(terrain, x, z);
     let n = ride::normal(terrain, Vec3::new(x, 0.0, z));
     let top = above.map_or(h + 30.0, |a| a.max(h));
-    statics
-        .iter()
-        .filter_map(|s| s.crossing(Vec3::new(x, top, z), Vec3::new(x, h - 0.1, z)))
-        .min_by(|a, b| a.along.total_cmp(&b.along))
+    world
+        .crossing_among(Vec3::new(x, top, z), Vec3::new(x, h - 0.1, z), |i| i < statics, false)
         .map_or((h, n), |c| (c.point.y, c.normal))
 }
 
@@ -113,11 +112,12 @@ impl Traffic {
             // It drives over the track's objects too, as the Ski Lodge's
             // trucks cross its bridge (0x439e10): from a little above
             // where it was, down to the terrain.
-            let statics = &world.solids[..self.first];
+            let statics = self.first.min(world.solids.len());
             let placed = car.vehicle.position != Vec3::ZERO;
             let above = car.vehicle.position.y + CLIMB;
             if !car.driven {
-                car.vehicle.update(dt, |x, z| ground_at(terrain, statics, x, z, placed.then_some(above)));
+                let world = &*world;
+                car.vehicle.update(dt, |x, z| ground_at(terrain, world, statics, x, z, placed.then_some(above)));
             }
             let (turn, at) = (car.vehicle.rotation(), car.vehicle.position);
             for s in &mut world.solids[car.solids.clone()] {

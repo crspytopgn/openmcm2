@@ -51,6 +51,7 @@
 // keeps stderr in last-run.log.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bench;
 mod gpu_free;
 mod free_text;
 mod demo;
@@ -552,7 +553,7 @@ fn main() -> Result<(), BoxError> {
                 .map(|s| s.split_whitespace().filter_map(|x| x.parse::<f32>().ok()).map(|t| t + shift).collect())
                 .unwrap_or_default();
             let mut film = match flag("--film") {
-                dir if dir.is_some() || std::env::var("MM2_WRECK_LOG").is_ok() => {
+                dir if dir.is_some() || std::env::var("MM2_WRECK_LOG").is_ok() || std::env::var("MM2_FILM_BENCH").is_ok() => {
                     let size = flag("--size")
                         .and_then(|s| s.split_once('x'))
                         .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
@@ -658,7 +659,11 @@ fn main() -> Result<(), BoxError> {
                     }
                     None => c,
                 };
+                let stepped = web_time::Instant::now();
                 chase = r.update(&track.ground(), c, frame);
+                if let Some(f) = &mut film {
+                    f.step = stepped.elapsed().as_secs_f64();
+                }
                 if let Some(d) = &mut driving {
                     chase = d.camera(&track.terrain, frame);
                     if k % 30 == 0 {
@@ -2489,6 +2494,8 @@ async fn load_track_steps(
                     }
                     world.trunks = mm2_physics::collision::Trunks::new(trunks);
                     traffic.first = world.solids.len();
+                    // All but the vehicles' stay put.
+                    world.still = traffic.first;
                     for (source, vehicle, model) in &vehicles {
                         let first = world.solids.len();
                         world.solids.extend(traffic::solids(&model.model, &colseg));
@@ -4012,6 +4019,11 @@ struct Film {
     log: Option<(PathBuf, String)>,
     /// The vehicle the player drives, if any.
     drive: Option<drive::Drive>,
+    /// `MM2_FILM_BENCH`: each frame drawn and timed instead of saved
+    /// (crate::bench), for finding where frames come late.
+    bench: Option<bench::Bench>,
+    /// The game's own step before each frame, s (for the bench).
+    pub step: f64,
 }
 
 impl Film {
@@ -4021,7 +4033,8 @@ impl Film {
         let log = std::env::var("MM2_WRECK_LOG")
             .ok()
             .map(|f| (PathBuf::from(f), String::from("t,stage,motion,x,y,z,xx,xy,xz,yx,yy,yz,zx,zy,zz\n")));
-        Ok(Film { device, queue, renderer, dir, from, size, next: from, shot: 0, log, drive: None })
+        let bench = bench::Bench::wanted();
+        Ok(Film { device, queue, renderer, dir, from, size, next: from, shot: 0, log, drive: None, bench, step: 0.0 })
     }
 
     /// Poses the race at `clock` s into the ride, and films it.
@@ -4042,8 +4055,17 @@ impl Film {
             _ => chase,
         };
         let eye = renderer::from_game(chase.0);
+        let shown = web_time::Instant::now();
         show(race, track, &mut self.renderer, eye, None);
         feel_wrecks(race, &self.renderer);
+        let shown = shown.elapsed().as_secs_f64();
+        if let Some(b) = &mut self.bench {
+            let (w, h) = self.size;
+            let mut camera = Camera::looking_at(eye, renderer::from_game(chase.1));
+            camera.fov = race.fov();
+            b.frame(&self.device, &self.queue, &mut self.renderer, (w, h), &camera, race.time, clock, self.step, shown);
+            return Ok(());
+        }
         if let Some(d) = &self.drive {
             drive_show(d, race, track, &mut self.renderer);
         }
@@ -4082,6 +4104,9 @@ impl Film {
 
 impl Drop for Film {
     fn drop(&mut self) {
+        if let Some(b) = &self.bench {
+            b.report(&self.device, &mut self.renderer);
+        }
         if let Some((path, text)) = &self.log {
             let _ = crate::fs::write(path, text);
         }

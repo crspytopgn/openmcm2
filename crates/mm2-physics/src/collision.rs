@@ -389,27 +389,182 @@ pub struct World {
     pub solids: Vec<Solid>,
     /// Tree trunks, when trees are solid (the race's Tree Collision).
     pub trunks: Trunks,
+    /// How many of the first solids stay where they were placed (all but
+    /// the scripted vehicles'): those are found through a grid instead of
+    /// each being asked, the answers the same. Set once the solids are all
+    /// in; none by default.
+    pub still: usize,
+    broad: std::sync::OnceLock<Broad>,
 }
 
 impl World {
     /// The deepest touch of a sphere against any solid.
     pub fn sphere(&self, centre: Vec3, radius: f32) -> Option<Hit> {
-        self.solids
-            .iter()
-            .filter_map(|s| s.sphere(centre, radius))
-            .chain(self.trunks.sphere(centre, radius))
-            .max_by(|a, b| a.depth.total_cmp(&b.depth))
+        self.near(centre, radius, |solids| {
+            solids
+                .filter_map(|(_, s)| s.sphere(centre, radius))
+                .chain(self.trunks.sphere(centre, radius))
+                .max_by(|a, b| a.depth.total_cmp(&b.depth))
+        })
     }
 
     /// The first solid face a point moving from `from` to `to` passes
     /// through from its front.
     pub fn crossing(&self, from: Vec3, to: Vec3) -> Option<Crossing> {
-        self.solids
-            .iter()
-            .enumerate()
-            .filter_map(|(i, s)| s.crossing(from, to).map(|c| Crossing { object: i as u64, ..c }))
-            .chain(self.trunks.crossing(from, to))
-            .min_by(|a, b| a.along.total_cmp(&b.along))
+        self.near((from + to) / 2.0, from.distance(to) / 2.0, |solids| {
+            solids
+                .filter_map(|(i, s)| s.crossing(from, to).map(|c| Crossing { object: i as u64, ..c }))
+                .chain(self.trunks.crossing(from, to))
+                .min_by(|a, b| a.along.total_cmp(&b.along))
+        })
+    }
+
+    /// The first face of the solids `keep` keeps (by index), and of the
+    /// trees' trunks with `trunks`, a point moving from `from` to `to`
+    /// passes through from its front: as asking each of them in turn.
+    pub fn crossing_among(&self, from: Vec3, to: Vec3, keep: impl Fn(usize) -> bool, trunks: bool) -> Option<Crossing> {
+        self.near((from + to) / 2.0, from.distance(to) / 2.0, |solids| {
+            solids
+                .filter(|(i, _)| keep(*i))
+                .filter_map(|(i, s)| s.crossing(from, to).map(|c| Crossing { object: i as u64, ..c }))
+                .chain(trunks.then(|| self.trunks.crossing(from, to)).flatten())
+                .min_by(|a, b| a.along.total_cmp(&b.along))
+        })
+    }
+
+    /// Hands `ask` the solids that might reach within `reach` of `at`, in
+    /// their order, each with its index: the still ones near by the grid
+    /// and every moving one. Each solid's own test turns away the rest just
+    /// as it would have, so the answer is the same as asking them all, and
+    /// ties go the same way. (A track's hundreds of solids, each asked a
+    /// few hundred times a step, were half the game's time.)
+    fn near<T>(&self, at: Vec3, reach: f32, ask: impl FnOnce(&mut dyn Iterator<Item = (usize, &Solid)>) -> T) -> T {
+        let broad = self.broad.get_or_init(|| Broad::new(&self.solids, self.still));
+        if broad.count != self.solids.len() || !at.is_finite() || !reach.is_finite() {
+            return ask(&mut self.solids.iter().enumerate());
+        }
+        NEAR.with(|list| {
+            let mut list = list.take();
+            broad.gather(at, reach, &mut list);
+            let answer = ask(&mut list.iter().map(|&i| (i as usize, &self.solids[i as usize])));
+            NEAR.with(|l| l.replace(list));
+            answer
+        })
+    }
+}
+
+thread_local! {
+    /// The solids found near, kept for the next ask.
+    static NEAR: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The still solids by where they are, in square cells over the ground:
+/// each listed in every cell its bounding sphere (and a foot more) is over.
+#[derive(Debug, Clone, Default)]
+struct Broad {
+    /// The solids there were when it was made.
+    count: usize,
+    /// The first cell's place, and how many cells across and down.
+    first: (i32, i32),
+    size: (i32, i32),
+    /// Each cell's solids: `items[starts[c]..starts[c + 1]]`.
+    starts: Vec<u32>,
+    items: Vec<u32>,
+    /// Asked every time: the moving solids, and still ones too big for
+    /// the grid.
+    always: Vec<u32>,
+}
+
+impl Broad {
+    /// Cell side, ft.
+    const CELL: f32 = 48.0;
+    /// A solid over more cells than this is asked every time instead.
+    const MOST_CELLS: i64 = 400;
+    /// Kept round each solid for the rounding of the tests, ft.
+    const SPARE: f32 = 1.0;
+
+    fn cell(v: f32) -> i32 {
+        (v / Self::CELL).floor() as i32
+    }
+
+    fn new(solids: &[Solid], still: usize) -> Broad {
+        let still = still.min(solids.len());
+        let mut always = Vec::new();
+        // Each gridded solid's cells, x from..=to and z from..=to.
+        let mut placed: Vec<(u32, [i32; 4])> = Vec::new();
+        for (i, s) in solids.iter().enumerate() {
+            let fixed = i < still && s.was == (s.rotation, s.position) && s.velocity == Vec3::ZERO;
+            let r = s.radius + Self::SPARE;
+            let cells = [Self::cell(s.centre.x - r), Self::cell(s.centre.x + r), Self::cell(s.centre.z - r), Self::cell(s.centre.z + r)];
+            let span = (cells[1] as i64 - cells[0] as i64 + 1) * (cells[3] as i64 - cells[2] as i64 + 1);
+            if !fixed || s.nodes.is_empty() || !s.centre.is_finite() || !r.is_finite() || span > Self::MOST_CELLS {
+                // An empty one never touches: left out.
+                if !s.nodes.is_empty() {
+                    always.push(i as u32);
+                }
+                continue;
+            }
+            placed.push((i as u32, cells));
+        }
+        let mut broad = Broad { count: solids.len(), always, ..Default::default() };
+        if placed.is_empty() {
+            return broad;
+        }
+        let x0 = placed.iter().map(|p| p.1[0]).min().unwrap();
+        let x1 = placed.iter().map(|p| p.1[1]).max().unwrap();
+        let z0 = placed.iter().map(|p| p.1[2]).min().unwrap();
+        let z1 = placed.iter().map(|p| p.1[3]).max().unwrap();
+        let (w, h) = (x1 - x0 + 1, z1 - z0 + 1);
+        broad.first = (x0, z0);
+        broad.size = (w, h);
+        let at = |x: i32, z: i32| ((z - z0) * w + (x - x0)) as usize;
+        let mut counts = vec![0u32; (w * h) as usize + 1];
+        for (_, c) in &placed {
+            for z in c[2]..=c[3] {
+                for x in c[0]..=c[1] {
+                    counts[at(x, z) + 1] += 1;
+                }
+            }
+        }
+        for k in 1..counts.len() {
+            counts[k] += counts[k - 1];
+        }
+        let mut fill = counts.clone();
+        let mut items = vec![0u32; *counts.last().unwrap() as usize];
+        // In the solids' order, so each cell's list is in order too.
+        for (i, c) in &placed {
+            for z in c[2]..=c[3] {
+                for x in c[0]..=c[1] {
+                    let k = at(x, z);
+                    items[fill[k] as usize] = *i;
+                    fill[k] += 1;
+                }
+            }
+        }
+        broad.starts = counts;
+        broad.items = items;
+        broad
+    }
+
+    /// The solids that might reach within `reach` of `at`, in order, into
+    /// `out`.
+    fn gather(&self, at: Vec3, reach: f32, out: &mut Vec<u32>) {
+        out.clear();
+        out.extend_from_slice(&self.always);
+        if !self.starts.is_empty() {
+            let (x0, z0) = self.first;
+            let (w, h) = self.size;
+            let xs = (Self::cell(at.x - reach).max(x0), Self::cell(at.x + reach).min(x0 + w - 1));
+            let zs = (Self::cell(at.z - reach).max(z0), Self::cell(at.z + reach).min(z0 + h - 1));
+            for z in zs.0..=zs.1 {
+                for x in xs.0..=xs.1 {
+                    let k = ((z - z0) * w + (x - x0)) as usize;
+                    out.extend_from_slice(&self.items[self.starts[k] as usize..self.starts[k + 1] as usize]);
+                }
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
     }
 }
 
@@ -497,6 +652,50 @@ mod tests {
             ],
             points: Vec::new(),
         }
+    }
+
+    /// The grid finds what asking every solid finds, ties and all, with
+    /// still and moving solids, big and small, round cell edges.
+    #[test]
+    fn the_grid_answers_as_asking_all() {
+        let mut solids = Vec::new();
+        let mut seed = 7u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        for i in 0..300 {
+            let at = Vec3::new(next() * 2000.0 - 1000.0, next() * 20.0, next() * 2000.0 - 1000.0);
+            let turn = Mat3::from_rotation_y(next() * 6.3) * Mat3::from_rotation_x(next() - 0.5);
+            let mut s = Solid::new(&floor(), turn, at);
+            // Some twice in one place, for ties; one huge.
+            if i % 50 == 1 {
+                solids.push(s.clone());
+            }
+            if i == 3 {
+                s = Solid::new(&floor(), turn, at);
+                s.radius = 5000.0;
+            }
+            solids.push(s);
+        }
+        let still = solids.len() - 20;
+        let mut world = World { solids, still, ..Default::default() };
+        // The last ones move.
+        for s in &mut world.solids[still..] {
+            let to = s.position + Vec3::new(3.0, 0.0, -2.0);
+            s.place(Mat3::IDENTITY, to, Vec3::new(1.0, 0.0, 0.0));
+        }
+        let all = World { solids: world.solids.clone(), still: 0, ..Default::default() };
+        let mut hits = 0;
+        for _ in 0..20_000 {
+            let from = Vec3::new(next() * 2100.0 - 1050.0, next() * 25.0, next() * 2100.0 - 1050.0);
+            let to = from + Vec3::new(next() - 0.5, next() * 2.0 - 1.5, next() - 0.5) * 12.0;
+            assert_eq!(world.crossing(from, to), all.crossing(from, to));
+            let r = next() * 6.0;
+            assert_eq!(world.sphere(from, r), all.sphere(from, r));
+            hits += all.crossing(from, to).is_some() as u32 + all.sphere(from, r).is_some() as u32;
+        }
+        assert!(hits > 100, "{hits}");
     }
 
     #[test]

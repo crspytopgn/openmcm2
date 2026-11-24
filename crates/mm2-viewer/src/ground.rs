@@ -517,10 +517,8 @@ mod wall_tests {
             scale: 3.0,
             position: [1152.0, 4.0, 1152.0],
         };
-        let world = World {
-            solids: stadium_walls(seg, &frame),
-            ..Default::default()
-        };
+        let mut world = World::default();
+        world.solids = stadium_walls(seg, &frame);
         let at = |z: f32| world.sphere(Vec3::new(880.0, 25.0, z), 1.5);
         assert!(at(672.0).is_none());
         // Touching from inside, and just through it, both push back in.
