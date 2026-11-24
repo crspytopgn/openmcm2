@@ -1996,9 +1996,50 @@ pub struct Start {
     position: Vec3,
     /// Level and of unit length.
     direction: Vec3,
-    /// Where the grid's middle stands from `position`: ft behind it and
-    /// ft left of it. None goes by the start line.
-    grid: Option<(f32, f32)>,
+    /// How the bikes line up from it.
+    layout: Layout,
+}
+
+/// The ways the game lines the bikes up (0x422030, by event), each rider
+/// in his slot: the player first, then the computer's riders in turn.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Layout {
+    /// Nationals and Supercross: one row 4.66 ft behind the line, the
+    /// slots `15.5 × cell / (riders + 1)` apart, the first 6.75 cells out
+    /// to the side; `side` is −1 or 1, away from the first bend's inside,
+    /// `cell` the terrain's cell size.
+    Line { side: f32, cell: f32 },
+    /// Baja and Enduro: 8 ft through the last gate, the slots `1.05 ×
+    /// width / (riders + 1)` apart (at least 3.4 ft), the first 0.48 of the
+    /// width out to the side.
+    Gate { width: f32 },
+    /// The Stunt Quarry and Moto-Tag: 4.66 ft behind the start, 20 ft
+    /// apart.
+    Spread,
+}
+
+/// The gate's width as the start's layout takes it: the six Baja and
+/// Enduro tapes' lone rider stands 0.78 ft right of the gate's middle,
+/// which is 0.045 of it.
+const GATE_START_WIDTH: f32 = 17.33;
+
+impl Layout {
+    /// Where slot `k` (from 1, of `n`) stands from the start at `at` facing
+    /// `d`, and how it faces.
+    fn slot(self, at: Vec3, d: Vec3, k: usize, n: usize) -> Vec3 {
+        let across = Vec3::new(d.z, 0.0, -d.x);
+        let (k, n) = (k as f32, n as f32);
+        match self {
+            Layout::Line { side, cell } => {
+                at - d * 4.66 + across * (side * cell * (k * 15.5 / (n + 1.0) - 6.75))
+            }
+            Layout::Gate { width } => {
+                let spacing = (width * 1.05 / (n + 1.0)).max(3.4);
+                at + d * 8.0 + across * (k * spacing - width * 0.48)
+            }
+            Layout::Spread => at - d * 4.66 + across * (20.0 * (k - 1.0)),
+        }
+    }
 }
 
 /// Loads a track in one go (see `load_track_steps`).
@@ -2055,7 +2096,7 @@ async fn load_track_steps(
         .transpose()?;
     let zones = scene.as_ref().map_or_else(Default::default, |s| s.zones);
     load_step().await;
-    let (mut start, course, stem) = race_start(&archive, scene.as_ref(), &terrain, course);
+    let (mut start, course, stem) = race_start(path, &archive, scene.as_ref(), &terrain, course);
     // A Baja or Enduro course's gates, from the `.wpt` beside its `.tdf`.
     let waypoints = stem
         .and_then(|stem| archive.get(&format!("{stem}.wpt")))
@@ -2112,7 +2153,7 @@ async fn load_track_steps(
                     last.position.z,
                 ),
                 direction: last.look,
-                grid: Some((-7.96, -0.78)),
+                layout: Layout::Gate { width: GATE_START_WIDTH },
             };
         }
     }
@@ -2848,6 +2889,7 @@ fn solid_models(track: &Path) -> std::collections::HashSet<String> {
 }
 
 fn race_start(
+    path: &Path,
     archive: &rs2::Archive,
     scene: Option<&scn::Scene>,
     terrain: &Terrain,
@@ -2887,11 +2929,33 @@ fn race_start(
     };
     position.y = ride::ground(terrain, position.x, position.z);
     let direction = Vec3::new(direction.x, 0.0, direction.z).normalize_or(Vec3::Z);
+    // The Stunt Quarry and Moto-Tag spread out; the lap races line up
+    // away from the inside of the course's first bend: the turn from its
+    // first stretch to its second (as 0x422030 reads the first node).
+    let folder = |names: &[&str]| {
+        path.parent()
+            .and_then(|d| d.file_name())
+            .is_some_and(|d| names.iter().any(|n| d.eq_ignore_ascii_case(n)))
+    };
+    let layout = if folder(&["QUARRIES", "TAG"]) {
+        Layout::Spread
+    } else {
+        let side = course
+            .as_ref()
+            .and_then(|c| c.nodes.first())
+            .filter(|n| n.sections.len() >= 3)
+            .map_or(-1.0, |n| {
+                let c = |i: usize| Vec3::from(n.sections[i].center);
+                let (p0, p1) = ((c(1) - c(0)).normalize_or_zero(), (c(2) - c(1)).normalize_or_zero());
+                if p1.x * p0.z - p0.x * p1.z <= 0.0 { 1.0 } else { -1.0 }
+            });
+        Layout::Line { side, cell: terrain.scale }
+    };
     (
         Start {
             position,
             direction,
-            grid: None,
+            layout,
         },
         course,
         stem,
@@ -2996,12 +3060,6 @@ fn plate_number(rider: usize) -> u32 {
 const PLAYER: usize = 0;
 /// Riders when the command line starts a race: the player and three.
 const RIDERS: usize = 4;
-/// Bikes side by side in a row at the start.
-const ROW: usize = 8;
-/// The start grid's spacing, and how far left of the line's middle it
-/// sits, ft.
-const SLOT_WIDTH: f32 = 7.75;
-const GRID_OFFSET: f32 = 3.03;
 /// `--spawn x,z,heading`: where the first bike stands instead, to replay
 /// a tape from exactly its start.
 static SPAWN: std::sync::OnceLock<(Vec3, Vec3)> = std::sync::OnceLock::new();
@@ -3025,7 +3083,6 @@ fn start_grid(
         .find(|a| a.model.eq_ignore_ascii_case("StartGate.mcf"))
         .map(|g| g.offset);
     let (d, up) = (start.direction, Vec3::Y);
-    let right = up.cross(d);
     if let Some(gate) = gate {
         for a in animations.iter_mut().filter(|a| a.offset == gate) {
             a.offset = start.position.into();
@@ -3033,11 +3090,6 @@ fn start_grid(
             a.up = up.into();
         }
     }
-    // Behind the line: the original's bikes stand 4.7 ft back (its tapes,
-    // gate or not); clear of the bars where there is no line to go by.
-    let (back, left) = start
-        .grid
-        .unwrap_or((if gate.is_some() { 4.6 } else { 2.0 }, GRID_OFFSET));
     skins.resize(animations.len(), None);
     // Without the stock grid's bikes (the demo has two of the game's), the
     // computer's riders ride the game's own bikes it does have, on every
@@ -3099,15 +3151,9 @@ fn start_grid(
         if ghostly {
             (bike, rider, skin) = (GHOST.0.into(), GHOST.1.into(), None);
         }
-        // Rows of up to eight, the player on the right: the original's
-        // tapes put them 7.75 ft apart, centred 3 ft left of the line's
-        // middle (five riders on SX01; a lone practice rider on every
-        // supercross track).
-        let (row, slot) = (i / ROW, i % ROW);
-        let in_row = (riders - row * ROW).min(ROW);
-        let across = (in_row as f32 - 1.0) / 2.0 - slot as f32;
-        let mut at = start.position - d * (back + row as f32 * 8.0)
-            + right * (across * SLOT_WIDTH - left);
+        // All in one row, each in its slot (0x422030): the player in the
+        // first, the computer's riders after.
+        let mut at = start.layout.slot(start.position, d, i + 1, riders.max(1));
         let mut look = d;
         if let (0, Some(&(spot, way))) = (i, SPAWN.get()) {
             (at, look) = (spot, way);
@@ -7338,5 +7384,31 @@ mod drawn_size_tests {
         assert_eq!(fit_pixels(2532, 1170, Some(1280 * 720)), (1412, 652));
         assert_eq!(fit_pixels(1280, 720, Some(1280 * 720)), (1280, 720));
         assert_eq!(fit_pixels(2532, 1170, None), (2532, 1170));
+    }
+}
+
+#[cfg(test)]
+mod start_grid_tests {
+    use super::{Layout, GATE_START_WIDTH};
+    use glam::Vec3;
+
+    #[test]
+    fn five_riders_line_up_as_the_original_does() {
+        let line = Layout::Line { side: -1.0, cell: 3.0 };
+        let d = Vec3::Z;
+        let at: Vec<f32> = (1..=5).map(|k| line.slot(Vec3::ZERO, d, k, 5).x).collect();
+        for pair in at.windows(2) {
+            assert!(((pair[1] - pair[0]).abs() - 7.75).abs() < 1e-4, "{at:?}");
+        }
+        assert!((at[0] - 12.5).abs() < 1e-4, "{at:?}");
+        assert!((line.slot(Vec3::ZERO, d, 1, 5).z + 4.66).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_lone_rider_at_a_gate_starts_just_right_of_centre() {
+        let gate = Layout::Gate { width: GATE_START_WIDTH };
+        let p = gate.slot(Vec3::ZERO, Vec3::Z, 1, 1);
+        assert!((p.x.abs() - 0.78).abs() < 0.01, "{p:?}");
+        assert!((p.z - 8.0).abs() < 1e-4);
     }
 }
