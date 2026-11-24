@@ -1562,6 +1562,33 @@ The crate's `career` module holds this: `Tables` (`default`, `shipped`, `purse`,
 
 ## 20. Race camera views (FollowCam.cpp, KrustyBikeCamera vtable 0x55980c) **[views solid, angle meanings likely]**
 
+**2026-11-24, from the matched decompilation of the demo exe (FollowCamera 0x465c20, VehicleCamera
+0x52c510, BikeCamera, KrustyBikeCamera; demo addresses) [solid]:** what `ride::Chase` now does.
+
+* Each frame the follow point is the bike model's origin led by velocity × min(dt, 0.2) (not while
+  down). The heading is the velocity on the level (below 10 ft/s mixed with the nose, eased 0.18).
+* The eye: the heading pitched by the view's elevation and turned by its yaw plus +0x308, pushed the
+  view's distance back from the follow point. +0x308 = fov/109 × bike turn rate (+0x43c) × 0.42
+  (× 0.55 in the Rider Cam; 0 once the race is over alone or the yaw is past 2 rad).
+* The look point: the heading turned by 0.7 × +0x308, times 27 ft × (fov/109 × (1 − |yaw|/(π/2)) ×
+  (1 − |elevation|/(π/2)) + a speed lead (1 − d/600) × 1.8 × (1 + 0.0111 d fov/109)² × along/180,
+  scaled down when climbing or diving over 5 ft/s), plus (1 − fov/109) × v.y/4 up, a lift of 0.6 ×
+  the ground's rise above the bike a short way ahead (decaying × 0.01), and 3 ft.
+* Eye and look point each go through three filters of 0.3 s (0.55 s for the FOV), the eye kept 3.5 ft
+  over the ground. The recorded chase run (`camera_vs_speed_noframes.txt`) matches within 1 ft and
+  0.3° at 60 fps and up.
+* Rider Cam: the eye is the `Head` frame, the look 27 ft along the heading pitched with the bike, no
+  easing, rolled cos(roll) × roll with the bike; FOV +0x2f0, which starts at the camera's 77°.
+* Crash (not following unless Sky Cam or frozen): the eye goes 60° (+0x2e8) round from the bike's
+  heading at the crash (+π upside down), the view's distance off and 7 ft (+0x2d4) over the point 38% of
+  the way from the rider's head to the bike; the height moves 5 ft/s to keep the head and the bike on
+  screen, and the distance closes to 20 ft when they sit close together on screen.
+* Reverse Cam: 17 ft, 0.75 rad, yaw π, 85°, looking 6.75 ft behind; Thrill Cam: the eye at
+  takeoff + v·(v.y/32.2 × 1.5) − 0.2 v + 0.45 side, at max(ground + 7, base − 1); FOV from the level
+  distance (10–70°). Both snap back when let go.
+* Numpad 8/2 tilt and 4/6 turn the view 30°/s (× (3 − 0.04 d) under 50 ft); the frozen camera moves
+  300 ft/s. Numpad * saves the view as the User Cam.
+
 The race builds a KrustyBikeCamera (0x4e2d70 → 0x498d40 → FollowCamera init 0x464070). It passes the
 target and 0.55 and 0.3 (two easing filters, on +0x16c and the distance +0x220), 27 (+0x228), 7 (+0x2d0,
 a height), 1.048 rad (+0x2e8, the yaw reset angle), a history of 2, and the mode list 0–7. The init drops
