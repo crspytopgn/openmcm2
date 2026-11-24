@@ -230,6 +230,11 @@
 
   <!-- First visit (or Change): the MM2 way first, the free version below. -->
   <div id="choose">
+    <div id="buildernote" class="tip" hidden role="status">
+      <p><b>Opening the Course Builder.</b> First pick what to build with: your MM2 files, the free demo or the free version.
+        The builder opens as soon as it's ready.</p>
+      <button type="button" class="plain small" id="buildercancel" title="Goes back to the normal start: Play opens the main menu.">Not now</button>
+    </div>
     <section class="card" id="mm2card">
       <span class="tag">Recommended</span>
       <h2>Play Motocross Madness 2</h2>
@@ -1681,6 +1686,8 @@ $("pickfree").addEventListener("click", () => {
   changing = false;
   $("why").textContent = "";
   setFree(true);
+  // Asked for the Course Builder: no second press to download.
+  if (builderOnce && !keptPack && !downloaded) downloadAndPlay();
 });
 $("change").addEventListener("click", () => {
   changing = true;
@@ -2313,20 +2320,25 @@ $("forgetpack").addEventListener("click", async () => {
 
 // Tools. The Course Builder: straight into the builder, the way picked
 // to play, once there are files to start from.
-// With nothing to start from yet, `stay` keeps the builder asked for, so
-// the next start (after picking) opens it.
-function openBuilder(stay) {
+// Uses whatever this browser has to start from (the last pick first). With
+// nothing yet, it asks at the top of the page what to build with, and the
+// next start (after picking) opens the builder.
+function openBuilder() {
   builderOnce = true;
-  if (free && keptPack) return go(keptPack, true);
-  if (free && downloaded) return downloadAndPlay();
-  if (!free && kept) return go(kept, false);
-  builderOnce = !!stay;
-  $("why").textContent = stay
-    ? "Pick a way to play above: your MM2 files, the free demo or the free version. The Course Builder opens straight after."
-    : "Pick a way to play first: your MM2 files, the free demo or the free version. The Course Builder opens straight after.";
-  $("why").scrollIntoView({ behavior: "smooth", block: "center" });
+  const pack = keptPack || downloaded;
+  if (pack && (free || !kept)) return keptPack ? go(keptPack, true) : downloadAndPlay();
+  if (kept) return go(kept, false);
+  changing = false;
+  $("why").textContent = "";
+  layout();
+  $("buildernote").hidden = false;
+  $("buildernote").scrollIntoView({ behavior: "smooth", block: "center" });
 }
-$("openbuilder").addEventListener("click", () => openBuilder(false));
+$("buildercancel").addEventListener("click", () => {
+  builderOnce = false;
+  $("buildernote").hidden = true;
+});
+$("openbuilder").addEventListener("click", () => openBuilder());
 for (const [button, box] of [["opentracks", "tracksbox"], ["opencontrols", "controlsbox"]]) {
   $(button).addEventListener("click", () => {
     $(box).open = true;
@@ -2379,7 +2391,7 @@ showStarterTip();
 // Back from switching the look: straight into the game again.
 const canStart = (free && keptPack) || (!free && kept);
 if (!((again || builderAsked) && canStart)) loader.hide();
-if (builderAsked && !again) openBuilder(true);
+if (builderAsked && !again) openBuilder();
 else if (again && free && keptPack) go(keptPack, true);
 else if (again && free && downloaded) downloadAndPlay();
 else if (again && !free && kept) go(kept, false);
