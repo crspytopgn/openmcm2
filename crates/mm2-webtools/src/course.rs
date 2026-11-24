@@ -91,6 +91,7 @@ pub struct Preview {
     gates: Vec<f32>,
     top: Vec<f32>,
     widths: Vec<f32>,
+    ai: Vec<f32>,
 }
 
 #[wasm_bindgen]
@@ -114,6 +115,12 @@ impl Preview {
         self.colours.clone()
     }
     /// The smoothed racing line: x, z ft pairs.
+    /// How far across the track the AI line runs at each point of the
+    /// line, ft (towards the line's left), kept inside the edges.
+    pub fn ai(&self) -> Vec<f32> {
+        self.ai.clone()
+    }
+
     pub fn line(&self) -> Vec<f32> {
         self.line.clone()
     }
@@ -180,6 +187,15 @@ pub fn course_preview(text: &str, every: u32) -> Result<Preview, JsError> {
         })
         .collect();
     let widths = path.width.clone();
+    let ai = path
+        .s
+        .iter()
+        .zip(&path.width)
+        .map(|(&s, &w)| {
+            let room = (w / 2.0 - mm2_course::AI_EDGE).max(0.0);
+            c.line.ai_at(s, path.length).clamp(-room, room)
+        })
+        .collect();
     Ok(Preview {
         n: field.n as u32,
         step: field.step,
@@ -190,6 +206,7 @@ pub fn course_preview(text: &str, every: u32) -> Result<Preview, JsError> {
         gates,
         top,
         widths,
+        ai,
     })
 }
 

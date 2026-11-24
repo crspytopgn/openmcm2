@@ -276,7 +276,7 @@ impl Course {
 
     /// How far on along the course `to` is from `from`, when it is no
     /// more than `most` ft on (0x51d420).
-    fn along(&self, from: Place, to: Place, most: f32) -> Option<f32> {
+    pub fn along(&self, from: Place, to: Place, most: f32) -> Option<f32> {
         if from.leg == to.leg && from.t <= to.t {
             return Some((to.t - from.t) * self.leg_length(from.leg));
         }

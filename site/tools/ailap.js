@@ -16,36 +16,51 @@ const load = () =>
 const POSE = 16;
 const COLOURS = [0xd8452b, 0x2f6fd6, 0xe0b322, 0x3a9d4f, 0xf2f2f2, 0x8a4fd1, 0xe07a1f, 0x1fb3b3];
 
-// A rider and bike, a few boxes each: wheels, the bike, the rider. In the
-// game's frame: x to the right, y up, z forward, feet.
-function rider(colour) {
+// Our own Free Pack rider and bike, cut down to a couple of thousand flat
+// triangles in four block colours (ailap-rider.bin, made by
+// tools/freepack/ailap_rider.py): the paint, the rider's kit, the dark
+// parts and the metal. In the game's frame: x to the right, y up, z
+// forward, feet.
+let shapes = null;
+const loadShapes = () =>
+  (shapes ||= fetch(new URL("./ailap-rider.bin", import.meta.url))
+    .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`rider model: ${r.status}`))))
+    .then((buf) => {
+      const d = new DataView(buf);
+      let o = 4;
+      const out = {};
+      for (const role of ["paint", "kit", "dark", "metal"]) {
+        const nv = d.getUint16(o, true);
+        const nt = d.getUint16(o + 2, true);
+        o += 4;
+        const pos = new Float32Array(nv * 3);
+        for (let i = 0; i < nv * 3; i++, o += 2) pos[i] = d.getInt16(o, true) / 1000;
+        const idx = new Uint16Array(nt * 3);
+        for (let i = 0; i < nt * 3; i++, o += 2) idx[i] = d.getUint16(o, true);
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        g.setIndex(new THREE.BufferAttribute(idx, 1));
+        const flat = g.toNonIndexed();
+        flat.computeVertexNormals();
+        out[role] = flat;
+      }
+      return out;
+    }));
+
+function rider(colour, geo) {
   const g = new THREE.Group();
-  const dark = new THREE.MeshLambertMaterial({ color: 0x1b1b1b });
-  const paint = new THREE.MeshLambertMaterial({ color: colour });
-  const kit = new THREE.MeshLambertMaterial({ color: new THREE.Color(colour).lerp(new THREE.Color(0xffffff), 0.35) });
-  const wheel = new THREE.CylinderGeometry(1.05, 1.05, 0.35, 10);
-  wheel.rotateZ(Math.PI / 2);
-  const box = (w, h, d, m, x, y, z, tilt = 0) => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
-    mesh.position.set(x, y, z);
-    mesh.rotation.x = tilt;
-    g.add(mesh);
-    return mesh;
+  const paint = new THREE.Color(colour);
+  const colours = {
+    paint,
+    kit: paint.clone().lerp(new THREE.Color(0xffffff), 0.45),
+    dark: new THREE.Color(0x1d1c1a),
+    metal: new THREE.Color(0x9c9a96),
   };
-  for (const z of [2.35, -2.35]) {
-    const w = new THREE.Mesh(wheel, dark);
-    w.position.set(0, 1.05, z);
-    g.add(w);
+  for (const [role, geometry] of Object.entries(geo)) {
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ color: colours[role], side: THREE.DoubleSide }));
+    mesh.matrixAutoUpdate = false;
+    g.add(mesh);
   }
-  box(0.7, 0.9, 3.6, paint, 0, 2.2, 0.1); // tank and seat
-  box(0.5, 0.35, 1.6, paint, 0, 2.55, 2.0, -0.5); // number plate and bars
-  box(0.25, 1.6, 0.25, dark, 0, 1.75, 2.0, -0.45); // forks
-  box(1.1, 1.8, 0.8, kit, 0, 3.6, -0.3, 0.35); // body
-  box(0.55, 0.55, 0.65, paint, 0, 4.75, 0.15); // helmet
-  box(0.35, 1.3, 0.35, kit, 0.45, 2.7, 0.0, -0.6); // legs
-  box(0.35, 1.3, 0.35, kit, -0.45, 2.7, 0.0, -0.6);
-  box(0.25, 0.25, 1.4, kit, 0.6, 3.9, 0.9, 0.5); // arms
-  box(0.25, 0.25, 1.4, kit, -0.6, 3.9, 0.9, 0.5);
   g.matrixAutoUpdate = false;
   return g;
 }
@@ -84,11 +99,11 @@ export class AiLap {
 
   /// Puts `count` riders on the baked track `env` (an .ENV's bytes).
   async start(env, count, supercross) {
-    const m = await load();
+    const [m, geo] = await Promise.all([load(), loadShapes()]);
     this.stop();
     this.sim = new m.Sim(env, count, supercross);
     for (let i = 0; i < this.sim.count(); i++) {
-      const b = rider(COLOURS[i % COLOURS.length]);
+      const b = rider(COLOURS[i % COLOURS.length], geo);
       this.bikes.push(b);
       this.group.add(b);
     }
@@ -131,7 +146,7 @@ export class AiLap {
     this.viewer.scene.remove(this.group);
     for (const b of this.bikes) {
       this.group.remove(b);
-      b.traverse((o) => o.geometry?.dispose());
+      b.traverse((o) => o.material?.dispose());
     }
     this.bikes = [];
     if (this.dots) {

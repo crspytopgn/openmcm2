@@ -128,6 +128,10 @@
         <div class="seg" role="group" aria-label="What a click does">
           <button id="qb-tool-line" aria-pressed="true" title="Click the ground to add a point to the line, drag a point to move it, double-click one (or select it and press Delete) to take it away.">Line</button>
           <button id="qb-tool-jumps" aria-pressed="false" title="Click the track to drop in the jump picked below, drag a jump along the track to move it, click one to change it.">Jumps</button>
+          <button id="qb-tool-ai" aria-pressed="false" title="The line the computer riders follow. It runs down the middle of the track by itself. Click the track to pull it across (say, tight into a corner), drag a handle to move it, double-click a handle to take it away.">AI line</button>
+        </div>
+        <div class="buttons qb-aionly" hidden>
+          <button id="qb-ai-auto" title="Takes away every handle: the computer riders follow the middle of the track again.">Back to automatic</button>
         </div>
         <label class="row" title="How wide the whole track is, in feet.">Track width <output id="qb-width-v"></output>
           <input id="qb-width" type="range" min="12" max="90" step="1"></label>

@@ -41,6 +41,10 @@ fn riders_lap_new_tracks() {
         let (laps, _) = ride(name, &Course::new(mode), sx);
         assert!(laps >= 1, "{name}: nobody finished a lap in three minutes");
     }
+    for (name, mode) in [("baja", Mode::Baja), ("enduro", Mode::Enduro)] {
+        let (laps, _) = ride(name, &auto::surprise(mode, 3), false);
+        let _ = laps;
+    }
     for seed in 1..4 {
         ride(
             &format!("surprise national {seed}"),

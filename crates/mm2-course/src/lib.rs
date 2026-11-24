@@ -260,7 +260,50 @@ pub struct Line {
     /// towards +x), to funnel into the track.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_spot: Option<[f32; 3]>,
+    /// The AI line, where it leaves the track's middle: handles of ft
+    /// along the line and ft across it (to the side `Path::side` points,
+    /// the course's first edge), eased between. None: the middle.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ai: Vec<[f32; 2]>,
 }
+
+impl Line {
+    /// How far across the track the AI line runs `s` ft along a line
+    /// `length` ft long, before it is kept inside the track's edges.
+    pub fn ai_at(&self, s: f32, length: f32) -> f32 {
+        let mut keys: Vec<[f32; 2]> = self.ai.clone();
+        if keys.is_empty() {
+            return 0.0;
+        }
+        keys.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        let ease = |a: [f32; 2], b: [f32; 2], s: f32| {
+            let span = b[0] - a[0];
+            let k = if span > 1e-3 { ((s - a[0]) / span).clamp(0.0, 1.0) } else { 0.0 };
+            let k = k * k * (3.0 - 2.0 * k);
+            a[1] + (b[1] - a[1]) * k
+        };
+        let (first, last) = (keys[0], keys[keys.len() - 1]);
+        if self.closed && length > 0.0 {
+            // Round the lap: past the last handle it eases back to the first.
+            let s = s.rem_euclid(length);
+            if s < first[0] {
+                return ease([last[0] - length, last[1]], first, s);
+            }
+            if s >= last[0] {
+                return ease(last, [first[0] + length, first[1]], s);
+            }
+        } else if s <= first[0] {
+            return first[1];
+        } else if s >= last[0] {
+            return last[1];
+        }
+        let i = keys.partition_point(|k| k[0] <= s).max(1);
+        ease(keys[i - 1], keys[i], s)
+    }
+}
+
+/// How close to an edge the AI line may run, ft.
+pub const AI_EDGE: f32 = 3.0;
 
 /// One point the line passes through.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

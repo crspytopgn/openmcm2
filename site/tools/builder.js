@@ -159,13 +159,25 @@ export async function mount(app, panel) {
     tool = t;
     $("qb-tool-line").setAttribute("aria-pressed", String(t === "line"));
     $("qb-tool-jumps").setAttribute("aria-pressed", String(t === "jumps"));
+    $("qb-tool-ai").setAttribute("aria-pressed", String(t === "ai"));
+    for (const el of panel.querySelectorAll(".qb-aionly")) el.hidden = t !== "ai";
     $("qb-hint").textContent = t === "line"
       ? "Click the ground to add points. Drag a point to move it, double-click it to take it away. Drag the ground to move the view."
-      : "Click the track to drop in a jump. Drag a jump along the track, or click it to change it. Drag the ground to move the view.";
+      : t === "ai"
+        ? "The dashed line is where the computer riders ride. Click the track to pull it across, drag a handle to move it, double-click a handle to take it away."
+        : "Click the track to drop in a jump. Drag a jump along the track, or click it to change it. Drag the ground to move the view.";
     draw();
   };
   $("qb-tool-line").addEventListener("click", () => setTool("line"));
   $("qb-tool-jumps").addEventListener("click", () => setTool("jumps"));
+  $("qb-tool-ai").addEventListener("click", () => setTool("ai"));
+  $("qb-ai-auto").addEventListener("click", () => {
+    if (!c.line.ai?.length) return;
+    remember();
+    c.line.ai = [];
+    sel.ai = -1;
+    changed();
+  });
   $("qb-kind").addEventListener("change", () => {
     kindAbout();
     const j = c.jumps[sel.jump];
@@ -216,7 +228,7 @@ export async function mount(app, panel) {
     if (e.target.matches("input[type=text]")) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") step(e.shiftKey ? redo : undo, e.shiftKey ? undo : redo);
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") step(redo, undo);
-    else if (e.key === "Delete" || e.key === "Backspace") sel.jump >= 0 ? delJump() : delPoint();
+    else if (e.key === "Delete" || e.key === "Backspace") sel.ai >= 0 ? delAi(sel.ai) : sel.jump >= 0 ? delJump() : delPoint();
     else return;
     e.preventDefault();
   });
@@ -230,7 +242,7 @@ export async function mount(app, panel) {
     pending = requestAnimationFrame(() => {
       try {
         const p = mm.course_preview(text(), EVERY);
-        view = { n: p.n, step: p.step, heights: p.heights(), colours: p.colours(), line: p.line(), gates: p.gates(), length: p.length, top: p.top(), widths: p.widths() };
+        view = { n: p.n, step: p.step, heights: p.heights(), colours: p.colours(), line: p.line(), gates: p.gates(), length: p.length, top: p.top(), widths: p.widths(), ai: p.ai() };
         p.free();
         view.s = alongLine(view.line);
         ground = null;
@@ -274,6 +286,56 @@ export async function mount(app, panel) {
       if (d < best.d) best = { d, at: s[i / 2] + t * Math.sqrt(l2) };
     }
     return best;
+  }
+
+  // The AI line: line point i moved across by the course's AI offset
+  // (towards the line's left, as the bake has it).
+  function aiPoint(i) {
+    const { line, ai } = view;
+    const m = line.length / 2;
+    const a = Math.max(0, i - 1);
+    const b = Math.min(m - 1, i + 1);
+    const dx = line[b * 2] - line[a * 2];
+    const dz = line[b * 2 + 1] - line[a * 2 + 1];
+    const l = Math.hypot(dx, dz) || 1;
+    const off = ai?.[i] || 0;
+    return [line[i * 2] - (dz / l) * off, line[i * 2 + 1] + (dx / l) * off];
+  }
+  // How far the AI line may run from the middle `at` ft along, ft.
+  function aiRoom(at) {
+    const i = Math.max(0, view.s.findIndex((d) => d >= at));
+    return Math.max(0, (view.widths[i] || event().width) / 2 - 3);
+  }
+  // A handle's place on the map.
+  function aiHandle([at, off]) {
+    const p = onLine(at);
+    const o = Math.max(-aiRoom(at), Math.min(aiRoom(at), off));
+    return [p.x - p.dz * o, p.z + p.dx * o];
+  }
+  // A handle for the point x, z on the track: how far along and across.
+  function aiKey(x, z) {
+    const at = nearLine(x, z).at;
+    const p = onLine(at);
+    const off = (x - p.x) * -p.dz + (z - p.z) * p.dx;
+    const room = aiRoom(at);
+    return [Math.round(at * 10) / 10, Math.round(Math.max(-room, Math.min(room, off)) * 10) / 10];
+  }
+  function hitAi(sx, sy) {
+    const r = (devicePixelRatio || 1) * 10;
+    let best = -1;
+    let bd = r;
+    (c.line.ai || []).forEach((k, i) => {
+      const [px, py] = toScreen(...aiHandle(k));
+      const d = Math.hypot(px - sx, py - sy);
+      if (d < bd) [best, bd] = [i, d];
+    });
+    return best;
+  }
+  function delAi(i) {
+    remember();
+    c.line.ai.splice(i, 1);
+    sel.ai = -1;
+    changed();
   }
 
   // ---- the map ----
@@ -393,6 +455,32 @@ export async function mount(app, panel) {
       ctx.stroke();
       ctx.setLineDash([]);
     }
+    // The AI line, dashed, when it's been moved or its tool is up; its
+    // handles to drag with the tool.
+    if (tool === "ai" || c.line.ai?.length) {
+      ctx.strokeStyle = tool === "ai" ? "#6fd0e8" : "#6fd0e888";
+      ctx.lineWidth = 2 * r;
+      ctx.setLineDash([6 * r, 5 * r]);
+      ctx.beginPath();
+      for (let i = 0; i < line.length / 2; i++) {
+        const [x, z] = aiPoint(i);
+        ctx.lineTo(...toScreen(x, z));
+      }
+      if (c.line.closed) ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (tool === "ai")
+      (c.line.ai || []).forEach((k, i) => {
+        const [sx, sy] = toScreen(...aiHandle(k));
+        ctx.beginPath();
+        ctx.arc(sx, sy, (i === sel.ai ? 7 : 5) * r, 0, Math.PI * 2);
+        ctx.fillStyle = i === sel.ai ? "#ffffff" : "#6fd0e8";
+        ctx.fill();
+        ctx.strokeStyle = "#121110";
+        ctx.lineWidth = 1.5 * r;
+        ctx.stroke();
+      });
     // The points to drag, in line mode.
     if (tool === "line")
       c.line.points.forEach((p, k) => {
@@ -452,6 +540,15 @@ export async function mount(app, panel) {
         return changed(true);
       }
     }
+    if (e.button === 0 && tool === "ai" && view) {
+      const k = hitAi(sx, sy);
+      if (k >= 0) {
+        sel = { point: -1, jump: -1, ai: k };
+        remember();
+        drag = { ...from, ai: k };
+        return draw();
+      }
+    }
     if (e.button === 0 && tool === "jumps" && view) {
       const k = hitJump(x, z);
       if (k >= 0) {
@@ -481,6 +578,9 @@ export async function mount(app, panel) {
       p.x = Math.max(0, Math.min(s, x));
       p.z = Math.max(0, Math.min(s, z));
       changed(true);
+    } else if (drag.ai !== undefined) {
+      c.line.ai[drag.ai] = aiKey(x, z);
+      changed(true);
     } else if (drag.jump !== undefined) {
       c.jumps[drag.jump].at = Math.max(0, Math.min(view.length - c.jumps[drag.jump].length, nearLine(x, z).at - drag.off));
       changed(true);
@@ -496,7 +596,7 @@ export async function mount(app, panel) {
     if (touches.size || !d) return void (drag = null);
     drag = null;
     if (d.pinch) return;
-    if (d.point !== undefined || d.jump !== undefined) {
+    if (d.point !== undefined || d.jump !== undefined || d.ai !== undefined) {
       if (d.moved) changed();
       else undo.pop(); // only a click: nothing changed
       return;
@@ -504,11 +604,17 @@ export async function mount(app, panel) {
     if (d.moved || e.button !== 0 || e.type === "pointercancel") return;
     // A click on the ground.
     if (tool === "line") addPoint(d.x, d.z);
+    else if (tool === "ai") addAi(d.x, d.z);
     else addJump(d.x, d.z);
   };
   map.addEventListener("pointerup", up);
   map.addEventListener("pointercancel", up);
   map.addEventListener("dblclick", (e) => {
+    if (tool === "ai") {
+      const k = hitAi(...at(e));
+      if (k >= 0) delAi(k);
+      return;
+    }
     const k = hitPoint(...at(e));
     if (tool === "line" && k >= 0) {
       sel.point = k;
@@ -553,6 +659,17 @@ export async function mount(app, panel) {
     const width = pts[Math.min(best, n - 1)]?.width || event().width;
     pts.splice(best, 0, { x, z, width });
     sel = { point: best, jump: -1 };
+    changed();
+  }
+  function addAi(x, z) {
+    if (!view) return;
+    const near = nearLine(x, z);
+    if (near.d > event().width + 10 / cam.scale) return say("Click on the track to pull the AI line across it.", true);
+    remember();
+    (c.line.ai ||= []).push(aiKey(x, z));
+    c.line.ai.sort((a, b) => a[0] - b[0]);
+    sel = { point: -1, jump: -1, ai: c.line.ai.findIndex((k) => k[0] >= near.at - 0.1) };
+    say("");
     changed();
   }
   function addJump(x, z) {

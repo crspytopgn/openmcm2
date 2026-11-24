@@ -16,7 +16,7 @@ use mm2_formats::trn::Terrain;
 use mm2_formats::{faoe, rs2, tdf, Container};
 use mm2_physics::ai::{Mover, Path};
 use mm2_physics::computer::{self, Rider};
-use mm2_physics::{Controls, Ground};
+use mm2_physics::{race, Controls, Ground};
 use wasm_bindgen::prelude::*;
 
 /// The computer riders' frame in a race, s (`race::AI_FRAME`).
@@ -30,6 +30,14 @@ const LEVEL: usize = 1;
 const START_HOLD: f32 = 2.0;
 const START_EASE: f32 = 6.0;
 const EDGE_ROOM: f32 = 4.0;
+/// A computer rider passes a gate anywhere within this many times its
+/// width (as the race has it).
+const COMPUTER_GATE: f32 = 2.0;
+/// The gate arch: it stands this far above the ground, half its width and
+/// its height as the game's gate box cuts them (`mm2-viewer`'s gates.rs).
+const GATE_RAISE: f32 = 2.0;
+const GATE_HALF_WIDTH: f32 = 18.5 * 0.98;
+const GATE_HEIGHT: f32 = 19.4 * 0.67;
 /// Floats a rider gives the page each frame, see [`Sim::poses`].
 pub const POSE: usize = 16;
 
@@ -153,6 +161,11 @@ struct One {
     lap_start: f32,
     last_lap: f32,
     best_lap: f32,
+    /// In a gate race: the next gate, the place on the course the line
+    /// is laid from, and where the bike was last frame.
+    gate: usize,
+    line_place: Option<Place>,
+    last: Vec3,
 }
 
 impl One {
@@ -177,6 +190,8 @@ impl One {
 pub struct Sim {
     track: Track,
     course: Course,
+    /// A Baja or Enduro track's gates, from its `.wpt`; none in a lap race.
+    gates: Vec<race::Line>,
     riders: Vec<One>,
     clock: f32,
     left: f32,
@@ -224,9 +239,29 @@ impl Sim {
             zones,
             edge: !supercross,
         };
+        // A Baja or Enduro's gates, from its `.wpt` (the race's line
+        // through each arch, `mm2-viewer`'s `Gate::line`).
+        let gates: Vec<race::Line> = find(".wpt")
+            .map(|w| {
+                mm2_physics::ai::waypoints(&String::from_utf8_lossy(w))
+                    .into_iter()
+                    .map(|(at, look)| {
+                        let look = look.normalize_or(Vec3::Z);
+                        let y = height(&track.terrain, at.x, at.z);
+                        race::Line {
+                            centre: Vec3::new(at.x, y, at.z),
+                            forward: look,
+                            half_width: Vec3::new(look.z, 0.0, -look.x) * GATE_HALF_WIDTH,
+                            height: GATE_HEIGHT + GATE_RAISE,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let mut sim = Sim {
             track,
             course,
+            gates,
             riders: Vec::new(),
             clock: 0.0,
             left: 0.0,
@@ -362,6 +397,9 @@ impl Sim {
                 lap_start: 0.0,
                 last_lap: 0.0,
                 best_lap: 0.0,
+                gate: 0,
+                line_place: None,
+                last: p,
             });
         }
     }
@@ -389,15 +427,27 @@ impl Sim {
                 .collect();
             let one = &mut self.riders[i];
             one.was = one.stance();
-            ride(
-                &self.track,
-                &self.course,
-                one,
-                self.clock,
-                tolerance,
-                &movers,
-            );
-            lap(&self.course, one, self.clock);
+            if self.gates.is_empty() {
+                ride(
+                    &self.track,
+                    &self.course,
+                    one,
+                    self.clock,
+                    tolerance,
+                    &movers,
+                );
+                lap(&self.course, one, self.clock);
+            } else {
+                ride_gates(
+                    &self.track,
+                    &self.course,
+                    &self.gates,
+                    one,
+                    tolerance,
+                    &movers,
+                );
+                pass_gate(&self.gates, one, self.clock);
+            }
         }
     }
 }
@@ -486,6 +536,110 @@ fn ride(
             r,
             one.place.map(|p| (course.point(p), course.way(p))),
         ));
+    }
+}
+
+/// One frame of a computer rider in a Baja or Enduro (`Racer::ride` and
+/// the gate branch of `Racer::plan`): along the course from its kept
+/// place toward the next gate's place, ten seconds' riding laid out a
+/// tenth at a time, while that gets it nearer the gate; else straight at
+/// the gate. A crashed rider gets up where it lies, facing the next gate.
+fn ride_gates(
+    track: &Track,
+    course: &Course,
+    gates: &[race::Line],
+    one: &mut One,
+    tolerance: f32,
+    movers: &[Mover],
+) {
+    let ground: &dyn Ground = track;
+    let gate = gates[one.gate.min(gates.len() - 1)];
+    if let Some(w) = &mut one.wreck {
+        w.reset_to = None;
+        w.step(ground, Controls::default(), FRAME);
+        if w.crash.is_none() {
+            let place = w.place();
+            let at = place.w_axis.truncate();
+            let to = flat(gate.centre - at);
+            let facing = if to.length_squared() > 1e-6 {
+                to
+            } else {
+                place.z_axis.truncate()
+            };
+            let (lane, class) = (one.rider.lane, one.rider.class);
+            one.rider = Rider::new(ground, at, facing, lane, class);
+            one.wreck = None;
+        }
+        return;
+    }
+    let r = &mut one.rider;
+    let (at, speed) = (r.position, r.speed);
+    let raise = |p: Vec3| Vec3::new(p.x, at.y + 2.0, p.z);
+    let mut limit: f32 = 1000.0;
+    let g = gate.centre;
+    let far = |from: Place, to: Place| course.along(from, to, f32::MAX).unwrap_or(0.0);
+    let target = course.nearest_place(g);
+    let here = course.nearest_place(at);
+    let mut kept = one.line_place.or(here);
+    let (before, now) = match (kept, here, target) {
+        (Some(k), Some(h), Some(t)) => (far(k, t), far(h, t)),
+        _ => (0.0, 0.0),
+    };
+    if now > 0.0 && before > 0.0 && now < before {
+        kept = here;
+    }
+    one.line_place = kept;
+    let (dx, dz) = (at.x - g.x, at.z - g.z);
+    let near_only = mm2_physics::ai::rough_sqrt(dx * dx + dz * dz) < speed;
+    if near_only {
+        let to = (g - at).normalize_or_zero();
+        if to.dot(r.velocity.normalize_or_zero()) < 0.707_55 {
+            limit = 40.0;
+        }
+    }
+    let points: Vec<Vec3> = match kept {
+        Some(k) if before > now => (0..100)
+            .map(|i| raise(course.point(course.walk(k, i as f32 * 0.1 * speed))))
+            .collect(),
+        _ => vec![g],
+    };
+    let mut path = Path::new(points, speed * 0.25);
+    path.limit = limit;
+    path.power = computer::POWER[LEVEL];
+    r.near_only = near_only;
+    r.tolerance = tolerance;
+    r.air_pose = true;
+    let crash = r.step(ground, &mut path, FRAME, &mut one.air_lean, true, movers);
+    if crash {
+        one.wreck = Some(throw(ground, r, None));
+    }
+}
+
+/// Through the next gate (`Racer::pass_gates`, a computer rider's gate
+/// twice as wide); past the last, round again from the first, a lap.
+fn pass_gate(gates: &[race::Line], one: &mut One, clock: f32) {
+    let at = one.stance().0;
+    let from = std::mem::replace(&mut one.last, at);
+    let gate = gates[one.gate.min(gates.len() - 1)];
+    let wide = race::Line {
+        half_width: gate.half_width * COMPUTER_GATE,
+        ..gate
+    };
+    if !wide.crossed(from, at, true) {
+        return;
+    }
+    one.gate += 1;
+    if one.gate >= gates.len() {
+        one.gate = 0;
+        let time = clock - one.lap_start;
+        one.laps += 1;
+        one.last_lap = time;
+        one.best_lap = if one.best_lap == 0.0 {
+            time
+        } else {
+            one.best_lap.min(time)
+        };
+        one.lap_start = clock;
     }
 }
 
