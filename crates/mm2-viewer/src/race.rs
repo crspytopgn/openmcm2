@@ -1771,13 +1771,15 @@ impl Racer {
                 // Put back on the course: on with the two-wheel model.
                 let place = w.place();
                 let (lane, class) = (c.rider.lane, c.rider.class);
-                c.rider = mm2_physics::computer::Rider::new(
-                    ground,
-                    place.w_axis.truncate(),
-                    place.z_axis.truncate(),
-                    lane,
-                    class,
-                );
+                let at = place.w_axis.truncate();
+                // In a Baja or Enduro the rider gets up where it lies,
+                // facing the next gate (FindPlacement, events 1 and 5).
+                let facing = gates
+                    .get(self.timing.gate)
+                    .map(|g| flat(g.centre - at))
+                    .filter(|d| d.length_squared() > 1e-6)
+                    .unwrap_or(place.z_axis.truncate());
+                c.rider = mm2_physics::computer::Rider::new(ground, at, facing, lane, class);
                 c.wreck = None;
                 c.was = None;
             }

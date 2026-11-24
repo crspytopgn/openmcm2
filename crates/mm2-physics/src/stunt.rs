@@ -308,7 +308,7 @@ pub const AI_TRICKS: [(f32, usize, usize, usize, &[usize]); 12] = [
     (2.2666, 12, 5, 7, &[0, 1, 2, 4, 5, 8, 9, 10, 12, 13, 14, 15]),
     (2.1333, 11, 4, 7, &[0, 1, 4, 5, 8, 9, 10, 12, 13, 14, 15]),
     (1.9375, 8, 4, 4, &[0, 1, 4, 5, 8, 9, 10, 14, 15]),
-    (1.8, 8, 4, 5, &[0, 1, 4, 5, 8, 9, 10, 15]),
+    (1.8, 9, 4, 5, &[0, 1, 4, 5, 8, 9, 10, 15]),
     (1.7647, 7, 4, 3, &[0, 1, 4, 5, 8, 10, 15]),
     (1.7222, 6, 4, 2, &[0, 1, 4, 5, 8, 15]),
     (1.6667, 4, 4, 0, &[0, 1, 4, 5]),
@@ -338,7 +338,8 @@ pub fn ai_pick(budget: f32, set: Set, mut rand: impl FnMut() -> f32) -> Option<(
         Set::Button7 if seven == 0 => (0, six),
         Set::Button7 => (six, seven),
     };
-    let i = ((rand() * count as f32 - 0.5).round().max(0.0) as usize).min(count - 1);
+    // The index is rounded by the FPU (fistp, nearest, ties to even).
+    let i = ((rand() * count as f32 - 0.5).round_ties_even().max(0.0) as usize).min(count - 1);
     // Two rows' counts disagree with their lists (1.9375 counts 8 of 9,
     // 1.8 counts 9 of 8); past the list the game reads the row's zero
     // padding, BarKneel.
