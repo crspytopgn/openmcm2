@@ -156,16 +156,17 @@
         <button id="qb-reland" title="New hills of the same kind, in other places.">Other hills</button>
 
         <h3>Your track</h3>
-        <div class="row qb-for" title="Which game the saved track is for.">
-          <span>Save for</span>
-          <div class="seg" role="group" aria-label="Save for">
-            <button id="qb-for-open" aria-pressed="true" title="OpenMCM2, in this browser or the desktop app: kept in this browser, in the browser game's track lists, and the full Course Builder opens on it. You can download its .ENV for the desktop app too.">OpenMCM2</button>
-            <button id="qb-for-orig" aria-pressed="false" title="The original Motocross Madness 2 from 2000: downloads an .ENV to put in the game's TERAFORM folder, in the folder for its race (SX, NATIONAL, BAJA or ENDURO). OpenMCM2 loads these too, but the OpenMCM2 save keeps the builder's finer ground and can be opened again here.">Original MM2</button>
-          </div>
-        </div>
         <div class="buttons">
-          <button class="primary" id="qb-ride" title="Saves the track and rides it in the browser version of the game. In the game, Esc comes back to the full Course Builder on this track.">Ride it</button>
-          <button id="qb-save" title="Saves the track for the game picked above.">Save</button>
+          <button class="primary" id="qb-ride" title="Saves the track and opens the browser version of the game to ride it yourself (it loads the game first). In the game, Esc comes back to the full Course Builder on this track.">Ride it in the game</button>
+          <button id="qb-save" aria-expanded="false" title="Save the track for OpenMCM2, or export it for the original Motocross Madness 2: pick which next.">Save / Export</button>
+        </div>
+        <div class="qb-for" id="qb-for" hidden>
+          <span>Save / export for</span>
+          <div class="buttons">
+            <button id="qb-for-open" title="OpenMCM2, in this browser or the desktop app: kept in this browser, in the browser game's track lists, and the full Course Builder opens on it. You can download its .ENV for the desktop app too.">OpenMCM2</button>
+            <button id="qb-for-orig" title="The original Motocross Madness 2 from 2000: downloads an .ENV to put in the game's TERAFORM folder, in the folder for its race (SX, NATIONAL, BAJA or ENDURO). OpenMCM2 loads these too, but the OpenMCM2 save keeps the builder's finer ground and can be opened again here.">Original MM2</button>
+            <button id="qb-for-no" class="plain" title="Don't save now.">Cancel</button>
+          </div>
         </div>
         <div class="qb-progress" id="qb-progress" hidden><progress max="1" value="0"></progress><span></span></div>
         <div class="buttons">

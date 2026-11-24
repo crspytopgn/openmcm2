@@ -92,8 +92,8 @@ button[disabled] { opacity: 0.5; cursor: default; }
 main.tools section.sources { padding: 14px 18px 16px; margin: 8px 0 18px; }
 /* Course Builder tab: the quick builder, and the way into the game's full one. */
 .qb-intro { margin: 0; }
-.qb-for { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; color: var(--muted); }
-.qb-for .seg { flex: 1; }
+.qb-for { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); border-left: 3px solid var(--accent); padding-left: 10px; }
+.qb-for[hidden] { display: none; }
 .qb-progress { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 .qb-progress[hidden] { display: none; }
 .qb-progress progress { width: 100%; height: 10px; accent-color: var(--accent); }

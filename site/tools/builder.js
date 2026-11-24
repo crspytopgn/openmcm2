@@ -734,26 +734,11 @@ export async function mount(app, panel) {
     keepTimer = setTimeout(() => keepCourse().catch((err) => console.warn("not kept", err)), 800);
   }
   let busy = false;
-  // Which game Save is for, remembered in this browser.
-  let saveFor = "open";
-  try {
-    saveFor = localStorage.getItem("mm2builderfor") === "orig" ? "orig" : "open";
-  } catch {}
-  const showFor = () => {
-    $("qb-for-open").setAttribute("aria-pressed", String(saveFor === "open"));
-    $("qb-for-orig").setAttribute("aria-pressed", String(saveFor === "orig"));
+  // Save / Export, then which game it's for.
+  const askFor = (on) => {
+    $("qb-for").hidden = !on;
+    $("qb-save").setAttribute("aria-expanded", String(on));
   };
-  const pickFor = (f) => {
-    saveFor = f;
-    showFor();
-    try {
-      localStorage.setItem("mm2builderfor", f);
-    } catch {}
-  };
-  showFor();
-  $("qb-for-open").addEventListener("click", () => pickFor("open"));
-  $("qb-for-orig").addEventListener("click", () => pickFor("orig"));
-
   // A bake in the worker, with a bar. The bake can't say how far it's got,
   // so the bar follows how long the last one for this race took here
   // (or a first guess), and fills when it's done.
@@ -821,19 +806,24 @@ export async function mount(app, panel) {
     download(new Blob([bytes]), `${stem}.ENV`);
     say(`Downloaded ${stem}.ENV. Put it in the original game's TERAFORM\\${event().folder} folder and it shows in the ${event().name} track list. OpenMCM2 loads it too.`);
   }
-  $("qb-save").addEventListener("click", async () => {
+  $("qb-save").addEventListener("click", () => !busy && askFor($("qb-for").hidden));
+  $("qb-for-no").addEventListener("click", () => askFor(false));
+  const saveFor = async (how) => {
     if (busy) return;
+    askFor(false);
     busy = true;
     $("qb-save").disabled = true;
     try {
-      await (saveFor === "orig" ? saveOriginal() : saveOpen());
+      await how();
     } catch (err) {
       say(`Couldn't save the track: ${err.message}. Try a normal (not private) window.`, true);
     } finally {
       busy = false;
       $("qb-save").disabled = false;
     }
-  });
+  };
+  $("qb-for-open").addEventListener("click", () => saveFor(saveOpen));
+  $("qb-for-orig").addEventListener("click", () => saveFor(saveOriginal));
   $("qb-download").addEventListener("click", () => {
     download(new Blob([JSON.stringify(c, null, 2)], { type: "application/json" }), `${mm.course_stem(text())}.course`);
   });

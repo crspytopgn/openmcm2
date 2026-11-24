@@ -259,6 +259,8 @@ enum Popup {
     Open { files: Vec<PathBuf>, mode: Mode, scroll: usize },
     /// The kind of race the track is for, to change it.
     Kind,
+    /// Which game to save the track for.
+    Save,
 }
 
 thread_local! {
@@ -346,6 +348,11 @@ pub struct Builder {
     bake_job: Option<(Job<Result<PathBuf, String>>, bool)>,
     /// Making the track for the original game: its file name and bytes.
     export_job: Option<Job<Result<(String, Vec<u8>), String>>>,
+    /// When the running bake or export began, for its bar.
+    busy_since: f32,
+    /// How long the last bake (0) and export for the original (1) of each
+    /// kind of race took, s, to fill the bar by.
+    took: [[f32; 4]; 2],
     /// Files asked for in a browser, not yet given.
     picking: Option<PickFor>,
     /// The next ride is the computer's, to watch.
@@ -427,6 +434,8 @@ impl Builder {
             ui: None,
             bake_job: None,
             export_job: None,
+            busy_since: 0.0,
+            took: [[4.0, 9.0, 15.0, 9.0], [12.0, 35.0, 50.0, 35.0]],
             picking: None,
             watch: false,
             copy_job: None,
@@ -637,6 +646,7 @@ impl Builder {
             Ok(path)
         });
         self.bake_job = Some((job, ride));
+        self.busy_since = self.now;
     }
 
     /// Makes the track for the original Motocross Madness 2 on another
@@ -652,7 +662,12 @@ impl Builder {
             let env = mm2_course::env::write_original(&course, &crate::fine_ground::builder_pictures())?;
             Ok((format!("{}.ENV", course.stem()), env))
         }));
+        self.busy_since = self.now;
         self.say("Making the track for the original game...");
+    }
+
+    fn mode_index(&self) -> usize {
+        Mode::ALL.iter().position(|m| *m == self.course.mode).unwrap_or(1)
     }
 
     /// Where an export for the original game goes on a computer.
@@ -789,6 +804,8 @@ impl Builder {
             return;
         }
         let job = self.export_job.take().unwrap();
+        let k = self.mode_index();
+        self.took[1][k] = (self.now - self.busy_since).max(1.0);
         let (name, env) = match job.join() {
             Ok(Ok(made)) => made,
             Ok(Err(e)) => {
@@ -838,6 +855,8 @@ impl Builder {
         }
         if self.bake_job.as_ref().is_some_and(|(j, _)| j.is_finished()) {
             let (job, ride) = self.bake_job.take().unwrap();
+            let k = self.mode_index();
+            self.took[0][k] = (self.now - self.busy_since).max(1.0);
             match job.join() {
                 Ok(Ok(path)) => {
                     if ride {
@@ -2156,21 +2175,9 @@ impl Builder {
         if right(p, input, "ride", if riding { "Baking..." } else { "RIDE IT  (R)" }, "Bake the track and ride it now. Esc comes back here.", 84.0, true) {
             self.bake_track(true);
         }
-        let exporting = self.export_job.is_some();
-        if right(
-            p,
-            input,
-            "export",
-            if exporting { "Making..." } else { "For MM2" },
-            "Make a copy of this track that plays in the original Motocross Madness 2, to put in its Teraform folder. Anyone can then race it without OpenMCM2.",
-            62.0,
-            false,
-        ) {
-            self.export_original();
-        }
-        if right(p, input, "save", "Save", "Save the track and put it in the game's track list (Ctrl+S).", 44.0, false) {
-            self.bake_track(false);
-            self.say("Saving...");
+        let saving = self.bake_job.as_ref().is_some_and(|(_, r)| !*r) || self.export_job.is_some();
+        if right(p, input, "save", if saving { "Saving..." } else { "Save / Export" }, "Save the track for OpenMCM2 (and its track lists), or export it for the original Motocross Madness 2. Ctrl+S saves for OpenMCM2.", 84.0, matches!(self.popup, Some(Popup::Save))) && !saving {
+            self.popup = Some(Popup::Save);
         }
         if right(p, input, "redo", "Redo", "Redo what was undone (Ctrl+Y).", 44.0, false) {
             self.redo();
@@ -2253,8 +2260,30 @@ impl Builder {
         p.panel(input, [0.0, 460.0, w, 20.0]);
         p.text([10.0, 465.0], &hint, 11.0, false, [0.85, 0.85, 0.8, 1.0]);
         // Saved / baking state at the right of the hint line.
-        let state = if self.bake_job.is_some() {
-            "Baking the track...".to_string()
+        let busy = if self.export_job.is_some() {
+            Some((1, "Making it for MM2"))
+        } else if self.bake_job.is_some() {
+            Some((0, "Saving"))
+        } else {
+            None
+        };
+        if let Some((which, what)) = busy {
+            // The bake can't say how far it's got: the bar follows how long
+            // the last one took, easing on if this one runs longer.
+            let expect = self.took[which][self.mode_index()];
+            let t = self.now - self.busy_since;
+            let f = (1.0 - (-t / expect * 1.6).exp()).min(0.97);
+            let left = (expect - t).max(1.0);
+            let label = if t < expect { format!("{what}: about {left:.0} s") } else { format!("{what}: nearly there") };
+            let bw = 110.0;
+            let lw = p.text_width(&label, 11.0, false);
+            p.text([w - bw - lw - 18.0, 465.0], &label, 11.0, false, [0.85, 0.85, 0.8, 1.0]);
+            let bar = [w - bw - 10.0, 466.0, bw, 8.0];
+            p.fill(bar, [0.18, 0.18, 0.16, 1.0]);
+            p.fill([bar[0], bar[1], bar[2] * f, bar[3]], [ACCENT[0] * 0.8, ACCENT[1] * 0.8, ACCENT[2] * 0.8, 1.0]);
+        }
+        let state = if busy.is_some() {
+            String::new()
         } else if self.unsaved {
             "Not saved yet".to_string()
         } else {
@@ -2446,6 +2475,34 @@ impl Builder {
                 }
                 if keep {
                     self.popup = Some(Popup::Kind);
+                }
+            }
+            Some(Popup::Save) => {
+                let (pw, ph) = (340.0, 150.0);
+                let (px, py) = ((w - pw) / 2.0, 110.0);
+                p.fill([0.0, 0.0, w, 480.0], [0.0, 0.0, 0.0, 0.35]);
+                p.panel(input, [px, py, pw, ph]);
+                p.text([px + 14.0, py + 12.0], "SAVE / EXPORT FOR", 14.0, true, [ACCENT[0], ACCENT[1], ACCENT[2], 1.0]);
+                let say = "OpenMCM2 loads both, but its own save keeps the finer ground and opens again here.";
+                for (k, line) in panel::wrap(p, say, pw - 28.0, 11.0).iter().enumerate() {
+                    p.text([px + 14.0, py + 32.0 + k as f32 * 13.0], line, 11.0, false, [0.85, 0.85, 0.8, 1.0]);
+                }
+                let mut keep = true;
+                let half = (pw - 32.0) / 2.0;
+                if p.button(input, "save-open", [px + 14.0, py + 70.0, half, 30.0], "OpenMCM2", "Save the track and put it in OpenMCM2's track list for its race (Ctrl+S).", true) {
+                    self.bake_track(false);
+                    self.say("Saving...");
+                    keep = false;
+                }
+                if p.button(input, "save-orig", [px + 18.0 + half, py + 70.0, half, 30.0], "Original MM2", "Make a copy that plays in the original Motocross Madness 2 from 2000, to put in its Teraform folder. Anyone can then race it without OpenMCM2.", false) {
+                    self.export_original();
+                    keep = false;
+                }
+                if p.button(input, "save-close", [px + pw - 84.0, py + ph - 30.0, 70.0, 20.0], "Close", "Don't save now.", false) {
+                    keep = false;
+                }
+                if keep {
+                    self.popup = Some(Popup::Save);
                 }
             }
             None => {}
