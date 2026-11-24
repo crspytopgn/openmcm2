@@ -734,40 +734,92 @@ export async function mount(app, panel) {
     keepTimer = setTimeout(() => keepCourse().catch((err) => console.warn("not kept", err)), 800);
   }
   let busy = false;
+  // Save / Export, then which game it's for.
+  const askFor = (on) => {
+    $("qb-for").hidden = !on;
+    $("qb-save").setAttribute("aria-expanded", String(on));
+  };
+  // A bake in the worker, with a bar. The bake can't say how far it's got,
+  // so the bar follows how long the last one for this race took here
+  // (or a first guess), and fills when it's done.
+  const GUESS = { open: { Supercross: 4, National: 9, Baja: 15, Enduro: 9 }, orig: { Supercross: 12, National: 35, Baja: 50, Enduro: 35 } };
+  async function baked(what) {
+    const key = `mm2bake-${what}-${c.mode}`;
+    let expect = GUESS[what === "original" ? "orig" : "open"][c.mode] || 20;
+    try {
+      expect = Number(localStorage.getItem(key)) || expect;
+    } catch {}
+    const box = $("qb-progress");
+    const bar = box.querySelector("progress");
+    const label = box.querySelector("span");
+    box.hidden = false;
+    bar.value = 0;
+    const t0 = performance.now();
+    const tick = setInterval(() => {
+      const t = (performance.now() - t0) / 1000;
+      // Eases towards the end rather than stopping, if it runs long.
+      bar.value = Math.min(0.97, 1 - Math.exp(-t / expect * 1.6));
+      const left = Math.max(1, Math.round(expect - t));
+      label.textContent = t < expect ? `About ${left} s to go` : "Nearly there…";
+    }, 200);
+    try {
+      const out = await bakeOff(what, text());
+      bar.value = 1;
+      label.textContent = "Done";
+      try {
+        localStorage.setItem(key, String(Math.round((performance.now() - t0) / 100) / 10));
+      } catch {}
+      return out;
+    } finally {
+      clearInterval(tick);
+      setTimeout(() => (box.hidden = true), 1500);
+    }
+  }
   async function saveTrack() {
     const stem = await keepCourse();
-    say("Saving the track for the game's track lists… (a few seconds)");
-    const env = await bakeOff("bake", text());
+    say("Saving the track for OpenMCM2…");
+    const env = await baked("bake");
     await fs.keepUser(`/user/Tracks/${event().folder}/${stem}.ENV`, env);
-    return stem;
+    return { stem, env };
   }
-  $("qb-save").addEventListener("click", async () => {
+  async function saveGame() {
+    const { stem } = await saveTrack();
+    say(`Saved as ${stem}. It's in the browser game's ${event().name} track list, and the full Course Builder opens on it.`);
+  }
+  async function exportOpen() {
+    say("Making a copy for OpenMCM2…");
+    const stem = await keepCourse();
+    const env = await baked("bake");
+    download(new Blob([env]), `${stem}.ENV`);
+    say(`Downloaded ${stem}.ENV. Other players put it in OpenMCM2's TERAFORM\\${event().folder} folder (or add it on the browser game's Your own tracks).`);
+  }
+  async function saveOriginal() {
+    say("Making a copy for MM2… (a big track takes up to a minute)");
+    const stem = mm.course_stem(text());
+    keepCourse().catch(() => {});
+    const bytes = await baked("original");
+    download(new Blob([bytes]), `${stem}.ENV`);
+    say(`Downloaded ${stem}.ENV. MM2 players put it in the game's TERAFORM\\${event().folder} folder and it shows in the ${event().name} track list. OpenMCM2 loads it too.`);
+  }
+  $("qb-save").addEventListener("click", () => !busy && askFor($("qb-for").hidden));
+  $("qb-for-no").addEventListener("click", () => askFor(false));
+  const saveFor = async (how) => {
     if (busy) return;
+    askFor(false);
     busy = true;
+    $("qb-save").disabled = true;
     try {
-      const stem = await saveTrack();
-      say(`Saved as ${stem}. It's in the browser game's ${event().name} track list, and the full Course Builder opens on it.`);
+      await how();
     } catch (err) {
       say(`Couldn't save the track: ${err.message}. Try a normal (not private) window.`, true);
     } finally {
       busy = false;
+      $("qb-save").disabled = false;
     }
-  });
-  $("qb-export").addEventListener("click", async () => {
-    if (busy) return;
-    busy = true;
-    say("Making the track for the original Motocross Madness 2… (up to a minute for a big track)");
-    try {
-      const stem = mm.course_stem(text());
-      const bytes = await bakeOff("original", text());
-      download(new Blob([bytes]), `${stem}.ENV`);
-      say(`Downloaded ${stem}.ENV. Put it in the original game's TERAFORM\\${event().folder} folder and it shows in the ${event().name} track list.`);
-    } catch (err) {
-      say(`Couldn't make the track for the original: ${err.message}`, true);
-    } finally {
-      busy = false;
-    }
-  });
+  };
+  $("qb-for-game").addEventListener("click", () => saveFor(saveGame));
+  $("qb-for-open").addEventListener("click", () => saveFor(exportOpen));
+  $("qb-for-orig").addEventListener("click", () => saveFor(saveOriginal));
   $("qb-download").addEventListener("click", () => {
     download(new Blob([JSON.stringify(c, null, 2)], { type: "application/json" }), `${mm.course_stem(text())}.course`);
   });

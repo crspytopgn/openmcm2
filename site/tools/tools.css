@@ -92,6 +92,12 @@ button[disabled] { opacity: 0.5; cursor: default; }
 main.tools section.sources { padding: 14px 18px 16px; margin: 8px 0 18px; }
 /* Course Builder tab: the quick builder, and the way into the game's full one. */
 .qb-intro { margin: 0; }
+.qb-for { display: flex; flex-direction: column; gap: 6px; border-left: 3px solid var(--accent); padding-left: 10px; }
+.qb-for button { text-align: left; }
+.qb-for[hidden] { display: none; }
+.qb-progress { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.qb-progress[hidden] { display: none; }
+.qb-progress progress { width: 100%; height: 10px; accent-color: var(--accent); }
 .controls input[type=text] { font: inherit; font-size: 14px; padding: 7px 8px; background: #24221e; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; }
 .controls output { float: right; color: var(--fg); font-weight: 500; }
 .controls h3 + .seg { margin-top: -4px; }

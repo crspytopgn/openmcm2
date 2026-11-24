@@ -157,9 +157,17 @@
 
         <h3>Your track</h3>
         <div class="buttons">
-          <button class="primary" id="qb-ride" title="Saves the track and rides it in the browser version of the game. In the game, Esc comes back to the full Course Builder on this track.">Ride it</button>
-          <button id="qb-save" title="Saves the track in this browser. It joins the browser game's track lists, and the full Course Builder opens on it.">Save</button>
-          <button id="qb-export" title="Makes a copy of the track that plays in the original Motocross Madness 2 (it takes up to a minute). Put the .ENV in the game's TERAFORM folder, in the folder for its race (SX, NATIONAL, BAJA or ENDURO).">For original MM2</button>
+          <button class="primary" id="qb-ride" title="Saves the track and opens the browser version of the game to ride it yourself (it loads the game first). In the game, Esc comes back to the full Course Builder on this track.">Ride it in the game</button>
+          <button id="qb-save" aria-expanded="false" title="Save the track for OpenMCM2, or export it for the original Motocross Madness 2: pick which next.">Save / Export</button>
+        </div>
+        <div class="qb-for" id="qb-for" hidden>
+          <button id="qb-for-game" class="primary" title="Saves the track into the browser game: it's in the track list for its race, ready to race, and the full Course Builder opens on it.">Save into my game</button>
+          <button id="qb-for-open" title="Downloads a copy of the track to share with players of OpenMCM2 (browser or desktop app). It keeps the builder's finer ground, and they can open it in their Course Builder too.">Export for OpenMCM2 (.ENV)</button>
+          <button id="qb-for-orig" title="Downloads a copy that plays in the original Motocross Madness 2 from 2000, for its TERAFORM folder (in the folder for its race: SX, NATIONAL, BAJA or ENDURO). OpenMCM2 plays these too. A big track takes up to a minute.">Export for MM2 (.ENV)</button>
+          <button id="qb-for-no" class="plain" title="Don't save now.">Cancel</button>
+        </div>
+        <div class="qb-progress" id="qb-progress" hidden><progress max="1" value="0"></progress><span></span></div>
+        <div class="buttons">
           <label class="tbtn" for="qb-open" title="Open a track made in the Course Builder: a .course file, or a builder .ENV.">Open file</label>
           <input id="qb-open" type="file" accept=".course,.env,.ENV" hidden>
           <button id="qb-download" title="Downloads the track's .course file, to keep it or open it in the desktop app's Course Builder.">Download .course</button>
