@@ -18,14 +18,11 @@ Project page: https://crspytopgn.github.io/openmcm2/ · Play in your browser: ht
 
 ## New in 0.8: The Big Physics Update
 
-The riding physics are now copied 1:1 from the original game: tyres,
-suspension, air control, crashes and the tumble afterwards, checked
-against 124 rides recorded in the original and the same at any frame
-rate. The race cameras, computer riders and start grid follow the
-original too. Also new: faster on every PC and on laptops in the browser,
-MX Bikes style free engines, bounce light and FSR in Enhanced, and
-Course Builder tracks you can export to the original game. See
-[RELEASE_NOTES.md](RELEASE_NOTES.md) for the full list.
+**It rides like MM2 again.** Grip, suspension, jumps, landings and crashes
+now feel just like the original, at any frame rate, and the cameras and
+computer riders are back the way they were. Plus it runs faster, the free
+bikes have new audio, and Course Builder tracks export to the original
+game. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the full list.
 
 ## New in 0.7
 
