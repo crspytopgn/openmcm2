@@ -362,6 +362,12 @@ fn real_light_seen(n: vec3<f32>, sun: f32, seen: f32) -> vec3<f32> {
 // reflections (post.wgsl fs_ssr): 0 dry.
 var<private> water_here: f32 = 0.0;
 
+// How far down a rut is, 0 to 1, from the ruts' map (ruts.rs): sunk
+// once a few tyres have run there, deeper as more do.
+fn rut_shape(v: f32) -> f32 {
+    return smoothstep(0.16, 0.3, v) * 0.6 + smoothstep(0.3, 1.0, v) * 0.4;
+}
+
 // The new ground: the painted colour with its light taken out, the photo
 // materials' detail laid over it by what each part of the ground is, and
 // then lit by the sun as it really falls, bumps, ruts and shadows and all.
@@ -470,6 +476,7 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     // The ruts: dark, damp grooves where the tyres have run.
     var rut = 0.0;
     var worn = 0.0;
+    var lip = 0.0;
     if (enh.ruts.w > 1.5) {
         // The gentle wear: where the tyres have run, again and again, the
         // ground packs a little darker and smoother, a soft band with no
@@ -483,12 +490,42 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
         }
         worn = smoothstep(0.0, 0.05, sum / 9.0);
     } else if (enh.ruts.w > 0.5) {
+        // Tyre marks that build up into ruts: each pass of a tyre adds a
+        // little to the map (ruts.rs), so a line ridden once is a faint,
+        // packed mark, and the racing line ridden lap after lap sinks
+        // into a dark, damp rut with loose dirt pushed up either side and
+        // a gently packed band round it all. Close by only the shape and
+        // the dirt's grain; far off just the band, as the map's texels
+        // would shimmer.
         let ruv = (in.world.xz - enh.ruts.xy) / enh.ruts.z;
-        rut = textureSampleLevel(rut_map, rut_sampler, ruv, 0.0).r;
-        let e = 1.0 / 8192.0;
-        let gx = textureSampleLevel(rut_map, rut_sampler, ruv + vec2<f32>(e, 0.0), 0.0).r - textureSampleLevel(rut_map, rut_sampler, ruv - vec2<f32>(e, 0.0), 0.0).r;
-        let gz = textureSampleLevel(rut_map, rut_sampler, ruv + vec2<f32>(0.0, e), 0.0).r - textureSampleLevel(rut_map, rut_sampler, ruv - vec2<f32>(0.0, e), 0.0).r;
-        bent = normalize(bent + vec3<f32>(gx, 0.0, gz) * 6.0 * near);
+        let e = 1.5 / 8192.0;
+        let c = textureSampleLevel(rut_map, rut_sampler, ruv, 0.0).r;
+        let px = textureSampleLevel(rut_map, rut_sampler, ruv + vec2<f32>(e, 0.0), 0.0).r;
+        let nx = textureSampleLevel(rut_map, rut_sampler, ruv - vec2<f32>(e, 0.0), 0.0).r;
+        let pz = textureSampleLevel(rut_map, rut_sampler, ruv + vec2<f32>(0.0, e), 0.0).r;
+        let nz = textureSampleLevel(rut_map, rut_sampler, ruv - vec2<f32>(0.0, e), 0.0).r;
+        var ring = 0.0;
+        for (var i = 0; i < 4; i++) {
+            let o = vec2<f32>(f32(i % 2) * 2.0 - 1.0, f32(i / 2) * 2.0 - 1.0) * 2.4 * e;
+            ring += textureSampleLevel(rut_map, rut_sampler, ruv + o, 0.0).r;
+        }
+        let blur = (px + nx + pz + nz + ring) / 8.0;
+        let close = 1.0 - smoothstep(50.0 * reach, 160.0 * reach, dist);
+        // Read as a contour of the smooth map, so a rut has a crisp, true
+        // edge however coarse the map's texels; broken up by the dirt's
+        // own grain, so no line is drawn clean.
+        let rough_edge = 0.75 + 0.5 * clamp(surface, 0.0, 1.0);
+        let here = mix(blur, c, close) * mix(1.0, rough_edge, close);
+        let mark = smoothstep(0.02, 0.07, here);
+        rut = smoothstep(0.16, 0.3, here);
+        let deep = smoothstep(0.3, 1.0, here);
+        // Loose dirt pushed out just beside a rut.
+        lip = smoothstep(0.06, 0.16, blur) * (1.0 - smoothstep(0.08, 0.18, here)) * close;
+        worn = smoothstep(0.0, 0.3, blur) * (0.15 + 0.15 * (1.0 - close)) + mark * 0.12 * (1.0 - rut) + deep * 0.25;
+        // The rut's walls, from its shape round about.
+        let hx = rut_shape(px) - rut_shape(nx);
+        let hz = rut_shape(pz) - rut_shape(nz);
+        bent = normalize(bent + vec3<f32>(hx, 0.0, hz) * 1.2 * close * near);
     }
     // Take out the light the painter put in: as the scene's sun would
     // have lit the land's shape, half of it.
@@ -496,8 +533,10 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     let baked = mix(vec3<f32>(1.0), max(real_light(n, 1.0), vec3<f32>(0.05)) / max(flat_light, vec3<f32>(0.05)), 0.5);
     let albedo_game = pow(painted, vec3<f32>(1.0 / 2.2)) / baked;
     var albedo = pow(max(albedo_game, vec3<f32>(0.0)), vec3<f32>(2.2)) * colour;
-    albedo *= 1.0 - rut * 0.22;
+    albedo *= 1.0 - rut * 0.16;
     albedo *= mix(vec3<f32>(1.0), vec3<f32>(0.55, 0.52, 0.5), worn);
+    // Loose dirt thrown up beside a rut: drier, a little lighter.
+    albedo *= 1.0 + lip * vec3<f32>(0.2, 0.19, 0.16);
     // The wet ground is darker.
     albedo *= 1.0 - enh.world.y * 0.35;
     // In the wet, puddles in the hollows of flat ground and in the ruts:

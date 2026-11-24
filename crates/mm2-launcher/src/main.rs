@@ -2649,7 +2649,7 @@ fn effect_about(name: &str) -> &'static str {
         "bikes" => "Shiny paint and metal, and smoother riders.",
         "shafts" => "Beams of sunlight past hills, trees and riders.",
         "cinematic" => "Replays filmed as through a lens.",
-        "ruts" => "Tyre ruts that stay for the race.",
+        "ruts" => "Where the bikes ride, tyre marks press into the dirt and build up lap by lap: a line ridden once is a faint mark, the racing line sinks into dark, damp ruts with loose dirt pushed up beside them, and the grass wears away. Only drawn: the ground you ride is the original's, so the riding doesn't change. Each player's game draws its own, in races, online and in replays.",
         "scenery" => "Props along the course, a paddock and a crowd.",
         "grade" => "A bolder look: colour, contrast, a vignette.",
         "raytracing" => "Truer shadows, light shafts and reflections, traced as rays.",
@@ -2677,8 +2677,8 @@ fn preset_text(q: Quality) -> String {
         Quality::Medium => "without light shafts or smooth hills, with TAA rebuilding the scene at the screen's sharpness",
         Quality::RayTraced => "High's effects with ray tracing (needs a graphics card that can trace rays)",
         Quality::High => "every effect that's on unless changed",
-        Quality::Ultra => "every effect but ray tracing, with lasting ruts",
-        Quality::Max => "for the strongest graphics cards: Ultra's effects drawn finer, the scene supersampled (drawn with more pixels than the screen and shrunk to it) and the grass, smooth hills and shadows reaching further; the same light and colours as High, without lasting ruts",
+        Quality::Ultra => "every effect but ray tracing",
+        Quality::Max => "for the strongest graphics cards: Ultra's effects drawn finer, the scene supersampled (drawn with more pixels than the screen and shrunk to it) and the grass, smooth hills and shadows reaching further; the same light and colours as High",
     };
     let msaa = ANTIALIASING.iter().find(|a| a.0 == q.antialiasing()).map_or("", |a| a.1);
     // Past 1440p each pixel is small enough that 4x looks the same, for

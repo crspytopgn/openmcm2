@@ -38,8 +38,8 @@ pub struct Enhanced {
     pub grass: bool,
     /// A real sky with clouds in place of the painted one.
     pub clouds: bool,
-    /// Tyre ruts that stay, and clouds of dust (spray on wet ground)
-    /// behind the bikes.
+    /// Tyre marks that build up into ruts over the race (drawn only),
+    /// and clouds of dust (spray on wet ground) behind the bikes.
     pub ruts: bool,
     pub dust: bool,
     /// Dirt flung off the rear tyres as they pull hard, spin or slide
@@ -187,7 +187,7 @@ impl Default for Enhanced {
             ground: true,
             grass: true,
             clouds: false,
-            ruts: false,
+            ruts: true,
             dust: true,
             // Off until Michael approves the reworked look.
             roost: false,
@@ -284,12 +284,11 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             e.raytracing = true;
         }
         // Everything but ray tracing (its own preset, for the cards that
-        // can), with lasting ruts.
+        // can).
         "ultra" => {
             e.msaa = 8;
             e.fewer_samples_past_qhd = true;
             e.pixels = None;
-            e.ruts = true;
             e.dust_amount = 1.25;
             // Twice the shadow maps' texels a side: crisper edges near
             // the rider, for four times the memory (200 MB).
@@ -298,12 +297,11 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
         // For the strongest graphics cards: Ultra's look drawn with more
         // pixels than the screen and shrunk to it (supersampling, with
         // 4x MSAA on top in place of 8x), the grass, smooth hills and
-        // shadows reaching further, and without Ultra's lasting ruts. Only
-        // finer, never bolder: the same light and colours as High.
+        // shadows reaching further. Only finer, never bolder: the same
+        // light and colours as High.
         "max" => {
             preset(e, "ultra")?;
             e.msaa = 4;
-            e.ruts = false;
             e.supersample = true;
             e.far = true;
         }
@@ -911,7 +909,7 @@ mod tests {
     #[test]
     fn max_draws_finer_than_ultra() {
         let max = Enhanced::parse("quality=max").unwrap();
-        assert!(max.supersample && max.far && !max.ruts && !max.raytracing && !max.scenery && !max.grade && !max.bloom);
+        assert!(max.supersample && max.far && max.ruts && !max.raytracing && !max.scenery && !max.grade && !max.bloom);
         assert_eq!(max.msaa, 4);
         assert_eq!(max.shadow_side, 2 * crate::enhance::SHADOW_SIDE);
         // A 1080p screen drawn at 4K, 1440p at 4K, 4K as it is.

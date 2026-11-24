@@ -23,7 +23,7 @@ export const UPGRADES = [
   ["bikes", "Glossier bikes", false, "Shiny paint and metal, and smoother riders."],
   ["shafts", "Light shafts", true, "Beams of sunlight past hills, trees and riders. Not in a browser: too heavy."],
   ["cinematic", "Replay blur and depth of field", false, "Replays filmed as through a lens. Not in a browser: too heavy."],
-  ["ruts", "Lasting tyre ruts", false, "Tyre ruts that stay for the race."],
+  ["ruts", "Tyre marks and ruts", true, "Where the bikes ride, tyre marks press into the dirt and build up lap by lap: a line ridden once is a faint mark, the racing line sinks into dark, damp ruts with loose dirt pushed up beside them, and the grass wears away. Only drawn: the ground you ride is the original's, so the riding doesn't change. Each player's game draws its own, in races, online and in replays."],
   ["scenery", "Trackside props and crowd", false, "Props along the course, a paddock and a crowd."],
   ["grade", "Colour grade", false, "A bolder look: colour, contrast, a vignette."],
   ["gtao", "Better ambient occlusion (GTAO)", true, "A truer ambient occlusion: deeper in creases and corners. Not in a browser: too heavy."],
@@ -173,6 +173,9 @@ export function load() {
   try {
     const kept = JSON.parse(localStorage.getItem(KEY) || "null");
     if (kept) {
+      // Before v3 the ruts were the old deep grooves, off; the tyre marks
+      // that build up start on now.
+      if ((kept.v || 0) < 3 && kept.upgrades) delete kept.upgrades.ruts;
       Object.assign(s, kept, { upgrades: { ...s.upgrades, ...(kept.upgrades || {}) } });
       // Settings from before Medium was the browser's default go to it.
       if (!kept.v && s.quality !== "low") {
@@ -187,7 +190,7 @@ export function load() {
 }
 
 export function save(s) {
-  s.v = 2;
+  s.v = 3;
   try {
     localStorage.setItem(KEY, JSON.stringify(s));
   } catch {}
