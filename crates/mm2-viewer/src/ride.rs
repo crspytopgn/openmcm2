@@ -121,6 +121,9 @@ pub struct Chase {
     /// (+0x45c, +0x464), and whether it was down last frame.
     crash_yaw: (f32, bool),
     was_crashed: bool,
+    /// The crash was a roll past 110° (crash reason 6, 0x40a950): the
+    /// camera follows on as it was until the rider lands (0x4174b0).
+    rolled: bool,
     /// The bike's velocity last frame, for a turn rate when the bike
     /// doesn't give one (the computer's and the taped bikes).
     was_velocity: Vec3,
@@ -258,6 +261,14 @@ pub struct Followed {
     /// The race is over for the only player: the camera stops swinging
     /// with the turns (0x498130's +0x7a4).
     pub finished_alone: bool,
+    /// The bike is down because it rolled or pitched over (crash reasons
+    /// 6 and 8; which one the camera tells from the bike).
+    pub flipped: bool,
+    /// The thrown rider is still in the bail motion (Wrecker state 1), or
+    /// has touched the ground or something (state 3); a bike with no
+    /// thrown rider counts as down.
+    pub wreck_bail: bool,
+    pub wreck_down: bool,
 }
 
 impl Chase {
@@ -317,6 +328,7 @@ impl Chase {
             blend: 0.0,
             crash_yaw: (0.0, false),
             was_crashed: false,
+            rolled: false,
             was_velocity: Vec3::ZERO,
             takeoff: (position, Vec3::ZERO),
             was_airborne: false,
@@ -554,7 +566,7 @@ impl Chase {
     /// Where the eye goes this frame (0x464b30): round the heading by the
     /// view's pitch and yaw while following; in a crash, out to the side
     /// of where the bike was going, keeping the rider in the picture.
-    fn place_eye(&mut self, following: bool, base: Vec3, head: Vec3, dt: f32) -> Vec3 {
+    fn place_eye(&mut self, following: bool, close_in: bool, base: Vec3, head: Vec3, dt: f32) -> Vec3 {
         if let Some(eye) = self.frozen {
             return eye;
         }
@@ -601,7 +613,7 @@ impl Chase {
             self.world_yaw = w;
             self.distance_ease.value = self.distance;
         }
-        self.keep_in_picture(head, dt);
+        self.keep_in_picture(head, close_in, dt);
         let r = rotate(Vec3::Z, Vec3::Y, self.yaw + self.world_yaw);
         let mut eye = base - r * self.distance;
         eye.y += self.height;
@@ -612,7 +624,9 @@ impl Chase {
     /// (0x416ed0 → 0x4636e0): either off the top or the bottom raises or
     /// lowers the eye 5 ft/s; both in, and near each other on screen, it
     /// closes in to 20 ft.
-    fn keep_in_picture(&mut self, head: Vec3, dt: f32) {
+    fn keep_in_picture(&mut self, head: Vec3, close_in: bool, dt: f32) {
+        // After a roll-over it rises more gently (0x416ed0).
+        let (rise, drop) = if self.rolled { (2.5, 4.0) } else { (5.0, 5.0) };
         // Seen as last frame's camera saw them, on a 640×480 screen.
         let forward = (self.target - self.eye).normalize_or(Vec3::Z);
         let right = Vec3::Y.cross(forward).normalize_or(Vec3::X);
@@ -641,8 +655,8 @@ impl Chase {
             if code != 0 {
                 self.distance = self.distance_ease.update(self.distance, dt);
                 match code {
-                    4 => self.height += dt * 5.0,
-                    8 => self.height -= dt * 5.0,
+                    4 => self.height += dt * rise,
+                    8 => self.height -= dt * drop,
                     _ => {}
                 }
                 return;
@@ -651,7 +665,7 @@ impl Chase {
             screen[i] = Vec3::new(640.0 * (x * 0.5 + 0.5), 480.0 * (0.5 - y * 0.5), 480.0 * depth);
         }
         let (near, far) = if screen[0].z <= screen[1].z { (screen[0], screen[1]) } else { (screen[1], screen[0]) };
-        if far.x - near.x < 64.0 && far.y - near.y < 48.0 {
+        if close_in && far.x - near.x < 64.0 && far.y - near.y < 48.0 {
             let to = self.distance - (near.z.min(335.0) - 15.0) * dt * 0.028;
             self.distance = self.distance_ease.update(to, dt).max(20.0);
         }
@@ -668,6 +682,13 @@ impl Chase {
         if crashed && !self.was_crashed {
             let f = bike.forward;
             self.crash_yaw = (f.x.atan2(f.z), bike.up.y < 0.0);
+            // Reason 8 is the nose straight up or down (0.9962), 6 a roll
+            // past 110° (1.919862 rad).
+            let (_, roll) = pitch_roll(bike.nose, bike.up);
+            self.rolled = bike.flipped && bike.nose.y.abs() <= 0.996_194_7 && roll.abs() > 1.919_862;
+        }
+        if !crashed {
+            self.rolled = false;
         }
         self.was_crashed = crashed;
         // How fast the bike turns (+0x43c): on the ground only.
@@ -766,8 +787,12 @@ impl Chase {
         } else {
             0.0
         };
-        // The camera follows the bike unless it is down; Sky Cam always.
-        let following = self.frozen.is_some() || self.view == View::Sky || !crashed;
+        // The camera follows the bike unless it is down; Sky Cam always,
+        // and after a roll-over until the rider lands (0x4174b0).
+        let following = self.frozen.is_some()
+            || self.view == View::Sky
+            || !crashed
+            || (self.rolled && !bike.wreck_down);
         let still = wide || self.settled;
         let to = match self.held {
             _ if self.frozen.is_some() => {
@@ -784,7 +809,7 @@ impl Chase {
             // Between the rider's head and the bike (0x416fb0).
             _ => head + (self.lead - head) * 0.38,
         };
-        let eye = self.place_eye(following, to, head, dt);
+        let eye = self.place_eye(following, !bike.wreck_bail, to, head, dt);
         let rate = self.ease_rate();
         if self.eye_ease.is_none() {
             self.eye_ease = Some(eases(eye, rate));
@@ -1342,6 +1367,7 @@ mod trace {
             c.follow(&bike, CamKeys::default(), &terrain, 1.0 / 60.0);
         }
         bike.crashed = true;
+        bike.wreck_down = true;
         let mut eye = Vec3::ZERO;
         for _ in 0..240 {
             eye = c.follow(&bike, CamKeys::default(), &terrain, 1.0 / 60.0).0;
@@ -1359,6 +1385,42 @@ mod trace {
             eye = c.follow(&bike, CamKeys::default(), &terrain, 1.0 / 60.0).0;
         }
         assert!((at.z - eye.z - 5.86).abs() < 0.1 && (eye.x - at.x).abs() < 0.1, "{eye}");
+    }
+
+    #[test]
+    fn a_roll_over_is_followed_until_the_rider_lands() {
+        let terrain = flat();
+        let at = Vec3::new(500.0, 0.0, 500.0);
+        let mut c = Chase::new(at, Vec3::Z);
+        let mut bike = Followed {
+            position: at,
+            forward: Vec3::Z,
+            nose: Vec3::Z,
+            up: Vec3::Y,
+            head: Some(at + Vec3::Y * 5.3),
+            ..Default::default()
+        };
+        for _ in 0..60 {
+            c.follow(&bike, CamKeys::default(), &terrain, 1.0 / 60.0);
+        }
+        // Rolled 120° onto its side and over.
+        let roll = 2.1f32;
+        bike.up = Vec3::new(roll.sin(), roll.cos(), 0.0);
+        bike.crashed = true;
+        bike.flipped = true;
+        let mut eye = Vec3::ZERO;
+        for _ in 0..120 {
+            eye = c.follow(&bike, CamKeys::default(), &terrain, 1.0 / 60.0).0;
+        }
+        assert!((at.z - eye.z - 5.86).abs() < 0.1 && (eye.x - at.x).abs() < 0.1, "still behind: {eye}");
+        // The rider lands: the crash view takes over, 60° round, and from
+        // the far side as the bike lies upside down (+0x464).
+        bike.wreck_down = true;
+        for _ in 0..240 {
+            eye = c.follow(&bike, CamKeys::default(), &terrain, 1.0 / 60.0).0;
+        }
+        let d = Vec3::new(eye.x - at.x, 0.0, eye.z - at.z);
+        assert!((d.x.abs().atan2(-d.z).to_degrees() - 120.0).abs() < 1.0, "{eye}");
     }
 
     #[test]
