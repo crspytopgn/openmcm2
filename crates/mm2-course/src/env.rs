@@ -465,9 +465,12 @@ fn tdf(course: &Course, field: &Field, path: &Path) -> Vec<u8> {
     f(&mut out, span);
     for &i in &picks {
         let (p, n, hw) = (path.pts[i], path.side(i), path.width[i] / 2.0);
+        // The AI follows the centre: the AI line where one is set.
+        let room = (hw - crate::AI_EDGE).max(0.0);
+        let off = course.line.ai_at(path.s[i], path.length).clamp(-room, room);
         tag(&mut out, 8);
         for (t, x, z) in [
-            (9, p[0], p[1]),
+            (9, p[0] + n[0] * off, p[1] + n[1] * off),
             (10, p[0] + n[0] * hw, p[1] + n[1] * hw),
             (11, p[0] - n[0] * hw, p[1] - n[1] * hw),
         ] {

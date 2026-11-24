@@ -208,6 +208,8 @@ enum Hover {
     River(usize, usize),
     /// A flight path's point.
     Flight(usize, usize),
+    /// One of the AI line's handles.
+    Ai(usize),
     /// Bare ground.
     Ground,
 }
@@ -221,6 +223,9 @@ enum PickFor {
     Model,
 }
 
+/// What the AI line mode does, for its button.
+const AI_TIP: &str = "The line the computer riders follow runs down the middle of the track by itself. Click the track to pull it across (say, tight into a corner), drag a handle to move it, right-click a handle to take it away.";
+
 /// What a click does with the Line tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LineMode {
@@ -229,6 +234,8 @@ enum LineMode {
     Gates,
     /// Moves the start: along a lap, or anywhere for a funnel start.
     Start,
+    /// Pulls the line the computer riders follow across the track.
+    Ai,
 }
 
 /// What the Nature tool does.
@@ -248,6 +255,8 @@ enum Drag {
     Object(usize),
     River(usize, usize),
     Flight(usize, usize),
+    /// An AI line handle.
+    Ai(usize),
     Brush,
     Turn,
     Pan,
@@ -1237,6 +1246,39 @@ impl Builder {
 
     // ---- editing ----
 
+    /// How far across the track the AI line may run at sample `i`, ft.
+    fn ai_room(&self, i: usize) -> f32 {
+        (self.line.width.get(i).copied().unwrap_or(self.course.mode.track_width()) / 2.0 - mm2_course::AI_EDGE).max(0.0)
+    }
+
+    /// The AI line at sample `i`: the line moved across by its offset.
+    fn ai_point(&self, i: usize) -> [f32; 2] {
+        let room = self.ai_room(i);
+        let off = self.course.line.ai_at(self.line.s[i], self.line.length).clamp(-room, room);
+        let (p, n) = (self.line.pts[i], self.line.side(i));
+        [p[0] + n[0] * off, p[1] + n[1] * off]
+    }
+
+    /// Where a handle (ft along, ft across) stands on the ground.
+    fn ai_spot(&self, k: [f32; 2]) -> [f32; 2] {
+        let i = self.line.index_at(k[0]).min(self.line.pts.len().saturating_sub(1));
+        if self.line.pts.is_empty() {
+            return [0.0; 2];
+        }
+        let room = self.ai_room(i);
+        let off = k[1].clamp(-room, room);
+        let (p, n) = (self.line.pts[i], self.line.side(i));
+        [p[0] + n[0] * off, p[1] + n[1] * off]
+    }
+
+    /// A handle for the ground at `x`, `z`: how far along the line and
+    /// across it, kept inside the track.
+    fn ai_key(&self, x: f32, z: f32) -> Option<[f32; 2]> {
+        let n = self.line.nearest([x, z])?;
+        let room = self.ai_room(n.i);
+        Some([(n.s * 10.0).round() / 10.0, (n.side.clamp(-room, room) * 10.0).round() / 10.0])
+    }
+
     fn line_at_pointer(&self) -> Option<f32> {
         let g = self.ground?;
         self.line.nearest([g.x, g.z]).map(|n| n.s)
@@ -1248,6 +1290,12 @@ impl Builder {
             Hover::Point(i) if self.tool == Tool::Line => {
                 self.remember();
                 self.course.line.points.remove(i);
+                self.changed();
+                true
+            }
+            Hover::Ai(i) if self.tool == Tool::Line => {
+                self.remember();
+                self.course.line.ai.remove(i);
                 self.changed();
                 true
             }
@@ -1308,6 +1356,21 @@ impl Builder {
                     self.changed();
                 }
             }
+            Tool::Line if self.line_mode == LineMode::Ai => match self.hover {
+                Hover::Ai(i) => {
+                    self.remember();
+                    self.drag = Drag::Ai(i);
+                }
+                Hover::Line(_) => {
+                    if let Some(k) = self.ai_key(g.x, g.z) {
+                        self.remember();
+                        self.course.line.ai.push(k);
+                        self.drag = Drag::Ai(self.course.line.ai.len() - 1);
+                        self.changed();
+                    }
+                }
+                _ => {}
+            },
             Tool::Line if self.line_mode == LineMode::Start => {
                 if self.course.mode.laps() {
                     if let Hover::Line(s) = self.hover {
@@ -1530,6 +1593,15 @@ impl Builder {
                     }
                 }
             }
+            Drag::Ai(i) => {
+                if let (Some(k), true) = (self.ai_key(g.x, g.z), i < self.course.line.ai.len()) {
+                    let was = self.course.line.ai[i];
+                    if (was[0] - k[0]).abs() + (was[1] - k[1]).abs() > 0.2 {
+                        self.course.line.ai[i] = k;
+                        self.dirty = true;
+                    }
+                }
+            }
             Drag::Jump(i, off) => {
                 if let (Some(n), true) = (self.line.nearest([g.x, g.z]), i < self.course.jumps.len()) {
                     let mut at = n.s - off;
@@ -1719,6 +1791,14 @@ impl Builder {
             self.project(&vp, p).is_some_and(|s| (s[0] - self.pointer.0).powi(2) + (s[1] - self.pointer.1).powi(2) < r * r)
         };
         match self.tool {
+            Tool::Line if self.line_mode == LineMode::Ai => {
+                for (i, &k) in self.course.line.ai.iter().enumerate() {
+                    let at = self.ai_spot(k);
+                    if near_px(Vec3::new(at[0], self.height(at[0], at[1]), at[1]), 9.0) {
+                        return Hover::Ai(i);
+                    }
+                }
+            }
             Tool::Line => {
                 for (i, p) in self.course.line.points.iter().enumerate() {
                     if near_px(Vec3::new(p.x, self.height(p.x, p.z), p.z), 9.0) {
@@ -2019,8 +2099,33 @@ impl Builder {
                 p.label([a[0], a[1] - 10.0], "STADIUM FLOOR", [1.0, 1.0, 1.0, 0.7]);
             }
         }
+        // The AI line, dashed, when it's been moved or its mode is up.
+        let ai_mode = self.tool == Tool::Line && self.line_mode == LineMode::Ai;
+        if (ai_mode || !self.course.line.ai.is_empty()) && self.line.pts.len() > 1 {
+            let colour = if ai_mode { [0.44, 0.82, 0.91, 1.0] } else { [0.44, 0.82, 0.91, 0.5] };
+            let every = 3;
+            let mut prev: Option<[f32; 2]> = None;
+            for (k, i) in (0..self.line.pts.len()).step_by(every).enumerate() {
+                let q = self.ai_point(i);
+                let s = self.project(vp, Vec3::new(q[0], self.height(q[0], q[1]) + 0.8, q[1]));
+                if let (Some(a), Some(b)) = (prev, s) {
+                    if k % 2 == 0 {
+                        p.line(a, b, 2.0, colour);
+                    }
+                }
+                prev = s;
+            }
+            if ai_mode {
+                for (i, &k) in self.course.line.ai.iter().enumerate() {
+                    let q = self.ai_spot(k);
+                    if let Some(s) = self.project(vp, Vec3::new(q[0], self.height(q[0], q[1]) + 1.0, q[1])) {
+                        self.handle(p, s, self.hover == Hover::Ai(i) || self.drag == Drag::Ai(i));
+                    }
+                }
+            }
+        }
         // The player's points.
-        if self.tool == Tool::Line {
+        if self.tool == Tool::Line && self.line_mode != LineMode::Ai {
             for (i, pt) in self.course.line.points.iter().enumerate() {
                 if let Some(s) = self.project(vp, Vec3::new(pt.x, self.height(pt.x, pt.z) + 1.0, pt.z)) {
                     self.handle(p, s, self.hover == Hover::Point(i) || self.drag == Drag::Point(i));
@@ -2159,6 +2264,9 @@ impl Builder {
             (Tool::Line, _) if self.line_mode == LineMode::Gates && !self.course.mode.laps() => "Click the track to add a gate there, or click a gate to take it away. The finish stays at the end.",
             (Tool::Line, _) if self.line_mode == LineMode::Start && self.course.mode.laps() => "Click the track to put the start and finish line there.",
             (Tool::Line, _) if self.line_mode == LineMode::Start => "Click the track to start there, or open ground beside it for a funnel start.",
+            (Tool::Line, Hover::Ai(_)) => "Drag to move this handle of the AI line. Right-click or Delete takes it away.",
+            (Tool::Line, Hover::Line(_)) if self.line_mode == LineMode::Ai => "Click to pull the AI line across the track here, and drag.",
+            (Tool::Line, _) if self.line_mode == LineMode::Ai => "The dashed line is where the computer riders ride. Click the track to pull it across.",
             (Tool::Line, Hover::Point(_)) => "Drag to move this point. Wheel: track width here. Right-click or Delete removes it.",
             (Tool::Line, Hover::Line(_)) => "Click to add a point here and drag it. T moves the start here.",
             (Tool::Line, _) => "Click the ground to add a point to the line.",
@@ -2667,12 +2775,17 @@ impl Builder {
     fn line_modes(&mut self, p: &mut Painter, input: &mut Input, y: &mut f32, left: f32, col: f32) {
         let laps = self.course.mode.laps();
         let modes: &[(LineMode, &str, &str)] = if laps {
-            &[(LineMode::Draw, "Draw", "Click the ground to add points; drag them to move."), (LineMode::Start, "Move start", "Click the track to put the start and finish line there (or press T over it).")]
+            &[
+                (LineMode::Draw, "Draw", "Click the ground to add points; drag them to move."),
+                (LineMode::Start, "Start", "Click the track to put the start and finish line there (or press T over it)."),
+                (LineMode::Ai, "AI line", AI_TIP),
+            ]
         } else {
             &[
                 (LineMode::Draw, "Draw", "Click the ground to add points; drag them to move."),
                 (LineMode::Gates, "Gates", "Place the checkpoint gates yourself: click the track to add one, click a gate to take it away. The finish stays at the end."),
                 (LineMode::Start, "Start", "Click the track to start there, or the open ground beside it for a funnel start: the riders line up out in the open and race into the track."),
+                (LineMode::Ai, "AI line", AI_TIP),
             ]
         };
         let w = col / modes.len() as f32;
@@ -2700,7 +2813,15 @@ impl Builder {
                 self.changed();
             }
         }
-        if !laps && self.course.line.start_spot.is_some() {
+        if self.line_mode == LineMode::Ai && !self.course.line.ai.is_empty() {
+            row = true;
+            if p.button(input, "aiauto", [left, *y, half, 20.0], "Automatic", "Back to automatic: takes every handle away: the computer riders follow the middle of the track again.", false) {
+                self.remember();
+                self.course.line.ai.clear();
+                self.changed();
+            }
+        }
+        if !laps && self.course.line.start_spot.is_some() && self.line_mode != LineMode::Ai {
             row = true;
             if p.button(input, "sauto", [left + half + 2.0, *y, half, 20.0], "Start on the track", "No funnel: the riders line up on the track at its start.", false) {
                 self.remember();

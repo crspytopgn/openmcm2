@@ -2466,6 +2466,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mm2-preview"
+version = "0.6.1"
+dependencies = [
+ "glam",
+ "mm2-course",
+ "mm2-formats",
+ "mm2-physics",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "mm2-settings"
 version = "0.6.1"
 

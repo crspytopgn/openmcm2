@@ -128,6 +128,10 @@
         <div class="seg" role="group" aria-label="What a click does">
           <button id="qb-tool-line" aria-pressed="true" title="Click the ground to add a point to the line, drag a point to move it, double-click one (or select it and press Delete) to take it away.">Line</button>
           <button id="qb-tool-jumps" aria-pressed="false" title="Click the track to drop in the jump picked below, drag a jump along the track to move it, click one to change it.">Jumps</button>
+          <button id="qb-tool-ai" aria-pressed="false" title="The line the computer riders follow. It runs down the middle of the track by itself. Click the track to pull it across (say, tight into a corner), drag a handle to move it, double-click a handle to take it away.">AI line</button>
+        </div>
+        <div class="buttons qb-aionly" hidden>
+          <button id="qb-ai-auto" title="Takes away every handle: the computer riders follow the middle of the track again.">Back to automatic</button>
         </div>
         <label class="row" title="How wide the whole track is, in feet.">Track width <output id="qb-width-v"></output>
           <input id="qb-width" type="range" min="12" max="90" step="1"></label>
@@ -157,6 +161,7 @@
 
         <h3>Your track</h3>
         <div class="buttons">
+          <button id="qb-watch" title="Computer riders lap the track right here in the 3D view: the game's own AI riders and bike physics, without loading the game. A quick look at how it rides.">Watch an AI lap</button>
           <button class="primary" id="qb-ride" title="Saves the track and opens the browser version of the game to ride it yourself (it loads the game first). In the game, Esc comes back to the full Course Builder on this track.">Ride it in the game</button>
           <button id="qb-save" aria-expanded="false" title="Save the track for OpenMCM2, or export it for the original Motocross Madness 2: pick which next.">Save / Export</button>
         </div>
@@ -187,6 +192,14 @@
           <label class="qb-3donly" hidden title="Turns the 3D view round the track.">Turn <input id="qb-turn" type="range" min="0" max="1" step="0.002"></label>
           <button id="qb-whole" title="Brings the whole track into view.">Whole track</button>
           <button id="qb-fs" title="The builder fills this browser tab: the controls down the side, the track filling the rest. Esc or this button again comes back.">Expand</button>
+        </div>
+        <div class="qb-ai" id="qb-ai" hidden>
+          <label title="How many computer riders are on the gate.">Riders <select id="qb-ai-n"><option>1</option><option>2</option><option>4</option><option selected>6</option><option>8</option></select></label>
+          <label title="How fast the riders' time runs: 1x to judge a jump at real speed, faster to see whole laps. Their riding is the same at any speed.">Speed <input id="qb-ai-speed" type="range" min="1" max="8" step="1" value="4"> <output id="qb-ai-speed-v">4x</output></label>
+          <label title="The view goes along with the red rider."><input id="qb-ai-follow" type="checkbox"> Follow</label>
+          <span id="qb-ai-lap" class="qb-ai-lap"></span>
+          <button id="qb-ai-again" title="Back to the gate and start again.">Restart</button>
+          <button id="qb-ai-stop" title="The riders leave the track.">Stop</button>
         </div>
         <p class="viewhint" id="qb-hint">Click the ground to add points. Drag a point to move it, or drag the ground to move the view.</p>
       </div>

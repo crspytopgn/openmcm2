@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/mm2-formats", "crates/mm2-course", "crates/mm2-indeo", "crates/mm2-physics", "crates/mm2-tools", "crates/mm2-viewer", "crates/mm2-launcher", "crates/mm2-settings", "crates/mm2-webtools"]
+members = ["crates/mm2-formats", "crates/mm2-course", "crates/mm2-indeo", "crates/mm2-physics", "crates/mm2-tools", "crates/mm2-viewer", "crates/mm2-launcher", "crates/mm2-settings", "crates/mm2-webtools", "crates/mm2-preview"]
 
 [workspace.package]
 version = "0.6.1"
