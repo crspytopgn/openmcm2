@@ -1652,8 +1652,11 @@ $("builder").addEventListener("change", (e) => {
 });
 // "Open the Course Builder": the next start only.
 let builderOnce = false;
-// An address left with it by an older page.
-if (params.has("course-builder")) setParam("course-builder", null);
+// Asked for in the address (the Tools page's Course Builder tab links
+// here with it): taken out at once, then the builder opens as if its
+// button were pressed (at the end of the page's start).
+const builderAsked = params.has("course-builder");
+if (builderAsked) setParam("course-builder", null);
 
 // ---- MM2 graphics or free graphics ----
 // The choice is kept in this browser: MM2 graphics unless picked.
@@ -2310,15 +2313,20 @@ $("forgetpack").addEventListener("click", async () => {
 
 // Tools. The Course Builder: straight into the builder, the way picked
 // to play, once there are files to start from.
-$("openbuilder").addEventListener("click", () => {
+// With nothing to start from yet, `stay` keeps the builder asked for, so
+// the next start (after picking) opens it.
+function openBuilder(stay) {
   builderOnce = true;
   if (free && keptPack) return go(keptPack, true);
   if (free && downloaded) return downloadAndPlay();
   if (!free && kept) return go(kept, false);
-  builderOnce = false;
-  $("why").textContent = "Pick a way to play first: your MM2 files, the free demo or the free version. The Course Builder opens straight after.";
+  builderOnce = !!stay;
+  $("why").textContent = stay
+    ? "Pick a way to play above: your MM2 files, the free demo or the free version. The Course Builder opens straight after."
+    : "Pick a way to play first: your MM2 files, the free demo or the free version. The Course Builder opens straight after.";
   $("why").scrollIntoView({ behavior: "smooth", block: "center" });
-});
+}
+$("openbuilder").addEventListener("click", () => openBuilder(false));
 for (const [button, box] of [["opentracks", "tracksbox"], ["opencontrols", "controlsbox"]]) {
   $(button).addEventListener("click", () => {
     $(box).open = true;
@@ -2369,8 +2377,10 @@ $("startertipno").addEventListener("click", () => {
 showStarterTip();
 
 // Back from switching the look: straight into the game again.
-if (!(again && ((free && keptPack) || (!free && kept)))) loader.hide();
-if (again && free && keptPack) go(keptPack, true);
+const canStart = (free && keptPack) || (!free && kept);
+if (!((again || builderAsked) && canStart)) loader.hide();
+if (builderAsked && !again) openBuilder(true);
+else if (again && free && keptPack) go(keptPack, true);
 else if (again && free && downloaded) downloadAndPlay();
 else if (again && !free && kept) go(kept, false);
 </script>

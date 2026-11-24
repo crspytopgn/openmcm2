@@ -90,3 +90,11 @@ button[disabled] { opacity: 0.5; cursor: default; }
 .flypad[hidden] { display: none; }
 .controls .seg { flex-wrap: wrap; } .controls .seg button { padding: 8px 10px; }
 main.tools section.sources { padding: 14px 18px 16px; margin: 8px 0 18px; }
+/* Course Builder tab: a clip and a way into the game's builder. */
+.builder { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 20px; align-items: start; }
+.builder-clip { width: 100%; border-radius: 6px; border: 1px solid var(--line); background: #000; aspect-ratio: 16 / 9; object-fit: cover; }
+.builder-text { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.builder-text p { margin: 0; }
+a.tbtn { text-decoration: none; display: inline-block; }
+a.tbtn.primary { background: var(--accent); border-color: var(--accent); color: #151410; font-size: 15px; padding: 10px 18px; }
+@media (max-width: 760px) { .builder { grid-template-columns: 1fr; } }
