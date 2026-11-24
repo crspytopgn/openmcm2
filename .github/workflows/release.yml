@@ -93,7 +93,10 @@ jobs:
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/') || inputs.version != ''
+    # Still makes the draft when a build was cancelled (GitHub's Mac
+    # machines are often too busy), with the downloads that did build.
+    # Re-running the cancelled builds makes it again with all of them.
+    if: always() && needs.build.result != 'failure' && (startsWith(github.ref, 'refs/tags/') || inputs.version != '')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
