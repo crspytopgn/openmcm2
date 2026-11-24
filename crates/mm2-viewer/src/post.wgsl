@@ -835,6 +835,10 @@ fn history_at(uv: vec2<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_taa(in: Out) -> @location(0) vec4<f32> {
+    // With FSR on: FSR 2's way of rebuilding and blending (taa_fsr2).
+    if (post.extra.w > 0.5) {
+        return taa_fsr2(in.position.xy);
+    }
     // Drawn at the screen's size (taa_out); the scene's own pixels may be
     // fewer (size). Where this pixel is on the scene, in its pixels.
     let uv = in.position.xy * post.taa_out.zw;
@@ -935,4 +939,157 @@ fn fs_taa(in: Out) -> @location(0) vec4<f32> {
     let share = select(1.0, mix(0.25, 1.0, closest), upscaled) / (n + 1.0);
     let c = mix(hist, to_ycocg(tame(now)), share);
     return vec4<f32>(max(untame(from_ycocg(c)), vec3<f32>(0.0)), n);
+}
+
+// ---- Temporal upscaling after AMD FSR 2 (FidelityFX-FSR2, MIT; see
+// fsr.wgsl for the licence). Ported from ffx_fsr2_upsample.h and
+// ffx_fsr2_accumulate.h, without its separate passes: this frame's
+// samples rebuilt at the screen pixel with FSR 2's two-lobe Lanczos,
+// widened as the scene is drawn smaller and narrowed for new or moving
+// detail; the history clipped to a variance box (Gaussian weighted, wide
+// where nothing moves so fine detail is kept, tight when moving so
+// nothing trails); and blended by how much of this pixel this frame's
+// samples cover, in tone-mapped YCoCg. Locks, luma instability and the
+// depth-clip pass are left out (the scene keeps no last depth).
+
+// FSR 2's constants (ffx_fsr2_common.h).
+const FSR2_EPSILON: f32 = 1e-3;
+const FSR2_LANCZOS_SCALE: f32 = 1.0 / 12.0;
+const FSR2_MAX_ACCUMULATION: f32 = 1.0;
+
+// Lanczos2ApproxSq: the two-lobe Lanczos at the square distance `x2`.
+fn lanczos2_sq(x2_in: f32) -> f32 {
+    let x2 = min(x2_in, 4.0);
+    let a = (2.0 / 5.0) * x2 - 1.0;
+    let b = (1.0 / 4.0) * x2 - 1.0;
+    return ((25.0 / 16.0) * a * a - (25.0 / 16.0 - 1.0)) * (b * b);
+}
+
+fn taa_fsr2(position: vec2<f32>) -> vec4<f32> {
+    let uv = position * post.taa_out.zw;
+    let size = vec2<i32>(post.size.xy);
+    // The scene's pixels to one of the screen's (FSR 2's DownscaleFactor).
+    let down = post.size.xy * post.taa_out.zw;
+    let src = uv * post.size.xy;
+    let i_src = vec2<i32>(floor(src));
+    let centre = clamp(i_src, vec2<i32>(0), size - 1);
+    var shaft = vec3<f32>(0.0);
+    if (post.scaled.y > 0.0) {
+        shaft = post.sun_colour.rgb * traced_shafts(uv, centre) * post.scaled.y;
+    }
+
+    // Where it was a frame ago (as fs_taa): the nearest of the 3x3 round
+    // about, so a thin edge in front is found where it was.
+    var nearest = 2.0;
+    var at = centre;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            let q = clamp(centre + vec2<i32>(x, y), vec2<i32>(0), size - 1);
+            let d = textureLoad(depth_tex, q, 0);
+            if (d < nearest) {
+                nearest = d;
+                at = q;
+            }
+        }
+    }
+    let h = post.taa_inverse * vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, nearest, 1.0);
+    let world = h.xyz / h.w;
+    var was = uv;
+    var known = post.taa.x > 0.5;
+    let m = textureLoad(motion_tex, at, 0);
+    let dist = length(world - post.taa_camera.xyz);
+    if (m.w > 0.5 && abs(m.z - dist) < 0.03 * dist + 0.5) {
+        was = uv + m.xy * post.size.zw;
+    } else {
+        let c = post.taa_before * vec4<f32>(world, 1.0);
+        if (c.w <= 0.0) {
+            known = false;
+        } else {
+            was = vec2<f32>(c.x / c.w * 0.5 + 0.5, 0.5 - c.y / c.w * 0.5);
+        }
+    }
+    if (any(was < vec2<f32>(0.0)) || any(was > vec2<f32>(1.0))) {
+        known = false;
+    }
+    // How fast it moves, in the screen's pixels (FSR 2's fHrVelocity).
+    let velocity = length((was - uv) * post.taa_out.xy);
+    // How much this frame should count for its own sake (FSR 2's temporal
+    // reactive factor, from motion alone here).
+    let reactive = select(mix(0.0, 0.4, clamp(velocity, 0.0, 1.0)), 1.0, !known);
+
+    // ComputeUpsampledColorAndWeight: 4x4 of this frame's samples round the
+    // pixel, each where the frame's shift put it.
+    let unjittered = vec2<f32>(i_src) + 0.5 - post.taa.zw;
+    let tl = select(vec2<i32>(-1), vec2<i32>(-2), unjittered > src);
+    let base = unjittered - src;
+    let kernel_max = min(1.99, 1.0 + (1.0 / down.x - 1.0)) * (1.0 - reactive);
+    let kernel_min = max(1.0, (1.0 + kernel_max) * 0.3);
+    let kernel = mix(kernel_max, kernel_min, reactive);
+    let curve = mix(-2.0, -3.0, clamp(velocity / 50.0, 0.0, 1.0));
+    var sum = vec4<f32>(0.0);
+    var box_lo = vec3<f32>(1e9);
+    var box_hi = vec3<f32>(-1e9);
+    var centre_sum = vec3<f32>(0.0);
+    var spread_sum = vec3<f32>(0.0);
+    var box_weight = 0.0;
+    for (var row = 0; row < 4; row++) {
+        for (var col = 0; col < 4; col++) {
+            let o = tl + vec2<i32>(col, row);
+            let q = i_src + o;
+            if (any(q < vec2<i32>(0)) || any(q >= size)) {
+                continue;
+            }
+            let s = to_ycocg(tame(finite(textureLoad(hdr_tex, q, 0).rgb) + shaft));
+            let off = base + vec2<f32>(o);
+            let biased = off * kernel;
+            let w = lanczos2_sq(dot(biased, biased));
+            sum += vec4<f32>(s * w, w);
+            // The rectification box from the 3x3 nearest, Gaussian weighted.
+            let d2 = dot(off, off);
+            if (d2 < 2.25) {
+                let bw = exp(curve * d2);
+                box_lo = min(box_lo, s);
+                box_hi = max(box_hi, s);
+                centre_sum += s * bw;
+                spread_sum += s * s * bw;
+                box_weight += bw;
+            }
+        }
+    }
+    let bw = select(1.0, box_weight, abs(box_weight) > FSR2_EPSILON);
+    let box_centre = centre_sum / bw;
+    let box_vec = sqrt(abs(spread_sum / bw - box_centre * box_centre));
+    var up = to_ycocg(tame(finite(textureLoad(hdr_tex, centre, 0).rgb) + shaft));
+    var up_weight = 0.0;
+    if (sum.w > FSR2_EPSILON) {
+        // Deringed to the samples round about.
+        up = clamp(sum.xyz / sum.w, box_lo, box_hi);
+        up_weight = sum.w * FSR2_LANCZOS_SCALE;
+    }
+    if (!known) {
+        return vec4<f32>(untame(from_ycocg(up)), 1.0);
+    }
+
+    // ComputeBaseAccumulationWeight: as much history as it holds, less as
+    // it moves.
+    var accumulation = FSR2_MAX_ACCUMULATION * (1.0 - reactive);
+    accumulation = min(accumulation, mix(accumulation, up_weight * 10.0, clamp(velocity * 10.0, 0.0, 1.0)));
+    accumulation = min(accumulation, mix(accumulation, up_weight, clamp(velocity / 20.0, 0.0, 1.0)));
+
+    // RectifyHistory: clipped to the box, wide standing still (the scene
+    // drawn smaller, wider still), tight moving.
+    var hist = to_ycocg(tame(history_at(was)));
+    let influence = min(20.0, pow(1.0 / max(down.x * down.y, 1e-3), 3.0));
+    let box_scale = mix(influence, 1.0, clamp(velocity / 20.0, 0.0, 1.0));
+    let lo = max(box_lo, box_centre - box_vec * box_scale);
+    let hi = min(box_hi, box_centre + box_vec * box_scale);
+    if (any(hist < lo) || any(hist > hi)) {
+        hist = clamp(hist, lo, hi);
+        accumulation = min(accumulation, 0.1);
+    }
+
+    // Accumulate.
+    let total = max(FSR2_EPSILON, accumulation + up_weight);
+    let blended = mix(hist, up, up_weight / total);
+    return vec4<f32>(max(untame(from_ycocg(blended)), vec3<f32>(0.0)), 1.0);
 }

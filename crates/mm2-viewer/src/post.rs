@@ -686,7 +686,8 @@ impl Post {
             proj: proj.to_cols_array_2d(),
             view_sun: to_view(screen_fx.to_sun).extend(contact).into(),
             view_up: to_view(glam::Vec3::Y).extend(wet).into(),
-            extra: [showing.is_some_and(|e| e.gtao) as u32 as f32, if bounce { BOUNCE_STRENGTH } else { 0.0 }, BOUNCE_REACH, 0.0],
+            // w: FSR 2's temporal rebuild in place of the plain one (fs_taa).
+            extra: [showing.is_some_and(|e| e.gtao) as u32 as f32, if bounce { BOUNCE_STRENGTH } else { 0.0 }, BOUNCE_REACH, (fsr.is_some() && taa.is_some()) as u32 as f32],
         };
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         if fsr.is_some() {
