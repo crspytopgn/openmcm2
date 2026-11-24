@@ -714,6 +714,12 @@ impl Bike {
             },
             head: None,
             finished_alone: false,
+            flipped: matches!(self, Bike::Player(b) if matches!(b.crash, Some((mm2_physics::bike::Crash::Flipped, _)))),
+            wreck_bail: matches!(self, Bike::Player(b) if b.wreck.as_ref().is_some_and(|w| w.stage == mm2_physics::wreck::Stage::Bail)),
+            wreck_down: match self {
+                Bike::Player(b) => b.wreck.as_ref().is_none_or(|w| w.stage == mm2_physics::wreck::Stage::Down),
+                _ => true,
+            },
         }
     }
 
