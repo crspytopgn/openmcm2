@@ -4634,7 +4634,8 @@ const PHOTO_SPEEDS: (f32, f32, f32) = (25.0, 150.0, 1.2);
 /// A step of a track's loading: the bar moves on, and in a browser the
 /// page gets to draw (the loading runs between its frames, a step a frame).
 async fn load_step() {
-    LOAD_STEPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let step = LOAD_STEPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    load_log(&format!("step {step}"));
     #[cfg(target_arch = "wasm32")]
     job::next_frame().await;
 }
@@ -4644,9 +4645,28 @@ async fn load_step() {
 async fn load_stage(stage: &str) {
     #[cfg(target_arch = "wasm32")]
     web::track_stage(stage);
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = stage;
+    load_log(stage);
     load_step().await;
+}
+
+/// When the track began loading, for `load_log`.
+#[cfg(not(target_arch = "wasm32"))]
+static LOAD_START: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+
+/// A line in `last-run.log` for each step of a track's loading, with the
+/// time since it began, so a load that sticks shows where (issue #192).
+fn load_log(what: &str) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut start = LOAD_START.lock().unwrap_or_else(|e| e.into_inner());
+        if what == "begin" {
+            *start = Some(Instant::now());
+        }
+        let ms = start.map_or(0, |t| t.elapsed().as_millis());
+        eprintln!("loading: {what} ({ms} ms)");
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = what;
 }
 
 /// The same in a browser alone, without a step of the game's bar.
@@ -5095,6 +5115,7 @@ impl App {
     }
 
     fn show_track(state: &mut State, track: &Track, quality: u32, ecosystem: u32) {
+        load_log("sending the track to the graphics card");
         let mut renderer = TerrainRenderer::new(
             &state.device,
             &state.queue,
@@ -5136,6 +5157,7 @@ impl App {
         }
         state.renderer = Some(renderer);
         state.camera = renderer::start_camera(&track.terrain);
+        load_log("on the graphics card");
     }
 
     /// Starts loading the chosen race's track.
@@ -5156,6 +5178,8 @@ impl App {
             rides[1] = setup.ride.clone();
         }
         LOAD_STEPS.store(0, std::sync::atomic::Ordering::Relaxed);
+        load_log("begin");
+        eprintln!("loading: {} course {course}, {riders} riders", path.display());
         let random = setup.random_gates;
         let job = job::Job::spawn_steps(move || async move {
             load_track_steps(&path, course, riders, rides, me, ghost.then_some(1), random)
@@ -5176,6 +5200,7 @@ impl App {
             return;
         }
         let Loading { setup, job, .. } = self.loading.take().unwrap();
+        load_log("track read");
         #[cfg(target_arch = "wasm32")]
         web::track_loading(false);
         match job.join() {
@@ -5387,7 +5412,10 @@ impl App {
                 web::track_failed(&setup.name, &format!("{}: {e}", setup.track.display()));
                 self.back_to_menu();
             }
-            Err(_) => self.back_to_menu(),
+            Err(_) => {
+                eprintln!("{}: the loading stopped with an error", setup.track.display());
+                self.back_to_menu();
+            }
         }
     }
 
