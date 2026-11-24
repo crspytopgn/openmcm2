@@ -585,9 +585,17 @@ impl Bike {
         }
     }
 
+    /// Where the riding motion puts the rider's Wrecker probes, in the
+    /// bike's model space (the player's original physics reads them).
+    pub fn set_rider_probes(&mut self, points: Vec<glam::Vec3>) {
+        if let Bike::Player(b) = self {
+            b.set_rider_probes(points);
+        }
+    }
+
     /// Where the thrown rider's motion puts the pelvis (model space) and
     /// the body parts' corners (the pelvis's space) now.
-    pub fn set_wreck_pose(&mut self, pelvis: Mat4, points: Vec<glam::Vec3>) {
+    pub fn set_wreck_pose(&mut self, pelvis: Mat4, points: Vec<glam::Vec3>, probes: Vec<glam::Vec3>) {
         let w = match self {
             Bike::Player(b) => b.wreck.as_mut(),
             Bike::Computer(b) => b.wreck.as_mut().and_then(|w| w.wreck.as_mut()),
@@ -595,6 +603,7 @@ impl Bike {
         };
         if let Some(w) = w {
             w.set_pose(pelvis, points);
+            w.set_probes(probes);
         }
     }
 
@@ -833,6 +842,7 @@ impl Bike {
             Bike::Player(b) => {
                 if first {
                     b.fixed_step = fixed;
+                    b.original = original_physics();
                     b.step(ground, controls, frame)
                 }
             }
@@ -2371,6 +2381,9 @@ impl Race {
                     }
                 }
                 if racing && !self.gates.is_empty() && !self.stunt_event && self.tag.is_none() {
+                    if let Bike::Player(b) = &mut r.bike {
+                        b.reset_face = self.gates.get(r.timing.gate).map(|g| g.centre);
+                    }
                     r.pass_gates(&self.gates, clock, self.laps, computer);
                 }
             }
@@ -2912,6 +2925,7 @@ mod tests {
     #[test]
     fn a_rider_passes_a_gate_either_way() {
         let terrain = mm2_formats::trn::Terrain {
+            kind: 1,
             size: 9,
             heights: vec![0.0; 81],
             normals: vec![[0, 127, 0]; 81],
@@ -2949,6 +2963,7 @@ mod tests {
     #[test]
     fn tricks_score_on_landing() {
         let terrain = mm2_formats::trn::Terrain {
+            kind: 1,
             size: 9,
             heights: vec![0.0; 81],
             normals: vec![[0, 127, 0]; 81],
@@ -3071,4 +3086,11 @@ mod tests {
         assert_eq!(ordinal(12), "12th");
         assert_eq!(ordinal(23), "23rd");
     }
+}
+
+/// The game's own vehicle step, copied 1:1 (MM2_ORIGINAL=0 rides the
+/// older model instead, for comparing).
+fn original_physics() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("MM2_ORIGINAL").is_none_or(|v| v != "0"))
 }

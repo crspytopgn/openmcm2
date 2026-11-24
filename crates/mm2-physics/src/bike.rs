@@ -30,6 +30,8 @@ use crate::wreck::{self, Wreck};
 use crate::Ground;
 use glam::{Mat3, Mat4, Quat, Vec3};
 
+mod orig;
+
 /// The game's physics step (Vehicle ctor, 0x506b20).
 pub const STEP: f32 = 0.02;
 /// More steps than this in one frame are dropped, as the game does.
@@ -574,6 +576,14 @@ pub struct Bike {
     /// its spin more than twice as fast a second as at the 50 fps or less
     /// it was played at. False runs the game's accumulator exactly.
     pub fixed_step: bool,
+    /// Steps the bike with the game's own vehicle step followed call for
+    /// call (`orig.rs`) rather than the older model.
+    pub original: bool,
+    o: orig::Orig,
+    /// The Wrecker's probes on the rider's bones (Bike::CreateWrecker,
+    /// 0x40c0f0), where the riding motion last put them, in the bike's
+    /// model space; empty when nothing posed the rider.
+    rider_probes: Vec<Vec3>,
     /// The player's crash tolerance: 1, 1.05 or 1.15 by difficulty.
     pub crash_tolerance: f32,
     /// How much steering in the air also bends the flight, turning the
@@ -594,6 +604,10 @@ pub struct Bike {
     /// The confirmed place on the course and the way along it there, set
     /// by the race; a crash puts the rider back just behind it.
     pub reset_to: Option<(Vec3, Vec3)>,
+    /// In a Baja or Enduro (events 1 and 5), the next gate: a crash gets
+    /// the rider up where the wreck lies, facing it (KrustyBike's
+    /// placement, 0x4920a0: the gate list's lapGate + 9).
+    pub reset_face: Option<Vec3>,
     /// How long a crash lasts, s. With `touch_clock` the clock runs as the
     /// game's 0x40b010 does: it starts only once the thrown rider touches
     /// something, and for its first half second it runs only on steps the
@@ -707,6 +721,10 @@ impl Bike {
             crash: None,
             racing: true,
             fixed_step: false,
+            original: false,
+            rider_probes: Vec::new(),
+            reset_face: None,
+            o: orig::Orig::default(),
             crash_tolerance: 1.05,
             air_steer: 0.0,
             air_brake: 0.0,
@@ -800,6 +818,7 @@ impl Bike {
         let origin = Vec3::new(origin.x, base - sag_drop * 0.8, origin.z);
         self.position = origin + self.orientation * COM;
         self.update_angles();
+        self.o.ready = false;
     }
 
     /// Puts the bike into a state read from the running game (a memory
@@ -819,6 +838,7 @@ impl Bike {
         }
         self.previous = None;
         self.update_angles();
+        self.o.ready = false;
     }
 
     /// The heading, pitch and lean from the orientation (0x4ba1a0).
@@ -841,6 +861,12 @@ impl Bike {
 
     pub fn up(&self) -> Vec3 {
         self.orientation.y_axis
+    }
+
+    /// Hands over where the riding motion puts the rider's 15 probes, in
+    /// the bike's model space (the Wrecker's state 0 follows the pose).
+    pub fn set_rider_probes(&mut self, points: Vec<Vec3>) {
+        self.rider_probes = points;
     }
 
     /// Speed along the bike, ft/s.
@@ -941,6 +967,9 @@ impl Bike {
 
     /// Advances the bike by `dt` seconds in the game's fixed steps.
     pub fn step(&mut self, ground: &dyn Ground, controls: Controls, dt: f32) {
+        if self.original {
+            return self.step_original(ground, controls, dt);
+        }
         self.hit = None;
         // The game's accumulator (0x506b20): whole 0.02 s steps while the
         // frames are longer, at most three a frame, and then the rest of
@@ -1431,8 +1460,11 @@ impl Bike {
                 Some((at, dir)) => (at - dir * RESET_BACK, dir),
                 None => {
                     let at = self.wreck.as_ref().map_or(self.position, |w| w.position);
+                    let toward = self.reset_face.map(|g| Vec3::new(g.x - at.x, 0.0, g.z - at.z)).filter(|d| d.length() > 1e-3);
                     let look = self.forward();
-                    let dir = if look.x.abs() + look.z.abs() > 1e-3 {
+                    let dir = if let Some(d) = toward {
+                        d.normalize()
+                    } else if look.x.abs() + look.z.abs() > 1e-3 {
                         look
                     } else {
                         self.up()

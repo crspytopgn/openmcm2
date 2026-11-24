@@ -115,6 +115,11 @@ pub struct Wreck {
     /// Rider.col's corners where the motion has them now, in the
     /// pelvis's own space; empty for one sphere.
     points: Vec<Vec3>,
+    /// The Wrecker's 15 probes on the rider's bones (Bike::CreateWrecker,
+    /// 0x40c0f0) where the motion has them now, in the pelvis's space:
+    /// what touches the ground. Empty until the viewer poses them; then
+    /// Rider.col's corners only meet the solid objects.
+    probes: Vec<Vec3>,
     /// The pelvis in model space as the motion has it now; the model is
     /// drawn round it.
     pelvis: Mat4,
@@ -156,6 +161,7 @@ impl Wreck {
             seed,
             touching: false,
             points: Vec::new(),
+            probes: Vec::new(),
             pelvis: Mat4::from_translation(RIDER_CENTRE),
             posed: false,
             bail_time: BAILS
@@ -217,6 +223,12 @@ impl Wreck {
         self.points = points;
     }
 
+    /// Where the motion puts the Wrecker's bone probes now, in the
+    /// pelvis's space.
+    pub fn set_probes(&mut self, probes: Vec<Vec3>) {
+        self.probes = probes;
+    }
+
     fn pick<const N: usize>(&mut self, from: [&'static str; N]) -> &'static str {
         self.seed ^= self.seed << 13;
         self.seed ^= self.seed >> 17;
@@ -258,7 +270,9 @@ impl Wreck {
             let q = Mat3::from_quat(Quat::from_axis_angle(self.spin.normalize(), angle));
             self.orientation = q * self.orientation;
         }
-        if !self.points.is_empty() {
+        if !self.probes.is_empty() {
+            self.touch_probes(ground, h);
+        } else if !self.points.is_empty() {
             self.touch_parts(ground, h);
         } else {
             self.touch_sphere(ground, h);
@@ -308,6 +322,54 @@ impl Wreck {
             return;
         };
         self.position += normal * depth;
+        let into = self.velocity.dot(normal);
+        if into < 0.0 {
+            let push = ((1.0 - IMPULSE_DROPPED) * -into * MASS).min(IMPULSE_MOST);
+            self.velocity += normal * (push / MASS);
+        }
+        let keep = 1.0 - h * DAMPING;
+        self.velocity *= keep;
+        self.spin *= keep;
+        if self.stage == Stage::Tumble {
+            self.stage = Stage::Down;
+            self.queued = Some(self.pick(HITS));
+        }
+    }
+
+    /// The Wrecker's tumble (ConstraintMethodCollisionModel::Step,
+    /// 0x43c8a0): Rider.col's shapes are pushed out of the solid objects
+    /// (1.005 × the overlap, no impulse); then the deepest bone probe
+    /// under the ground takes the contact impulse along the ground's
+    /// normal at its point and the body is pushed out by 1.005 × its
+    /// depth. Only the ground contact counts as touching (+0x58).
+    fn touch_probes(&mut self, ground: &dyn Ground, h: f32) {
+        let place = self.body();
+        let mut out: Option<(f32, Vec3)> = None;
+        for p in &self.points {
+            let at = place.transform_point3(*p);
+            if let Some(hit) = ground.solid(at, CORNER_RADIUS) {
+                if hit.depth > out.map_or(0.0, |o| o.0) {
+                    out = Some((hit.depth, hit.normal));
+                }
+            }
+        }
+        if let Some((depth, normal)) = out {
+            self.position += normal * depth * 1.005;
+        }
+        let place = self.body();
+        let mut deepest: Option<(f32, Vec3)> = None;
+        for p in &self.probes {
+            let at = place.transform_point3(*p);
+            let (height, normal) = ground.terrain(at.x, at.z);
+            if at.y < height && height - at.y > deepest.map_or(0.0, |d| d.0) {
+                deepest = Some((height - at.y, normal.normalize_or(Vec3::Y)));
+            }
+        }
+        self.touching = deepest.is_some();
+        let Some((depth, normal)) = deepest else {
+            return;
+        };
+        self.position += normal * depth * 1.005;
         let into = self.velocity.dot(normal);
         if into < 0.0 {
             let push = ((1.0 - IMPULSE_DROPPED) * -into * MASS).min(IMPULSE_MOST);
@@ -421,6 +483,26 @@ mod tests {
         }
         assert!(!rose, "bounced");
         assert_eq!(w.spin, Vec3::ZERO);
+        assert!(w.velocity.x.abs() < 2.0, "{}", w.velocity);
+    }
+
+    #[test]
+    fn bone_probes_stop_on_the_ground_without_bouncing() {
+        let start = Mat4::from_translation(Vec3::new(0.0, 1.0, 0.0));
+        let mut w = Wreck::new(start, Vec3::new(20.0, -10.0, 0.0), Vec3::ZERO, "Fall01", false, 1);
+        w.set_pose(Mat4::from_translation(RIDER_CENTRE), Vec::new());
+        w.set_probes(model_points(&[Vec3::new(0.5, 0.5, 0.0), Vec3::new(-0.5, 0.5, 0.0), Vec3::new(0.0, 2.0, 0.0)]));
+        let mut rose = false;
+        for _ in 0..300 {
+            let was = w.velocity.y;
+            if w.step(&crate::Flat, 0.02, start, Vec3::ZERO) {
+                break;
+            }
+            rose |= w.touching && w.velocity.y > 0.0 && was <= 0.0;
+            let low = w.probes.iter().map(|p| w.body().transform_point3(*p).y).fold(f32::MAX, f32::min);
+            assert!(low > -1e-3, "{low}");
+        }
+        assert!(!rose, "bounced");
         assert!(w.velocity.x.abs() < 2.0, "{}", w.velocity);
     }
 
