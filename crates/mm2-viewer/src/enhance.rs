@@ -653,6 +653,51 @@ pub fn cascades(view: Mat4, fovy: f32, aspect: f32, to_sun: Vec3, side: u32) -> 
     (out, texels)
 }
 
+/// What each sun cascade need hold, for leaving the rest of the scenery
+/// out of it: each cascade's view, narrowed across to the part of its map
+/// that is ever read. A cascade is only read for what the camera sees
+/// within its reach (sun_visible picks it by the distance from the eye),
+/// so only for what lies in the camera's view short of that far; round
+/// that, as far as the soft shadows' search and blur and the lift off the
+/// surface reach, and a little more. An object outside it shades nothing
+/// that is drawn, so the picture is the same without it. For culling
+/// only: the cascades are still drawn through their own views.
+pub fn cascade_reach(view: Mat4, fovy: f32, aspect: f32, cascades: &[Mat4; CASCADES], texels: &[f32; CASCADES]) -> [Mat4; CASCADES] {
+    let inverse = view.inverse();
+    let (ty, tx) = ((fovy / 2.0).tan(), (fovy / 2.0).tan() * aspect);
+    let mut out = *cascades;
+    for (i, &far) in reach().iter().enumerate() {
+        let c = cascades[i];
+        let texel = texels[i];
+        // The eye and the four corners of the view as far as the reach.
+        let mut points = vec![inverse.transform_point3(Vec3::ZERO)];
+        for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+            points.push((inverse * glam::Vec4::new(sx * tx * far, sy * ty * far, -far, 1.0)).xyz());
+        }
+        let (mut lo, mut hi) = (glam::Vec2::splat(f32::MAX), glam::Vec2::splat(f32::MIN));
+        for p in points {
+            let q = c.project_point3(p).truncate();
+            lo = lo.min(q);
+            hi = hi.max(q);
+        }
+        // The map's side in ft is 2 / its view's x scale; the soft
+        // shadows reach 6 + 8 texels of a 2048 map whatever its size, the
+        // plain filter one, the lift two and a half and 0.4 ft.
+        let side_ft = 2.0 / c.x_axis.truncate().length().max(1e-9);
+        let margin_ft = 16.0 * side_ft / 2048.0 + 4.0 * texel + 1.0;
+        let margin = 2.0 * margin_ft / side_ft;
+        let (lo, hi) = ((lo - margin).max(glam::Vec2::splat(-1.0)), (hi + margin).min(glam::Vec2::splat(1.0)));
+        if !(lo.x < hi.x && lo.y < hi.y) || !lo.is_finite() || !hi.is_finite() {
+            continue;
+        }
+        // Maps lo..hi across onto -1..1, depth as it was.
+        let scale = (2.0 / (hi - lo)).extend(1.0);
+        let shift = (-(hi + lo) / (hi - lo)).extend(0.0);
+        out[i] = Mat4::from_translation(shift) * Mat4::from_scale(scale) * c;
+    }
+    out
+}
+
 /// Each cascade's reach, and where the shadows end.
 pub fn splits() -> [f32; 4] {
     let s = reach();

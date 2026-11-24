@@ -583,8 +583,14 @@ fn fs_smooth(in: VertexOut) -> @location(0) vec4<f32> {
 fn enhanced_ground(in: VertexOut) -> vec4<f32> {
     let colour = ground(in);
     let n = normalize(in.normal);
-    let bumped = bump(n, in.world, luminance(colour), 1.2);
     let dist = length(in.world - globals.camera.xyz);
+    // The new ground lights itself: none of the plain light below is
+    // needed, and its shadow lookups were most of a pixel's cost.
+    if (enh.more.x > 0.5) {
+        let lit = new_ground(in, colour, n, dist);
+        return vec4<f32>(apply_haze(lit, in.world, dist), select(1.0, 2.0 + water_here, water_here > 0.0));
+    }
+    let bumped = bump(n, in.world, luminance(colour), 1.2);
     // The textures have the land's light painted in, so keep it: only the
     // small bumps the texture suggests, and the objects' shadows, change
     // it, as they change the light the game would give the ground here.
@@ -601,9 +607,6 @@ fn enhanced_ground(in: VertexOut) -> vec4<f32> {
     }
     var lit = colour * pow(max(light, vec3<f32>(0.0)), vec3<f32>(2.2));
     lit += colour * headlight_at(in.world, n, dist);
-    if (enh.more.x > 0.5) {
-        lit = new_ground(in, colour, n, dist);
-    }
     // Water marked past 2 in the alpha, which nothing else writes there.
     return vec4<f32>(apply_haze(lit, in.world, dist), select(1.0, 2.0 + water_here, water_here > 0.0));
 }

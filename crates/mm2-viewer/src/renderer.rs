@@ -1370,8 +1370,14 @@ impl TerrainRenderer {
                 // of lamps' view instead.
                 let cascades = night_lamps.as_ref().map_or(cascades, |n| n.views);
                 objects.set_cascades(queue, &cascades);
-                for (i, c) in cascades.iter().enumerate() {
-                    objects.cull(1 + i, &crate::cull::Frustum::new(*c), camera.position);
+                // The sun's cascades hold only what can shade what is seen
+                // (enhance::cascade_reach); a stadium's lamps' views all.
+                let reach = match &night_lamps {
+                    Some(_) => cascades,
+                    None => crate::enhance::cascade_reach(camera.view(), camera.fovy(aspect), aspect, &cascades, &texels),
+                };
+                for (i, (tight, wide)) in reach.iter().zip(&cascades).enumerate() {
+                    objects.cull_cascade(1 + i, &crate::cull::Frustum::new(*tight), &crate::cull::Frustum::new(*wide), camera.position);
                 }
             }
         }
@@ -1543,7 +1549,11 @@ impl TerrainRenderer {
                 });
                 // Indoors (a stadium, with no sky box) only the moving
                 // models cast.
-                objects.draw_sun_depth(&mut pass, cascade, self.sky.is_none());
+                if !crate::gpu_time::skip("cascades") {
+                    objects.draw_sun_depth(&mut pass, cascade, self.sky.is_none());
+                }
+                drop(pass);
+                mark!(self.gpu_timer, &mut encoder, ["cascade 0", "cascade 1", "cascade 2", "cascade 3"][cascade.min(3)]);
             }
         }
         mark!(self.gpu_timer, &mut encoder, "sun cascades");
@@ -1605,7 +1615,7 @@ impl TerrainRenderer {
             }
             pass.set_vertex_buffer(0, self.vertices.slice(..));
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-            for run in &self.runs {
+            for run in self.runs.iter().filter(|_| !crate::gpu_time::skip("terrain")) {
                 pass.draw_indexed(run.clone(), 0, 0..1);
             }
             mark_pass!(self.gpu_timer, &mut pass, "scene: terrain");
@@ -1624,14 +1634,16 @@ impl TerrainRenderer {
                 .filter(|_| showing.is_some_and(|e| e.smooth))
                 .and_then(|e| Some((e.smooth.as_ref()?, &e.group, &e.shared.group)))
             {
-                smooth.draw(&mut pass, own, group);
+                if !crate::gpu_time::skip("smooth") {
+                    smooth.draw(&mut pass, own, group);
+                }
             }
             mark_pass!(self.gpu_timer, &mut pass, "scene: smooth hills");
-            if let Some((grass, own, group)) = grass {
+            if let Some((grass, own, group)) = grass.filter(|_| !crate::gpu_time::skip("grass")) {
                 grass.draw(&mut pass, own, group);
             }
             mark_pass!(self.gpu_timer, &mut pass, "scene: grass");
-            if let Some(objects) = &self.objects {
+            if let Some(objects) = self.objects.as_ref().filter(|_| !crate::gpu_time::skip("objects")) {
                 match shared {
                     Some((group, ..)) => objects.draw_enhanced(&mut pass, group),
                     None => objects.draw(&mut pass),

@@ -136,3 +136,12 @@ impl GpuTimer {
         self.frames = 0;
     }
 }
+
+/// `MM2_SKIP=cascades,terrain,...`: parts of the frame left undrawn, to see
+/// what each costs (a probe only).
+pub fn skip(part: &str) -> bool {
+    static LIST: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    LIST.get_or_init(|| std::env::var("MM2_SKIP").map(|v| v.split(',').map(|s| s.trim().to_string()).collect()).unwrap_or_default())
+        .iter()
+        .any(|p| p == part)
+}
