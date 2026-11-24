@@ -74,26 +74,49 @@
   #tracklist { list-style: none; padding: 0; margin: .4rem 0; }
   #tracklist li { display: flex; justify-content: space-between; gap: .5rem; color: var(--dim); padding: .15rem 0; }
   @media (max-width: 30rem) { .grid { grid-template-columns: 1fr; } }
-  .lead { margin: 0 0 1rem; }
-  h2.ask { margin: 1rem 0 .5rem; font-size: 1.05rem; letter-spacing: .02em; text-transform: uppercase; color: var(--fg); }
-  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; margin-bottom: .8rem; }
-  @media (max-width: 30rem) { .choices { grid-template-columns: 1fr; } }
-  button.choice { display: flex; flex-direction: column; gap: .3rem; text-align: left; background: #1a1917;
-    color: var(--fg); border: 1px solid #34322c; border-radius: 10px; padding: .8rem .9rem; font-weight: 400; }
-  button.choice:hover { border-color: #55524a; }
-  button.choice[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
-  button.choice[aria-disabled="true"]:hover { border-color: inherit; }
-  h2.ask.sub { font-size: 1rem; margin-top: 1rem; }
-  button.choice b { font-size: 1.05rem; letter-spacing: .03em; text-transform: uppercase; display: flex; gap: .5rem; align-items: center; }
-  button.choice b::before { content: ""; width: .8rem; height: .8rem; border-radius: 50%; border: 2px solid var(--dim); flex: none; }
-  button.choice span { color: var(--dim); font-size: .88rem; line-height: 1.4; }
-  button.choice em { font-style: normal; font-size: .85rem; color: #e8745c; margin-top: auto; }
-  button.choice em.ready { color: var(--accent); }
-  button.choice[aria-checked="true"] { border: 2px solid var(--accent); background: #22241b; padding: calc(.8rem - 1px) calc(.9rem - 1px); }
-  button.choice[aria-checked="true"] b::before { border-color: var(--accent); background: radial-gradient(var(--accent) 45%, transparent 50%); }
-  .builderrow { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; margin: 1rem 0 .2rem;
-    padding-top: .8rem; border-top: 1px solid #2c2a25; }
-  .builderrow .hint { flex: 1 1 14rem; margin: 0; color: var(--dim); }
+  /* The start page: the MM2 way first, the free version below, then tools. */
+  .top { display: flex; align-items: center; gap: 1rem; margin: 0 0 1.1rem; }
+  .toplogo { width: 128px; height: auto; flex: none; }
+  .lead { margin: 0; }
+  .tag { display: inline-block; background: var(--accent); color: #151410; font-weight: 800; font-size: .7rem;
+    letter-spacing: .14em; text-transform: uppercase; padding: 2px 10px; transform: skewX(-14deg); }
+  .card { border: 2px solid var(--accent); background: #1d1f17; border-radius: 10px; padding: 1rem 1.1rem 1.1rem; }
+  .card h2 { font: 900 italic 1.35rem/1.1 "Archivo Expanded", system-ui, sans-serif; text-transform: uppercase;
+    margin: .55rem 0 .35rem; letter-spacing: -.01em; }
+  .card > p { margin: 0 0 .9rem; }
+  .card.quiet { border-color: #34322c; background: #1a1917; }
+  .ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .7rem; }
+  .way { background: #151612; border: 1px solid #3a3d2c; border-radius: 8px; padding: .8rem .85rem;
+    display: flex; flex-direction: column; gap: .45rem; }
+  .way > b { text-transform: uppercase; letter-spacing: .03em; font-size: .98rem; }
+  .way > span { color: var(--dim); font-size: .86rem; line-height: 1.4; flex: 1; }
+  .way label.button { margin: 0; text-align: center; }
+  label.keep { color: var(--dim); font-size: .85rem; }
+  #usekept { margin-top: .8rem; }
+  .row { display: flex; gap: .6rem .8rem; align-items: center; flex-wrap: wrap; }
+  button.play { font: 900 italic 1.6rem/1 "Archivo Expanded", system-ui, sans-serif; text-transform: uppercase;
+    padding: .8rem 2.4rem; transform: skewX(-8deg); }
+  .freerow { margin-top: .9rem; border: 1px solid #34322c; border-radius: 10px; padding: .7rem .9rem; background: #1a1917; }
+  .freehead { display: flex; gap: .9rem; align-items: center; flex-wrap: wrap; }
+  .freehead > div { flex: 1 1 16rem; }
+  .freehead b { font-size: .95rem; }
+  .freehead p { margin: .1rem 0 0; font-size: .86rem; }
+  #freeside { margin-top: .6rem; }
+  #freeside label.button { margin: 0; }
+  #backrow { margin: .4rem 0 0; }
+  .tools { margin-top: 1.1rem; }
+  h2.label { font-size: .72rem; color: #7d786c; text-transform: uppercase; letter-spacing: .12em; margin: 0 0 .45rem; font-weight: 600; }
+  .tgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .6rem; }
+  button.tool { display: flex; flex-direction: column; text-align: left; color: var(--fg); background: #1a1917;
+    border: 1px solid #34322c; border-radius: 8px; padding: .55rem .75rem; font-weight: 400; }
+  button.tool:hover, button.tool:focus-visible { border-color: var(--accent); }
+  button.tool b { font-weight: 600; }
+  button.tool span { color: var(--dim); font-size: .82rem; }
+  .seg { display: inline-flex; border: 1px solid #55524a; border-radius: 6px; overflow: hidden; margin: .3rem 0; }
+  .seg button { background: none; color: var(--dim); border-radius: 0; padding: .3rem .9rem; font-weight: 500; }
+  .seg button[aria-checked="true"] { background: var(--accent); color: #111; font-weight: 600; }
+  .seg button[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+  .line { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .3rem 0; color: var(--dim); }
   label.plainbutton { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost:hover { border-color: var(--accent); }
@@ -186,78 +209,76 @@
 <body>
 <canvas id="mm2" tabindex="0"></canvas>
 <div id="setup"><div>
-  <h1>OpenMCM2</h1>
-  <p class="lead">Motocross Madness 2, running in your browser.</p>
+  <header class="top">
+    <img class="toplogo" src="../img/logo-worn.png" alt="OpenMCM2" width="720" height="427">
+    <p class="lead">Motocross Madness 2, running in your browser.</p>
+  </header>
   <div id="installtip" class="tip" hidden></div>
-  <h2 class="ask">How do you want to play?</h2>
-  <div class="choices" role="radiogroup" aria-label="Graphics">
-    <button type="button" class="choice" id="pickmm2" role="radio" aria-checked="true"
-      title="Plays with the art, sounds and menus from your own Motocross Madness 2 CD, CD image or install. This is the game as it was, and it's the default.">
-      <b>MM2 graphics</b>
-      <span>The original game's own art and sound, from your copy of Motocross Madness 2. The full game: every event, the menus, the Pro Circuit and multiplayer.</span>
-      <em id="mm2state">Needs your MM2 files</em>
-    </button>
-    <button type="button" class="choice" id="pickfree" role="radio" aria-checked="false"
-      title="Plays with the Free Pack instead of the original's files: new bikes, riders, ground, trees, stadium and engine sounds, all openly licensed. Every menu works as in the original; only what's in them changes.">
-      <b>Free graphics</b>
-      <span>New art and sound made for OpenMCM2, free for anyone. No MM2 files needed: the full menus, free bikes and riders, and the Course Builder.</span>
-      <em id="freestate">Free Pack not added yet</em>
-    </button>
+
+  <!-- Coming back: what was picked last time, one button. -->
+  <section id="ready" class="card" hidden>
+    <span class="tag">Ready</span>
+    <h2 id="readytitle">Your MM2 game</h2>
+    <p id="readywhy">Remembered in this browser.</p>
+    <div class="row">
+      <button id="play" class="play" title="Starts the game with your Motocross Madness 2 files.">Play</button>
+      <button id="playfree" class="play" hidden title="Starts the free version, fetching any update to the Free Pack first.">Play</button>
+      <button type="button" class="plain" id="change"
+        title="Pick another way to play: your own MM2 files, the free MM2 demo or the free version. Nothing kept in this browser is deleted.">Change</button>
+    </div>
+  </section>
+
+  <!-- First visit (or Change): the MM2 way first, the free version below. -->
+  <div id="choose">
+    <section class="card" id="mm2card">
+      <span class="tag">Recommended</span>
+      <h2>Play Motocross Madness 2</h2>
+      <p>The original game: its own bikes, tracks, menus and sound.</p>
+      <div class="ways">
+        <div class="way" id="pick">
+          <b>I have the game</b>
+          <span>Pick your installed game folder, your CD, or a CD image or .zip. Nothing is uploaded: the files stay on this device. You can also drop them on this page.</span>
+          <label class="button" for="folder" title="The folder Motocross Madness 2 is installed in (the one with the UI, RES and TERAFORM folders in it), or the CD's own folder.">Choose game folder</label>
+          <label class="button plainbutton" for="file" title="Your game CD's image (.iso, .bin, .img, .mdf or .nrg), or a .zip of the game folder or of a CD image. On a phone or tablet, a .zip is the way.">Choose a CD image or .zip</label>
+          <input id="folder" type="file" webkitdirectory multiple>
+          <input id="file" type="file" multiple accept=".zip,.iso,.bin,.img,.mdf,.mds,.nrg,.cue,.exe,application/zip">
+          <label class="keep"><input id="keep" type="checkbox" checked title="Keeps your game in this browser, so next time Play starts it straight away."> Remember it in this browser</label>
+        </div>
+        <div class="way" id="demorow">
+          <b>No copy? Try the demo</b>
+          <span>Microsoft's free Motocross Madness 2 demo from 2000, with the original look. The Free Pack fills in the other tracks, so every event is open.</span>
+          <button type="button" id="getdemo" class="ghost"
+            title="Downloads Microsoft's free Motocross Madness 2 demo (43 MB) from the Internet Archive, checks it and keeps it in this browser. It plays with the original graphics on the Voodoo Basin national track and the Donner Pass stunt quarry. The Free Pack (several hundred MB, downloaded once) fills in every other track, bike and screen, so every event, the Pro Circuit and multiplayer are open. Nothing of the demo comes with OpenMCM2 itself.">Play the free demo</button>
+        </div>
+      </div>
+      <button type="button" id="usekept" class="ghost small" hidden
+        title="Starts the Motocross Madness 2 files this browser already keeps.">Play the game kept in this browser</button>
+    </section>
+    <section class="freerow" id="freerow">
+      <div class="freehead">
+        <div><b>Or play the free version</b>
+          <p>All-new art and sound made for OpenMCM2, free for anyone. No MM2 files needed.</p></div>
+        <button type="button" class="ghost" id="pickfree"
+          title="Plays with the Free Pack instead of the original's files: new bikes, riders, ground, trees, stadium and engine sounds, all openly licensed. Every menu works as in the original; only what's in them changes.">Get the free version</button>
+      </div>
+      <div id="freeside" hidden>
+        <p class="hint">The Free Pack downloads once and stays in this browser. After that, Play only fetches the files
+          that changed in an update. It's big (several hundred MB), so a computer with plenty of memory works best;
+          phones may struggle.</p>
+        <div id="freepick" class="row">
+          <button type="button" id="getpack" title="Downloads the Free Pack into this browser, checking every file. Next time, only what changed comes down.">Download the Free Pack</button>
+          <label class="button plainbutton" for="packfile" title="A Free Pack .zip you already have. Or drop it on this page.">Use a Free Pack .zip</label>
+          <input id="packfile" type="file" accept=".zip,application/zip">
+        </div>
+        <label class="keep"><input id="keeppack" type="checkbox" checked title="Keeps a picked .zip in this browser, so next time Play starts it straight away."> Remember a picked .zip in this browser</label>
+      </div>
+    </section>
+    <p id="backrow" hidden><button type="button" class="plain" id="back" title="Keeps what you had picked.">Back</button></p>
   </div>
-  <h2 class="ask sub">Menus</h2>
-  <div class="choices" role="radiogroup" aria-label="Menus">
-    <button type="button" class="choice" id="picknewmenus" role="radio" aria-checked="false"
-      title="Every menu and button from the original, laid out the same and working the same, drawn in a new style. Works with either graphics. With MM2 graphics only the menus download (about 60 MB), not the whole Free Pack.">
-      <b>New look</b>
-      <span>Menus redrawn for OpenMCM2: the same buttons and screens as the original, in a fresh workshop style.</span>
-      <em id="newmenustate">Comes with the Free Pack</em>
-    </button>
-    <button type="button" class="choice" id="pickoldmenus" role="radio" aria-checked="true"
-      title="The original game's own menus, art and sounds. Needs your Motocross Madness 2 files, as they come from your copy of the game.">
-      <b>Original menus</b>
-      <span>The menus exactly as Motocross Madness 2 had them, chain and all.</span>
-      <em id="oldmenustate">Needs your MM2 files</em>
-    </button>
-  </div>
-  <div id="mm2side">
-    <p class="hint">It plays from your own copy of the game: pick your installed game folder (the one with the
-      <code>UI</code>, <code>RES</code> and <code>TERAFORM</code> folders in it). Nothing is uploaded; the files stay
-      on this device. You can also pick your game CD's image (.iso, .bin, .img, .mdf or .nrg), the CD's own folder,
-      or a .zip of the game folder or of a CD image, which is the way on a phone or tablet. Or drop any of them on
-      this page.</p>
-    <div id="pick">
-      <label class="button" for="folder" title="The folder Motocross Madness 2 is installed in, or the CD's own folder.">Choose game folder</label>
-      <label class="button" for="file" title="Your game CD's image (.iso, .bin, .img, .mdf or .nrg), or a .zip of the game folder or of a CD image.">Choose a CD image or .zip</label>
-      <input id="folder" type="file" webkitdirectory multiple>
-      <input id="file" type="file" multiple accept=".zip,.iso,.bin,.img,.mdf,.mds,.nrg,.cue,.exe,application/zip">
-      <p><label><input id="keep" type="checkbox" checked title="Keeps your game in this browser, so next time Play starts it straight away."> Remember it in this browser</label></p>
-    </div>
-    <div id="demorow">
-      <p class="hint">No copy of the game? Play Microsoft's free Motocross Madness 2 demo from 2000, with the
-        original graphics on its two tracks. The Free Pack fills in the rest, so every event is open.</p>
-      <button type="button" id="getdemo" class="plainbutton"
-        title="Downloads Microsoft's free Motocross Madness 2 demo (43 MB) from the Internet Archive, checks it and keeps it in this browser. It plays with the original graphics on the Voodoo Basin national track and the Donner Pass stunt quarry. The Free Pack (several hundred MB, downloaded once) fills in every other track, bike and screen, so every event, the Pro Circuit and multiplayer are open. Nothing of the demo comes with OpenMCM2 itself.">Play the free MM2 demo</button>
-    </div>
-    <div id="kept" hidden>
-      <button id="play" title="Starts the game with your Motocross Madness 2 files.">Play</button>
-      <button id="forget" class="plain" title="Forgets the game files this browser kept, so you can pick others.">Use another folder</button>
-    </div>
-  </div>
-  <div id="freeside" hidden>
-    <p class="hint">The Free Pack downloads once and stays in this browser. After that, Play only fetches the files
-      that changed in an update. It's big (several hundred MB), so a computer with plenty of memory works best;
-      phones may struggle. Your MM2 files stay remembered, so you can switch back any time.</p>
-    <div id="freepick">
-      <button type="button" id="getpack" title="Downloads the Free Pack into this browser, checking every file. Next time, only what changed comes down.">Download the Free Pack</button>
-      <label class="button plainbutton" for="packfile" title="A Free Pack .zip you already have. Or drop it on this page.">Use a Free Pack .zip</label>
-      <input id="packfile" type="file" accept=".zip,application/zip">
-      <p><label><input id="keeppack" type="checkbox" checked title="Keeps a picked .zip in this browser, so next time Play starts it straight away."> Remember a picked .zip in this browser</label></p>
-    </div>
-    <div id="freekept" hidden>
-      <button id="playfree" title="Starts with the Free Pack, fetching any update first.">Play</button>
-      <button id="forgetpack" class="plain" title="Deletes the Free Pack from this browser to free the space. Your saves and own tracks stay. Download it again, or pick another, any time.">Remove the Free Pack</button>
-    </div>
-  </div>
+  <progress id="bar" hidden></progress>
+  <p id="status"></p>
+  <p id="why"></p>
+
   <div id="startertip" class="tip" style="margin-top:1rem" hidden>
     <p><b>Want more tracks?</b> <span id="starterwhy">The demo has two tracks of its own.</span> Players have made thousands more.
       The starter set is ten of the most raced: a National, five Supercross tracks, three Baja maps and an Enduro map.</p>
@@ -268,24 +289,33 @@
     </div>
     <p class="hint" id="startertipstatus"></p>
   </div>
+
+  <section class="tools">
+    <h2 class="label">Tools</h2>
+    <div class="tgrid">
+      <button type="button" class="tool" id="openbuilder"
+        title="Starts straight in the Course Builder, with the way to play picked above. Draw the track's line, drop in jumps, shape and paint the ground, then press Ride it. Your tracks stay in this browser and join the track lists. It's on the game's main menu too (the shovel on the chain).">
+        <b>Course Builder</b><span>Make your own track and ride it</span></button>
+      <button type="button" class="tool" id="opentracks"
+        title="Add the most raced tracks players have made, or a track .zip from MDX Racing. They join the game's track lists.">
+        <b>Your own tracks</b><span>Add tracks players made</span></button>
+      <button type="button" class="tool" id="opencontrols"
+        title="Game pads, the keyboard and touch: what's found and how it works.">
+        <b>Controls</b><span>Game pad and keys</span></button>
+    </div>
+  </section>
+
   <div id="playtime" class="playtime" hidden
-    title="How long you've played in this browser, and everyone's time added up on the OpenMCM2 server. Unless you tick &quot;Don't add my time to everyone's&quot; in Settings and extras, how long you play each event, track and bike class is added to everyone's, with no name or anything else that says who you are.">
+    title="How long you've played in this browser, and everyone's time added up on the OpenMCM2 server. Unless you tick &quot;Don't add my time to everyone's&quot; in Settings, how long you play each event, track and bike class is added to everyone's, with no name or anything else that says who you are.">
     <h3>Playtime</h3>
     <p id="ptmine" class="mine"></p>
     <div id="pttop" class="grid"></div>
     <p id="ptall" class="hint"></p>
   </div>
-  <div class="builderrow">
-    <button type="button" id="openbuilder" class="ghost"
-      title="Starts straight in the Course Builder, with the graphics picked above. Draw the track's line, drop in jumps, shape and paint the ground, then press Ride it. Your tracks stay in this browser and join the track lists.">Open the Course Builder</button>
-    <span class="hint">Make your own track and ride it. It works with either graphics, and it's on the game's main menu too (the shovel on the chain).</span>
-  </div>
-  <h2 class="ask sub">Controls</h2>
-  <div id="padrow"></div>
-  <div id="lookbox"></div>
-  <details class="more">
-    <summary>Settings and extras</summary>
-    <div id="settings"></div>
+
+  <details class="more" id="controlsbox">
+    <summary>Controls</summary>
+    <div id="padrow"></div>
   </details>
   <details class="more" id="tracksbox">
     <summary>Your own tracks</summary>
@@ -332,15 +362,36 @@
     <fieldset>
       <legend>Make your own</legend>
       <p class="hint">The Course Builder lays out a track of your own: draw the line, drop in jumps, shape
-        the land and ride it straight away. Open it with the button near the top of this page, or in the game
+        the land and ride it straight away. Open it from Tools on this page, or in the game
         from the shovel on the main menu's chain (or Options, Tweaks). Your tracks stay in this browser and join
         the track lists.</p>
       <label title="Play opens the Course Builder instead of the main menu. Esc in a ride comes back to it."><input id="builder" type="checkbox"> Start in the Course Builder</label>
     </fieldset>
   </details>
-  <progress id="bar" hidden></progress>
-  <p id="status"></p>
-  <p id="why"></p>
+  <details class="more" id="setbox">
+    <summary>Settings</summary>
+    <fieldset>
+      <legend>Menus</legend>
+      <div class="seg" role="radiogroup" aria-label="Menus">
+        <button type="button" id="pickoldmenus" role="radio" aria-checked="true"
+          title="The original game's own menus, exactly as Motocross Madness 2 had them, chain and all. They come from your MM2 files or the demo.">Original</button>
+        <button type="button" id="picknewmenus" role="radio" aria-checked="false"
+          title="Every menu and button from the original, laid out the same and working the same, redrawn in a fresh workshop style for OpenMCM2. With the MM2 files only the menus download (about 60 MB), not the whole Free Pack.">New look</button>
+      </div>
+      <p class="hint">Original: <span id="oldmenustate">Needs your MM2 files</span>. New look: <span id="newmenustate">Comes with the Free Pack</span>.</p>
+    </fieldset>
+    <div id="lookbox"></div>
+    <fieldset>
+      <legend>Kept in this browser</legend>
+      <div class="line"><span id="mm2state">No MM2 files kept</span>
+        <button type="button" class="ghost small" id="forget" hidden
+          title="Forgets the game files this browser kept, so you can pick others. Your saves and own tracks stay.">Forget them</button></div>
+      <div class="line"><span id="freestate">Free Pack not downloaded</span>
+        <button type="button" class="ghost small" id="forgetpack" hidden
+          title="Deletes the Free Pack (and the new look menus) from this browser to free the space. Your saves and own tracks stay. Download it again any time.">Remove the Free Pack</button></div>
+    </fieldset>
+    <div id="settings"></div>
+  </details>
   <div class="report">
     <p class="hint">Something not working? <button type="button" class="small ghost" id="reportbtn"
       title="Copies what this browser and device are, what you picked and the last messages, with nothing personal in it. Paste it in a new issue on GitHub.">Copy a bug report</button>
@@ -596,7 +647,7 @@ const bugReport = (problem) =>
     problem,
     recent,
     extra: {
-      Graphics: picked("pickfree") ? "Free Pack" : "MM2 files",
+      Graphics: free ? "Free Pack" : isDemo(kept) ? "MM2 demo" : "MM2 files",
       Menus: picked("picknewmenus") ? "new look" : "original",
       Look: look,
       Quality: s.enhanced ? s.quality : "original",
@@ -623,7 +674,7 @@ const SLOW_TIPS = {
   engine: ["The engine is about 12 MB, so a slow connection can take a minute.", "Check you're still online."],
   compile: ["Slower phones and tablets take longest here. Give it a minute.", "Close other apps and tabs to free memory."],
   gpu: ["Close other tabs and apps that use the graphics card.", "Make sure hardware acceleration is on in the browser's settings."],
-  graphics: ["The first start builds every shader, which can take a minute on a phone.", "The light mode (in Settings and extras) is easier on a phone."],
+  graphics: ["The first start builds every shader, which can take a minute on a phone.", "The light mode (in Settings) is easier on a phone."],
   pack: ["The Free Pack is several hundred MB, which takes a while on a phone's connection.", "Use Wi-Fi if you can. What has come down stays, so trying again carries on."],
   packcheck: ["Check you're still online. Once the pack is here, it plays without the internet."],
   menuscheck: ["Check you're still online."],
@@ -723,7 +774,7 @@ settings.setDevice({ touch: touch.wanted(), phone: touch.phone() });
 const params = new URLSearchParams(location.search);
 const s = settings.load();
 if ([...params.keys()].some((k) => k.startsWith("enhanced"))) s.enhanced = true;
-// The look goes above the rest, which waits behind "Settings and extras".
+// The look and the rest both wait behind "Settings".
 let look = s.enhanced ? "enhanced" : "original";
 settings.render($("lookbox"), $("settings"), s, () => (look = s.enhanced ? "enhanced" : "original"));
 // The game reads its options from the address: the settings' options,
@@ -1325,8 +1376,8 @@ addEventListener("drop", async (e) => {
   e.preventDefault();
   document.body.classList.remove("dragging");
   if ($("setup").hidden) return;
-  if (free) return $("freekept").hidden ? usePack([...e.dataTransfer.files][0]) : undefined;
-  if ($("pick").hidden) return;
+  if (!$("ready").hidden) return;
+  if (free) return usePack([...e.dataTransfer.files][0]);
   const entries = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry?.()).filter(Boolean);
   if (entries.some((en) => en.isDirectory)) {
     status("Looking through the folder…");
@@ -1341,10 +1392,6 @@ addEventListener("drop", async (e) => {
 $("forget").addEventListener("click", async () => {
   await fs.forgetGame();
   kept = null;
-  $("forget").textContent = "Use another folder";
-  $("forget").title = "Forgets the game files this browser kept, so you can pick others.";
-  $("kept").hidden = true;
-  $("pick").hidden = false;
   status("");
   showReady();
   showStarterTip().catch(() => {});
@@ -1573,23 +1620,33 @@ let free = false;
 try {
   free = localStorage.getItem("mm2graphics") === "free";
 } catch {}
-function showChoice() {
-  $("pickmm2").setAttribute("aria-checked", String(!free));
-  $("pickfree").setAttribute("aria-checked", String(free));
-  $("mm2side").hidden = free;
-  $("freeside").hidden = !free;
+// The page shows what was picked last time as one Play button once its
+// files are here ("Ready"); otherwise, or after Change, the choice: the
+// MM2 way first (your own files, or the demo), the free version below.
+// Starting the game keeps the choice (go()).
+let pageReady = false;
+let changing = false;
+function setFree(f) {
+  free = f;
+  try {
+    localStorage.setItem("mm2graphics", f ? "free" : "original");
+  } catch {}
+  if (pageReady) layout();
+}
+$("pickfree").addEventListener("click", () => {
+  changing = false;
   $("why").textContent = "";
-}
-for (const [id, f] of [["pickmm2", false], ["pickfree", true]]) {
-  $(id).addEventListener("click", () => {
-    free = f;
-    try {
-      localStorage.setItem("mm2graphics", f ? "free" : "original");
-    } catch {}
-    showChoice();
-  });
-}
-showChoice();
+  setFree(true);
+});
+$("change").addEventListener("click", () => {
+  changing = true;
+  $("why").textContent = "";
+  layout();
+});
+$("back").addEventListener("click", () => {
+  changing = false;
+  layout();
+});
 
 // ---- The menus: the new look or the original's ----
 // Kept in this browser: the original's unless picked; the original's
@@ -1610,7 +1667,7 @@ function showMenus() {
 for (const [id, n] of [["picknewmenus", true], ["pickoldmenus", false]]) {
   $(id).addEventListener("click", () => {
     if (!n && !haveMenus) {
-      $("why").textContent = "The original menus come from your MM2 files: pick them under MM2 graphics first.";
+      $("oldmenustate").textContent = "Needs your MM2 files or the demo: pick them above first";
       return;
     }
     newMenus = n;
@@ -1637,6 +1694,8 @@ function setParam(name, value) {
 // the menus picked: the new look's from the pack (with MM2 graphics, only
 // the menus' part of it), the original's from the MM2 files.
 async function go(list, withPack) {
+  setFree(!!withPack);
+  changing = false;
   // The demo: its own look and its own menus (unless the new look is
   // picked), with the whole Free Pack filling in what it lacks.
   if (!withPack && isDemo(list)) {
@@ -1696,7 +1755,6 @@ async function usePack(file) {
     navigator.storage?.persist?.();
     await fs.keepPack(file).catch((e) => console.warn("Free Pack not kept", e));
   }
-  $("freepick").hidden = $("freekept").hidden = true;
   go(list, true);
 }
 $("packfile").addEventListener("change", (e) => usePack(e.target.files[0]));
@@ -1934,7 +1992,6 @@ async function downloadAndPlay() {
   try {
     const list = await syncPack(true);
     if (!list) throw new Error("the downloaded pack is missing some files");
-    $("freepick").hidden = $("freekept").hidden = true;
     go(list, true);
   } catch (err) {
     console.warn(err);
@@ -2142,71 +2199,92 @@ function showReady() {
   haveGame = !!kept && !isDemo(kept);
   haveMenus = !!kept;
   showMenus();
-  $("oldmenustate").textContent = kept ? "Your MM2 files are here" : "Needs your MM2 files";
-  $("oldmenustate").classList.toggle("ready", !!kept);
-  $("newmenustate").textContent =
-    keptPack || downloaded
-      ? "Free Pack kept in this browser"
-      : menusKept
-        ? "New look menus kept in this browser"
-        : kept
-          ? "Small download (about 60 MB)"
-          : "Comes with the Free Pack";
-  $("newmenustate").classList.toggle("ready", !!(keptPack || downloaded || menusKept));
-  $("mm2state").textContent = isDemo(kept) ? "The free demo is kept in this browser" : kept ? "Remembered in this browser" : "Needs your MM2 files";
-  $("demorow").hidden = !!kept;
-  $("mm2state").classList.toggle("ready", !!kept);
+  const demo = isDemo(kept);
   const has = keptPack || downloaded;
-  $("freestate").textContent = has ? "Free Pack kept in this browser" : "Free Pack not downloaded yet";
-  $("freestate").classList.toggle("ready", !!has);
+  $("oldmenustate").textContent = demo ? "from the demo" : kept ? "from your MM2 files" : "needs your MM2 files or the demo";
+  $("newmenustate").textContent = has
+    ? "Free Pack kept in this browser"
+    : menusKept
+      ? "kept in this browser"
+      : kept
+        ? "a small download (about 60 MB)"
+        : "comes with the Free Pack";
+  $("mm2state").textContent = demo ? "The MM2 demo" : kept ? "Your MM2 game files" : "No MM2 files kept";
+  $("forget").hidden = !kept;
+  $("forget").textContent = demo ? "Remove the demo" : "Forget them";
+  $("forget").title = demo
+    ? "Deletes the demo from this browser to free the space. Your saves and own tracks stay."
+    : "Forgets the game files this browser kept, so you can pick others. Your saves and own tracks stay.";
+  $("freestate").textContent = has ? "The Free Pack" : menusKept ? "The new look menus" : "No Free Pack kept";
+  $("forgetpack").hidden = !(has || menusKept);
+  $("forgetpack").textContent = has ? "Remove the Free Pack" : "Remove them";
+  // A demo or a full game kept: the demo would replace it.
+  $("demorow").hidden = !!kept;
+  pageReady = true;
+  layout();
+}
+// Ready (one Play button) or the choice, as the files kept and the last
+// pick have it.
+function layout() {
+  const demo = isDemo(kept);
+  const packReady = !!(keptPack || downloaded);
+  const mm2Ready = !free && !!kept;
+  const freeReady = free && packReady;
+  const ready = (mm2Ready || freeReady) && !changing;
+  $("ready").hidden = !ready;
+  $("choose").hidden = ready;
+  $("play").hidden = !mm2Ready;
+  $("playfree").hidden = !freeReady;
+  $("readytitle").textContent = freeReady ? "The free version" : demo ? "The MM2 demo" : "Your MM2 game";
+  $("readywhy").textContent = freeReady
+    ? "The Free Pack is kept in this browser. Play fetches any update first."
+    : demo
+      ? "Kept in this browser, with the Free Pack filling in the other tracks."
+      : "Remembered in this browser.";
+  // In the choice: what's kept already, one press away.
+  $("usekept").hidden = !kept || mm2Ready;
+  $("usekept").textContent = demo ? "Play the demo kept in this browser" : "Play the game kept in this browser";
+  $("pickfree").textContent = packReady ? "Play the free version" : "Get the free version";
+  $("freeside").hidden = !free || packReady;
+  $("pickfree").hidden = free && !packReady;
+  $("mm2card").classList.toggle("quiet", free && !packReady);
+  $("backrow").hidden = !(changing && (mm2Ready || freeReady));
 }
 showReady();
-if (keptPack || downloaded) {
-  $("freepick").hidden = true;
-  $("freekept").hidden = false;
-  $("playfree").addEventListener("click", () => {
-    $("freekept").hidden = true;
-    if (keptPack) go(keptPack, true);
-    else downloadAndPlay();
-  });
-}
+$("play").addEventListener("click", () => kept && go(kept, false));
+$("usekept").addEventListener("click", () => kept && go(kept, false));
+$("playfree").addEventListener("click", () => {
+  if (keptPack) go(keptPack, true);
+  else if (downloaded) downloadAndPlay();
+});
 $("forgetpack").addEventListener("click", async () => {
   await fs.forgetPack();
   await fs.packDelete([...(await fs.packStored())]);
   keptPack = null;
   downloaded = null;
   menusKept = null;
-  $("freekept").hidden = true;
-  $("freepick").hidden = false;
   showReady();
   showStarterTip().catch(() => {});
 });
 
-// The Course Builder button: straight into the builder, with the graphics
-// picked, once there are files to start from.
+// Tools. The Course Builder: straight into the builder, the way picked
+// to play, once there are files to start from.
 $("openbuilder").addEventListener("click", () => {
   builderOnce = true;
-  if (free && keptPack) {
-    $("freekept").hidden = true;
-    return go(keptPack, true);
-  }
+  if (free && keptPack) return go(keptPack, true);
   if (free && downloaded) return downloadAndPlay();
   if (!free && kept) return go(kept, false);
-  $("why").textContent = free
-    ? "Download the Free Pack first. The Course Builder opens straight after."
-    : "Pick your game files first (Choose game folder). The Course Builder opens straight after.";
+  builderOnce = false;
+  $("why").textContent = "Pick a way to play first: your MM2 files, the free demo or the free version. The Course Builder opens straight after.";
+  $("why").scrollIntoView({ behavior: "smooth", block: "center" });
 });
-
-if (kept) {
-  $("pick").hidden = true;
-  $("kept").hidden = false;
-  status(isDemo(kept) ? "The free demo is kept in this browser." : "Your game folder is remembered in this browser.");
-  if (isDemo(kept)) {
-    $("forget").textContent = "Remove the demo";
-    $("forget").title = "Deletes the demo from this browser to free the space. Your saves and own tracks stay.";
-  }
-  $("play").addEventListener("click", () => go(kept, false));
+for (const [button, box] of [["opentracks", "tracksbox"], ["opencontrols", "controlsbox"]]) {
+  $(button).addEventListener("click", () => {
+    $(box).open = true;
+    $(box).scrollIntoView({ behavior: "smooth", block: "start" });
+  });
 }
+
 // The starter set, suggested to players without the full game (the demo,
 // or the Free Pack alone) until they have it or say no thanks.
 let starterNo = false;
