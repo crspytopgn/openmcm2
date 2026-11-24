@@ -138,7 +138,13 @@ pub struct TerrainRenderer {
     /// The runs of indices in view this frame.
     runs: Vec<std::ops::Range<u32>>,
     /// The blocks in view by distance, kept between frames for its room.
-    nearest: Vec<(f32, std::ops::Range<u32>)>,
+    nearest: Vec<(f32, std::ops::Range<u32>, bool)>,
+    /// The same runs for the enhanced drawing, each with whether its
+    /// blocks reach under the smooth ground round the eye, where the
+    /// game's mesh gives way to it (terrain.wgsl fs_enhanced); the rest
+    /// are drawn with a shader that never discards, so the GPU can test
+    /// their depth before shading them.
+    open_runs: Vec<(std::ops::Range<u32>, bool)>,
     globals: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     /// The terrain's textures, tile map and sampler, kept to rebind with
@@ -237,7 +243,7 @@ fn found_lamps(banks: &[(Vec3, f32, f32)], floor: &crate::night::Floor) -> Optio
 /// The terrain renderer's part of the enhanced drawing.
 struct Enhanced {
     shared: crate::enhance::Shared,
-    terrain: wgpu::RenderPipeline,
+    terrain: (wgpu::RenderPipeline, wgpu::RenderPipeline),
     /// The terrain's own group for it, the same as the game's drawing's.
     layout: wgpu::BindGroupLayout,
     group: wgpu::BindGroup,
@@ -503,7 +509,7 @@ impl TerrainRenderer {
                 bind_group_layouts: &[Some(&group_layout), Some(&shared.layout)],
                 immediate_size: 0,
             });
-            let terrain = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            let terrain_with = |fs: &str| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("terrain enhanced"),
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
@@ -518,7 +524,7 @@ impl TerrainRenderer {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
-                    entry_point: Some("fs_enhanced"),
+                    entry_point: Some(fs),
                     compilation_options: Default::default(),
                     targets: &[Some(format.into())],
                 }),
@@ -537,6 +543,10 @@ impl TerrainRenderer {
                 multiview_mask: None,
                 cache: None,
             });
+            // The game's mesh where the smooth ground round the eye may lie
+            // over it (it discards there), and the rest, which never does:
+            // fs_smooth is the same ground with no discard.
+            let terrain = (terrain_with("fs_enhanced"), terrain_with("fs_smooth"));
             (shared, terrain, group_layout)
         });
         let terrain_views = (
@@ -667,6 +677,7 @@ impl TerrainRenderer {
             blocks,
             runs: Vec::new(),
             nearest: Vec::new(),
+            open_runs: Vec::new(),
             globals,
             bind_group,
             terrain_views,
@@ -1218,15 +1229,33 @@ impl TerrainRenderer {
         // fails the depth test before it is shaded. The ground never lies
         // over itself at one depth, so the picture is the same.
         let eye = camera.position;
+        // Which blocks the smooth patch round the eye lies over, with a
+        // cell to spare: only those can have pixels fs_enhanced discards.
+        let patch = self.enhanced.as_ref().and_then(|e| e.smooth.as_ref()).map(|g| g.uniform(eye));
+        let scale = self.grid[1];
+        let under = |lo: Vec3, hi: Vec3| {
+            patch.is_some_and(|[px, pz, cells, _]| {
+                let (x0, x1) = (lo.x / scale, hi.x / scale);
+                let (z0, z1) = (-hi.z / scale, -lo.z / scale);
+                x1 >= px - 1.0 && x0 <= px + cells + 1.0 && z1 >= pz - 1.0 && z0 <= pz + cells + 1.0
+            })
+        };
         self.nearest.clear();
         self.nearest.extend(
             self.blocks
                 .iter()
                 .filter(|b| seen.sees(b.0, b.1))
-                .map(|b| (eye.clamp(b.0, b.1).distance_squared(eye), b.2.clone())),
+                .map(|b| (eye.clamp(b.0, b.1).distance_squared(eye), b.2.clone(), under(b.0, b.1))),
         );
         self.nearest.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.start.cmp(&b.1.start)));
-        crate::cull::runs(self.nearest.iter().map(|(_, r)| r.clone()), &mut self.runs);
+        crate::cull::runs(self.nearest.iter().map(|(_, r, _)| r.clone()), &mut self.runs);
+        self.open_runs.clear();
+        for (_, r, cut) in &self.nearest {
+            match self.open_runs.last_mut() {
+                Some((last, was)) if last.end == r.start && was == cut => last.end = r.end,
+                _ => self.open_runs.push((r.clone(), *cut)),
+            }
+        }
         let side = self.enhanced.as_ref().map_or(crate::enhance::SHADOW_SIDE, |e| e.shared.side);
         let (cascades, texels) = crate::enhance::cascades(camera.view(), camera.fovy(aspect), aspect, lights.to_sun, side);
         // The dust clouds as the sun sees them, round those near the eye.
@@ -1627,21 +1656,29 @@ impl TerrainRenderer {
                 .as_ref()
                 .filter(|_| showing.is_some_and(|e| e.grass))
                 .and_then(|e| Some((e.grass.as_ref()?, &e.group, &e.shared.group)));
+            pass.set_vertex_buffer(0, self.vertices.slice(..));
+            pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+            let draw_ground = !crate::gpu_time::skip("terrain");
             match shared {
-                Some((group, terrain, own)) => {
-                    pass.set_pipeline(terrain);
+                Some((group, (cut, open), own)) => {
                     pass.set_bind_group(0, own, &[]);
                     pass.set_bind_group(1, group, &[]);
+                    let mut bound = None;
+                    for (run, under) in self.open_runs.iter().filter(|_| draw_ground) {
+                        if bound != Some(*under) {
+                            pass.set_pipeline(if *under { cut } else { open });
+                            bound = Some(*under);
+                        }
+                        pass.draw_indexed(run.clone(), 0, 0..1);
+                    }
                 }
                 None => {
                     pass.set_pipeline(&self.pipeline);
                     pass.set_bind_group(0, &self.bind_group, &[]);
+                    for run in self.runs.iter().filter(|_| draw_ground) {
+                        pass.draw_indexed(run.clone(), 0, 0..1);
+                    }
                 }
-            }
-            pass.set_vertex_buffer(0, self.vertices.slice(..));
-            pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-            for run in self.runs.iter().filter(|_| !crate::gpu_time::skip("terrain")) {
-                pass.draw_indexed(run.clone(), 0, 0..1);
             }
             mark_pass!(self.gpu_timer, &mut pass, "scene: terrain");
             if let Some((crowd, own, group)) = self
