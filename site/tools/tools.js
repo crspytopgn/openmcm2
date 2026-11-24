@@ -85,8 +85,7 @@ const loaders = {
   garage: () => import("./garage.js"),
   track: () => import("./track.js"),
   paint: () => import("./paint.js"),
-  // Nothing to load: the tab links to the game, which has the builder.
-  builder: async () => ({ mount: () => ({}) }),
+  builder: () => import("./builder.js"),
 };
 app.show = async (name) => {
   for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === name));

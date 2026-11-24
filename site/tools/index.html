@@ -106,7 +106,8 @@
     </div>
   </section>
 
-  <!-- Course Builder: it lives in the game, so this opens the browser version straight into it. -->
+  <!-- Course Builder: it lives in the game, so this opens the browser version straight into it,
+       with the files picked here (builder.js). -->
   <section class="panel" id="tab-builder" role="tabpanel" hidden>
     <div class="builder">
       <video class="builder-clip" src="../img/course-builder.mp4" poster="../img/course-builder-poster.jpg" muted loop playsinline autoplay preload="none" aria-label="The Course Builder"></video>
@@ -114,10 +115,30 @@
         <h2 class="small">Make your own track and ride it</h2>
         <p class="hint">Draw the track's line, drop in jumps and gates, shape and paint the ground, plant trees, then press Ride it.
           Your tracks stay in this browser and join the game's track lists, and you can export them for the original game too.</p>
-        <p class="hint">The Course Builder is part of the game, so it opens in the browser version with whatever you play with there:
-          your MM2 files, the free demo or the free version. If you haven't picked one yet, it asks first, then opens the builder.</p>
-        <a class="tbtn primary" href="../play/?course-builder"
-          title="Opens the browser version of OpenMCM2 straight into the Course Builder. Esc in a ride comes back to it.">Open the Course Builder</a>
+        <h3 class="small">Build with</h3>
+        <p class="hint" id="b-saved">Checking what this browser has saved…</p>
+        <div class="bopt rec" id="b-mm2">
+          <div><span class="btag">Recommended</span> <b>My MM2 game files</b> <span class="bsaved" hidden>Saved</span></div>
+          <p class="hint">Your own Motocross Madness 2: its ground, trees, objects and bikes. Pick the folder it's installed in, your CD, or a CD image or .zip. Nothing is uploaded.</p>
+          <div class="pick">
+            <button class="tbtn primary" id="b-mm2-go" hidden title="Opens the Course Builder with the MM2 game saved in this browser.">Open with my MM2 game</button>
+            <label class="tbtn" for="b-folder" id="b-folder-label" title="The folder Motocross Madness 2 is installed in (the one with RES, TERAFORM and UI in it), or the CD's own folder. It's saved in this browser for next time and opens the builder straight away.">Choose game folder</label>
+            <input id="b-folder" type="file" webkitdirectory multiple hidden>
+            <label class="tbtn" for="b-file" id="b-file-label" title="Your game CD's image (.iso, .bin, .img, .mdf or .nrg), or a .zip of the game folder or of a CD image. It's saved in this browser for next time and opens the builder straight away.">Choose a CD image or .zip</label>
+            <input id="b-file" type="file" accept=".zip,.iso,.bin,.img,.mdf,.nrg,application/zip" hidden>
+          </div>
+        </div>
+        <div class="bopt" id="b-demo">
+          <div><b>The free MM2 demo</b> <span class="bsaved" hidden>Saved</span></div>
+          <p class="hint">No copy of the game? Microsoft's free demo from 2000 gives the original look, with the Free Pack filling in the rest.</p>
+          <button class="tbtn" id="b-demo-go" title="Downloads Microsoft's free Motocross Madness 2 demo (43 MB) and the Free Pack if they aren't saved yet, then opens the Course Builder.">Open with the demo</button>
+        </div>
+        <div class="bopt" id="b-free">
+          <div><b>The free version</b> <span class="bsaved" hidden>Saved</span></div>
+          <p class="hint">Our own openly licensed art and sound. No MM2 files needed.</p>
+          <button class="tbtn" id="b-free-go" title="Downloads the Free Pack (several hundred MB, once) if it isn't saved yet, then opens the Course Builder.">Open with the free version</button>
+        </div>
+        <p class="hint" id="b-status" aria-live="polite"></p>
         <p class="hint">It's on the game's main menu too: the shovel on the chain.</p>
       </div>
     </div>

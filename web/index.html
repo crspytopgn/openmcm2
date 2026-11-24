@@ -1660,7 +1660,10 @@ let builderOnce = false;
 // Asked for in the address (the Tools page's Course Builder tab links
 // here with it): taken out at once, then the builder opens as if its
 // button were pressed (at the end of the page's start).
+// It may say what to build with: mm2, demo or free (the Tools page's
+// choice); bare, whatever this browser keeps.
 const builderAsked = params.has("course-builder");
+const builderWith = params.get("course-builder") || "";
 if (builderAsked) setParam("course-builder", null);
 
 // ---- MM2 graphics or free graphics ----
@@ -2323,9 +2326,15 @@ $("forgetpack").addEventListener("click", async () => {
 // Uses whatever this browser has to start from (the last pick first). With
 // nothing yet, it asks at the top of the page what to build with, and the
 // next start (after picking) opens the builder.
-function openBuilder() {
+function openBuilder(how = "") {
   builderOnce = true;
   const pack = keptPack || downloaded;
+  if (how === "free") {
+    setFree(true);
+    return keptPack ? go(keptPack, true) : downloadAndPlay();
+  }
+  if (how === "demo") return isDemo(kept) ? go(kept, false) : useDemo();
+  if (how === "mm2" && kept) return go(kept, false);
   if (pack && (free || !kept)) return keptPack ? go(keptPack, true) : downloadAndPlay();
   if (kept) return go(kept, false);
   changing = false;
@@ -2391,7 +2400,7 @@ showStarterTip();
 // Back from switching the look: straight into the game again.
 const canStart = (free && keptPack) || (!free && kept);
 if (!((again || builderAsked) && canStart)) loader.hide();
-if (builderAsked && !again) openBuilder();
+if (builderAsked && !again) openBuilder(builderWith);
 else if (again && free && keptPack) go(keptPack, true);
 else if (again && free && downloaded) downloadAndPlay();
 else if (again && !free && kept) go(kept, false);
