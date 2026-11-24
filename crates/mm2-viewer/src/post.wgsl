@@ -48,7 +48,9 @@ struct Post {
     // The way up in the camera's space, and w how wet the ground is for
     // its reflections (0 for none).
     view_up: vec4<f32>,
-    // x 1 for the horizon-based occlusion (GTAO) in place of the plain one.
+    // x 1 for the horizon-based occlusion (GTAO) in place of the plain one;
+    // y how strongly the light bounced off what is round about shows
+    // (fs_bounce, 0 for none); z its reach (ft).
     extra: vec4<f32>,
 };
 
@@ -66,6 +68,8 @@ struct Post {
 // The reflections in wet ground (fs_ssr): what they show, premultiplied
 // by how much.
 @group(0) @binding(9) var ssr_tex: texture_2d<f32>;
+// The light bounced off what is round about (fs_bounce), blurred.
+@group(0) @binding(10) var bounce_tex: texture_2d<f32>;
 
 struct Out {
     @builtin(position) position: vec4<f32>,
@@ -248,6 +252,94 @@ fn fs_ao(in: Out) -> @location(0) vec4<f32> {
     }
     let lit = contact(c, n, jitter);
     return vec4<f32>(ao, lit, 0.0, 1.0);
+}
+
+// A surface's own colour from its lit colour `c`, roughly (the scene
+// keeps none apart): its hue at a middling brightness, whether in sun or
+// shade; what shows darker still (tyres, a black suit) takes less and
+// less, so no hue is made up from its noise.
+fn surface_colour(c: vec3<f32>) -> vec3<f32> {
+    let l = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return clamp(c / max(l, 0.15) * 0.35, vec3<f32>(0.0), vec3<f32>(0.85));
+}
+
+// The occlusion with the light that bounces between the surfaces of a
+// crease (GTAO's multi-bounce fit, Jimenez et al. 2016): a pale crease
+// darkens less than a dark one.
+fn multi_bounce(ao: f32, albedo: vec3<f32>) -> vec3<f32> {
+    let a = 2.0404 * albedo - 0.3324;
+    let b = -4.7951 * albedo + 0.6417;
+    let c = 2.7552 * albedo + 0.6903;
+    return max(vec3<f32>(ao), ((ao * a + b) * ao + c) * ao);
+}
+
+// Light bounced once off what is round about (screen-space indirect
+// light, after Ritschel et al. 2009's directional occlusion): from points
+// on the surfaces near each pixel, within `extra.z` ft, the light they
+// show now, as much as they face each other and the nearer the more; so
+// sunlit dirt warms the shaded side of a bike and a rider, and a bright
+// wall the ground beside it. Worked out at half size, blurred after. What
+// it gives is light falling on the surface (the composite colours it by
+// the surface).
+@fragment
+fn fs_bounce(in: Out) -> @location(0) vec4<f32> {
+    let p = vec2<i32>(in.position.xy) * 2;
+    if (depth_at(p) >= 1.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    let c = view_at(p);
+    let n = normal_at(p, c);
+    let radius = post.extra.z;
+    let reach = clamp(radius * post.params.w / max(-c.z, 0.1), 4.0, 96.0);
+    let noise = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));
+    let count = 10;
+    var sum = vec3<f32>(0.0);
+    let scene = vec2<i32>(post.size.xy);
+    for (var i = 0; i < count; i++) {
+        let t = (f32(i) + 0.5) / f32(count);
+        let angle = f32(i) * 2.39996 + noise * 6.2832;
+        let q = p + vec2<i32>(vec2<f32>(cos(angle), sin(angle)) * reach * sqrt(t));
+        if (any(q < vec2<i32>(0)) || any(q >= scene) || depth_at(q) >= 1.0) {
+            continue;
+        }
+        let at = view_at(q);
+        let v = at - c;
+        let d2 = max(dot(v, v), 0.25);
+        let dir = v * inverseSqrt(d2);
+        let toward = max(dot(n, dir), 0.0);
+        if (toward <= 0.0) {
+            continue;
+        }
+        let facing = max(dot(normal_at(q, at), -dir), 0.0);
+        let fade = 1.0 - smoothstep(radius * radius * 0.5, radius * radius, d2);
+        let light = finite(textureLoad(hdr_tex, q, 0).rgb);
+        sum += min(light, vec3<f32>(4.0)) * toward * facing * fade / d2;
+    }
+    // Each point stands for its share of the disc round the pixel.
+    let e = sum * (radius * radius / f32(count));
+    return vec4<f32>(min(e, vec3<f32>(2.0)), 1.0);
+}
+
+// The bounce blurred over 4×4 pixels, as the occlusion, but only from
+// what is at about the same distance: a bike's light does not spread onto
+// the hill behind it, nor the ground's onto a tyre.
+@fragment
+fn fs_bounce_blur(in: Out) -> @location(0) vec4<f32> {
+    let half = vec2<i32>(in.position.xy);
+    let centre = -view_at(half * 2).z;
+    var sum = vec3<f32>(0.0);
+    var weight = 0.0;
+    let most = vec2<i32>(textureDimensions(src_tex)) - 1;
+    for (var y = -1; y <= 2; y++) {
+        for (var x = -1; x <= 2; x++) {
+            let q = clamp(half + vec2<i32>(x, y), vec2<i32>(0), most);
+            let z = -view_at(q * 2).z;
+            let w = 1.0 / (1.0 + 40.0 * abs(z - centre) / max(centre, 0.1));
+            sum += textureLoad(src_tex, q, 0).rgb * w;
+            weight += w;
+        }
+    }
+    return vec4<f32>(sum / max(weight, 1e-4), 1.0);
 }
 
 // The occlusion blurred over 4×4 pixels, in four filtered taps.
@@ -535,10 +627,22 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
         let r = textureSampleLevel(ssr_tex, smooth_sampler, in.uv, 0.0);
         c = c * (1.0 - r.a) + r.rgb;
     }
+    // What the surface's own colour is, as near as the lit picture tells
+    // (the bounce and the occlusion's light between surfaces need one).
+    let albedo = surface_colour(c);
+    if (post.extra.y > 0.0) {
+        c += textureSampleLevel(bounce_tex, smooth_sampler, in.uv, 0.0).rgb * albedo * post.extra.y;
+    }
     if (post.flags.x > 0.5 || post.view_sun.w > 0.0) {
         let a = textureSampleLevel(ao_tex, smooth_sampler, in.uv, 0.0).rg;
         if (post.flags.x > 0.5) {
-            c *= a.r;
+            if (post.extra.y > 0.0) {
+                // With the bounce: a crease lit by its own walls' light
+                // too, so a pale one darkens less than a dark one.
+                c *= multi_bounce(a.r, albedo);
+            } else {
+                c *= a.r;
+            }
         }
         c *= mix(1.0, a.g, post.view_sun.w);
     }
@@ -566,7 +670,12 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
     if (post.flags.w > 0.5) {
         c = grade(c, in.uv);
     }
-    return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    let shown = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    // For FSR (fsr.wgsl) after: in gamma 2, as it wants it.
+    if (post.scaled.w > 0.5) {
+        return vec4<f32>(sqrt(shown), 1.0);
+    }
+    return vec4<f32>(shown, 1.0);
 }
 
 // Reflections in wet ground (screen space): where the scene marks its
@@ -726,6 +835,10 @@ fn history_at(uv: vec2<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_taa(in: Out) -> @location(0) vec4<f32> {
+    // With FSR on: FSR 2's way of rebuilding and blending (taa_fsr2).
+    if (post.extra.w > 0.5) {
+        return taa_fsr2(in.position.xy);
+    }
     // Drawn at the screen's size (taa_out); the scene's own pixels may be
     // fewer (size). Where this pixel is on the scene, in its pixels.
     let uv = in.position.xy * post.taa_out.zw;
@@ -826,4 +939,157 @@ fn fs_taa(in: Out) -> @location(0) vec4<f32> {
     let share = select(1.0, mix(0.25, 1.0, closest), upscaled) / (n + 1.0);
     let c = mix(hist, to_ycocg(tame(now)), share);
     return vec4<f32>(max(untame(from_ycocg(c)), vec3<f32>(0.0)), n);
+}
+
+// ---- Temporal upscaling after AMD FSR 2 (FidelityFX-FSR2, MIT; see
+// fsr.wgsl for the licence). Ported from ffx_fsr2_upsample.h and
+// ffx_fsr2_accumulate.h, without its separate passes: this frame's
+// samples rebuilt at the screen pixel with FSR 2's two-lobe Lanczos,
+// widened as the scene is drawn smaller and narrowed for new or moving
+// detail; the history clipped to a variance box (Gaussian weighted, wide
+// where nothing moves so fine detail is kept, tight when moving so
+// nothing trails); and blended by how much of this pixel this frame's
+// samples cover, in tone-mapped YCoCg. Locks, luma instability and the
+// depth-clip pass are left out (the scene keeps no last depth).
+
+// FSR 2's constants (ffx_fsr2_common.h).
+const FSR2_EPSILON: f32 = 1e-3;
+const FSR2_LANCZOS_SCALE: f32 = 1.0 / 12.0;
+const FSR2_MAX_ACCUMULATION: f32 = 1.0;
+
+// Lanczos2ApproxSq: the two-lobe Lanczos at the square distance `x2`.
+fn lanczos2_sq(x2_in: f32) -> f32 {
+    let x2 = min(x2_in, 4.0);
+    let a = (2.0 / 5.0) * x2 - 1.0;
+    let b = (1.0 / 4.0) * x2 - 1.0;
+    return ((25.0 / 16.0) * a * a - (25.0 / 16.0 - 1.0)) * (b * b);
+}
+
+fn taa_fsr2(position: vec2<f32>) -> vec4<f32> {
+    let uv = position * post.taa_out.zw;
+    let size = vec2<i32>(post.size.xy);
+    // The scene's pixels to one of the screen's (FSR 2's DownscaleFactor).
+    let down = post.size.xy * post.taa_out.zw;
+    let src = uv * post.size.xy;
+    let i_src = vec2<i32>(floor(src));
+    let centre = clamp(i_src, vec2<i32>(0), size - 1);
+    var shaft = vec3<f32>(0.0);
+    if (post.scaled.y > 0.0) {
+        shaft = post.sun_colour.rgb * traced_shafts(uv, centre) * post.scaled.y;
+    }
+
+    // Where it was a frame ago (as fs_taa): the nearest of the 3x3 round
+    // about, so a thin edge in front is found where it was.
+    var nearest = 2.0;
+    var at = centre;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            let q = clamp(centre + vec2<i32>(x, y), vec2<i32>(0), size - 1);
+            let d = textureLoad(depth_tex, q, 0);
+            if (d < nearest) {
+                nearest = d;
+                at = q;
+            }
+        }
+    }
+    let h = post.taa_inverse * vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, nearest, 1.0);
+    let world = h.xyz / h.w;
+    var was = uv;
+    var known = post.taa.x > 0.5;
+    let m = textureLoad(motion_tex, at, 0);
+    let dist = length(world - post.taa_camera.xyz);
+    if (m.w > 0.5 && abs(m.z - dist) < 0.03 * dist + 0.5) {
+        was = uv + m.xy * post.size.zw;
+    } else {
+        let c = post.taa_before * vec4<f32>(world, 1.0);
+        if (c.w <= 0.0) {
+            known = false;
+        } else {
+            was = vec2<f32>(c.x / c.w * 0.5 + 0.5, 0.5 - c.y / c.w * 0.5);
+        }
+    }
+    if (any(was < vec2<f32>(0.0)) || any(was > vec2<f32>(1.0))) {
+        known = false;
+    }
+    // How fast it moves, in the screen's pixels (FSR 2's fHrVelocity).
+    let velocity = length((was - uv) * post.taa_out.xy);
+    // How much this frame should count for its own sake (FSR 2's temporal
+    // reactive factor, from motion alone here).
+    let reactive = select(mix(0.0, 0.4, clamp(velocity, 0.0, 1.0)), 1.0, !known);
+
+    // ComputeUpsampledColorAndWeight: 4x4 of this frame's samples round the
+    // pixel, each where the frame's shift put it.
+    let unjittered = vec2<f32>(i_src) + 0.5 - post.taa.zw;
+    let tl = select(vec2<i32>(-1), vec2<i32>(-2), unjittered > src);
+    let base = unjittered - src;
+    let kernel_max = min(1.99, 1.0 + (1.0 / down.x - 1.0)) * (1.0 - reactive);
+    let kernel_min = max(1.0, (1.0 + kernel_max) * 0.3);
+    let kernel = mix(kernel_max, kernel_min, reactive);
+    let curve = mix(-2.0, -3.0, clamp(velocity / 50.0, 0.0, 1.0));
+    var sum = vec4<f32>(0.0);
+    var box_lo = vec3<f32>(1e9);
+    var box_hi = vec3<f32>(-1e9);
+    var centre_sum = vec3<f32>(0.0);
+    var spread_sum = vec3<f32>(0.0);
+    var box_weight = 0.0;
+    for (var row = 0; row < 4; row++) {
+        for (var col = 0; col < 4; col++) {
+            let o = tl + vec2<i32>(col, row);
+            let q = i_src + o;
+            if (any(q < vec2<i32>(0)) || any(q >= size)) {
+                continue;
+            }
+            let s = to_ycocg(tame(finite(textureLoad(hdr_tex, q, 0).rgb) + shaft));
+            let off = base + vec2<f32>(o);
+            let biased = off * kernel;
+            let w = lanczos2_sq(dot(biased, biased));
+            sum += vec4<f32>(s * w, w);
+            // The rectification box from the 3x3 nearest, Gaussian weighted.
+            let d2 = dot(off, off);
+            if (d2 < 2.25) {
+                let bw = exp(curve * d2);
+                box_lo = min(box_lo, s);
+                box_hi = max(box_hi, s);
+                centre_sum += s * bw;
+                spread_sum += s * s * bw;
+                box_weight += bw;
+            }
+        }
+    }
+    let bw = select(1.0, box_weight, abs(box_weight) > FSR2_EPSILON);
+    let box_centre = centre_sum / bw;
+    let box_vec = sqrt(abs(spread_sum / bw - box_centre * box_centre));
+    var up = to_ycocg(tame(finite(textureLoad(hdr_tex, centre, 0).rgb) + shaft));
+    var up_weight = 0.0;
+    if (sum.w > FSR2_EPSILON) {
+        // Deringed to the samples round about.
+        up = clamp(sum.xyz / sum.w, box_lo, box_hi);
+        up_weight = sum.w * FSR2_LANCZOS_SCALE;
+    }
+    if (!known) {
+        return vec4<f32>(untame(from_ycocg(up)), 1.0);
+    }
+
+    // ComputeBaseAccumulationWeight: as much history as it holds, less as
+    // it moves.
+    var accumulation = FSR2_MAX_ACCUMULATION * (1.0 - reactive);
+    accumulation = min(accumulation, mix(accumulation, up_weight * 10.0, clamp(velocity * 10.0, 0.0, 1.0)));
+    accumulation = min(accumulation, mix(accumulation, up_weight, clamp(velocity / 20.0, 0.0, 1.0)));
+
+    // RectifyHistory: clipped to the box, wide standing still (the scene
+    // drawn smaller, wider still), tight moving.
+    var hist = to_ycocg(tame(history_at(was)));
+    let influence = min(20.0, pow(1.0 / max(down.x * down.y, 1e-3), 3.0));
+    let box_scale = mix(influence, 1.0, clamp(velocity / 20.0, 0.0, 1.0));
+    let lo = max(box_lo, box_centre - box_vec * box_scale);
+    let hi = min(box_hi, box_centre + box_vec * box_scale);
+    if (any(hist < lo) || any(hist > hi)) {
+        hist = clamp(hist, lo, hi);
+        accumulation = min(accumulation, 0.1);
+    }
+
+    // Accumulate.
+    let total = max(FSR2_EPSILON, accumulation + up_weight);
+    let blended = mix(hist, up, up_weight / total);
+    return vec4<f32>(max(untame(from_ycocg(blended)), vec3<f32>(0.0)), 1.0);
 }

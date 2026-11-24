@@ -28,6 +28,43 @@ pub struct Taa {
 }
 /// How much the scene is sharpened after temporal anti-aliasing.
 const TAA_SHARPEN: f32 = 0.8;
+/// The picture FSR (fsr.wgsl) works on, in gamma 2: the finished scene
+/// at its own size, and stretched to the screen's.
+const FSR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// RCAS's sharpening after FSR's stretch, in stops down from its
+/// sharpest (AMD's own default 0.2): gentle, so no edge looks drawn on.
+const FSR_SHARPNESS_STOPS: f32 = 0.5;
+/// After temporal anti-aliasing (which rebuilds at the screen's size
+/// itself, so only RCAS follows), a little firmer.
+const FSR_TAA_SHARPNESS_STOPS: f32 = 0.35;
+/// How far the bounced light reaches (ft), and how strongly it shows.
+const BOUNCE_REACH: f32 = 8.0;
+const BOUNCE_STRENGTH: f32 = 1.2;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct FsrGlobals {
+    input: [f32; 4],
+    output: [f32; 4],
+    sharp: [f32; 4],
+}
+
+/// FSR's own targets, made only while it is on: the finished scene at its
+/// size (or, after temporal anti-aliasing, the screen's), and stretched.
+struct FsrTargets {
+    _held: crate::gpu_free::Held,
+    /// The finished scene, in gamma 2, at the scene's size; and at the
+    /// screen's, after temporal anti-aliasing.
+    small: wgpu::TextureView,
+    full: wgpu::TextureView,
+    /// The last step's groups writing them, and EASU's and RCAS's.
+    composite: wgpu::BindGroup,
+    taa_composite: [wgpu::BindGroup; 2],
+    easu: wgpu::BindGroup,
+    /// RCAS reads `full`: EASU's stretch, or temporal anti-aliasing's
+    /// picture finished at the screen's size.
+    rcas_full: wgpu::BindGroup,
+}
 /// Halvings in the bloom's chain.
 const BLOOM_STEPS: usize = 6;
 
@@ -153,6 +190,13 @@ struct Targets {
     taa_bloom: [wgpu::BindGroup; 2],
     taa_composite: [wgpu::BindGroup; 2],
     history: [wgpu::TextureView; 2],
+    /// The light bounced off what is round about (fs_bounce) at half size,
+    /// blurred, and the groups making them.
+    bounce_raw: wgpu::TextureView,
+    bounce: wgpu::TextureView,
+    bounce_group: wgpu::BindGroup,
+    bounce_blur_group: wgpu::BindGroup,
+    fsr: Option<FsrTargets>,
 }
 
 pub struct Post {
@@ -175,6 +219,17 @@ pub struct Post {
     bloom_up: wgpu::RenderPipeline,
     composite: wgpu::RenderPipeline,
     taa: wgpu::RenderPipeline,
+    bounce: wgpu::RenderPipeline,
+    bounce_blur: wgpu::RenderPipeline,
+    /// FSR (fsr.wgsl): the last step into its picture, its stretch, its
+    /// sharpening onto the screen, and their numbers.
+    composite_fsr: wgpu::RenderPipeline,
+    easu: wgpu::RenderPipeline,
+    rcas: wgpu::RenderPipeline,
+    fsr_globals: wgpu::Buffer,
+    /// Whether FSR's targets are wanted at the next frame (the upgrade
+    /// `fsr` on, and the scene drawn smaller or temporally anti-aliased).
+    pub fsr_wanted: bool,
     /// Copies the anti-aliased depth's first sample (`depth_single`).
     depth_copy: Option<wgpu::RenderPipeline>,
     /// Which of the outputs is written next, and whether the other holds
@@ -280,6 +335,10 @@ impl Post {
             },
             alpha: wgpu::BlendComponent::REPLACE,
         };
+        let fsr_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("fsr"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("fsr.wgsl").into()),
+        });
         let blank = Self::texture(device, "no shafts", (1, 1), HDR_FORMAT, 1, wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT)
             .create_view(&Default::default());
         Post {
@@ -309,6 +368,18 @@ impl Post {
             bloom_up: pipeline(device, &shader, "fs_bloom_up", HDR_FORMAT, Some(add)),
             composite: pipeline(device, &shader, "fs_composite", format, None),
             taa: pipeline(device, &shader, "fs_taa", HDR_FORMAT, None),
+            bounce: pipeline(device, &single, "fs_bounce", HDR_FORMAT, None),
+            bounce_blur: pipeline(device, &single, "fs_bounce_blur", HDR_FORMAT, None),
+            composite_fsr: pipeline(device, &shader, "fs_composite", FSR_FORMAT, None),
+            easu: pipeline(device, &fsr_shader, "fs_easu", FSR_FORMAT, None),
+            rcas: pipeline(device, &fsr_shader, "fs_rcas", format, None),
+            fsr_globals: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("fsr"),
+                size: std::mem::size_of::<FsrGlobals>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            fsr_wanted: false,
             taa_next: std::cell::Cell::new(0),
             taa_valid: std::cell::Cell::new(false),
             targets: None,
@@ -368,7 +439,7 @@ impl Post {
 
     /// Makes the targets for `size`, unless they are made.
     fn ready(&mut self, device: &wgpu::Device, size: (u32, u32), output: (u32, u32)) {
-        if self.targets.as_ref().is_some_and(|t| t.size == size && t.output == output) {
+        if self.targets.as_ref().is_some_and(|t| t.size == size && t.output == output && t.fsr.is_some() == self.fsr_wanted) {
             return;
         }
         let draw = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
@@ -423,7 +494,11 @@ impl Post {
             .map(|i| self.group(device, &self.bloom_up, &[(4, &bloom[i])], false, true))
             .collect();
         let shafts = self.traced_shafts.clone().unwrap_or_else(|| self.blank.clone());
-        let composite = self.group(device, &self.composite, &[(1, &depth_only), (2, &hdr), (3, &blurred), (6, &bloom[0]), (7, &shafts), (9, &ssr)], true, true);
+        let bounce_raw = view(Self::texture(device, "bounce", half, HDR_FORMAT, 1, draw));
+        let bounce = view(Self::texture(device, "bounce blurred", half, HDR_FORMAT, 1, draw));
+        let bounce_group = self.group(device, &self.bounce, &[(1, read), (2, &hdr)], true, false);
+        let bounce_blur_group = self.group(device, &self.bounce_blur, &[(1, read), (4, &bounce_raw)], true, false);
+        let composite = self.group(device, &self.composite, &[(1, &depth_only), (2, &hdr), (3, &blurred), (6, &bloom[0]), (7, &shafts), (9, &ssr), (10, &bounce)], true, true);
         let motion = view(Self::texture(device, "motion", size, MOTION_FORMAT, 1, draw));
         let motion_depth = view(Self::texture(device, "motion depth", size, MOTION_DEPTH, 1, wgpu::TextureUsages::RENDER_ATTACHMENT));
         // At the screen's size: drawn smaller, the scene is rebuilt from the
@@ -432,8 +507,45 @@ impl Post {
         let history = [0, 1].map(|_| view(Self::texture(device, "taa", output, HDR_FORMAT, 1, draw)));
         let taa = [0, 1].map(|i| self.group(device, &self.taa, &[(1, &depth_only), (2, &hdr), (4, &history[1 - i]), (7, &shafts), (8, &motion)], true, true));
         let taa_bloom = [0, 1].map(|i| self.group(device, &self.bloom_first, &[(2, &history[i])], false, true));
-        let taa_composite =
-            [0, 1].map(|i| self.group(device, &self.composite, &[(1, &depth_only), (2, &history[i]), (3, &blurred), (6, &bloom[0]), (7, &shafts), (9, &ssr)], true, true));
+        let taa_composite = [0, 1]
+            .map(|i| self.group(device, &self.composite, &[(1, &depth_only), (2, &history[i]), (3, &blurred), (6, &bloom[0]), (7, &shafts), (9, &ssr), (10, &bounce)], true, true));
+        let fsr = self.fsr_wanted.then(|| {
+            let held = std::cell::RefCell::new(crate::gpu_free::Held::default());
+            let view = |t: wgpu::Texture| held.borrow_mut().texture(t).create_view(&Default::default());
+            let small = view(Self::texture(device, "fsr scene", size, FSR_FORMAT, 1, draw));
+            let full = view(Self::texture(device, "fsr stretched", output, FSR_FORMAT, 1, draw));
+            let composite = self.group(device, &self.composite_fsr, &[(1, &depth_only), (2, &hdr), (3, &blurred), (6, &bloom[0]), (7, &shafts), (9, &ssr), (10, &bounce)], true, true);
+            let taa_composite = [0, 1].map(|i| {
+                self.group(device, &self.composite_fsr, &[(1, &depth_only), (2, &history[i]), (3, &blurred), (6, &bloom[0]), (7, &shafts), (9, &ssr), (10, &bounce)], true, true)
+            });
+            let fsr_group = |pipeline: &wgpu::RenderPipeline, src: &wgpu::TextureView| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("fsr"),
+                    layout: &pipeline.get_bind_group_layout(0),
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: self.fsr_globals.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(src),
+                        },
+                    ],
+                })
+            };
+            let easu = fsr_group(&self.easu, &small);
+            let rcas_full = fsr_group(&self.rcas, &full);
+            FsrTargets {
+                _held: held.into_inner(),
+                small,
+                full,
+                composite,
+                taa_composite,
+                easu,
+                rcas_full,
+            }
+        });
         self.taa_valid.set(false);
         self.targets = Some(Targets {
             _held: held.into_inner(),
@@ -444,6 +556,11 @@ impl Post {
             taa_bloom,
             taa_composite,
             history,
+            bounce_raw,
+            bounce,
+            bounce_group,
+            bounce_blur_group,
+            fsr,
             size,
             msaa,
             hdr,
@@ -514,6 +631,11 @@ impl Post {
         let bloom = showing.is_some_and(|e| e.bloom);
         let contact = showing.map_or(0.0, |e| if e.contact { screen_fx.contact } else { 0.0 });
         let wet = showing.map_or(0.0, |e| if e.ssr && !e.raytracing { screen_fx.wet } else { 0.0 });
+        let bounce = showing.is_some_and(|e| e.bounce);
+        // FSR in place of the plain stretch (and of temporal anti-aliasing's
+        // own sharpening): only drawn smaller than the screen, or temporally
+        // anti-aliased; supersampled, the plain shrink.
+        let fsr = t.fsr.as_ref().filter(|_| showing.is_some_and(|e| e.fsr) && t.size.0 <= t.output.0 && (taa.is_some() || t.size != screen));
         let to_view = |v: glam::Vec3| (screen_fx.view * v.extend(0.0)).truncate().normalize_or_zero();
         let globals = PostGlobals {
             inv_proj: proj.inverse().to_cols_array_2d(),
@@ -542,12 +664,14 @@ impl Post {
             reproject: cinematic.map_or(Mat4::IDENTITY, |c| c.1).to_cols_array_2d(),
             cinematic: cinematic.map_or([0.0; 4], |(focus, _)| [focus, 0.006 * h, 0.5, 1.0]),
             scaled: [
-                (t.size != screen) as u32 as f32,
+                // FSR without temporal anti-aliasing finishes the scene at its own
+                // size (EASU stretches it after).
+                (t.size != screen && !(fsr.is_some() && taa.is_none())) as u32 as f32,
                 if self.traced_shafts.is_some() && showing.is_some_and(|e| e.shafts) { self.shaft_strength } else { 0.0 },
                 // How many of the scene's pixels across one of the screen's
                 // (above 1 when supersampled).
                 t.size.0 as f32 / t.output.0.max(1) as f32,
-                0.0,
+                fsr.is_some() as u32 as f32,
             ],
             taa_inverse: taa.map_or(Mat4::IDENTITY, |a| a.inverse).to_cols_array_2d(),
             taa_before: taa.map_or(Mat4::IDENTITY, |a| a.before).to_cols_array_2d(),
@@ -558,13 +682,25 @@ impl Post {
                 let (w, h) = (t.output.0.max(1) as f32, t.output.1.max(1) as f32);
                 [w, h, 1.0 / w, 1.0 / h]
             },
-            taa: [self.taa_valid.get() as u32 as f32, if taa.is_some() { TAA_SHARPEN } else { 0.0 }, taa.map_or(0.0, |a| a.shift[0]), taa.map_or(0.0, |a| a.shift[1])],
+            taa: [self.taa_valid.get() as u32 as f32, if taa.is_some() && fsr.is_none() { TAA_SHARPEN } else { 0.0 }, taa.map_or(0.0, |a| a.shift[0]), taa.map_or(0.0, |a| a.shift[1])],
             proj: proj.to_cols_array_2d(),
             view_sun: to_view(screen_fx.to_sun).extend(contact).into(),
             view_up: to_view(glam::Vec3::Y).extend(wet).into(),
-            extra: [showing.is_some_and(|e| e.gtao) as u32 as f32, 0.0, 0.0, 0.0],
+            // w: FSR 2's temporal rebuild in place of the plain one (fs_taa).
+            extra: [showing.is_some_and(|e| e.gtao) as u32 as f32, if bounce { BOUNCE_STRENGTH } else { 0.0 }, BOUNCE_REACH, (fsr.is_some() && taa.is_some()) as u32 as f32],
         };
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
+        if fsr.is_some() {
+            let (w, h) = (t.size.0.max(1) as f32, t.size.1.max(1) as f32);
+            let (ow, oh) = (t.output.0.max(1) as f32, t.output.1.max(1) as f32);
+            let stops = if taa.is_some() { FSR_TAA_SHARPNESS_STOPS } else { FSR_SHARPNESS_STOPS };
+            let numbers = FsrGlobals {
+                input: [w, h, 1.0 / w, 1.0 / h],
+                output: [ow, oh, 1.0 / ow, 1.0 / oh],
+                sharp: [(-stops).exp2(), 0.0, 0.0, 0.0],
+            };
+            queue.write_buffer(&self.fsr_globals, 0, bytemuck::bytes_of(&numbers));
+        }
         let mut mark = |encoder: &mut wgpu::CommandEncoder, label: &'static str| {
             if let Some(t) = timer.as_mut() {
                 t.mark(encoder, label);
@@ -592,18 +728,18 @@ impl Post {
             pass.draw(0..3, 0..1);
         };
         // Blended with the frames before, before the rest reads it.
-        let (bloom_first, composite) = match taa {
+        let (bloom_first, composite, fsr_composite) = match taa {
             Some(_) => {
                 let i = self.taa_next.get();
                 pass(encoder, &t.history[i], false, &self.taa, &t.taa[i]);
                 mark(encoder, "post: taa");
                 self.taa_next.set(1 - i);
                 self.taa_valid.set(true);
-                (&t.taa_bloom[i], &t.taa_composite[i])
+                (&t.taa_bloom[i], &t.taa_composite[i], fsr.map(|f| &f.taa_composite[i]))
             }
-            None => (&t.bloom_first, &t.composite),
+            None => (&t.bloom_first, &t.composite, fsr.map(|f| &f.composite)),
         };
-        if let (Some((single, group)), Some(copy), true) = (&t.depth_single, &self.depth_copy, wet > 0.0 || ao || contact > 0.0) {
+        if let (Some((single, group)), Some(copy), true) = (&t.depth_single, &self.depth_copy, wet > 0.0 || ao || contact > 0.0 || bounce) {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("depth copy"),
                 color_attachments: &[],
@@ -632,6 +768,11 @@ impl Post {
             pass(encoder, &t.blurred, false, &self.ao_blur, &t.blur_group);
             mark(encoder, "post: ao");
         }
+        if bounce {
+            pass(encoder, &t.bounce_raw, false, &self.bounce, &t.bounce_group);
+            pass(encoder, &t.bounce, false, &self.bounce_blur, &t.bounce_blur_group);
+            mark(encoder, "post: bounce");
+        }
         if bloom {
             pass(encoder, &t.bloom[0], false, &self.bloom_first, bloom_first);
             for i in 1..BLOOM_STEPS {
@@ -642,7 +783,24 @@ impl Post {
             }
         }
         mark(encoder, "post: bloom");
-        pass(encoder, target, false, &self.composite, composite);
-        mark(encoder, "post: composite");
+        match (fsr, fsr_composite) {
+            (Some(f), Some(group)) => {
+                if taa.is_some() {
+                    // Rebuilt at the screen's size already: finished there,
+                    // then only sharpened.
+                    pass(encoder, &f.full, false, &self.composite_fsr, group);
+                } else {
+                    pass(encoder, &f.small, false, &self.composite_fsr, group);
+                    pass(encoder, &f.full, false, &self.easu, &f.easu);
+                }
+                mark(encoder, "post: composite");
+                pass(encoder, target, false, &self.rcas, &f.rcas_full);
+                mark(encoder, "post: fsr");
+            }
+            _ => {
+                pass(encoder, target, false, &self.composite, composite);
+                mark(encoder, "post: composite");
+            }
+        }
     }
 }

@@ -1097,6 +1097,19 @@ impl TerrainRenderer {
             crate::dynres::set_room(room);
             crate::dynres::scaled(size, (width, height))
         });
+        // In a browser with FSR: the picture's share (dynres::Picture) taken
+        // by the scene alone, FSR stretching it over the window's pixels.
+        let scene = match showing {
+            Some(e) if e.fsr && cfg!(target_arch = "wasm32") && crate::dynres::picture() < 1.0 => {
+                let k = crate::dynres::picture();
+                (((scene.0 as f32 * k).round() as u32).max(1), ((scene.1 as f32 * k).round() as u32).max(1))
+            }
+            _ => scene,
+        };
+        if let Some(e) = &mut self.enhanced {
+            // FSR's targets made while it would be drawn.
+            e.post.fsr_wanted = showing.is_some_and(|s| s.fsr) && (scene != (width, height) || showing.is_some_and(|s| s.taa)) && scene.0 <= width;
+        }
         let (start, end) = self.fog_range;
         // The enhanced haze: half as thick as the game's fog at its end,
         // and the view reaching on till it has all but hidden the land.
