@@ -12,7 +12,15 @@ import * as mm from "./pkg/mm2_webtools.js";
 const params = new URLSearchParams(location.search);
 export const PACK_URL = params.get("pack-url") || "https://pub-18a3400893df4f6dbcc1edfbe934a71c.r2.dev/";
 
-const lower = (p) => p.replaceAll("\\", "/").toLowerCase();
+// A path's key: forward slashes, any case, "." and ".." worked out (the
+// Free Pack's models point at "../textures/…").
+const lower = (p) => {
+  const out = [];
+  for (const part of p.replaceAll("\\", "/").toLowerCase().split("/"))
+    if (part === "..") out.pop();
+    else if (part !== "." && part !== "") out.push(part);
+  return out.join("/");
+};
 const ext = (p) => (p.match(/\.([^./]+)$/)?.[1] || "").toLowerCase();
 export { ext };
 
