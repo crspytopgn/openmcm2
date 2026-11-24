@@ -39,7 +39,7 @@ Also new: **photo mode** and **race the leaderboard ghosts** (both in Extras, of
 
 ## Build your own tracks
 
-![The Course Builder: draw a line, add jumps, paint the ground and ride it](assets/readme/course-builder.gif)
+![The Course Builder with a Surprise me supercross track and the jump kit open](assets/readme/course-builder.jpg)
 
 The **Course Builder** is on the main menu. Draw the line, drop in jumps,
 whoops and rhythm sections, paint sand and mud, add bales, tents and
@@ -83,7 +83,7 @@ in the download and the browser.
 
 | | |
 |---|---|
-| ![The free supercross stadium at night](assets/readme/free-sx-night.jpg) | ![A full gate leaving the start on a free national track](assets/readme/free-national.jpg) |
+| ![The free supercross stadium at night](assets/readme/free-sx-night.jpg) | ![Racing on Copper Ridge, a free national track](assets/readme/free-national.jpg) |
 
 The **Free Pack** is a whole set of new art made for OpenMCM2: bikes and
 riders, a supercross stadium with lights for night races, 38 new tracks
