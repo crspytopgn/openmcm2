@@ -207,9 +207,27 @@ struct Loops {
     high: f32,
     /// Top speed in each gear, mph.
     gears: Vec<f32>,
+    /// From an MX Bikes style `engine.scl` (`Scl = engine.scl`): each on
+    /// and off loop's volume at points along the revs (rpm, volume), in
+    /// place of crossfading neighbours. The off layer starts at idle, so
+    /// the separate idle loop is then silent.
+    points: Option<(Vec<Vec<(f32, f32)>>, Vec<Vec<(f32, f32)>>)>,
 }
 
 impl Loops {
+    /// Whether the class's `engine.ini` asks for its loops over the
+    /// whole samples (`RevBlend = 1`).
+    fn wanted(dir: &Path) -> bool {
+        let Ok(text) = crate::fs::read_to_string(dir.join("engine.ini")) else {
+            return false;
+        };
+        let ini = scn::Ini::parse(&text);
+        ini.sections
+            .iter()
+            .find_map(|s| s.get("RevBlend"))
+            .is_some_and(|v| matches!(v.trim(), "1" | "true" | "yes"))
+    }
+
     fn load(dir: &Path) -> Option<Loops> {
         let ini = scn::Ini::parse(&crate::fs::read_to_string(dir.join("engine.ini")).ok()?);
         let get = |key: &str| ini.sections.iter().find_map(|s| s.get(key)).map(|v| v.trim().to_string());
@@ -244,6 +262,35 @@ impl Loops {
         let gears: Vec<f32> = get("GearTopSpeeds")
             .map(|v| v.split(',').filter_map(|g| g.trim().parse().ok()).collect())
             .unwrap_or_else(|| GEARS.to_vec());
+        let gears = if gears.is_empty() { vec![75.0] } else { gears };
+        if let Some(scl) = get("Scl") {
+            let layers = Scl::parse(&crate::fs::read_to_string(dir.join(&scl)).ok()?);
+            let mut sets = Vec::new();
+            for layer in layers.iter().take(2) {
+                let mut sounds = Vec::new();
+                let mut points = Vec::new();
+                for step in layer {
+                    sounds.push((file(&step.wav)?, step.reference));
+                    points.push(step.points.clone());
+                }
+                sets.push((sounds, points));
+            }
+            let (off, off_points) = sets.pop()?;
+            let (on, on_points) = sets.pop()?;
+            return Some(Loops {
+                idle: off.first()?.0.clone(),
+                idle_rpm: off.first()?.1,
+                on,
+                off,
+                low: num("IdleRpm").unwrap_or(1600.0),
+                high: num("MaxRpm").unwrap_or(10000.0),
+                gears,
+                points: Some((on_points, off_points)),
+            });
+        }
+        let gears: Vec<f32> = get("GearTopSpeeds")
+            .map(|v| v.split(',').filter_map(|g| g.trim().parse().ok()).collect())
+            .unwrap_or_else(|| GEARS.to_vec());
         Some(Loops {
             on: set("OnLoops", "OnLoop", "OnLoopRpm")?,
             off: set("OffLoops", "OffLoop", "OffLoopRpm")?,
@@ -252,7 +299,92 @@ impl Loops {
             low: num("IdleRpm").unwrap_or(1600.0),
             high: num("MaxRpm").unwrap_or(10000.0),
             gears: if gears.is_empty() { vec![75.0] } else { gears },
+            points: None,
         })
+    }
+}
+
+/// One loop of an MX Bikes `engine.scl` layer: its file, the revs it was
+/// recorded at, and its volume at points along the revs.
+#[derive(Debug, Clone, PartialEq)]
+struct SclStep {
+    wav: String,
+    reference: f32,
+    points: Vec<(f32, f32)>,
+}
+
+/// An MX Bikes engine sound layout (`engine.scl`): `MaxValue`, then
+/// `Layer0` (on the gas) and `Layer1` (off it), each a list of samples
+/// with `Wav`, `Point`s of `Value` (a share of `MaxValue`) and `Volume`,
+/// and `RefPitch` (the revs it was recorded at, also a share).
+struct Scl;
+
+impl Scl {
+    fn parse(text: &str) -> Vec<Vec<SclStep>> {
+        let mut max = 1.0f32;
+        let mut layers: Vec<Vec<SclStep>> = Vec::new();
+        let mut value = None;
+        for line in text.lines() {
+            let line = line.split(";;").next().unwrap_or("").trim();
+            let (key, v) = match line.split_once('=') {
+                Some((k, v)) => (k.trim(), v.trim()),
+                None => (line, ""),
+            };
+            let n = v.parse::<f32>().ok();
+            let step = layers.last_mut().and_then(|l| l.last_mut());
+            match key {
+                "MaxValue" => max = n.unwrap_or(1.0),
+                k if k.starts_with("Layer") => layers.push(Vec::new()),
+                "Wav" => {
+                    if let Some(l) = layers.last_mut() {
+                        let name = v.rsplit(['\\', '/']).next().unwrap_or(v).to_string();
+                        l.push(SclStep { wav: name, reference: 0.0, points: Vec::new() });
+                    }
+                }
+                "Value" => value = n.map(|x| x * max),
+                "Volume" => {
+                    if let (Some(s), Some(at), Some(vol)) = (step, value.take(), n) {
+                        s.points.push((at, vol));
+                    }
+                }
+                "RefPitch" => {
+                    if let (Some(s), Some(r)) = (step, n) {
+                        s.reference = r * max;
+                    }
+                }
+                _ => {}
+            }
+        }
+        layers.retain(|l| !l.is_empty());
+        layers
+    }
+}
+
+/// The volume a set of (rpm, volume) points gives at `rpm`: straight
+/// lines between them, and silence past either end.
+fn trapezoid(points: &[(f32, f32)], rpm: f32) -> f32 {
+    match points {
+        [] => 0.0,
+        [only] => only.1,
+        _ => {
+            let (first, last) = (points[0], points[points.len() - 1]);
+            // Below the first point only a loop that starts at 0 is
+            // heard; past the last, it holds at its last volume.
+            if rpm < first.0 {
+                return if first.0 <= 0.0 { first.1 } else { 0.0 };
+            }
+            if rpm > last.0 {
+                return last.1;
+            }
+            for w in points.windows(2) {
+                let ((a, va), (b, vb)) = (w[0], w[1]);
+                if rpm <= b {
+                    let t = if b > a { (rpm - a) / (b - a) } else { 1.0 };
+                    return va + (vb - va) * t;
+                }
+            }
+            points[points.len() - 1].1
+        }
     }
 }
 
@@ -322,6 +454,19 @@ impl Revs {
 
     /// Each loop's volume and pitch, in [`Loops::all`]'s order.
     fn mix(&self, loops: &Loops) -> Vec<(f32, f32)> {
+        if let Some((on, off)) = &loops.points {
+            // As MX Bikes plays them: the on layer by the throttle, the
+            // off layer by what's left, each loop at its own volume for
+            // the revs and pitched from the revs it was recorded at.
+            let mut out = Vec::with_capacity(on.len() + off.len() + 1);
+            for (set, points, level) in [(&loops.on, on, self.load), (&loops.off, off, 1.0 - self.load)] {
+                for ((_, at), p) in set.iter().zip(points) {
+                    out.push((level * trapezoid(p, self.rpm), self.rpm / at.max(1.0)));
+                }
+            }
+            out.push((0.0, 1.0));
+            return out;
+        }
         let near_idle = ((loops.low * 1.7 - self.rpm) / (loops.low * 0.7)).clamp(0.0, 1.0);
         let off = 1.0 - self.load;
         let mut out = Vec::with_capacity(loops.on.len() + loops.off.len() + 1);
@@ -347,7 +492,11 @@ fn blend(set: &[(Arc<Sound>, f32)], rpm: f32) -> Vec<f32> {
         return w;
     }
     let (a, b) = (set[i - 1].1, set[i].1);
-    let t = ((rpm / a).ln() / (b / a).ln()).clamp(0.0, 1.0);
+    // Each loop alone over most of its stretch, crossfaded only across
+    // the middle 40% of the way to the next: two takes heard together
+    // for long sound doubled, like an echo.
+    let t = ((rpm / a).ln() / (b / a).ln());
+    let t = ((t - 0.3) / 0.4).clamp(0.0, 1.0);
     w[i - 1] = (t * std::f32::consts::FRAC_PI_2).cos();
     w[i] = (t * std::f32::consts::FRAC_PI_2).sin();
     w
@@ -466,7 +615,11 @@ impl Bank {
         let whole = [List::Idle, List::PowerBand, List::Decel]
             .iter()
             .all(|&l| !lists[LISTS.iter().position(|(k, _)| *k == l).unwrap_or(0)].is_empty());
-        let loops = if whole { None } else { Loops::load(dir) };
+        // Unless the class's `engine.ini` asks for its rev-step loops
+        // (`RevBlend = 1`, with `OnLoops`/`OffLoops` recorded every so many
+        // revs): then the loops play, blended by revs, on the gas, off it
+        // and in the air, and the whole samples are only for an older game.
+        let loops = if whole && !Loops::wanted(dir) { None } else { Loops::load(dir) };
         if lists.iter().all(|l| l.is_empty()) && loops.is_none() {
             return None;
         }
@@ -1132,7 +1285,17 @@ impl RaceSounds {
                     e.revs.voices.resize(sounds.len(), None);
                     let (volume, pan, doppler) = l.hear(bike.position(), bike.velocity(), ENGINE_RANGE);
                     let mix = e.revs.mix(loops);
-                    for ((slot, sound), (level, pitch)) in e.revs.voices.iter_mut().zip(sounds).zip(mix) {
+                    // Each bike its own place in the loops and a hair of its
+                    // own pitch: bikes side by side at the same revs (off a
+                    // jump together) would otherwise play the very same
+                    // waves in step, which sounds hollow, like a flanger.
+                    let mine = |k: usize| {
+                        let h = (i as u32).wrapping_mul(0x9e37_79b9) ^ (k as u32).wrapping_mul(0x85eb_ca6b);
+                        let h = (h ^ (h >> 15)).wrapping_mul(0x2c1b_3c6d);
+                        (h ^ (h >> 12)) as f32 / u32::MAX as f32
+                    };
+                    let detune = 1.0 + (mine(usize::MAX) - 0.5) * 0.03;
+                    for (k, ((slot, sound), (level, pitch))) in e.revs.voices.iter_mut().zip(sounds).zip(mix).enumerate() {
                         if slot.is_some_and(|v| !audio.playing(v)) {
                             *slot = None;
                         }
@@ -1143,8 +1306,11 @@ impl RaceSounds {
                             }
                             continue;
                         }
-                        let v = *slot.get_or_insert_with(|| audio.play(sound, 0.0, true));
-                        audio.place(v, volume * level * self.options.gain, pan, doppler * pitch);
+                        let v = *slot.get_or_insert_with(|| {
+                            let length = sound.frames() as f32 / sound.rate.max(1) as f32;
+                            audio.play_from(sound, mine(k) * length, 0.0, true)
+                        });
+                        audio.place(v, volume * level * self.options.gain, pan, doppler * pitch * detune);
                     }
                 }
                 self.engines[i] = e;
@@ -1482,7 +1648,30 @@ mod tests {
         let bank = Bank::load_dir(&dir, 1).unwrap();
         assert!(bank.loops.is_none());
         assert_eq!(bank.list(List::PowerBand).len(), 1);
+        // Asked for, the rev-step loops win, blended by revs.
+        let ini = "[Engine]\nRevBlend=1\nOnLoops=OnLoop.wav@3000, PowerBand01.wav@9000\nOffLoop=OffLoop.wav\nIdleLoop=IdleLoop.wav\nOffLoopRpm=5000\nIdleLoopRpm=1500\n";
+        std::fs::write(dir.join("engine.ini"), ini).unwrap();
+        let bank = Bank::load_dir(&dir, 1).unwrap();
+        assert_eq!(bank.loops.as_ref().map(|l| l.on.len()), Some(2));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An MX Bikes `engine.scl` reads as its two layers, each loop with
+    /// its file, revs and volume points in rpm.
+    #[test]
+    fn scl_reads_layers() {
+        let text = "MaxValue = 10000.0\r\nAutoPitch = 1\r\nLayer0\r\n\tNumSamples = 1\r\n\tSample0\r\n\t\tWav = ..\\Sound\\a_on.wav\r\n\t\tPoint0\r\n\t\t\tValue = 0.0 ;; 0\r\n\t\t\tVolume = 1.0\r\n\t\tPoint1\r\n\t\t\tValue = 0.5 ;; 5000\r\n\t\t\tVolume = 0.5\r\n\t\tRefPitch = 0.4 ;; 4000\r\nLayer1\r\n\tSample0\r\n\t\tWav = b_off.wav\r\n\t\tPoint0\r\n\t\t\tValue = 0.2\r\n\t\t\tVolume = 0.7\r\n\t\tRefPitch = 0.3\r\n";
+        let layers = Scl::parse(text);
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[0][0].wav, "a_on.wav");
+        assert_eq!(layers[0][0].points, vec![(0.0, 1.0), (5000.0, 0.5)]);
+        assert!((layers[0][0].reference - 4000.0).abs() < 0.01);
+        assert_eq!(layers[1][0].wav, "b_off.wav");
+        // Straight lines between points; silence past a closing zero.
+        assert!((trapezoid(&[(0.0, 1.0), (100.0, 1.0), (200.0, 0.0)], 150.0) - 0.5).abs() < 1e-6);
+        assert_eq!(trapezoid(&[(0.0, 1.0), (100.0, 1.0), (200.0, 0.0)], 300.0), 0.0);
+        assert_eq!(trapezoid(&[(100.0, 0.0), (200.0, 1.0), (300.0, 1.0)], 400.0), 1.0);
+        assert_eq!(trapezoid(&[(100.0, 0.0), (200.0, 1.0)], 50.0), 0.0);
     }
 
     /// The Free Pack's sounds as Ogg Vorbis load as the WAVs did: a list's
@@ -1609,6 +1798,7 @@ mod revs_tests {
             low: 1600.0,
             high: 10000.0,
             gears: GEARS.to_vec(),
+            points: None,
         }
     }
 
