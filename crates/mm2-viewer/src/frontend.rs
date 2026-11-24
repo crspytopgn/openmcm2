@@ -1162,6 +1162,16 @@ impl Frontend {
         }
     }
 
+    /// The bike and rider were dragged round: Auto Rotate goes off
+    /// (0x44fae0).
+    pub fn stop_turning(&mut self) {
+        match &mut self.screen {
+            Screen::Single { page, .. } if page.index("DDLBikes").is_some() => page.set_on("ChkAutoRotate", false),
+            Screen::Extra(s) => s.stop_turning(),
+            _ => {}
+        }
+    }
+
     /// Where the turning bike goes on the screen.
     pub fn preview_window(&self) -> [f32; 4] {
         match &self.screen {

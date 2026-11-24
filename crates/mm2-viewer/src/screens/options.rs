@@ -238,11 +238,10 @@ const CHAT_MODES: [u32; 3] = [5131, 5130, 5132];
 pub(crate) const DETAILS: [&str; 4] = ["SldEcosystem", "SldObjects", "SldTerrain", "SldVisibility"];
 
 /// The advanced screen's settings this engine doesn't read, greyed: the
-/// details other than Visibility, the video card and memory, the terrain
-/// detail method, and the startup pickers and joystick filter. They are
-/// still saved, as the original did.
-const NO_EFFECT: [&str; 10] = [
-    "SldEcosystem",
+/// details other than Visibility and Ecosystem, the video card and memory,
+/// the terrain detail method, and the startup pickers and joystick filter.
+/// They are still saved, as the original did.
+const NO_EFFECT: [&str; 9] = [
     "SldObjects",
     "SldTerrain",
     "ChkForceVideoMem",

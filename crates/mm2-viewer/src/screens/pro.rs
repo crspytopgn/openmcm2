@@ -1247,6 +1247,12 @@ impl Screen for Pro {
         }
     }
 
+    fn stop_turning(&mut self) {
+        if let View::Central { page, tab: 1, .. } = &mut self.view {
+            page.set_on("ChkAutoRotate", false);
+        }
+    }
+
     fn preview(&self) -> Option<(Ride, bool, [f32; 4])> {
         if self.sub.is_some() {
             return None;

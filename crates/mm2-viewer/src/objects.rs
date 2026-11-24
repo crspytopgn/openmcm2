@@ -56,8 +56,44 @@ const BLOCK: f32 = 160.0;
 
 /// How far off the eco-system's trees give way to their billboards, ft,
 /// and over how deep a band they blend, dithered (objects.wgsl's too).
+/// That is Enhanced's; the original's is [`tree_band`].
 pub const TREE_FAR: f32 = 450.0;
 pub const TREE_BAND: f32 = 60.0;
+
+/// Where the trees give way to their billboards and how far those reach,
+/// ft: the edge between them, the band they blend over, and the reach.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TreeBand {
+    pub edge: f32,
+    pub band: f32,
+    pub reach: f32,
+}
+
+impl TreeBand {
+    /// Enhanced's: whole trees out to 450 ft, billboards to the fog.
+    pub const ENHANCED: TreeBand = TreeBand { edge: TREE_FAR, band: TREE_BAND, reach: f32::INFINITY };
+}
+
+/// The original's band at Ecosystem detail `level`, 0 to 9 (the table at
+/// 0x56a740 a 3D card reads, by 0x456890 and the billboard pass): whole
+/// trees out to the first distance, the billboard fading in over them
+/// from the second, and billboards only as far as the third.
+pub fn tree_band(level: u32) -> TreeBand {
+    const BANDS: [(f32, f32, f32); 10] = [
+        (20.0, 0.0, 256.0),
+        (35.0, 5.0, 256.0),
+        (45.0, 10.0, 320.0),
+        (60.0, 20.0, 384.0),
+        (75.0, 30.0, 448.0),
+        (90.0, 40.0, 512.0),
+        (105.0, 50.0, 576.0),
+        (120.0, 60.0, 640.0),
+        (135.0, 67.0, 768.0),
+        (150.0, 75.0, 768.0),
+    ];
+    let (whole, fade, reach) = BANDS[level.min(9) as usize];
+    TreeBand { edge: (whole + fade) / 2.0, band: whole - fade, reach }
+}
 
 /// What a draw is, for the trees' distance: a draw of anything else, of
 /// the eco-system's full trees (near), or of their billboards (far); its
@@ -1288,6 +1324,8 @@ pub struct ObjectRenderer {
     /// The dressing's node, and whether it shows.
     extra_node: Option<usize>,
     pub extras_shown: bool,
+    /// Where the trees give way to their billboards, for the culling.
+    pub trees: TreeBand,
     /// The enhanced drawing ([`crate::graphics`]), when on.
     enhanced: Option<Enhanced>,
     /// Whether each draw is solid: no texel of its picture at any size,
@@ -1977,6 +2015,7 @@ impl ObjectRenderer {
             node_count,
             extra_node: mesh.extra_node.map(|n| n as usize),
             extras_shown: true,
+            trees: TreeBand::ENHANCED,
             enhanced,
             solid: solid_draws(&mesh),
             held: held.into_inner(),
@@ -2258,9 +2297,10 @@ impl ObjectRenderer {
             let wanted = |b: &&Block| {
                 let near = camera.clamp(b.0, b.1).distance(camera);
                 let far = (camera - b.0).abs().max((camera - b.1).abs()).length();
+                let t = self.trees;
                 match kind {
-                    1 => near <= TREE_FAR + TREE_BAND,
-                    2 => far >= TREE_FAR - TREE_BAND,
+                    1 => near <= t.edge + t.band,
+                    2 => far >= t.edge - t.band && near <= t.reach,
                     _ => true,
                 }
             };
@@ -2795,4 +2835,17 @@ fn upload_as(device: &wgpu::Device, queue: &wgpu::Queue, tex: &Image, srgb: bool
 /// A file name without the folders before it.
 fn bare(name: &str) -> &str {
     name.rsplit(['\\', '/']).next().unwrap_or(name)
+}
+
+#[cfg(test)]
+mod tree_band_tests {
+    use super::tree_band;
+
+    #[test]
+    fn the_default_detail_draws_whole_trees_near_and_billboards_to_576_ft() {
+        let t = tree_band(6);
+        assert_eq!((t.edge - t.band / 2.0, t.edge + t.band / 2.0, t.reach), (50.0, 105.0, 576.0));
+        assert_eq!(tree_band(9).reach, 768.0);
+        assert_eq!(tree_band(20), tree_band(9));
+    }
 }
