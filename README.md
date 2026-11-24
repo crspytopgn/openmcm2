@@ -16,6 +16,17 @@ own. Point it at the folder of your install (or the CD's `GAME` folder).
 
 Project page: https://crspytopgn.github.io/openmcm2/ · Play in your browser: https://crspytopgn.github.io/openmcm2/play/ · Tools: https://crspytopgn.github.io/openmcm2/tools/
 
+## New in 0.8: The Big Physics Update
+
+The riding physics are now copied 1:1 from the original game: tyres,
+suspension, air control, crashes and the tumble afterwards, checked
+against 124 rides recorded in the original and the same at any frame
+rate. The race cameras, computer riders and start grid follow the
+original too. Also new: faster on every PC and on laptops in the browser,
+MX Bikes style free engines, bounce light and FSR in Enhanced, and
+Course Builder tracks you can export to the original game. See
+[RELEASE_NOTES.md](RELEASE_NOTES.md) for the full list.
+
 ## New in 0.7
 
 | | |
@@ -315,6 +326,10 @@ MM2_DATA="/path/to/Motocross Madness 2" cargo test
 
 ## Credits
 
+* Andrew Boudreau's
+  [Motocross Madness 2 decompilation](https://andrewboudreau.github.io/motocross-madness-2-decomp/)
+  was a huge help for matching the physics, cameras and computer riders to
+  the original. Thank you, Andrew.
 * Many fixes and most of the Extras came from Daniel's fork,
   [dwolp/MCM2](https://github.com/dwolp/MCM2): ultrawide support, saved
   track records, gates in either direction, the single-event difficulty,
