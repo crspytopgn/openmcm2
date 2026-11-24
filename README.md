@@ -48,6 +48,37 @@ me* makes a whole track in one click, and you can start from a copy of any
 track you already have. It's free, works with either set of graphics, and
 runs in the browser too. (A switch in the launcher's Extras takes it off the menu.)
 
+## The Tools: look inside the game
+
+| | |
+|---|---|
+| ![The Yamaha YZ426F and a rider in the Bikes & riders tool](assets/readme/tools-garage.jpg) | ![Flying low over a national track in the Tracks tool](assets/readme/tools-track.jpg) |
+| **Bikes & riders.** Every bike and rider in 3D, in any paint and outfit, playing every animation the game has. | **Tracks.** Fly round any track with its scenery, trees and racing line, your own tracks too. |
+| ![Painting a bike in 3D in the Skin painter](assets/readme/tools-paint.jpg) | ![A track drawn in the quick Course Builder](assets/readme/tools-builder.jpg) |
+| **Skin painter.** Paint a bike or a rider right on the 3D model and save it as a `.tga` for your game. | **Quick Course Builder.** Shape a track in seconds, then ride it or carry on in the full Course Builder. |
+
+The **[Tools page](https://crspytopgn.github.io/openmcm2/tools/)** runs in
+any recent browser, nothing to install. Point it at your MM2 folder, CD or
+`.zip`, or the Free Pack, and browse every file with previews, save models
+as `.glb`, pictures as `.png` and sounds as `.wav`. Your files are read on
+your own computer and never uploaded. More on each tool [below](#tools).
+
+## Hidden extra: drive the scenery
+
+| | |
+|---|---|
+| ![Flying the helicopter over Voodoo Basin](assets/readme/drive-heli.jpg) | ![Banking the Super Cub over the airfield](assets/readme/drive-plane.jpg) |
+| ![Riding the train through Munchberry Farms](assets/readme/drive-train.jpg) | ![Taking a sports car off-road](assets/readme/drive-car.jpg) |
+
+The cars, trucks, trains, planes and helicopters on the tracks aren't just
+scenery. Turn on **Drive the scenery** in Extras, go to Practice or free
+roam, and press **V** (or down on the D-pad) next to one to get in, or
+anywhere to grab the nearest plane, helicopter or blimp in the sky. Each has
+its own springs, weight, power and engine sound. Press **V** again to hop
+back on your bike. The Enduro tracks have the most, and the free tracks have
+a car park by the start plus planes, a helicopter, a blimp and a UFO. Works
+in the download and the browser.
+
 ## No copy of MM2? Play with the free graphics
 
 | | |
