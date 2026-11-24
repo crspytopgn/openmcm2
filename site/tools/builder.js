@@ -9,11 +9,13 @@
 import * as mm from "./pkg/mm2_webtools.js";
 import * as fs from "../play/mm2fs.js";
 import { Viewer, THREE, save as download } from "./scene3d.js";
+import { AiLap } from "./ailap.js";
 
 const DEMO_PATH = "/demo/MCM2PCG.exe";
 const COURSES = "/user/Courses/";
 const KIT = JSON.parse(mm.course_kit());
 const EVERY = 8; // the map and 3D look sample every 8th point of the ground
+const ZONES = mm.course_zone_colours(); // the ground zones' colours, as the preview paints them
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
@@ -232,6 +234,7 @@ export async function mount(app, panel) {
         p.free();
         view.s = alongLine(view.line);
         ground = null;
+        if (lap?.running) stopWatch("The track changed, so the riders left it. Press Watch an AI lap to see it again.");
         mesh3d = null;
       } catch (err) {
         say(`That didn't work: ${err.message}`, true);
@@ -618,6 +621,7 @@ export async function mount(app, panel) {
       viewer.controls.addEventListener("change", shown3d);
       build3d(true);
     } else {
+      if (lap?.running) stopWatch();
       setTool(tool);
       zoomShown();
     }
@@ -627,14 +631,28 @@ export async function mount(app, panel) {
 
   function build3d(reframe = false) {
     if (!v3 || !view || mesh3d) return;
-    const { n, step, heights, colours, line } = view;
+    const { colours, line } = view;
+    // Watching the riders: the baked ground they ride on, finer, so they
+    // sit on what's drawn. Else the quick preview's.
+    // (its own painted zones too: the track itself, with no ribbon).
+    const real = lap?.running ? lap.ground(Math.min(401, (view.n - 1) * 4 + 1)) : null;
+    const n = real ? Math.round(Math.sqrt(real.heights.length)) : view.n;
+    const step = real ? real.side / (n - 1) : view.step;
+    const heights = real ? real.heights : view.heights;
     const pos = new Float32Array(n * n * 3);
     const col = new Float32Array(n * n * 3);
     for (let k = 0; k < n * n; k++) {
-      pos[k * 3] = (k % n) * step;
+      const [i, j] = [k % n, Math.floor(k / n)];
+      pos[k * 3] = i * step;
       pos[k * 3 + 1] = heights[k];
-      pos[k * 3 + 2] = Math.floor(k / n) * step;
-      for (let ch = 0; ch < 3; ch++) col[k * 3 + ch] = (colours[k * 3 + ch] / 255) ** 2.2;
+      pos[k * 3 + 2] = j * step;
+      let rgb = colours;
+      let q = k;
+      if (real) {
+        rgb = ZONES;
+        q = real.zones[k];
+      }
+      for (let ch = 0; ch < 3; ch++) col[k * 3 + ch] = (rgb[q * 3 + ch] / 255) ** 2.2;
     }
     const index = [];
     for (let j = 0; j < n - 1; j++)
@@ -678,7 +696,9 @@ export async function mount(app, panel) {
     rg.setAttribute("color", new THREE.BufferAttribute(rc, 3));
     rg.setIndex(ri);
     rg.computeVertexNormals();
-    group.add(new THREE.Mesh(rg, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide })));
+    const ribbon = new THREE.Mesh(rg, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+    ribbon.visible = !real;
+    group.add(ribbon);
     viewer.clear();
     viewer.show(group);
     mesh3d = group;
@@ -775,6 +795,72 @@ export async function mount(app, panel) {
       setTimeout(() => (box.hidden = true), 1500);
     }
   }
+  // ---- Watch an AI lap: the game's riders on the baked track ----
+  let lap = null;
+  let bakedFor = null; // { text, env }: the last bake, kept for watching again
+  async function watch() {
+    if (busy) return;
+    busy = true;
+    $("qb-watch").disabled = true;
+    try {
+      if (!v3) show3d(true);
+      const t = text();
+      let env = bakedFor?.text === t ? bakedFor.env : null;
+      if (!env) {
+        say("Making the track for the riders…");
+        env = await baked("bake");
+        bakedFor = { text: t, env };
+      }
+      if (text() !== t) return; // changed meanwhile
+      say("Riders on the gate…");
+      lap ||= new AiLap(viewer);
+      lap.speed = Number($("qb-ai-speed").value);
+      lap.follow = $("qb-ai-follow").checked;
+      lap.onLap = lapShown;
+      await lap.start(env.slice(), Number($("qb-ai-n").value), event().folder === "SX");
+      mesh3d = null;
+      build3d();
+      $("qb-ai").hidden = false;
+      $("qb-watch").textContent = "Watching…";
+      say("The game's own AI riders and bike physics, riding your track. Change anything and they leave it.");
+    } catch (err) {
+      say(`The riders couldn't ride it: ${err.message}`, true);
+    } finally {
+      busy = false;
+      $("qb-watch").disabled = false;
+    }
+  }
+  function stopWatch(why) {
+    lap?.stop();
+    $("qb-ai").hidden = true;
+    $("qb-watch").textContent = "Watch an AI lap";
+    mesh3d = null;
+    build3d();
+    if (why) say(why);
+  }
+  const clock = (s) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
+  let shownAt = 0;
+  function lapShown(t, laps) {
+    if (Math.abs(t - shownAt) < 0.2) return;
+    shownAt = t;
+    let most = 0;
+    let best = 0;
+    for (let i = 0; i < laps.length; i += 3) {
+      most = Math.max(most, laps[i]);
+      if (laps[i + 2] > 0 && (!best || laps[i + 2] < best)) best = laps[i + 2];
+    }
+    $("qb-ai-lap").textContent = `${clock(t)}  ·  lap ${Math.min(most + 1, 99)}${best ? `  ·  best lap ${clock(best)}` : ""}`;
+  }
+  $("qb-watch").addEventListener("click", () => (lap?.running ? stopWatch() : watch()));
+  $("qb-ai-stop").addEventListener("click", () => stopWatch());
+  $("qb-ai-again").addEventListener("click", () => watch());
+  $("qb-ai-n").addEventListener("change", () => lap?.running && watch());
+  $("qb-ai-speed").addEventListener("input", (e) => {
+    $("qb-ai-speed-v").textContent = `${e.target.value}x`;
+    if (lap) lap.speed = Number(e.target.value);
+  });
+  $("qb-ai-follow").addEventListener("change", (e) => lap && (lap.follow = e.target.checked));
+
   async function saveTrack() {
     const stem = await keepCourse();
     say("Saving the track for OpenMCM2…");

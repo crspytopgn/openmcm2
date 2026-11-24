@@ -18,6 +18,14 @@ if command -v wasm-opt >/dev/null; then
     wasm-opt -O3 --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
         site/tools/pkg/mm2_webtools_bg.wasm -o site/tools/pkg/mm2_webtools_bg.wasm
 fi
+# The AI lap's riders, loaded only when the Course Builder tab asks.
+cargo build --release --target wasm32-unknown-unknown -p mm2-preview
+wasm-bindgen --target web --no-typescript --out-dir site/tools/sim \
+    target/wasm32-unknown-unknown/release/mm2_preview.wasm
+if command -v wasm-opt >/dev/null; then
+    wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
+        site/tools/sim/mm2_preview_bg.wasm -o site/tools/sim/mm2_preview_bg.wasm
+fi
 # The Free Pack rider's and bike's own motions, for the viewer.
 cp crates/mm2-viewer/src/free_motions.bin site/tools/pkg/
 echo "built site/tools/pkg"

@@ -206,6 +206,15 @@ pub fn course_original(text: &str) -> Result<Vec<u8>, JsError> {
     env::write_original(&read(text)?, &env::Pictures::default()).map_err(err)
 }
 
+/// The colour the preview paints each of the eight ground zones, as RGB
+/// bytes.
+#[wasm_bindgen]
+pub fn course_zone_colours() -> Vec<u8> {
+    (0..8u8)
+        .flat_map(|z| env::colour(mm2_course::Surface::from_zone(z)).map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8))
+        .collect()
+}
+
 /// The file name the track saves under, without `.ENV` or `.course`.
 #[wasm_bindgen]
 pub fn course_stem(text: &str) -> Result<String, JsError> {
