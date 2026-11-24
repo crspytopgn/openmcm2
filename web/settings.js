@@ -50,7 +50,7 @@ function presetHas(quality, name) {
   return !off.includes(name) && UPGRADES.some(([n, , on]) => n === name && on);
 }
 
-const ABOUT_QUALITY = "A preset for the effects below. Auto looks at your graphics card when the game starts and picks Low, Medium or High for it; most browsers don't say which card they have, and then it starts at Low and draws the 3D scene sharper while there is time to spare. While you race it draws the 3D scene a little smaller if frames start coming late, and if that isn't enough it turns the costliest effects off, one step at a time, giving them back once there is time to spare. It remembers what this computer needed for next time. Medium suits most computers in a browser; High needs a fast one. Changing an effect below picks Medium with that change.";
+const ABOUT_QUALITY = "A preset for the effects below. Auto looks at your graphics card when the game starts and picks Low, Medium or High for it; most browsers don't say which card they have, and then it starts with about Low's effects and turns Medium's on one step at a time while there is time to spare, remembering where it got to for next time. While you race it draws the 3D scene a little smaller if frames start coming late, and if that isn't enough it turns the costliest effects off, one step at a time, giving them back once there is time to spare. It remembers what this computer needed for next time. Medium suits most computers in a browser; High needs a fast one. Changing an effect below picks Medium with that change.";
 const ABOUT_TIME = "Where the sun is: the track's own, or an hour of your choice.";
 const ABOUT_WEATHER = "Clear, overcast or rain, for looks only: the riding is the same.";
 const ABOUT_DETAIL = "How strongly the grain of the photo ground shows.";
@@ -132,6 +132,15 @@ export function learnedShed() {
     return 0;
   }
 }
+/// Whether the game has said yet (a browser that names no graphics card
+/// starts at about Low until it has, and works up from there).
+export function shedKnown() {
+  try {
+    return localStorage.getItem(SHED_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
 export function learnShed(n) {
   try {
     localStorage.setItem(SHED_KEY, String(Math.max(0, Math.min(3, n | 0))));
@@ -211,7 +220,7 @@ export function args(s) {
     // (the game tells the page, mm2page.autoShed), so it starts there.
     if (s.quality === "auto" && !lite) {
       const shed = learnedShed();
-      if (shed > 0) list.push(`shed=${shed}`);
+      if (shed > 0 || shedKnown()) list.push(`shed=${shed}`);
     }
     if (s.time) list.push(`time=${s.time}`);
     if (s.weather !== "clear") list.push(`weather=${s.weather}`);

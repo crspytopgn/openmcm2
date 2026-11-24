@@ -411,7 +411,7 @@ impl TerrainRenderer {
             mapped_at_creation: false,
         });
 
-        let upgrades = crate::graphics::enhanced();
+        let upgrades = crate::graphics::made();
         let (scene_format, samples) = match upgrades {
             Some(e) => (crate::graphics::HDR_FORMAT, crate::graphics::samples(e.msaa)),
             None => (format, 1),
