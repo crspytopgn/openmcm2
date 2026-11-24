@@ -49,6 +49,15 @@
   #slow { position: fixed; top: 44px; left: 50%; transform: translateX(-50%); padding: .4rem .5rem .4rem 1rem; z-index: 6;
     background: rgba(0,0,0,.85); border: 1px solid var(--accent); border-radius: 8px; font-size: .9rem; max-width: calc(100vw - 32px); }
   #slow button { padding: .3rem .7rem; }
+  #slow a, #desktopnudge a.button { color: var(--accent); }
+  #desktopnudge { position: fixed; top: 44px; left: 50%; transform: translateX(-50%); padding: .5rem .6rem .5rem 1rem; z-index: 6;
+    background: rgba(0,0,0,.88); border: 1px solid var(--accent); border-radius: 8px; font-size: .9rem; max-width: calc(100vw - 32px); }
+  #desktopnudge button { padding: .3rem .7rem; }
+  #desktopnudge a.button { display: inline-block; padding: .3rem .8rem; border-radius: 6px; background: var(--accent); color: #151410; font-weight: 600; text-decoration: none; }
+  .desktopnote { display: flex; gap: .7rem; align-items: center; margin-top: 1rem; padding: .6rem .8rem; border: 1px solid #34322c; border-radius: 8px; background: #1a1917; font-size: .9rem; color: var(--dim, #a39d8f); }
+  .desktopnote span { flex: 1; }
+  .desktopnote a { color: var(--accent); font-weight: 600; }
+  .desktopnote button { padding: .2rem .55rem; }
   #look { position: fixed; top: 8px; left: 8px; padding: .3rem .8rem; border-radius: 999px;
     background: rgba(0,0,0,.6); color: var(--fg); font-size: .85rem; font-weight: 500;
     opacity: .9; transition: opacity .6s; }
@@ -310,6 +319,13 @@
     </div>
   </section>
 
+  <p class="desktopnote" id="desktopnote" hidden>
+    <span>The game runs best installed as a desktop app, for Windows, Mac and Linux: smoother, with your game folder read straight from the disk.</span>
+    <a href="https://github.com/crspytopgn/openmcm2/releases/latest" target="_blank" rel="noopener"
+      title="Downloads page for the desktop app. Free and open source, like this version.">Get the desktop app</a>
+    <button type="button" class="plain" id="desktopnoteno" title="Hides this note in this browser." aria-label="Hide">&times;</button>
+  </p>
+
   <div id="playtime" class="playtime" hidden
     title="How long you've played in this browser, and everyone's time added up on the OpenMCM2 server. Unless you tick &quot;Don't add my time to everyone's&quot; in Settings, how long you play each event, track and bike class is added to everyone's, with no name or anything else that says who you are.">
     <h3>Playtime</h3>
@@ -452,7 +468,14 @@
 </div>
 <div id="slow" class="banner" hidden>The game is running slowly on this computer.
   <button id="slowlow">Use Low quality</button> <button id="sloworig">Use the original look</button>
-  <button id="slowkeep" class="plain">Keep going</button></div>
+  <button id="slowkeep" class="plain">Keep going</button>
+  <a class="desktoplink" href="https://github.com/crspytopgn/openmcm2/releases/latest" target="_blank" rel="noopener"
+    title="The same game as a desktop app for Windows, Mac and Linux. It runs much smoother than in a browser.">Or get the desktop app</a></div>
+<div id="desktopnudge" class="banner" hidden>Struggling in the browser? The desktop app runs the same game much smoother.
+  <a class="button" href="https://github.com/crspytopgn/openmcm2/releases/latest" target="_blank" rel="noopener"
+    title="Downloads page for the desktop app: Windows, Mac and Linux. Free, like this version.">Get the desktop app</a>
+  <button id="nudgelater" class="plain" title="Hides this for now.">Not now</button>
+  <button id="nudgenever" class="plain" title="Never shows this again in this browser.">Don't show again</button></div>
 <div id="update" hidden>A new version of OpenMCM2 is out. <button id="reload">Reload to update</button>
   <button id="later" class="plain">Later</button></div>
 <button id="look" hidden title="Switch between the original look and the enhanced one (F3)"></button>
@@ -831,6 +854,34 @@ $("mm2").addEventListener("keydown", (e) => {
 // which restarts the game with it.
 let racingNow = false;
 let slowOffered = false;
+// The desktop app's note: quiet on the start page, louder when a race
+// keeps running under 25 frames a second. Phones and tablets have no
+// desktop app, so neither shows there.
+const desktopOk = !/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) && !(navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
+const desktopSaid = (k) => {
+  try {
+    return localStorage.getItem(k) === "1";
+  } catch {
+    return false;
+  }
+};
+const desktopSay = (k) => {
+  try {
+    localStorage.setItem(k, "1");
+  } catch {}
+};
+let nudged = desktopSaid("mm2desktopnever");
+const slowFrames = [];
+$("desktopnote").hidden = !desktopOk || desktopSaid("mm2desktopnote");
+$("desktopnoteno").addEventListener("click", () => {
+  $("desktopnote").hidden = true;
+  desktopSay("mm2desktopnote");
+});
+$("nudgelater").addEventListener("click", () => ($("desktopnudge").hidden = true));
+$("nudgenever").addEventListener("click", () => {
+  $("desktopnudge").hidden = true;
+  desktopSay("mm2desktopnever");
+});
 // With Auto, the steps of effects the game has set aside (0 to 3).
 let shedNow = settings.learnedShed();
 {
@@ -852,6 +903,18 @@ let shedNow = settings.learnedShed();
         $("slow").hidden = false;
       }
     } else times.length = 0;
+    // Struggling whatever the look (Auto has set aside all it can): the
+    // desktop app is the way to smoother, said once a visit.
+    if (racingNow && !document.hidden && !nudged && !autoCoping && $("slow").hidden && desktopOk) {
+      slowFrames.push(dt);
+      let span = slowFrames.reduce((a, b) => a + b, 0);
+      while (span - slowFrames[0] > 10000) span -= slowFrames.shift();
+      const sorted = [...slowFrames].sort((a, b) => a - b);
+      if (span > 10000 && sorted[sorted.length >> 1] > 40) {
+        nudged = true;
+        $("desktopnudge").hidden = false;
+      }
+    } else slowFrames.length = 0;
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
@@ -1281,10 +1344,12 @@ async function start(list) {
     // Runs the game's start; it reports its own steps from here. The
     // Course Builder is in the address only while the game reads it.
     setParam("course-builder", builderOnce || $("builder").checked ? "" : null);
+    setParam("ride-course", builderOnce && rideAsked ? "" : null);
     try {
       await game.default({ module_or_path: module });
     } finally {
       setParam("course-builder", null);
+      setParam("ride-course", null);
     }
     // The time played goes to the server as the tab is hidden or closed
     // (the game sends it after each race too).
@@ -1665,6 +1730,9 @@ let builderOnce = false;
 const builderAsked = params.has("course-builder");
 const builderWith = params.get("course-builder") || "";
 if (builderAsked) setParam("course-builder", null);
+// The Tools page's Ride it: the builder rides its last track as it opens.
+const rideAsked = builderAsked && params.has("ride-course");
+setParam("ride-course", null);
 
 // ---- MM2 graphics or free graphics ----
 // The choice is kept in this browser: MM2 graphics unless picked.

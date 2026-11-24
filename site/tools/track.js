@@ -626,6 +626,8 @@ vec3 fineGround(vec2 feet) {
     viewer.camera.near = 1;
     viewer.camera.far = s * 6;
     viewer.camera.updateProjectionMatrix();
+    viewer.range = [20, s * 2];
+    viewer.sliders?.shown();
   }
   function toStart() {
     if (!loaded?.scene) return overview();

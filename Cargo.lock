@@ -2522,6 +2522,7 @@ name = "mm2-webtools"
 version = "0.6.1"
 dependencies = [
  "glam",
+ "mm2-course",
  "mm2-formats",
  "serde_json",
  "wasm-bindgen",

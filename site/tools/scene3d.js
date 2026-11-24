@@ -13,7 +13,7 @@ export { THREE };
 
 /// A 3D view in `canvas`: orbit by default, or free fly.
 export class Viewer {
-  constructor(canvas) {
+  constructor(canvas, { sliders = true } = {}) {
     this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -42,6 +42,8 @@ export class Viewer {
     this.content = new THREE.Group();
     this.scene.add(this.content);
     this.onFrame = [];
+    this.range = [0.5, 200];
+    if (sliders && canvas.parentElement) this.addSliders(canvas.parentElement);
     new ResizeObserver(() => this.resize()).observe(canvas);
     this.resize();
     const loop = () => {
@@ -55,6 +57,37 @@ export class Viewer {
       this.renderer.render(this.scene, this.camera);
     };
     loop();
+  }
+  /// Zoom and tilt sliders over the view, for a slow wheel or a trackpad.
+  addSliders(parent) {
+    const bar = document.createElement("div");
+    bar.className = "viewsliders";
+    bar.innerHTML =
+      '<label title="How close the view is. The wheel or a pinch zooms too.">Zoom <input type="range" min="0" max="1" step="0.005"></label>' +
+      '<label title="How steeply the view looks down: from level, up to straight down. Dragging turns and tilts it too.">Tilt <input type="range" min="0" max="1" step="0.005"></label>';
+    parent.append(bar);
+    const [zoom, tilt] = bar.querySelectorAll("input");
+    const sph = new THREE.Spherical();
+    const read = () => sph.setFromVector3(this.camera.position.clone().sub(this.controls.target));
+    const [lo, hi] = [() => this.range[0], () => this.range[1]];
+    const shown = () => {
+      if (this.fly) return;
+      read();
+      zoom.value = 1 - Math.log(sph.radius / lo()) / Math.log(hi() / lo());
+      tilt.value = 1 - sph.phi / Math.PI * 2;
+    };
+    const set = () => {
+      read();
+      sph.radius = lo() * Math.pow(hi() / lo(), 1 - Number(zoom.value));
+      sph.phi = Math.max(0.02, (1 - Number(tilt.value)) * Math.PI / 2 * 0.99);
+      this.camera.position.setFromSpherical(sph).add(this.controls.target);
+      this.camera.lookAt(this.controls.target);
+      this.controls.update();
+    };
+    zoom.addEventListener("input", set);
+    tilt.addEventListener("input", set);
+    this.controls.addEventListener("change", shown);
+    this.sliders = { bar, shown };
   }
   resize() {
     const w = this.canvas.clientWidth || 1;
@@ -86,6 +119,8 @@ export class Viewer {
     this.camera.near = size / 500;
     this.camera.far = size * 50;
     this.camera.updateProjectionMatrix();
+    this.range = [size * 0.08, size * 4];
+    this.sliders?.shown();
     this.grid.position.y = box.min.y;
     this.grid.scale.setScalar(Math.max(1, size / 12));
   }

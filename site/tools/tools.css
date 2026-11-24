@@ -90,15 +90,35 @@ button[disabled] { opacity: 0.5; cursor: default; }
 .flypad[hidden] { display: none; }
 .controls .seg { flex-wrap: wrap; } .controls .seg button { padding: 8px 10px; }
 main.tools section.sources { padding: 14px 18px 16px; margin: 8px 0 18px; }
-/* Course Builder tab: a clip and a way into the game's builder. */
-.builder { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 20px; align-items: start; }
-.builder-clip { width: 100%; border-radius: 6px; border: 1px solid var(--line); background: #000; aspect-ratio: 16 / 9; object-fit: cover; }
-.builder-text { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
-.builder-text p { margin: 0; }
-a.tbtn { text-decoration: none; display: inline-block; }
-a.tbtn.primary { background: var(--accent); border-color: var(--accent); color: #151410; font-size: 15px; padding: 10px 18px; }
-@media (max-width: 760px) { .builder { grid-template-columns: 1fr; } }
-h3.small { font-size: 14px; margin: 6px 0 0; color: var(--fg); }
+/* Course Builder tab: the quick builder, and the way into the game's full one. */
+.qb-intro { margin: 0; }
+.controls input[type=text] { font: inherit; font-size: 14px; padding: 7px 8px; background: #24221e; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; }
+.controls output { float: right; color: var(--fg); font-weight: 500; }
+.controls h3 + .seg { margin-top: -4px; }
+#qb-kind-about { margin: -6px 0 0; font-size: 13px; }
+#qb-jump { display: flex; flex-direction: column; gap: 10px; border-left: 3px solid var(--accent); padding-left: 10px; }
+#qb-jump[hidden] { display: none; }
+.qb-view canvas { cursor: crosshair; }
+.qb-view canvas[hidden] { display: none; }
+.qb-bar { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; background: #121110d0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.qb-bar label { display: flex; align-items: center; gap: 6px; }
+.qb-bar label[hidden] { display: none; }
+.qb-bar input[type=range] { width: 120px; accent-color: var(--accent); }
+.qb-bar button { font: inherit; font-size: 13px; font-weight: 600; color: var(--fg); background: #24221e; border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+.qb-bar .seg { display: flex; }
+.qb-bar .seg button { border-radius: 0; }
+.qb-bar .seg button:first-child { border-radius: 4px 0 0 4px; }
+.qb-bar .seg button:last-child { border-radius: 0 4px 4px 0; }
+.qb-bar .seg button[aria-pressed=true] { background: #2f3a1c; border-color: var(--accent); }
+.qb-full { margin-top: 16px; background: var(--bg2); border: 2px solid var(--accent); border-radius: 8px; padding: 14px 16px; }
+.qb-full-head { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.qb-full-head > div { flex: 1 1 420px; }
+.qb-full-head p { margin: 0; }
+.qb-full h2.small { margin: 6px 0 4px; font-size: 18px; }
+.qb-ways { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
+@media (max-width: 900px) { .qb-ways { grid-template-columns: 1fr; } }
+a.tbtn.primary, .tbtn.primary { background: var(--accent); border-color: var(--accent); color: #151410; text-decoration: none; }
+h3.small { font-size: 14px; margin: 14px 0 4px; }
 .bopt { width: 100%; box-sizing: border-box; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
 .bopt.rec { border: 2px solid var(--accent); }
 .bopt p { margin: 4px 0 8px; }
@@ -107,3 +127,9 @@ h3.small { font-size: 14px; margin: 6px 0 0; color: var(--fg); }
   text-transform: uppercase; padding: 1px 8px; transform: skewX(-14deg); margin-right: 4px; }
 .bsaved { font-size: 12px; font-weight: 700; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 0 8px; margin-left: 4px; }
 #b-status.err { color: #e8745c; }
+
+/* Zoom and tilt sliders over a 3D view. */
+.viewsliders { position: absolute; top: 8px; right: 8px; display: flex; gap: 12px; align-items: center; background: #121110c0; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.viewsliders label { display: flex; gap: 6px; align-items: center; }
+.viewsliders input { width: 90px; accent-color: var(--accent); }
+.preview .stage .viewsliders { top: 6px; right: 6px; }

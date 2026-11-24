@@ -58,7 +58,7 @@
     <button role="tab" data-tab="garage" title="The bikes and riders in 3D, with their paints and outfits and every animation the game has.">Bikes &amp; riders</button>
     <button role="tab" data-tab="track" title="Any track in 3D: its ground, objects, trees and the racing line. Fly round it freely.">Tracks</button>
     <button role="tab" data-tab="paint" title="Paint a bike or a rider in 3D and save it as a skin the game picks up.">Skin painter</button>
-    <button role="tab" data-tab="builder" title="Make your own track and ride it: draw the line, drop in jumps, shape and paint the ground. It runs in the browser version of the game.">Course Builder</button>
+    <button role="tab" data-tab="builder" title="Make your own track: a quick builder right here, and the full Course Builder of the game on the same track.">Course Builder</button>
   </nav>
 
   <!-- Files -->
@@ -106,22 +106,102 @@
     </div>
   </section>
 
-  <!-- Course Builder: it lives in the game, so this opens the browser version straight into it,
-       with the files picked here (builder.js). -->
+  <!-- Course Builder: a quick builder on the page (builder.js, the game's own track maths), and the
+       full one in the browser version of the game, opened on the same track. -->
   <section class="panel" id="tab-builder" role="tabpanel" hidden>
-    <div class="builder">
-      <video class="builder-clip" src="../img/course-builder.mp4" poster="../img/course-builder-poster.jpg" muted loop playsinline autoplay preload="none" aria-label="The Course Builder"></video>
-      <div class="builder-text">
-        <h2 class="small">Make your own track and ride it</h2>
-        <p class="hint">Draw the track's line, drop in jumps and gates, shape and paint the ground, plant trees, then press Ride it.
-          Your tracks stay in this browser and join the game's track lists, and you can export them for the original game too.</p>
-        <h3 class="small">Build with</h3>
-        <p class="hint" id="b-saved">Checking what this browser has saved…</p>
+    <div class="side">
+      <div class="controls" id="builder-controls">
+        <p class="hint qb-intro"><b>Quick builder.</b> Shape a track right here: nothing to download. For the best tracks, carry on in the
+          <a href="#b-full" title="The game's own Course Builder: shape and paint the ground, gates, objects, trees, rivers, fog and light, and watch a computer rider lap it.">full Course Builder</a>.</p>
+        <label class="row" title="The track's name, as it shows in the game's track lists.">Name <input id="qb-name" type="text" maxlength="40"></label>
+        <label class="row" title="The kind of race this track is for. Supercross and National are laps; Baja and Enduro run from gate to gate.">Race
+          <select id="qb-event"></select></label>
+        <div class="buttons">
+          <button id="qb-surprise" title="A whole new track made up at random for this race: line, land and jumps. Undo brings yours back.">Surprise me</button>
+          <button id="qb-new" title="Start again with a plain track for this race. Undo brings yours back.">New</button>
+          <button id="qb-undo" title="Undo the last change (Ctrl+Z).">Undo</button>
+          <button id="qb-redo" title="Redo what was undone (Ctrl+Y).">Redo</button>
+        </div>
+
+        <h3>The line</h3>
+        <div class="seg" role="group" aria-label="What a click does">
+          <button id="qb-tool-line" aria-pressed="true" title="Click the ground to add a point to the line, drag a point to move it, double-click one (or select it and press Delete) to take it away.">Line</button>
+          <button id="qb-tool-jumps" aria-pressed="false" title="Click the track to drop in the jump picked below, drag a jump along the track to move it, click one to change it.">Jumps</button>
+        </div>
+        <label class="row" title="How wide the whole track is, in feet.">Track width <output id="qb-width-v"></output>
+          <input id="qb-width" type="range" min="12" max="90" step="1"></label>
+        <label class="row" title="How high the corners bank up on their outside, so you can rail them.">Berms <output id="qb-berms-v"></output>
+          <input id="qb-berms" type="range" min="0" max="1" step="0.01"></label>
+        <button id="qb-delpoint" disabled title="Takes the selected point out of the line (Delete).">Delete point</button>
+
+        <h3>Jumps</h3>
+        <label class="row" title="The jump a click on the track drops in, or the kind of the selected jump.">Jump <select id="qb-kind"></select></label>
+        <p class="hint" id="qb-kind-about"></p>
+        <div class="buttons">
+          <button id="qb-fill" title="Lays jumps all along the track by themselves, keeping the ones you placed.">Fill with jumps</button>
+          <button id="qb-clearjumps" title="Takes every jump off the track.">Clear jumps</button>
+        </div>
+        <div id="qb-jump" hidden>
+          <label class="row" title="How tall the selected jump is, in feet.">Height <output id="qb-jh-v"></output><input id="qb-jh" type="range" min="0.5" max="25" step="0.1"></label>
+          <label class="row" title="How long the selected jump is along the track, in feet.">Length <output id="qb-jl-v"></output><input id="qb-jl" type="range" min="10" max="300" step="1"></label>
+          <label class="row" title="Where the selected jump is: how far along the track it starts.">Along the track <output id="qb-ja-v"></output><input id="qb-ja" type="range" min="0" max="1000" step="1"></label>
+          <button id="qb-deljump" title="Takes the selected jump off the track (Delete).">Delete jump</button>
+        </div>
+
+        <h3>The land</h3>
+        <label class="row" title="The ground the track sits on.">Land <select id="qb-land"></select></label>
+        <label class="row" title="How tall the hills are.">Hills <output id="qb-hills-v"></output><input id="qb-hills" type="range" min="0" max="1" step="0.01"></label>
+        <label class="row" title="How bumpy the ground is between the hills (the track itself is smoothed).">Bumps <output id="qb-rough-v"></output><input id="qb-rough" type="range" min="0" max="1" step="0.01"></label>
+        <button id="qb-reland" title="New hills of the same kind, in other places.">Other hills</button>
+
+        <h3>Your track</h3>
+        <div class="buttons">
+          <button class="primary" id="qb-ride" title="Saves the track and rides it in the browser version of the game. In the game, Esc comes back to the full Course Builder on this track.">Ride it</button>
+          <button id="qb-save" title="Saves the track in this browser. It joins the browser game's track lists, and the full Course Builder opens on it.">Save</button>
+          <button id="qb-export" title="Makes a copy of the track that plays in the original Motocross Madness 2 (it takes up to a minute). Put the .ENV in the game's TERAFORM folder, in the folder for its race (SX, NATIONAL, BAJA or ENDURO).">For original MM2</button>
+          <label class="tbtn" for="qb-open" title="Open a track made in the Course Builder: a .course file, or a builder .ENV.">Open file</label>
+          <input id="qb-open" type="file" accept=".course,.env,.ENV" hidden>
+          <button id="qb-download" title="Downloads the track's .course file, to keep it or open it in the desktop app's Course Builder.">Download .course</button>
+        </div>
+        <p class="hint" id="qb-status" role="status"></p>
+      </div>
+      <div class="view qb-view">
+        <canvas id="qb-map" tabindex="0" aria-label="The track from above"></canvas>
+        <canvas id="qb-3d" tabindex="0" aria-label="The track in 3D" hidden></canvas>
+        <div class="qb-bar">
+          <div class="seg" role="group" aria-label="View">
+            <button id="qb-v2d" aria-pressed="true" title="Looking down on the track: draw and place jumps here.">Map</button>
+            <button id="qb-v3d" aria-pressed="false" title="The track in 3D, to see its hills and jumps. Drag to turn it.">3D</button>
+          </div>
+          <label title="How close the view is. The wheel or a pinch zooms too.">Zoom <input id="qb-zoom" type="range" min="0" max="1" step="0.005" value="0"></label>
+          <label class="qb-3donly" hidden title="How steeply the 3D view looks down: low over the ground, up to straight down.">Tilt <input id="qb-tilt" type="range" min="0" max="1" step="0.005"></label>
+          <label class="qb-3donly" hidden title="Turns the 3D view round the track.">Turn <input id="qb-turn" type="range" min="0" max="1" step="0.002"></label>
+          <button id="qb-whole" title="Brings the whole track into view.">Whole track</button>
+        </div>
+        <p class="viewhint" id="qb-hint">Click the ground to add points. Drag a point to move it, or drag the ground to move the view.</p>
+      </div>
+    </div>
+
+    <div class="qb-full" id="b-full">
+      <div class="qb-full-head">
+        <div>
+          <span class="btag">Best for making tracks</span>
+          <h2 class="small">The full Course Builder</h2>
+          <p class="hint">The game's own builder, on the same track: shape and paint the ground, your own height maps and ground pictures,
+            gates, objects, trees, rivers, planes in the sky, fog and light, and Watch AI to see a computer rider lap it.
+            It runs in the browser version of the game, so it loads the game first.
+            Even better on a computer: the <a href="https://github.com/crspytopgn/openmcm2/releases/latest" title="The desktop app (Windows, Mac and Linux) has the Course Builder too, at full speed, saving straight into your game folder.">desktop app</a>.</p>
+        </div>
+        <button class="tbtn primary" id="qb-full" title="Saves this track and opens it in the full Course Builder, with what you picked below (or what this browser has saved).">Open the full Course Builder</button>
+      </div>
+      <h3 class="small">Build and ride with</h3>
+      <p class="hint" id="b-saved">Checking what this browser has saved…</p>
+      <div class="qb-ways">
         <div class="bopt rec" id="b-mm2">
           <div><span class="btag">Recommended</span> <b>My MM2 game files</b> <span class="bsaved" hidden>Saved</span></div>
           <p class="hint">Your own Motocross Madness 2: its ground, trees, objects and bikes. Pick the folder it's installed in, your CD, or a CD image or .zip. Nothing is uploaded.</p>
           <div class="pick">
-            <button class="tbtn primary" id="b-mm2-go" hidden title="Opens the Course Builder with the MM2 game saved in this browser.">Open with my MM2 game</button>
+            <button class="tbtn primary" id="b-mm2-go" hidden title="Opens the full Course Builder with the MM2 game saved in this browser.">Open with my MM2 game</button>
             <label class="tbtn" for="b-folder" id="b-folder-label" title="The folder Motocross Madness 2 is installed in (the one with RES, TERAFORM and UI in it), or the CD's own folder. It's saved in this browser for next time and opens the builder straight away.">Choose game folder</label>
             <input id="b-folder" type="file" webkitdirectory multiple hidden>
             <label class="tbtn" for="b-file" id="b-file-label" title="Your game CD's image (.iso, .bin, .img, .mdf or .nrg), or a .zip of the game folder or of a CD image. It's saved in this browser for next time and opens the builder straight away.">Choose a CD image or .zip</label>
@@ -131,16 +211,15 @@
         <div class="bopt" id="b-demo">
           <div><b>The free MM2 demo</b> <span class="bsaved" hidden>Saved</span></div>
           <p class="hint">No copy of the game? Microsoft's free demo from 2000 gives the original look, with the Free Pack filling in the rest.</p>
-          <button class="tbtn" id="b-demo-go" title="Downloads Microsoft's free Motocross Madness 2 demo (43 MB) and the Free Pack if they aren't saved yet, then opens the Course Builder.">Open with the demo</button>
+          <button class="tbtn" id="b-demo-go" title="Downloads Microsoft's free Motocross Madness 2 demo (43 MB) and the Free Pack if they aren't saved yet, then opens the full Course Builder.">Open with the demo</button>
         </div>
         <div class="bopt" id="b-free">
           <div><b>The free version</b> <span class="bsaved" hidden>Saved</span></div>
           <p class="hint">Our own openly licensed art and sound. No MM2 files needed.</p>
-          <button class="tbtn" id="b-free-go" title="Downloads the Free Pack (several hundred MB, once) if it isn't saved yet, then opens the Course Builder.">Open with the free version</button>
+          <button class="tbtn" id="b-free-go" title="Downloads the Free Pack (several hundred MB, once) if it isn't saved yet, then opens the full Course Builder.">Open with the free version</button>
         </div>
-        <p class="hint" id="b-status" aria-live="polite"></p>
-        <p class="hint">It's on the game's main menu too: the shovel on the chain.</p>
       </div>
+      <p class="hint" id="b-status" role="status"></p>
     </div>
   </section>
 
