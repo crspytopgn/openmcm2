@@ -417,7 +417,7 @@ impl TerrainRenderer {
             mapped_at_creation: false,
         });
 
-        let upgrades = crate::graphics::enhanced();
+        let upgrades = crate::graphics::made();
         let (scene_format, samples) = match upgrades {
             Some(e) => (crate::graphics::HDR_FORMAT, crate::graphics::samples(e.msaa)),
             None => (format, 1),
@@ -1103,8 +1103,15 @@ impl TerrainRenderer {
             }
             // Dynamic resolution: smaller while frames come late, bigger
             // (up to the screen's own) while they keep time.
-            // (Not past the preset's in a browser: Enhanced::for_browser.)
-            let room = if cfg!(target_arch = "wasm32") { 1.0 } else { width as f32 / size.0.max(1) as f32 };
+            // In a browser, no further than 1080p's worth (Enhanced::for_browser),
+            // so Auto's Low (720p's worth) can grow to it with time to spare.
+            let room = width as f32 / size.0.max(1) as f32;
+            let room = if cfg!(target_arch = "wasm32") {
+                let most = (crate::graphics::BROWSER_PIXELS as f32 / (size.0.max(1) * size.1.max(1)) as f32).sqrt();
+                room.min(most.max(1.0))
+            } else {
+                room
+            };
             crate::dynres::set_room(room);
             crate::dynres::scaled(size, (width, height))
         });

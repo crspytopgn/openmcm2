@@ -637,7 +637,19 @@ pub fn pick_auto(info: &wgpu::AdapterInfo) {
         .map(|i| if i.trim() == "quality=auto" { format!("quality={q},dynamic") } else { i.trim().to_string() })
         .collect();
     match Enhanced::parse(&list.join(",")) {
-        Ok(e) => enable(e),
+        Ok(mut e) => {
+            // Unnamed in a browser: Medium made ready, started at what this
+            // browser was last raced at (`shed=`, from the page), or else at
+            // about Low; dynamic resolution gives steps back while there
+            // is time to spare (crate::dynres), and the page keeps them.
+            if cfg!(target_arch = "wasm32") && info.name.trim().is_empty() && q == "medium" {
+                let start = if list.iter().any(|i| i.starts_with("shed=")) { e.shed } else { UNNAMED_START };
+                e.shed = 0;
+                SOFT.store(true, Ordering::Relaxed);
+                set_shed(start);
+            }
+            enable(e)
+        }
         Err(e) => eprintln!("auto graphics: {e}"),
     }
     let card = if info.name.is_empty() { "this graphics card" } else { info.name.as_str() };
@@ -661,6 +673,13 @@ pub fn auto_quality(name: &str, kind: wgpu::DeviceType, backend: wgpu::Backend, 
     let has = |words: &[&str]| words.iter().any(|w| n.contains(w));
     if kind == D::Cpu || backend == wgpu::Backend::Gl || has(&["llvmpipe", "swiftshader", "software", "microsoft basic"]) {
         return "low";
+    }
+    // A browser that names no card (Safari never does, Chrome and Edge
+    // mostly not): nothing to go on, so Medium is made ready but raced
+    // at about Low's effects to begin with, the rest given back while
+    // frames have time to spare ([`pick_auto`], [`UNNAMED_START`]).
+    if browser && n.trim().is_empty() {
+        return "medium";
     }
     // Strong enough for High even on a 4K screen.
     let strong = has(&["rtx", "rx 6", "rx 7", "rx 9", "arc b", " max", " ultra"]);
@@ -692,6 +711,9 @@ pub fn auto_quality(name: &str, kind: wgpu::DeviceType, backend: wgpu::Backend, 
     ["low", "medium", "high"][level.clamp(0, 2) as usize]
 }
 
+/// The most pixels a browser draws the enhanced scene at: 1080p's worth.
+pub const BROWSER_PIXELS: u32 = 1920 * 1080;
+
 impl Enhanced {
     /// What a browser can carry: a browser's GPU work goes through more
     /// layers, a frame that takes too long can stall the whole computer,
@@ -700,7 +722,7 @@ impl Enhanced {
     /// with temporal anti-aliasing in place of 4x or 8x MSAA, and
     /// without the light shafts and replay blur, the costliest passes.
     pub fn for_browser(mut self) -> Enhanced {
-        const FULL_HD: u32 = 1920 * 1080;
+        const FULL_HD: u32 = BROWSER_PIXELS;
         self.raytracing = false;
         if self.msaa > 1 {
             self.msaa = 1;
@@ -735,6 +757,17 @@ pub fn not_drawable() {
 
 /// The upgrades, when on.
 pub fn enhanced() -> Option<Enhanced> {
+    upgrades(true)
+}
+
+/// The upgrades to make ready as a race loads: with Auto in a browser
+/// that names no card, all of the preset's, as the effects set aside at
+/// the start may be given back mid-race ([`pick_auto`]); else as now.
+pub fn made() -> Option<Enhanced> {
+    upgrades(!SOFT.load(Ordering::Relaxed))
+}
+
+fn upgrades(shed: bool) -> Option<Enhanced> {
     if !DRAWABLE.load(Ordering::Relaxed) {
         return None;
     }
@@ -744,13 +777,21 @@ pub fn enhanced() -> Option<Enhanced> {
         e.weather = weather;
     }
     if e.dynamic {
-        e = e.shed_to(SHED.load(Ordering::Relaxed).max(e.shed));
+        e = e.shed_to(if shed { SHED.load(Ordering::Relaxed).max(e.shed) } else { e.shed });
     }
     Some(e)
 }
 
 /// The most steps of effects [`Enhanced::shed_to`] sets aside.
 pub const MOST_SHED: u8 = 3;
+
+/// The steps set aside at the start for a browser that names no card and
+/// has not raced here before: Medium less these is about Low.
+pub const UNNAMED_START: u8 = 2;
+
+/// Set aside steps may come back mid-race: their parts were made as the
+/// race loaded ([`made`]).
+static SOFT: AtomicBool = AtomicBool::new(false);
 
 /// Steps of effects set aside while racing, when even the smallest scene
 /// dynamic resolution draws comes late (crate::dynres): none at first.
@@ -914,7 +955,7 @@ mod tests {
         assert_eq!(q("Apple M4", D::IntegratedGpu, uhd), "medium");
         assert_eq!(q("Apple M4 Max", D::IntegratedGpu, uhd), "high");
         // A browser: at most Medium without a card of its own; not known
-        // (Safari names no card) is Medium.
+        // (Safari names no card) is Low.
         assert_eq!(auto_quality("Apple M4 Pro", D::IntegratedGpu, B::BrowserWebGpu, hd, true), "medium");
         assert_eq!(auto_quality("", D::Other, B::BrowserWebGpu, hd, true), "medium");
     }
