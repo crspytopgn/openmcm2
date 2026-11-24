@@ -2567,6 +2567,8 @@ fn effect_about(name: &str) -> &'static str {
         "grade" => "A bolder look: colour, contrast, a vignette.",
         "raytracing" => "Truer shadows, light shafts and reflections, traced as rays.",
         "supersample" => "For a strong graphics card: the 3D scene is drawn with more pixels than your screen has (up to 4K's worth, at most twice across) and shrunk to fit, so the edges of fences, trees, bikes and far hills are as clean as they can be and fine detail doesn't shimmer. The colours and light don't change. Costs up to four times the work on a 1080p screen; nothing extra on a 4K one.",
+        "bounce" => "Sunlight bouncing off the ground and walls, as it does in real life: sunlit dirt throws a soft warm light into the shaded side of the bike and rider, and onto walls and banks close by, and pale corners don't go as dark as dark ones. Subtle, worked out on screen each frame. Costs a little on a slower graphics card.",
+        "fsr" => "AMD FidelityFX Super Resolution (FSR 1): when the 3D scene is drawn smaller than your screen (Resolution below 100%, or Auto on a big screen), it is stretched up along its edges and gently sharpened, so it looks close to full sharpness instead of soft. With TAA it does the final sharpening. A big help on laptops: pick 67% or 75% for the speed with most of the sharpness. Does nothing at 100% without TAA.",
         "far" => "The 3D grass reaches half as far again, the smoothed hills round you about twice as far, and the sun's shadows keep going nearly twice as far before fading, so more of the view looks finished. Close up nothing changes. Takes effect from the next track loaded.",
         _ => "",
     }

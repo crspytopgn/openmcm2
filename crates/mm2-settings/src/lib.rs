@@ -251,7 +251,7 @@ pub fn parse_difficulty(text: &str) -> Option<[[u32; 3]; 4]> {
     (n.len() == 12 && n.iter().all(|v| (1..=MOST_STEP).contains(v))).then_some(t)
 }
 
-pub const UPGRADES: [(&str, &str, bool); 29] = [
+pub const UPGRADES: [(&str, &str, bool); 31] = [
     ("lighting", "Per-pixel lighting", true),
     ("shadows", "Sun shadows", true),
     ("distance", "Far draw distance and haze", true),
@@ -285,6 +285,9 @@ pub const UPGRADES: [(&str, &str, bool); 29] = [
     // Holds the frame rate by drawing the scene a little softer while
     // frames come late; the preset's own size while they keep time.
     ("dynamic", "Keep the frame rate (dynamic resolution)", true),
+    // Newer light and upscaling, off unless turned on.
+    ("bounce", "Bounce light", false),
+    ("fsr", "AMD FSR upscaling", false),
 ];
 
 #[derive(Debug, Clone, PartialEq)]

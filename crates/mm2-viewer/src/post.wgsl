@@ -48,7 +48,9 @@ struct Post {
     // The way up in the camera's space, and w how wet the ground is for
     // its reflections (0 for none).
     view_up: vec4<f32>,
-    // x 1 for the horizon-based occlusion (GTAO) in place of the plain one.
+    // x 1 for the horizon-based occlusion (GTAO) in place of the plain one;
+    // y how strongly the light bounced off what is round about shows
+    // (fs_bounce, 0 for none); z its reach (ft).
     extra: vec4<f32>,
 };
 
@@ -66,6 +68,8 @@ struct Post {
 // The reflections in wet ground (fs_ssr): what they show, premultiplied
 // by how much.
 @group(0) @binding(9) var ssr_tex: texture_2d<f32>;
+// The light bounced off what is round about (fs_bounce), blurred.
+@group(0) @binding(10) var bounce_tex: texture_2d<f32>;
 
 struct Out {
     @builtin(position) position: vec4<f32>,
@@ -248,6 +252,94 @@ fn fs_ao(in: Out) -> @location(0) vec4<f32> {
     }
     let lit = contact(c, n, jitter);
     return vec4<f32>(ao, lit, 0.0, 1.0);
+}
+
+// A surface's own colour from its lit colour `c`, roughly (the scene
+// keeps none apart): its hue at a middling brightness, whether in sun or
+// shade; what shows darker still (tyres, a black suit) takes less and
+// less, so no hue is made up from its noise.
+fn surface_colour(c: vec3<f32>) -> vec3<f32> {
+    let l = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return clamp(c / max(l, 0.15) * 0.35, vec3<f32>(0.0), vec3<f32>(0.85));
+}
+
+// The occlusion with the light that bounces between the surfaces of a
+// crease (GTAO's multi-bounce fit, Jimenez et al. 2016): a pale crease
+// darkens less than a dark one.
+fn multi_bounce(ao: f32, albedo: vec3<f32>) -> vec3<f32> {
+    let a = 2.0404 * albedo - 0.3324;
+    let b = -4.7951 * albedo + 0.6417;
+    let c = 2.7552 * albedo + 0.6903;
+    return max(vec3<f32>(ao), ((ao * a + b) * ao + c) * ao);
+}
+
+// Light bounced once off what is round about (screen-space indirect
+// light, after Ritschel et al. 2009's directional occlusion): from points
+// on the surfaces near each pixel, within `extra.z` ft, the light they
+// show now, as much as they face each other and the nearer the more; so
+// sunlit dirt warms the shaded side of a bike and a rider, and a bright
+// wall the ground beside it. Worked out at half size, blurred after. What
+// it gives is light falling on the surface (the composite colours it by
+// the surface).
+@fragment
+fn fs_bounce(in: Out) -> @location(0) vec4<f32> {
+    let p = vec2<i32>(in.position.xy) * 2;
+    if (depth_at(p) >= 1.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    let c = view_at(p);
+    let n = normal_at(p, c);
+    let radius = post.extra.z;
+    let reach = clamp(radius * post.params.w / max(-c.z, 0.1), 4.0, 96.0);
+    let noise = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));
+    let count = 10;
+    var sum = vec3<f32>(0.0);
+    let scene = vec2<i32>(post.size.xy);
+    for (var i = 0; i < count; i++) {
+        let t = (f32(i) + 0.5) / f32(count);
+        let angle = f32(i) * 2.39996 + noise * 6.2832;
+        let q = p + vec2<i32>(vec2<f32>(cos(angle), sin(angle)) * reach * sqrt(t));
+        if (any(q < vec2<i32>(0)) || any(q >= scene) || depth_at(q) >= 1.0) {
+            continue;
+        }
+        let at = view_at(q);
+        let v = at - c;
+        let d2 = max(dot(v, v), 0.25);
+        let dir = v * inverseSqrt(d2);
+        let toward = max(dot(n, dir), 0.0);
+        if (toward <= 0.0) {
+            continue;
+        }
+        let facing = max(dot(normal_at(q, at), -dir), 0.0);
+        let fade = 1.0 - smoothstep(radius * radius * 0.5, radius * radius, d2);
+        let light = finite(textureLoad(hdr_tex, q, 0).rgb);
+        sum += min(light, vec3<f32>(4.0)) * toward * facing * fade / d2;
+    }
+    // Each point stands for its share of the disc round the pixel.
+    let e = sum * (radius * radius / f32(count));
+    return vec4<f32>(min(e, vec3<f32>(2.0)), 1.0);
+}
+
+// The bounce blurred over 4×4 pixels, as the occlusion, but only from
+// what is at about the same distance: a bike's light does not spread onto
+// the hill behind it, nor the ground's onto a tyre.
+@fragment
+fn fs_bounce_blur(in: Out) -> @location(0) vec4<f32> {
+    let half = vec2<i32>(in.position.xy);
+    let centre = -view_at(half * 2).z;
+    var sum = vec3<f32>(0.0);
+    var weight = 0.0;
+    let most = vec2<i32>(textureDimensions(src_tex)) - 1;
+    for (var y = -1; y <= 2; y++) {
+        for (var x = -1; x <= 2; x++) {
+            let q = clamp(half + vec2<i32>(x, y), vec2<i32>(0), most);
+            let z = -view_at(q * 2).z;
+            let w = 1.0 / (1.0 + 40.0 * abs(z - centre) / max(centre, 0.1));
+            sum += textureLoad(src_tex, q, 0).rgb * w;
+            weight += w;
+        }
+    }
+    return vec4<f32>(sum / max(weight, 1e-4), 1.0);
 }
 
 // The occlusion blurred over 4×4 pixels, in four filtered taps.
@@ -535,10 +627,22 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
         let r = textureSampleLevel(ssr_tex, smooth_sampler, in.uv, 0.0);
         c = c * (1.0 - r.a) + r.rgb;
     }
+    // What the surface's own colour is, as near as the lit picture tells
+    // (the bounce and the occlusion's light between surfaces need one).
+    let albedo = surface_colour(c);
+    if (post.extra.y > 0.0) {
+        c += textureSampleLevel(bounce_tex, smooth_sampler, in.uv, 0.0).rgb * albedo * post.extra.y;
+    }
     if (post.flags.x > 0.5 || post.view_sun.w > 0.0) {
         let a = textureSampleLevel(ao_tex, smooth_sampler, in.uv, 0.0).rg;
         if (post.flags.x > 0.5) {
-            c *= a.r;
+            if (post.extra.y > 0.0) {
+                // With the bounce: a crease lit by its own walls' light
+                // too, so a pale one darkens less than a dark one.
+                c *= multi_bounce(a.r, albedo);
+            } else {
+                c *= a.r;
+            }
         }
         c *= mix(1.0, a.g, post.view_sun.w);
     }
@@ -566,7 +670,12 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
     if (post.flags.w > 0.5) {
         c = grade(c, in.uv);
     }
-    return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    let shown = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    // For FSR (fsr.wgsl) after: in gamma 2, as it wants it.
+    if (post.scaled.w > 0.5) {
+        return vec4<f32>(sqrt(shown), 1.0);
+    }
+    return vec4<f32>(shown, 1.0);
 }
 
 // Reflections in wet ground (screen space): where the scene marks its

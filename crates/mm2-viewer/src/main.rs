@@ -1020,9 +1020,11 @@ fn run(app: App) -> Result<(), BoxError> {
 /// graphics chip fill three million pixels or more every frame.
 fn drawn_size(w: u32, h: u32) -> (u32, u32) {
     let (w, h) = most_drawn(w, h);
-    // In a browser, while racing: dynres::Picture's share of it.
+    // In a browser, while racing: dynres::Picture's share of it; with FSR
+    // the share is the 3D scene's (renderer.rs), stretched by FSR onto a
+    // picture at the window's own size, not by the browser.
     let k = dynres::picture();
-    if k >= 1.0 {
+    if k >= 1.0 || (cfg!(target_arch = "wasm32") && graphics::showing().is_some_and(|e| e.fsr)) {
         return (w, h);
     }
     (((w as f32 * k).round() as u32).max(1), ((h as f32 * k).round() as u32).max(1))

@@ -118,6 +118,16 @@ pub struct Enhanced {
     /// out from the rider (Max): more of the view finished, none of it
     /// changed close up.
     pub far: bool,
+    /// Light bounced off what is round about (post.wgsl fs_bounce): sunlit
+    /// dirt warming the shaded side of a bike and a rider, a bright wall
+    /// the ground beside it; and creases darkening less where they are
+    /// pale. Off unless asked.
+    pub bounce: bool,
+    /// AMD FSR 1 (fsr.wgsl) in place of the plain stretch when the scene
+    /// is drawn smaller than the screen (edges kept clean, then gently
+    /// sharpened), and in place of temporal anti-aliasing's own
+    /// sharpening. Off unless asked.
+    pub fsr: bool,
     /// How dirty the bikes start, 0 to 1.
     pub mud_start: f32,
     /// How strongly the new ground's detail shows, 0 to 1.
@@ -207,6 +217,8 @@ impl Default for Enhanced {
             taa: false,
             supersample: false,
             far: false,
+            bounce: false,
+            fsr: false,
             mud_start: 0.0,
             detail: 0.5,
             weather: Weather::Clear,
@@ -474,9 +486,11 @@ impl Enhanced {
                 }
                 "supersample" | "ssaa" => e.supersample = on,
                 "far" | "far-detail" => e.far = on,
+                "bounce" | "gi" => e.bounce = on,
+                "fsr" | "upscaling" => e.fsr = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-roost, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-dynamic, raytracing, taa, supersample, far, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra/max, resolution=1080p or 85%, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-roost, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-dynamic, raytracing, taa, supersample, far, bounce, fsr, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra/max, resolution=1080p or 85%, weather=rain or time=dusk"
                     ))
                 }
             }
@@ -771,6 +785,7 @@ impl Enhanced {
             self.shafts = false;
             self.cinematic = false;
             self.supersample = false;
+            self.bounce = false;
         }
         if n >= 2 {
             self.dust_amount = self.dust_amount.min(0.5);

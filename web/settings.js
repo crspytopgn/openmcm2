@@ -35,6 +35,8 @@ export const UPGRADES = [
   ["air", "Sunlit haze", true, "Distant haze glows toward the sun and thins higher up, so far hilltops stand clearer. Open-air tracks only."],
   ["nightlights", "Stadium lights at night", true, "With the time of day set to Night, a stadium is lit by its own lamp banks: the floor, bikes and riders lit from above, with soft shadows from each bank."],
   ["roost", "Flying dirt (roost)", false, "Real roost: while the back tyre spins (or you pull hard, or slide) it throws a low jet of fine grit, crumbs and clods with a brown plume of dirt behind, all falling fast. Only on dirt; mud in the rain. Fewer pieces on Low."],
+  ["bounce", "Bounce light", false, "Sunlight bouncing off the ground and walls: sunlit dirt throws a soft warm light into the shaded side of the bike and rider, and pale corners don't go as dark. Subtle. Costs a little on a slower computer."],
+  ["fsr", "AMD FSR upscaling", false, "AMD FidelityFX Super Resolution: on a big screen the 3D scene is drawn smaller to stay smooth; FSR stretches it back up along its edges and gently sharpens it, so it looks close to full sharpness instead of soft. A big help on laptops."],
 ];
 
 // In a browser, Ultra draws as High does (the game caps both: see
