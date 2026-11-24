@@ -1365,7 +1365,8 @@ mod tests {
         let wait = |f: &mut dyn FnMut() -> bool| {
             let start = Instant::now();
             while !f() {
-                assert!(start.elapsed() < Duration::from_secs(5), "timed out");
+                // Generous: CI runners are slow while other tests run.
+                assert!(start.elapsed() < Duration::from_secs(30), "timed out");
                 std::thread::sleep(Duration::from_millis(10));
             }
         };
@@ -1423,7 +1424,8 @@ mod tests {
         let wait = |f: &mut dyn FnMut() -> bool| {
             let start = Instant::now();
             while !f() {
-                assert!(start.elapsed() < Duration::from_secs(5), "timed out");
+                // Generous: CI runners are slow while other tests run.
+                assert!(start.elapsed() < Duration::from_secs(30), "timed out");
                 std::thread::sleep(Duration::from_millis(10));
             }
         };
