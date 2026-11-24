@@ -584,6 +584,35 @@ export async function mount(app, panel) {
   $("qb-turn").addEventListener("input", () => set3d({ turn: Number($("qb-turn").value) }));
   $("qb-whole").addEventListener("click", whole);
 
+  // Full screen: the browser's own where it can, else the page filled.
+  const box = panel.querySelector(".qb-side");
+  const maxed = (on) => {
+    box.classList.toggle("qb-max", on);
+    document.body.classList.toggle("qb-maxed", on);
+    $("qb-fs").textContent = on ? "Exit full screen" : "Full screen";
+    $("qb-fs").setAttribute("aria-pressed", String(on));
+    requestAnimationFrame(() => {
+      draw();
+      viewer?.resize();
+    });
+  };
+  $("qb-fs").addEventListener("click", async () => {
+    const on = !box.classList.contains("qb-max");
+    if (on) {
+      maxed(true);
+      try {
+        await box.requestFullscreen?.();
+      } catch {}
+    } else {
+      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+      maxed(false);
+    }
+  });
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && box.classList.contains("qb-max")) maxed(false);
+  });
+  document.addEventListener("keydown", (e) => e.key === "Escape" && box.classList.contains("qb-max") && maxed(false));
+
   // ---- the 3D look ----
   let v3 = false;
   let viewer = null;

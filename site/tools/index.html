@@ -109,7 +109,7 @@
   <!-- Course Builder: a quick builder on the page (builder.js, the game's own track maths), and the
        full one in the browser version of the game, opened on the same track. -->
   <section class="panel" id="tab-builder" role="tabpanel" hidden>
-    <div class="side">
+    <div class="side qb-side">
       <div class="controls" id="builder-controls">
         <p class="hint qb-intro"><b>Quick builder.</b> Shape a track right here: nothing to download. For the best tracks, carry on in the
           <a href="#b-full" title="The game's own Course Builder: shape and paint the ground, gates, objects, trees, rivers, fog and light, and watch a computer rider lap it.">full Course Builder</a>.</p>
@@ -177,6 +177,7 @@
           <label class="qb-3donly" hidden title="How steeply the 3D view looks down: low over the ground, up to straight down.">Tilt <input id="qb-tilt" type="range" min="0" max="1" step="0.005"></label>
           <label class="qb-3donly" hidden title="Turns the 3D view round the track.">Turn <input id="qb-turn" type="range" min="0" max="1" step="0.002"></label>
           <button id="qb-whole" title="Brings the whole track into view.">Whole track</button>
+          <button id="qb-fs" title="Fills the screen with the builder: the controls down the side, the track filling the rest. Esc or this button again comes back.">Full screen</button>
         </div>
         <p class="viewhint" id="qb-hint">Click the ground to add points. Drag a point to move it, or drag the ground to move the view.</p>
       </div>

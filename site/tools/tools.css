@@ -100,6 +100,14 @@ main.tools section.sources { padding: 14px 18px 16px; margin: 8px 0 18px; }
 #qb-jump[hidden] { display: none; }
 .qb-view canvas { cursor: crosshair; }
 .qb-view canvas[hidden] { display: none; }
+/* The controls scroll beside the view rather than running on below it. */
+.qb-side .controls { max-height: max(72vh, 420px); overflow-y: auto; box-sizing: border-box; }
+/* Full screen: the controls down the side, the track filling the rest. */
+.qb-side.qb-max { position: fixed; inset: 0; z-index: 50; background: var(--bg); padding: 10px; margin: 0; height: 100vh; height: 100dvh; box-sizing: border-box; grid-template-rows: 100%; }
+.qb-side.qb-max .controls { max-height: none; height: 100%; }
+.qb-side.qb-max .view, .qb-side.qb-max .view canvas { height: 100%; min-height: 0; }
+body.qb-maxed { overflow: hidden; }
+@media (max-width: 760px) { .qb-side.qb-max { grid-template-columns: 1fr; grid-template-rows: 40% 60%; } }
 .qb-bar { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; background: #121110d0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 13px; font-weight: 600; color: var(--muted); }
 .qb-bar label { display: flex; align-items: center; gap: 6px; }
 .qb-bar label[hidden] { display: none; }
