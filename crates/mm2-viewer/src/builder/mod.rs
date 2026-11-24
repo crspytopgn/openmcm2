@@ -2404,22 +2404,22 @@ impl Builder {
 
         // ---- the view ----
         // Zoom, tilt and turn as sliders too, for a slow wheel or a trackpad.
-        p.panel(input, [w - 214.0, 372.0, 210.0, 56.0]);
+        p.panel(input, [w - 214.0, 346.0, 210.0, 56.0]);
         let far = self.course.mode.side() * 1.3;
         let near = 40.0f32;
         let zoom = 1.0 - (self.cam.dist / near).ln() / (far / near).ln();
         let shown = format!("{:.0}%", zoom.clamp(0.0, 1.0) * 100.0);
-        if let (Some(v), _) = p.slider(input, "zoom", [w - 208.0, 375.0, 96.0, 24.0], "Zoom", "How close the view is. The wheel, a pinch or the pad's triggers zoom too.", zoom, (0.0, 1.0), &shown) {
+        if let (Some(v), _) = p.slider(input, "zoom", [w - 208.0, 349.0, 96.0, 24.0], "Zoom", "How close the view is. The wheel, a pinch or the pad's triggers zoom too.", zoom, (0.0, 1.0), &shown) {
             self.cam.dist = near * (far / near).powf(1.0 - v);
         }
         let tilt = (self.cam.pitch - 0.12) / (1.56 - 0.12);
         let shown = format!("{:.0}\u{b0}", self.cam.pitch.to_degrees());
-        if let (Some(v), _) = p.slider(input, "tilt", [w - 104.0, 375.0, 96.0, 24.0], "Tilt", "How steeply the view looks down: low over the ground, up to straight down. Right-drag tilts it too.", tilt, (0.0, 1.0), &shown) {
+        if let (Some(v), _) = p.slider(input, "tilt", [w - 104.0, 349.0, 96.0, 24.0], "Tilt", "How steeply the view looks down: low over the ground, up to straight down. Right-drag tilts it too.", tilt, (0.0, 1.0), &shown) {
             self.cam.pitch = 0.12 + v * (1.56 - 0.12);
         }
         let turn = self.cam.yaw.rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
         let shown = format!("{:.0}\u{b0}", turn * 360.0);
-        if let (Some(v), _) = p.slider(input, "turn", [w - 208.0, 401.0, 200.0, 24.0], "Turn", "Turns the view round the track. Right-drag turns it too.", turn, (0.0, 1.0), &shown) {
+        if let (Some(v), _) = p.slider(input, "turn", [w - 208.0, 375.0, 200.0, 24.0], "Turn", "Turns the view round the track. Right-drag turns it too.", turn, (0.0, 1.0), &shown) {
             self.cam.yaw = v * std::f32::consts::TAU;
         }
         p.panel(input, [w - 214.0, 430.0, 210.0, 26.0]);
