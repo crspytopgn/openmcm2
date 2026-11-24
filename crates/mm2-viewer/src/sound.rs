@@ -1284,7 +1284,17 @@ impl RaceSounds {
                     e.revs.voices.resize(sounds.len(), None);
                     let (volume, pan, doppler) = l.hear(bike.position(), bike.velocity(), ENGINE_RANGE);
                     let mix = e.revs.mix(loops);
-                    for ((slot, sound), (level, pitch)) in e.revs.voices.iter_mut().zip(sounds).zip(mix) {
+                    // Each bike its own place in the loops and a hair of its
+                    // own pitch: bikes side by side at the same revs (off a
+                    // jump together) would otherwise play the very same
+                    // waves in step, which sounds hollow, like a flanger.
+                    let mine = |k: usize| {
+                        let h = (i as u32).wrapping_mul(0x9e37_79b9) ^ (k as u32).wrapping_mul(0x85eb_ca6b);
+                        let h = (h ^ (h >> 15)).wrapping_mul(0x2c1b_3c6d);
+                        (h ^ (h >> 12)) as f32 / u32::MAX as f32
+                    };
+                    let detune = 1.0 + (mine(usize::MAX) - 0.5) * 0.03;
+                    for (k, ((slot, sound), (level, pitch))) in e.revs.voices.iter_mut().zip(sounds).zip(mix).enumerate() {
                         if slot.is_some_and(|v| !audio.playing(v)) {
                             *slot = None;
                         }
@@ -1295,8 +1305,11 @@ impl RaceSounds {
                             }
                             continue;
                         }
-                        let v = *slot.get_or_insert_with(|| audio.play(sound, 0.0, true));
-                        audio.place(v, volume * level * self.options.gain, pan, doppler * pitch);
+                        let v = *slot.get_or_insert_with(|| {
+                            let length = sound.frames() as f32 / sound.rate.max(1) as f32;
+                            audio.play_from(sound, mine(k) * length, 0.0, true)
+                        });
+                        audio.place(v, volume * level * self.options.gain, pan, doppler * pitch * detune);
                     }
                 }
                 self.engines[i] = e;
