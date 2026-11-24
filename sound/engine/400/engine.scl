@@ -1,0 +1,154 @@
+MaxValue = 14000.000000
+AutoPitch = 1
+Layer0
+	NumSamples = 6
+	Sample0
+		Wav = 4st450cc_onidle_1.wav
+		NumPoints = 3
+		Point0
+			Value = 0.000000  ;; 0
+			Volume = 1.000000
+		Point1
+			Value = 0.192857  ;; 2700
+			Volume = 1.000000
+		Point2
+			Value = 0.250000  ;; 3500
+			Volume = 0.000000
+		RefPitch = 0.285714  ;; 4000
+	Sample1
+		Wav = YZ450F_onverylow_1.wav
+		NumPoints = 4
+		Point0
+			Value = 0.192857  ;; 2700
+			Volume = 0.000000
+		Point1
+			Value = 0.250000  ;; 3500
+			Volume = 1.000000
+		Point2
+			Value = 0.314286  ;; 4400
+			Volume = 1.000000
+		Point3
+			Value = 0.371429  ;; 5200
+			Volume = 0.000000
+		RefPitch = 0.517857  ;; 7250
+	Sample2
+		Wav = YZ450F_onlow_1.wav
+		NumPoints = 4
+		Point0
+			Value = 0.314286  ;; 4400
+			Volume = 0.000000
+		Point1
+			Value = 0.371429  ;; 5200
+			Volume = 1.000000
+		Point2
+			Value = 0.435714  ;; 6100
+			Volume = 1.000000
+		Point3
+			Value = 0.492857  ;; 6900
+			Volume = 0.000000
+		RefPitch = 0.713357  ;; 9987
+	Sample3
+		Wav = YZ450F_onmid_1.wav
+		NumPoints = 4
+		Point0
+			Value = 0.435714  ;; 6100
+			Volume = 0.000000
+		Point1
+			Value = 0.492857  ;; 6900
+			Volume = 1.000000
+		Point2
+			Value = 0.571429  ;; 8000
+			Volume = 1.000000
+		Point3
+			Value = 0.625000  ;; 8750
+			Volume = 0.000000
+		RefPitch = 0.745929  ;; 10443
+	Sample4
+		Wav = YZ450F_onmidhigh.wav
+		NumPoints = 4
+		Point0
+			Value = 0.571429  ;; 8000
+			Volume = 0.000000
+		Point1
+			Value = 0.625000  ;; 8750
+			Volume = 1.000000
+		Point2
+			Value = 0.714286  ;; 10000
+			Volume = 1.000000
+		Point3
+			Value = 0.785714  ;; 11000
+			Volume = 0.000000
+		RefPitch = 0.851000  ;; 11914
+	Sample5
+		Wav = YZ450F_onhigh_1.wav
+		NumPoints = 3
+		Point0
+			Value = 0.714286  ;; 10000
+			Volume = 0.000000
+		Point1
+			Value = 0.785714  ;; 11000
+			Volume = 1.000000
+		Point2
+			Value = 1.000000  ;; 14000
+			Volume = 1.000000
+		RefPitch = 0.886714  ;; 12414
+Layer1
+	NumSamples = 4
+	Sample0
+		Wav = YZ450_idle.wav
+		NumPoints = 3
+		Point0
+			Value = 0.000000  ;; 0
+			Volume = 0.600000
+		Point1
+			Value = 0.157143  ;; 2200
+			Volume = 0.600000
+		Point2
+			Value = 0.300000  ;; 4200
+			Volume = 0.000000
+		RefPitch = 0.178571  ;; 2500
+	Sample1
+		Wav = YZ250F_offlow.wav
+		NumPoints = 4
+		Point0
+			Value = 0.157143  ;; 2200
+			Volume = 0.000000
+		Point1
+			Value = 0.300000  ;; 4200
+			Volume = 0.550000
+		Point2
+			Value = 0.392857  ;; 5500
+			Volume = 0.550000
+		Point3
+			Value = 0.464286  ;; 6500
+			Volume = 0.000000
+		RefPitch = 0.392857  ;; 5500
+	Sample2
+		Wav = YZ250F_offmid.wav
+		NumPoints = 4
+		Point0
+			Value = 0.392857  ;; 5500
+			Volume = 0.000000
+		Point1
+			Value = 0.464286  ;; 6500
+			Volume = 0.550000
+		Point2
+			Value = 0.607143  ;; 8500
+			Volume = 0.550000
+		Point3
+			Value = 0.678571  ;; 9500
+			Volume = 0.000000
+		RefPitch = 0.500000  ;; 7000
+	Sample3
+		Wav = YZ250F_offhigh.wav
+		NumPoints = 3
+		Point0
+			Value = 0.607143  ;; 8500
+			Volume = 0.000000
+		Point1
+			Value = 0.678571  ;; 9500
+			Volume = 0.550000
+		Point2
+			Value = 1.000000  ;; 14000
+			Volume = 0.550000
+		RefPitch = 0.642857  ;; 9000

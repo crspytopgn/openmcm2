@@ -4,7 +4,17 @@ Every Freesound recording used in `engine/` and `fx/`. CC0 clips need no credit 
 
 ## Engines 125, 250 and 400: recordings by crspytopgn
 
-The 125 (SX125 two-stroke) and 400 (CRF450R four-stroke) folders, and the 250 folder (riding and idle from the TC250 and YZ250 two-strokes, off-throttle Sputter, Decel and Rev from the FC250), are cut from engine recordings made by **crspytopgn**, released under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). They are cut into the original game's slots and take counts, with steady stretches tiled into seamless clips, equal-power crossfades for the decel and rev chains, a gentle tone match, loudness matching and short fades. They have no engine.ini, so the game plays them as whole samples the way MM2 does.
+Every engine sound in the 125, 250 and 400 folders is cut from engine recordings made by **crspytopgn**, released under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+- **Rev-step loops, played MX Bikes style** (`engine.scl` beside `engine.ini`, for versions after 0.7.8). These are the recordings as they are, with one loudness level per class.
+  - 125: the 2st125cc rev set and the SX125 idle.
+  - 250: TC250 and YZ250 on the gas, the TC250 idle, and the 2st125cc off-gas loops played lower.
+  - 400: crspytopgn's own YZ450F MX Bikes layout as it is.
+- **Whole samples in the original game's slots and take counts** (LowTorque, MidTorque, HighTorque, PowerBand, Sputter, Decel, Idle, Rev), played by earlier versions:
+  - 125: SX125, YZ125 and 2st125cc.
+  - 250: TC250, YZ250 and TC300 riding, and FC250 off the gas.
+  - 400: CRF450R, RM-Z450, YZ450F and 450cc.
+  - These are cut and tiled from steady stretches, with equal-power crossfades for the decel and rev chains, loudness matching and short fades.
 
 Credit line: "Engine sounds (125, 250, 400) recorded by crspytopgn, CC BY 4.0."
 
