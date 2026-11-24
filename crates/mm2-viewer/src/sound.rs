@@ -367,13 +367,14 @@ fn trapezoid(points: &[(f32, f32)], rpm: f32) -> f32 {
         [] => 0.0,
         [only] => only.1,
         _ => {
-            if rpm < points[0].0 || rpm > points[points.len() - 1].0 {
-                // The first loop holds from 0 and the last to the top.
-                return if rpm < points[0].0 && points[0].0 <= 0.0 || rpm > points[points.len() - 1].0 && points[points.len() - 1].1 > 0.0 {
-                    points[if rpm < points[0].0 { 0 } else { points.len() - 1 }].1
-                } else {
-                    0.0
-                };
+            let (first, last) = (points[0], points[points.len() - 1]);
+            // Below the first point only a loop that starts at 0 is
+            // heard; past the last, it holds at its last volume.
+            if rpm < first.0 {
+                return if first.0 <= 0.0 { first.1 } else { 0.0 };
+            }
+            if rpm > last.0 {
+                return last.1;
             }
             for w in points.windows(2) {
                 let ((a, va), (b, vb)) = (w[0], w[1]);
