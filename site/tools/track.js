@@ -46,7 +46,7 @@ export async function mount(app, panel) {
   detail.value = matchMedia("(max-width: 820px)").matches ? "4" : "2";
   const [objRow, showObjects] = check("Objects", "The track's buildings, fences, signs, vehicles and other models.");
   const [treeRow, showTrees] = check("Trees and bushes", "The plants the track scatters over its ground.");
-  const [lineRow, showLine] = check("Racing line", "The course riders follow, drawn in green above the ground.", false);
+  const [lineRow, showLine] = check("Racing line", "The course riders follow, drawn in green on the ground.", false);
   const [fogRow, showFog] = check("Haze", "The track's own haze in the distance.", true);
   const mode = el("div", { className: "seg", title: "Turn round the track, or fly through it freely." });
   const orbitBtn = el("button", { textContent: "Turn", ariaPressed: "true", title: "Drag to turn round, scroll or pinch to zoom, right-drag to move." });
@@ -102,6 +102,7 @@ export async function mount(app, panel) {
   // Models in this track: its own first, then the game's, then the Free
   // Pack's stand-ins (by its stockmap.toml, as the game finds them).
   let stock = null;
+  lib.onChange(() => (stock = null));
   async function stockMap() {
     if (stock) return stock;
     stock = new Map();
@@ -128,6 +129,11 @@ export async function mount(app, panel) {
       const env = await lib.archive(root, path);
       const names = env.names();
       const byExt = (e) => names.findIndex((n) => n.toLowerCase().endsWith("." + e));
+      // A track of the player's own leans on the game's models (and a
+      // Course Builder one on the Free Pack's ground pictures): fetch
+      // what's at hand first. Changing the files opens the track again.
+      if (await borrow(byExt("gmt") >= 0)) return;
+      if (my !== token) return;
       const scnAt = byExt("scn");
       const scene = scnAt >= 0 ? JSON.parse(mm.scene(env.at(scnAt))) : null;
       let trnAt = scene?.terrain ? env.find(scene.terrain) : undefined;
@@ -256,7 +262,7 @@ export async function mount(app, panel) {
       const tdfAt = byExt("tdf");
       if (tdfAt >= 0) {
         try {
-          loaded.line = racingLine(JSON.parse(mm.track_line(env.at(tdfAt))));
+          loaded.line = racingLine(JSON.parse(mm.track_line(env.at(tdfAt))), span);
           group.add(loaded.line);
         } catch (e) {
           console.warn("line", e);
@@ -268,6 +274,13 @@ export async function mount(app, panel) {
         `${group.name}: ${Math.round(span)} ft across, ${count} objects${loaded.trees ? `, ${loaded.trees.userData.count} plants` : ""}.` +
         (missing.size ? ` Not found: ${[...missing].slice(0, 12).join(", ")}${missing.size > 12 ? "…" : ""}.` : "") +
         (textures.missing.size ? ` ${textures.missing.size} textures missing.` : "");
+      const gmtAt = byExt("gmt");
+      if (gmtAt >= 0) {
+        const said = info.textContent;
+        info.textContent = said + " Sharpening the ground…";
+        const done = await fineGround(env.at(gmtAt), my).catch((e) => (console.warn("fine ground", e), false));
+        if (my === token) info.textContent = said + (done ? "" : " The ground's fine detail needs the Free Pack's ground pictures.");
+      }
     } catch (err) {
       console.warn(err);
       if (my === token) {
@@ -275,6 +288,33 @@ export async function mount(app, panel) {
         info.classList.add("err");
       }
     }
+  }
+
+  // The files a track needs that aren't picked yet: the game kept in the
+  // browser version, if there is one, for the original models; else the
+  // Free Pack's stand-ins, each file fetched only when it's used. A Course
+  // Builder track's fine ground needs the Free Pack's ground pictures.
+  // True when the files changed (and the track opens again).
+  const tried = new Set();
+  async function borrow(wantsPack) {
+    if (!lib.has("game") && !tried.has("game")) {
+      tried.add("game");
+      if (await lib.hasKeptGame()) {
+        info.textContent = "Reading the game kept in this browser for the track's objects…";
+        if (await lib.useKeptGame().catch(() => false)) return true;
+      }
+    }
+    if (!lib.has("pack") && (wantsPack || !lib.has("game")) && !tried.has("pack")) {
+      tried.add("pack");
+      info.textContent = "Getting the Free Pack's list of files for the track's objects and ground…";
+      try {
+        await lib.usePackOnline();
+        return true;
+      } catch (e) {
+        console.warn("free pack", e);
+      }
+    }
+    return false;
   }
 
   // The track's sky box (RES/SKIES.RES), its faces in the game's order
@@ -346,6 +386,137 @@ export async function mount(app, panel) {
     return mesh;
   }
 
+  // A Course Builder track's fine ground, as the game draws it: its
+  // `.gmt` says which two ground materials cover each terrain sample, and
+  // the materials' full-size pictures (the Free Pack's ground/*.png) are
+  // laid over the baked map, adding only the detail finer than a map
+  // texel, so the ground keeps its colour and turns crisp close up.
+  const SIDE = 1024;
+  const pictures = new Map();
+  function groundPicture(name) {
+    if (!pictures.has(name))
+      pictures.set(
+        name,
+        (async () => {
+          const file = `ground/${name}.png`;
+          if (!lib.entry("pack", file)) return null;
+          const bytes = await lib.read("pack", file);
+          const bmp = await createImageBitmap(new Blob([bytes], { type: "image/png" }), { resizeWidth: SIDE, resizeHeight: SIDE, resizeQuality: "high" });
+          const c = new OffscreenCanvas(SIDE, SIDE);
+          const ctx = c.getContext("2d");
+          ctx.drawImage(bmp, 0, 0);
+          bmp.close?.();
+          return ctx.getImageData(0, 0, SIDE, SIDE).data;
+        })().catch((e) => (console.warn(name, e), pictures.delete(name), null))
+      );
+    return pictures.get(name);
+  }
+  async function fineGround(data, my) {
+    const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    if (data.length < 16 || new TextDecoder().decode(data.subarray(0, 4)) !== "GMT1") return false;
+    const size = dv.getUint32(4, true);
+    const count = Math.min(12, dv.getUint32(8, true));
+    const mats = [];
+    let at = 12;
+    for (let m = 0; m < count; m++) {
+      const raw = data.subarray(at, at + 16);
+      const name = new TextDecoder().decode(raw.subarray(0, raw.indexOf(0) < 0 ? 16 : raw.indexOf(0)));
+      mats.push({ name, repeat: dv.getFloat32(at + 16, true) });
+      at += 20;
+    }
+    at += 4; // the baked tiles' feet per texel: the page's own map is what counts here
+    const cells = data.slice(at, at + size * size * 4);
+    if (cells.length < size * size * 4) return false;
+    // Only the materials the track uses come down.
+    const used = new Set();
+    for (let k = 0; k < cells.length; k += 4) {
+      used.add(cells[k]);
+      if (cells[k + 2]) used.add(cells[k + 1]);
+    }
+    const layers = await Promise.all(mats.map((m, i) => (used.has(i) ? groundPicture(m.name) : null)));
+    if (my !== token || !loaded) return false;
+    if (!layers.some(Boolean)) return false;
+    const stack = new Uint8Array(SIDE * SIDE * 4 * count);
+    layers.forEach((l, i) => l && stack.set(l, i * SIDE * SIDE * 4));
+    const pics = new THREE.DataArrayTexture(stack, SIDE, SIDE, count);
+    pics.wrapS = pics.wrapT = THREE.RepeatWrapping;
+    pics.magFilter = THREE.LinearFilter;
+    pics.minFilter = THREE.LinearMipmapLinearFilter;
+    pics.generateMipmaps = true;
+    pics.anisotropy = viewer.renderer.capabilities.getMaxAnisotropy();
+    pics.needsUpdate = true;
+    const map = new THREE.DataTexture(cells, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
+    map.magFilter = map.minFilter = THREE.NearestFilter;
+    map.needsUpdate = true;
+    const g = loaded.ground;
+    const cellFt = loaded.span / (size - 1);
+    const mapFt = loaded.span / loaded.terrain.userData.mapCanvas.width;
+    const repeats = Array.from({ length: 12 }, (_, i) => new THREE.Vector2(mats[i] ? 1 / Math.max(1, mats[i].repeat) : 0, layers[i] ? 1 : 0));
+    const mat = loaded.terrain.material;
+    mat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, {
+        fgMap: { value: map },
+        fgPics: { value: pics },
+        fgRepeats: { value: repeats },
+        fgInfo: { value: new THREE.Vector3(cellFt, mapFt, SIDE) },
+      });
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", "#include <common>\nvarying vec2 vFgFeet;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFgFeet = vec2(position.x, -position.z);");
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          "#include <common>",
+          `#include <common>
+varying vec2 vFgFeet;
+uniform sampler2D fgMap;
+uniform highp sampler2DArray fgPics;
+uniform vec2 fgRepeats[12];
+uniform vec3 fgInfo;
+vec3 fgRatio(int m, vec2 feet) {
+  vec2 r = fgRepeats[m];
+  if (r.y == 0.0) return vec3(1.0);
+  vec2 uv = feet * r.x;
+  vec3 fine = texture(fgPics, vec3(uv, float(m))).rgb;
+  float lod = log2(max(fgInfo.y * fgInfo.z * r.x, 1.0));
+  vec3 coarse = textureLod(fgPics, vec3(uv, float(m)), lod).rgb;
+  return clamp(fine / max(coarse, vec3(0.01)), vec3(0.35), vec3(2.2));
+}
+vec3 fineGround(vec2 feet) {
+  vec2 xz = feet / fgInfo.x;
+  ivec2 size = textureSize(fgMap, 0);
+  ivec2 i0 = ivec2(floor(xz));
+  vec2 f = fract(xz);
+  float w[12];
+  for (int m = 0; m < 12; m++) w[m] = 0.0;
+  for (int k = 0; k < 4; k++) {
+    ivec2 o = ivec2(k & 1, k >> 1);
+    vec4 c = texelFetch(fgMap, clamp(i0 + o, ivec2(0), size - 1), 0) * 255.0;
+    float bw = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+    float share = c.b / 255.0;
+    int ca = min(int(c.r + 0.5), 11), cb = min(int(c.g + 0.5), 11);
+    for (int m = 0; m < 12; m++) {
+      if (m == ca) w[m] += bw * (1.0 - share);
+      if (m == cb) w[m] += bw * share;
+    }
+  }
+  int a = 0;
+  for (int m = 1; m < 12; m++) if (w[m] > w[a]) a = m;
+  int b = a == 0 ? 1 : 0;
+  for (int m = 0; m < 12; m++) if (m != a && w[m] > w[b]) b = m;
+  float wb = w[b] / max(w[a] + w[b], 1e-4);
+  vec3 ratio = fgRatio(a, feet) * (1.0 - wb);
+  ratio += wb > 0.02 ? fgRatio(b, feet) * wb : vec3(wb);
+  return ratio;
+}`
+        )
+        .replace("#include <map_fragment>", "#include <map_fragment>\ndiffuseColor.rgb *= pow(fineGround(vFgFeet), vec3(2.2));");
+    };
+    mat.customProgramCacheKey = () => "fine-ground";
+    mat.needsUpdate = true;
+    loaded.terrain.userData.fine = { map, pics };
+    return true;
+  }
+
   async function plant(eco, load) {
     const out = new THREE.Group();
     out.name = "Plants";
@@ -384,16 +555,55 @@ export async function mount(app, panel) {
     return count ? out : null;
   }
 
-  function racingLine(line) {
+  // The racing line as a ribbon laid on the ground. The lap tracks keep
+  // their course level at height 0 (the game rides the ground under it),
+  // so every point takes the ground's height, between the course's
+  // cross-sections too, and sits just above it.
+  function racingLine(line, span) {
     const g = new THREE.Group();
     g.name = "RacingLine";
-    const mat = new THREE.LineBasicMaterial({ color: 0xa3c24a, depthTest: false, transparent: true, opacity: 0.9 });
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xc6e85a,
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
+    });
+    const half = Math.min(2.5, Math.max(1, span / 2000));
+    const step = Math.max(2, loaded.ground.spacing / 2);
     for (const pts of line.nodes) {
       if (pts.length < 2) continue;
-      const geo = new THREE.BufferGeometry().setFromPoints(pts.map((p) => new THREE.Vector3(p[0], p[1] + 2, p[2])));
-      const l = new THREE.Line(geo, mat);
-      l.renderOrder = 10;
-      g.add(l);
+      // A smooth curve through the cross-sections, a point every half
+      // sample or so. A lap's course ends where it starts.
+      const first = pts[0], last = pts[pts.length - 1];
+      const loop = pts.length > 3 && Math.hypot(first[0] - last[0], first[2] - last[2]) < 1;
+      const centres = (loop ? pts.slice(0, -1) : pts).map((p) => new THREE.Vector3(p[0], 0, p[2]));
+      const curve = new THREE.CatmullRomCurve3(centres, loop, "centripetal");
+      const along = curve.getSpacedPoints(Math.max(8, Math.ceil(curve.getLength() / step))).map((v) => [v.x, v.z]);
+      const pos = new Float32Array(along.length * 6);
+      const end = along.length - 1;
+      along.forEach(([x, z], i) => {
+        const p = along[i > 0 ? i - 1 : loop ? end - 1 : 0];
+        const q = along[i < end ? i + 1 : loop ? 1 : end];
+        let dx = q[0] - p[0], dz = q[1] - p[1];
+        const len = Math.hypot(dx, dz) || 1;
+        [dx, dz] = [dx / len, dz / len];
+        for (const [k, sgn] of [[0, 1], [1, -1]]) {
+          const sx = x - dz * half * sgn, sz = z + dx * half * sgn;
+          pos.set([sx, groundAt(sx, sz, true) + 0.4, sz], i * 6 + k * 3);
+        }
+      });
+      const idx = [];
+      for (let i = 0; i + 1 < along.length; i++) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setIndex(idx);
+      const m = new THREE.Mesh(geo, mat);
+      m.renderOrder = 10;
+      g.add(m);
     }
     return g;
   }
@@ -430,13 +640,21 @@ export async function mount(app, panel) {
     viewer.camera.lookAt(viewer.controls.target);
     if (viewer.fly) fly.start();
   }
-  function groundAt(x, z) {
+  // The ground's height at page x, z: the nearest sample, or with
+  // `exact` on the drawn triangles themselves.
+  function groundAt(x, z, exact = false) {
     const g = loaded.ground;
     const n = g.side;
-    const i = Math.max(0, Math.min(n - 1, Math.round(x / g.spacing)));
-    const j = Math.max(0, Math.min(n - 1, Math.round(-z / g.spacing)));
     loaded.h ||= g.heights();
-    return loaded.h[j * n + i] || 0;
+    const h = loaded.h;
+    const u = Math.max(0, Math.min(n - 1, x / g.spacing));
+    const v = Math.max(0, Math.min(n - 1, -z / g.spacing));
+    if (!exact) return h[Math.round(v) * n + Math.round(u)] || 0;
+    const i = Math.min(n - 2, Math.floor(u)), j = Math.min(n - 2, Math.floor(v));
+    const fx = u - i, fz = v - j;
+    const a = h[j * n + i], b = h[j * n + i + 1], c = h[(j + 1) * n + i], d = h[(j + 1) * n + i + 1];
+    // As groundMesh splits each square: a b c, then b d c.
+    return fx + fz <= 1 ? a + (b - a) * fx + (c - a) * fz : d + (c - d) * (1 - fx) + (b - d) * (1 - fz);
   }
   function setMode(flying) {
     orbitBtn.ariaPressed = String(!flying);
