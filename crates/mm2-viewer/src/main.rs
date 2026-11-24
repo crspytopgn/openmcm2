@@ -294,6 +294,9 @@ fn main() -> Result<(), BoxError> {
         freepack::set_menus(true, None);
     }
     let free_only = freepack::chosen() && path.is_none() && !freepack::has_menus() && !game_menus;
+    if args.iter().any(|a| a == "--ride-course") {
+        builder::RIDE_ON_OPEN.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     if !is_track && (free_only || args.iter().any(|a| a == "--course-builder")) {
         let has_menus = |g: &Path| fs::is_file(g.join("UI").join("MAINMENU.DAT"));
         let given = path.map(Path::to_path_buf);

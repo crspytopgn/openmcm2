@@ -13,6 +13,9 @@ use mm2_formats::{anim, cub, esb, faoe, rs2, scn, slb, slt, tdf, tga, trn, wav, 
 use serde_json::{json, Value};
 use wasm_bindgen::prelude::*;
 
+mod course;
+pub use course::*;
+
 fn err(e: impl std::fmt::Display) -> JsError {
     JsError::new(&e.to_string())
 }
