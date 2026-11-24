@@ -1,0 +1,170 @@
+MaxValue = 13500.000000
+AutoPitch = 1
+Layer0
+	NumSamples = 6
+	Sample0
+		Wav = 2st125cc_onidle2.wav
+		NumPoints = 3
+		Point0
+			Value = 0.000000  ;; 0
+			Volume = 1.000000
+		Point1
+			Value = 0.337354  ;; 4554
+			Volume = 1.000000
+		Point2
+			Value = 0.380420  ;; 5136
+			Volume = 0.000000
+		RefPitch = 0.280000  ;; 3780
+	Sample1
+		Wav = 2st125cc_onlow2.wav
+		NumPoints = 4
+		Point0
+			Value = 0.337354  ;; 4554
+			Volume = 0.000000
+		Point1
+			Value = 0.380420  ;; 5136
+			Volume = 1.000000
+		Point2
+			Value = 0.508612  ;; 6866
+			Volume = 1.000000
+		Point3
+			Value = 0.573542  ;; 7743
+			Volume = 0.000000
+		RefPitch = 0.460000  ;; 6210
+	Sample2
+		Wav = 2st125cc_onlowhigh2.wav
+		NumPoints = 4
+		Point0
+			Value = 0.508612  ;; 6866
+			Volume = 0.000000
+		Point1
+			Value = 0.573542  ;; 7743
+			Volume = 1.000000
+		Point2
+			Value = 0.650881  ;; 8787
+			Volume = 1.000000
+		Point3
+			Value = 0.733972  ;; 9909
+			Volume = 0.000000
+		RefPitch = 0.636444  ;; 8592
+	Sample3
+		Wav = 2st125cc_onmid2.wav
+		NumPoints = 4
+		Point0
+			Value = 0.650881  ;; 8787
+			Volume = 0.000000
+		Point1
+			Value = 0.733972  ;; 9909
+			Volume = 1.000000
+		Point2
+			Value = 0.747758  ;; 10095
+			Volume = 1.000000
+		Point3
+			Value = 0.843217  ;; 11383
+			Volume = 0.000000
+		RefPitch = 0.753333  ;; 10170
+	Sample4
+		Wav = 2st125cc_onhigh2.wav
+		NumPoints = 4
+		Point0
+			Value = 0.747758  ;; 10095
+			Volume = 0.000000
+		Point1
+			Value = 0.843217  ;; 11383
+			Volume = 1.000000
+		Point2
+			Value = 0.846070  ;; 11422
+			Volume = 1.000000
+		Point3
+			Value = 0.954079  ;; 12880
+			Volume = 0.000000
+		RefPitch = 0.840000  ;; 11340
+	Sample5
+		Wav = 2st125cc_onlimit2.wav
+		NumPoints = 3
+		Point0
+			Value = 0.846070  ;; 11422
+			Volume = 0.000000
+		Point1
+			Value = 0.954079  ;; 12880
+			Volume = 1.000000
+		Point2
+			Value = 1.000000  ;; 13500
+			Volume = 1.000000
+		RefPitch = 0.964444  ;; 13020
+Layer1
+	NumSamples = 5
+	Sample0
+		Wav = SX125_idle.wav
+		NumPoints = 3
+		Point0
+			Value = 0.000000  ;; 0
+			Volume = 0.900000
+		Point1
+			Value = 0.330282  ;; 4459
+			Volume = 0.900000
+		Point2
+			Value = 0.372446  ;; 5028
+			Volume = 0.000000
+		RefPitch = 0.277778  ;; 3750
+	Sample1
+		Wav = 2st125cc_offverylow2.wav
+		NumPoints = 4
+		Point0
+			Value = 0.330282  ;; 4459
+			Volume = 0.000000
+		Point1
+			Value = 0.372446  ;; 5028
+			Volume = 0.850000
+		Point2
+			Value = 0.459176  ;; 6199
+			Volume = 0.850000
+		Point3
+			Value = 0.517794  ;; 6990
+			Volume = 0.000000
+		RefPitch = 0.444444  ;; 6000
+	Sample2
+		Wav = 2st125cc_offlow2.wav
+		NumPoints = 4
+		Point0
+			Value = 0.459176  ;; 6199
+			Volume = 0.000000
+		Point1
+			Value = 0.517794  ;; 6990
+			Volume = 0.800000
+		Point2
+			Value = 0.559554  ;; 7554
+			Volume = 0.800000
+		Point3
+			Value = 0.630986  ;; 8518
+			Volume = 0.000000
+		RefPitch = 0.536889  ;; 7248
+	Sample3
+		Wav = 2st125cc_offmid2.wav
+		NumPoints = 4
+		Point0
+			Value = 0.559554  ;; 7554
+			Volume = 0.000000
+		Point1
+			Value = 0.630986  ;; 8518
+			Volume = 0.800000
+		Point2
+			Value = 0.676365  ;; 9131
+			Volume = 0.800000
+		Point3
+			Value = 0.762709  ;; 10297
+			Volume = 0.000000
+		RefPitch = 0.660000  ;; 8910
+	Sample4
+		Wav = 2st125cc_offhigh2.wav
+		NumPoints = 3
+		Point0
+			Value = 0.676365  ;; 9131
+			Volume = 0.000000
+		Point1
+			Value = 0.762709  ;; 10297
+			Volume = 0.750000
+		Point2
+			Value = 1.000000  ;; 13500
+			Volume = 0.750000
+		RefPitch = 0.784444  ;; 10590

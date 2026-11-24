@@ -1,0 +1,186 @@
+MaxValue = 12000.000000
+AutoPitch = 1
+Layer0
+	NumSamples = 7
+	Sample0
+		Wav = TC250_onverylow.wav
+		NumPoints = 3
+		Point0
+			Value = 0.000000  ;; 0
+			Volume = 1.000000
+		Point1
+			Value = 0.358207  ;; 4298
+			Volume = 1.000000
+		Point2
+			Value = 0.403935  ;; 4847
+			Volume = 0.000000
+		RefPitch = 0.315000  ;; 3780
+	Sample1
+		Wav = TC250_onlow.wav
+		NumPoints = 4
+		Point0
+			Value = 0.358207  ;; 4298
+			Volume = 0.000000
+		Point1
+			Value = 0.403935  ;; 4847
+			Volume = 1.000000
+		Point2
+			Value = 0.463542  ;; 5563
+			Volume = 1.000000
+		Point3
+			Value = 0.522718  ;; 6273
+			Volume = 0.000000
+		RefPitch = 0.461000  ;; 5532
+	Sample2
+		Wav = TC250_onmid.wav
+		NumPoints = 4
+		Point0
+			Value = 0.463542  ;; 5563
+			Volume = 0.000000
+		Point1
+			Value = 0.522718  ;; 6273
+			Volume = 1.000000
+		Point2
+			Value = 0.524847  ;; 6298
+			Volume = 1.000000
+		Point3
+			Value = 0.591849  ;; 7102
+			Volume = 0.000000
+		RefPitch = 0.527500  ;; 6330
+	Sample3
+		Wav = TC250_onlowmid.wav
+		NumPoints = 4
+		Point0
+			Value = 0.524847  ;; 6298
+			Volume = 0.000000
+		Point1
+			Value = 0.591849  ;; 7102
+			Volume = 1.000000
+		Point2
+			Value = 0.614243  ;; 7371
+			Volume = 1.000000
+		Point3
+			Value = 0.692657  ;; 8312
+			Volume = 0.000000
+		RefPitch = 0.591000  ;; 7092
+	Sample4
+		Wav = YZ250_onhigh.wav
+		NumPoints = 4
+		Point0
+			Value = 0.614243  ;; 7371
+			Volume = 0.000000
+		Point1
+			Value = 0.692657  ;; 8312
+			Volume = 1.000000
+		Point2
+			Value = 0.745258  ;; 8943
+			Volume = 1.000000
+		Point3
+			Value = 0.840397  ;; 10085
+			Volume = 0.000000
+		RefPitch = 0.722500  ;; 8670
+	Sample5
+		Wav = TC250_onveryhigh.wav
+		NumPoints = 4
+		Point0
+			Value = 0.745258  ;; 8943
+			Volume = 0.000000
+		Point1
+			Value = 0.840397  ;; 10085
+			Volume = 1.000000
+		Point2
+			Value = 0.860177  ;; 10322
+			Volume = 1.000000
+		Point3
+			Value = 0.969987  ;; 11640
+			Volume = 0.000000
+		RefPitch = 0.870000  ;; 10440
+	Sample6
+		Wav = TC250_onlimit.wav
+		NumPoints = 3
+		Point0
+			Value = 0.860177  ;; 10322
+			Volume = 0.000000
+		Point1
+			Value = 0.969987  ;; 11640
+			Volume = 1.000000
+		Point2
+			Value = 1.000000  ;; 12000
+			Volume = 1.000000
+		RefPitch = 0.962500  ;; 11550
+Layer1
+	NumSamples = 5
+	Sample0
+		Wav = TC250_idle2.wav
+		NumPoints = 3
+		Point0
+			Value = 0.000000  ;; 0
+			Volume = 0.900000
+		Point1
+			Value = 0.278849  ;; 3346
+			Volume = 0.900000
+		Point2
+			Value = 0.314447  ;; 3773
+			Volume = 0.000000
+		RefPitch = 0.220000  ;; 2640
+	Sample1
+		Wav = 2st125cc_offverylow2.wav
+		NumPoints = 4
+		Point0
+			Value = 0.278849  ;; 3346
+			Volume = 0.000000
+		Point1
+			Value = 0.314447  ;; 3773
+			Volume = 0.850000
+		Point2
+			Value = 0.413173  ;; 4958
+			Volume = 0.850000
+		Point3
+			Value = 0.465918  ;; 5591
+			Volume = 0.000000
+		RefPitch = 0.400000  ;; 4800
+	Sample2
+		Wav = 2st125cc_offlow2.wav
+		NumPoints = 4
+		Point0
+			Value = 0.413173  ;; 4958
+			Volume = 0.000000
+		Point1
+			Value = 0.465918  ;; 5591
+			Volume = 0.800000
+		Point2
+			Value = 0.503494  ;; 6042
+			Volume = 0.800000
+		Point3
+			Value = 0.567770  ;; 6813
+			Volume = 0.000000
+		RefPitch = 0.483000  ;; 5796
+	Sample3
+		Wav = 2st125cc_offmid2.wav
+		NumPoints = 4
+		Point0
+			Value = 0.503494  ;; 6042
+			Volume = 0.000000
+		Point1
+			Value = 0.567770  ;; 6813
+			Volume = 0.800000
+		Point2
+			Value = 0.608728  ;; 7305
+			Volume = 0.800000
+		Point3
+			Value = 0.686438  ;; 8237
+			Volume = 0.000000
+		RefPitch = 0.594000  ;; 7128
+	Sample4
+		Wav = 2st125cc_offhigh2.wav
+		NumPoints = 3
+		Point0
+			Value = 0.608728  ;; 7305
+			Volume = 0.000000
+		Point1
+			Value = 0.686438  ;; 8237
+			Volume = 0.750000
+		Point2
+			Value = 1.000000  ;; 12000
+			Volume = 0.750000
+		RefPitch = 0.706000  ;; 8472
