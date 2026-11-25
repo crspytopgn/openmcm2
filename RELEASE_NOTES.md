@@ -1,3 +1,25 @@
+# OpenMCM2 0.8.4
+
+* **No more rocket starts.** A computer rider next to another bike off
+  the start could shoot away at over 100 mph. Their dodge now matches
+  the other bike's speed the way the original does, and the starts line
+  up with a recorded race from the original.
+* **The free version stays free.** With your MM2 files set up, picking
+  the free version now really plays the free tracks, bikes and sounds.
+  The Play page has quick switches for the graphics (MM2 or free) and
+  the menus (Original or New look).
+* **A simpler Graphics page.** Pick a Look (Original, Enhanced or
+  Next-gen), a Quality and a Colour look. Everything else is under
+  Advanced.
+* **Next-gen on Macs** now runs smoothly, even at 4K.
+* **More screen sizes**, including 16:10 and super-wide, and new windows
+  open widescreen.
+* **Tyre marks you can see** (Enhanced): a faint line after one pass,
+  smooth ruts after two or three. Dirt builds up gradually on bikes and
+  riders, on by default in Enhanced.
+* **Crash camera** keeps the rider in view when you're thrown back from
+  the edge of the map (#214).
+
 # OpenMCM2 0.8.3
 
 * **The same ride at any frame rate.** At 30 fps a hard turn could end
