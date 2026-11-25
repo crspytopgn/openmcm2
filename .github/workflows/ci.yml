@@ -9,6 +9,10 @@ on:
 # A new push to a pull request stops that pull request's older run, so the
 # few Mac runners aren't tied up building commits nobody needs. Runs on main
 # each get their own group and always finish.
+# Builds and tests only: the token can read the code, nothing more.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true

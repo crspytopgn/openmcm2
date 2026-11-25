@@ -32,6 +32,16 @@ in `crates/mm2-settings/src/lib.rs` to it before a release.
   (`total`, `races`, `count`, `players`, `event:N`, `track:NAME`,
   `bike:CC`), and `GET /playtime` gives everyone's added up.
 
+## Limits
+
+Each address (an IPv4 address, or an IPv6 /64) may send only so many laps,
+playtimes, ghosts, ratings and reports a minute and a day (`LIMITS` in
+`worker.js`, counted in the `Races` object's `hits` table by hashed
+address). Past that the answer is 429 `slow down`; the game keeps what it
+couldn't send and tries again later. A shared track's stars, reports and
+downloads count once per address, so made-up voter names change nothing,
+and a track hidden by reports can't be downloaded either.
+
 ## Online ghosts
 
 With the online ghosts extra on (off by default), a new best lap goes up
