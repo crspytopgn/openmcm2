@@ -41,6 +41,7 @@
 
 import { connect } from "cloudflare:sockets";
 import { DurableObject } from "cloudflare:workers";
+import { mask } from "./clean.js";
 
 const KEEP = 100;
 const MOST_LINES = 200;
@@ -77,12 +78,12 @@ async function addLaps(request, env) {
     const f = line.replace(/\r$/, "").split("\t");
     if (f.length !== 6 && f.length !== 7) continue;
     const key = boardKey(f[0], f[1], f[2], f[3]);
-    const rider = clean(f[4]);
+    const rider = mask(clean(f[4]));
     const ms = Number.parseInt(f[5], 10);
     if (!key || !rider || !(ms >= SHORTEST && ms <= LONGEST)) continue;
     if (!byBoard.has(key)) byBoard.set(key, []);
     byBoard.get(key).push([rider, ms]);
-    const title = (f[6] ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 40).trim();
+    const title = mask((f[6] ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 40).trim());
     if (title) titles.set(key, title);
   }
   for (const [key, laps] of byBoard) {
@@ -130,7 +131,7 @@ async function addGhost(request, env) {
   if (f.length !== 6 && f.length !== 7) return text("which lap?\n", 400);
   const key = boardKey(f[0], f[1], f[2], f[3]);
   const at = ghostKey(f[0], f[1], f[2]);
-  const rider = clean(f[4]);
+  const rider = mask(clean(f[4]));
   const ms = Number.parseInt(f[5], 10);
   const data = tape.trim();
   if (!key || !at || !rider || !(ms >= SHORTEST && ms <= LONGEST)) return text("which lap?\n", 400);
@@ -143,7 +144,7 @@ async function addGhost(request, env) {
   const list = (await env.LAPS.get("ghosts", "json")) ?? {};
   const had = list[at.slice(2)];
   if (had && had.ms <= ms) return text("slower\n");
-  const title = (f[6] ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 40).trim();
+  const title = mask((f[6] ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 40).trim());
   await env.LAPS.put(at, data);
   list[at.slice(2)] = { cls: Number.parseInt(f[3], 10), rider: mine[0], ms, title: title || (had?.title ?? "") };
   await env.LAPS.put("ghosts", JSON.stringify(list));
@@ -283,7 +284,7 @@ async function addRace(request, env) {
     kind,
     address,
     from: ip,
-    name: clean(f.name) || "Race",
+    name: mask(clean(f.name)) || "Race",
     event: Math.min(99, Math.max(0, Number.parseInt(f.event, 10) || 0)),
     track: (f.track ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 40).trim(),
     players: Math.min(8, Math.max(1, Number.parseInt(f.players, 10) || 1)),
@@ -635,7 +636,7 @@ export class Room extends DurableObject {
       switch (kind) {
         case M.HELLO: {
           if (me.hello) return;
-          me.name = r.str().replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 24) || "Rider";
+          me.name = mask(r.str().replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 24)) || "Rider";
           me.ride = r.ride();
           me.hello = true;
           ws.serializeAttachment(me);
@@ -658,7 +659,7 @@ export class Room extends DurableObject {
           this.tellPlayers();
           return;
         case M.CHAT: {
-          const line = r.str().slice(0, 300);
+          const line = mask(r.str().slice(0, 300));
           this.everyone(new Writer().u8(M.CHAT).str(line).done());
           return;
         }
@@ -792,8 +793,8 @@ function tidyCourse(body) {
   delete c.models;
   if (c.look?.ground || c.land?.heightmap) return null;
   if (Array.isArray(c.plants) && c.plants.some((p) => p?.map)) return null;
-  c.name = line(c.name, 40) || "Shared track";
-  c.author = line(c.author, 24);
+  c.name = mask(line(c.name, 40)) || "Shared track";
+  c.author = mask(line(c.author, 24));
   if (c.base) {
     const file = String(c.base.file ?? "").split(/[\\/]/).pop();
     if (!/^[^<>:"|?*]{1,64}\.env$/i.test(file)) return null;
@@ -813,7 +814,7 @@ async function shared(request, url, env) {
       line(url.searchParams.get("q"), 40),
       Math.max(0, Number.parseInt(url.searchParams.get("page") ?? "0", 10) || 0),
     );
-    return text(rows.map((r) => `${[r.id, r.name, r.author, r.mode, r.base, r.downloads, r.stars, r.votes, r.created, r.bytes, r.updated].join("\t")}\n`).join(""));
+    return text(rows.map((r) => `${[r.id, mask(r.name), mask(r.author), r.mode, r.base, r.downloads, r.stars, r.votes, r.created, r.bytes, r.updated].join("\t")}\n`).join(""));
   }
   if (request.method === "GET" && p === "/shared/track") {
     const id = url.searchParams.get("id") ?? "";
@@ -876,6 +877,9 @@ export class Shared extends DurableObject {
     this.sql.exec("CREATE TABLE IF NOT EXISTS votes (id TEXT, voter TEXT, stars INTEGER, PRIMARY KEY (id, voter))");
     this.sql.exec("CREATE TABLE IF NOT EXISTS got (id TEXT, voter TEXT, PRIMARY KEY (id, voter))");
     this.sql.exec("CREATE TABLE IF NOT EXISTS reports (id TEXT, voter TEXT, PRIMARY KEY (id, voter))");
+    // Test tracks put up by mistake while the server was checked
+    // (2026-11-25), by the test's own voter name.
+    for (const r of this.sql.exec("SELECT id FROM tracks WHERE voter = 'probetest12345'").toArray()) this.drop(r.id);
   }
 
   putParts(id, json) {
@@ -972,7 +976,11 @@ export class Shared extends DurableObject {
     const r = this.sql.exec("SELECT key FROM tracks WHERE id = ?", id).toArray()[0];
     if (!r) return "gone";
     if (keyHash !== null && r.key !== keyHash) return "not yours";
-    for (const t of ["tracks", "parts", "votes", "got", "reports"]) this.sql.exec(`DELETE FROM ${t} WHERE id = ?`, id);
+    this.drop(id);
     return "ok";
+  }
+
+  drop(id) {
+    for (const t of ["tracks", "parts", "votes", "got", "reports"]) this.sql.exec(`DELETE FROM ${t} WHERE id = ?`, id);
   }
 }

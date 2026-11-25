@@ -56,8 +56,8 @@ pub fn parse_rows(text: &str) -> Vec<Row> {
             let n = |i: usize| f[i].trim().parse().unwrap_or(0);
             Some(Row {
                 id: f[0].into(),
-                name: f[1].into(),
-                author: f[2].into(),
+                name: crate::clean::mask(f[1]),
+                author: crate::clean::mask(f[2]),
                 mode: f[3].into(),
                 base: f[4].into(),
                 downloads: n(5) as u32,
