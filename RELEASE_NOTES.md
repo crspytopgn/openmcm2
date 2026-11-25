@@ -18,6 +18,8 @@
   off by default).
 * **New Enhanced looks**: colour looks, a Next-gen preset, and grass
   that bikes push aside (all off by default).
+* **Names stay clean.** Rude words in shared track names, leaderboards,
+  server and room names, and chat are starred out.
 * **Ko-fi**: you can now support OpenMCM2 on Ko-fi as well as GitHub
   Sponsors.
 
