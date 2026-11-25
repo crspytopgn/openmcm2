@@ -1094,6 +1094,7 @@ impl Settings {
     }
 }
 
+pub mod clean;
 pub mod laps;
 pub mod playtime;
 pub mod races;
