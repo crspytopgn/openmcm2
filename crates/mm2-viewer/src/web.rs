@@ -63,6 +63,13 @@ extern "C" {
     fn js_typing(text: Option<String>) -> Result<(), JsValue>;
     #[wasm_bindgen(js_name = savePicture, catch)]
     fn js_save_picture() -> Result<bool, JsValue>;
+    /// The replay editor's clip: the page records the canvas as a movie
+    /// (`fps` frames a second); false if this browser can't.
+    #[wasm_bindgen(js_name = clipStart, catch)]
+    fn js_clip_start(fps: u32) -> Result<bool, JsValue>;
+    /// Ends it and puts it in the downloads; false if there was none.
+    #[wasm_bindgen(js_name = clipStop, catch)]
+    fn js_clip_stop() -> Result<bool, JsValue>;
     /// Puts a file in the downloads; false if it can't.
     #[wasm_bindgen(js_name = saveFile, catch)]
     fn js_save_file(name: &str, bytes: &[u8]) -> Result<bool, JsValue>;
@@ -125,6 +132,16 @@ pub fn rumble(id: Option<&str>, strength: [f32; 2]) {
 /// Photo mode's picture: the canvas just shown, to the downloads.
 pub fn save_picture() -> bool {
     js_save_picture().unwrap_or(false)
+}
+
+/// The replay editor's clip starts (the page records the canvas).
+pub fn clip_start(fps: u32) -> bool {
+    js_clip_start(fps).unwrap_or(false)
+}
+
+/// The clip ends, to the downloads.
+pub fn clip_stop() -> bool {
+    js_clip_stop().unwrap_or(false)
 }
 
 /// The loading screen's step, for one the game takes itself.

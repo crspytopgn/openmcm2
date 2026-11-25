@@ -16,7 +16,7 @@ export const UPGRADES = [
   ["bloom", "HDR bloom", false, "Bright lights and the sun glow softly."],
   ["ao", "Ambient occlusion", true, "Corners and contacts darkened, as ambient light is."],
   ["ground", "Detailed ground", true, "The ground re-made from photo materials."],
-  ["grass", "3D grass", true, "Grass growing on the grassy ground near you."],
+  ["grass", "3D grass", true, "Grass growing on the grassy ground near you, swaying in the wind and pushed aside as bikes ride through it. With Next-gen it grows thicker and taller and the wind rolls across it in waves."],
   ["smooth", "Smooth hills", true, "The hills round you smoothed, not faceted."],
   ["dust", "Dust clouds", true, "Soft clouds of dust the colour of the ground behind the bikes: thicker when you pull hard or spin, a ring of it when you land, and on a dry track a thin haze that hangs on the wind. Fewer, bigger puffs on Low and Medium, so it stays light."],
   ["mud", "Mud and spray", true, "Mud and spray caking bikes and riders."],
@@ -36,17 +36,23 @@ export const UPGRADES = [
   ["nightlights", "Stadium lights at night", true, "With the time of day set to Night, a stadium is lit by its own lamp banks: the floor, bikes and riders lit from above, with soft shadows from each bank."],
   ["roost", "Flying dirt (roost)", true, "Real roost: while the back tyre spins (or you pull hard, or slide) it throws a low jet of fine grit, crumbs and clods with a brown plume of dirt behind, all falling fast. Only on dirt; mud in the rain. Fewer pieces on Low."],
   ["bounce", "Bounce light", true, "Sunlight bouncing off the ground and walls: sunlit dirt throws a soft warm light into the shaded side of the bike and rider, and pale corners don't go as dark. Subtle. Costs a little on a slower computer."],
+  ["closeup", "Sharp dirt up close", true, "Near your wheels the ground is real photo dirt, with clods, stones and grain, instead of the painted texture smeared up close. Needs Detailed ground on. Costs next to nothing."],
+  ["wind", "Wind in the grass and trees", true, "A breezy day: gusts roll across the 3D grass in waves and the trees sway a little more. Costs next to nothing."],
+  ["litair", "Sunlight in the air", true, "Sunlight in the air near the ground, with darker streaks where trees and hills shade it, so beams of light show. Faint, plain on Next-gen. Not in a browser except with Next-gen: too heavy."],
   ["fsr", "AMD FSR upscaling", true, "AMD FidelityFX Super Resolution: on a big screen the 3D scene is drawn smaller to stay smooth; FSR stretches it back up along its edges and gently sharpens it, so it looks close to full sharpness instead of soft. With TAA it rebuilds the picture from several frames, as FSR 2 does. A big help on laptops."],
 ];
 
 // In a browser, Ultra draws as High does (the game caps both: see
 // graphics::Enhanced::for_browser), so it isn't offered. Medium is the
 // default: High has stalled a whole Mac in Safari.
-const QUALITIES = [["auto", "Auto (picks for your computer)"], ["low", "Low"], ["medium", "Medium"], ["high", "High (a fast computer)"]];
+// Next-gen is offered: the game keeps its look but holds the frame rate
+// by setting effects aside when frames come late.
+const QUALITIES = [["auto", "Auto (picks for your computer)"], ["low", "Low"], ["medium", "Medium"], ["high", "High (a fast computer)"], ["nextgen", "Next-gen (bold, a strong computer)"]];
 // Whether a quality preset keeps an upgrade on (Quality::has).
 function presetHas(quality, name) {
   if (quality === "auto") quality = "low"; // browsers seldom name the graphics card
-  const off = { low: ["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr", "bounce"], medium: ["shafts", "smooth", "gtao", "ssr", "bounce"] }[quality] || [];
+  const off = { low: ["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr", "bounce", "litair"], medium: ["shafts", "smooth", "gtao", "ssr", "bounce", "litair"] }[quality] || [];
+  if (quality === "nextgen" && ["bounce", "bloom", "bikes", "scenery"].includes(name)) return true;
   return !off.includes(name) && UPGRADES.some(([n, , on]) => n === name && on);
 }
 
@@ -56,6 +62,10 @@ const ABOUT_WEATHER = "Clear, overcast or rain, for looks only: the riding is th
 const ABOUT_DETAIL = "How strongly the grain of the photo ground shows.";
 const TIMES = [["", "Track's own"], ["dawn", "Dawn"], ["morning", "Morning"], ["noon", "Noon"], ["afternoon", "Afternoon"], ["dusk", "Dusk"]];
 const WEATHERS = [["clear", "Clear"], ["overcast", "Overcast"], ["rain", "Rain"]];
+// The colour looks (mm2_settings::LOOKS), a gentle grade over the picture.
+const LOOKS = [["original", "Original"], ["bold", "Bold"], ["warm", "Warm afternoon"], ["overcast", "Overcast"]];
+const ABOUT_LOOK = "A gentle colour grade over the finished picture. Original: the colours as drawn. Bold: richer colour, a little more contrast, slightly darker corners. Warm afternoon: sunlit parts a touch golden, the shade lifted a little. Overcast: a little less colour and contrast, a cool tint in the shade.";
+const ABOUT_NEXTGEN = "Next-gen: a modern game's look, much bolder than the others. Sunlit air you can see shafts of light in, thick grass blowing in waves of wind, trees plainly moving, photo dirt sharp right up to your wheels, the real sky with clouds, bounce light, a soft glow round bright light, glossier bikes and trackside props. Heavy: for a strong computer. If frames come late it draws softer and sets effects aside.";
 
 // The extras the original game didn't have, all off unless turned on,
 // by group: the setting, its flag, the label and what it does. A number
@@ -83,6 +93,7 @@ export const EXTRAS = [
     { key: "pad_curve", flag: "pad-curve", label: "Stick steering curve", about: "How gently a stick steers near the middle. 100% is the original game's: little steering for a small push and a lot near the edge. 0% steers in straight proportion.", range: [0, 100, 5, "%"], off: 100 },
     { key: "pad_smoothing", flag: "pad-smoothing", label: "Stick smoothing", about: "Evens out a twitchy stick's steering. 0% is the original game's.", range: [0, 90, 5, "%"], off: 0 },
     { key: "photo_mode", flag: "photo-mode", label: "Photo mode", about: "In a race, press F (or click both sticks on a pad) to freeze it and hide the race display. Fly the camera with WASD, Q/E for down and up and Shift for faster, look round with the arrow keys or by holding the right mouse button (on a pad, the left stick flies, the right stick looks, the triggers go down and up). Enter or the pad's A saves a picture as a PNG to your downloads. F again, Escape or the pad's B carries on the race. Not in network races, where the race can't wait." },
+    { key: "replay_editor", flag: "replay-editor", label: "Replay editor", about: "In a replay, extra keys on top of the original VCR player. Tab goes from the race camera to a free camera you fly (WASD, Q/E down and up, Shift faster, arrow keys or the right mouse button to look) and on to a camera path. Comma and full stop slow the replay down to 1/2, 1/4, 1/8 or 1/20 speed and back. I and O mark the start and end of a moment, and L loops it. K keeps the camera where it is as a camera key at that time; with two or more keys, the camera path glides between them as the replay plays. Backspace takes away the nearest key, T keeps the free camera aimed at the rider. R records a clip as a movie (30 frames a second, no sound) to your downloads (a WebM or MP4 file, depending on the browser): from In to Out if both are marked, otherwise until R again. H hides the player and the editor's line for a clean picture. On a pad: X changes the camera, Y adds a key, the D-pad's left and right change the speed, A pauses, Back records, and the sticks and triggers fly the free camera. Off, replays are exactly the original's." },
     { key: "no_fresh_sounds", flag: "no-fresh-sounds", label: "Original engine sounds, untouched", keep: true, about: "Unless you tick this, the bike engines from your own MM2 or demo files get a little more life as they load: a fuller tone, a touch more bite and loops with no clicks, with the free graphics too. Nothing is downloaded; without the game files the free recordings play. Ticked, the engines sound exactly as in the original." },
     { key: "no_whistle", flag: "no-whistle", label: "No out-of-bounds whistle", keep: true, about: "The free tracks play a cartoon slide whistle as you ride off the edge of the world and get thrown back in, going up, then down as you fall, unless you tick this. Ticked, that throw is silent as in the original." },
     { key: "fxaa", flag: "fxaa", label: "Smoother edges", about: "Smooths stair-stepped edges after the race is drawn, in either look: the outlines of banners, bushes, tree leaves and fences, which Anti-aliasing (MSAA) does not reach. The change is small, so look at a banner edge with it off and on." },
@@ -159,6 +170,7 @@ export function defaults() {
     quality: "auto",
     time: "",
     weather: "clear",
+    look: "original",
     detail: 0.5,
     upgrades: Object.fromEntries(UPGRADES.map(([n]) => [n, presetHas("medium", n)])),
     show_fps: false,
@@ -177,6 +189,8 @@ export function load() {
       // that build up start on now.
       if ((kept.v || 0) < 3 && kept.upgrades) delete kept.upgrades.ruts;
       Object.assign(s, kept, { upgrades: { ...s.upgrades, ...(kept.upgrades || {}) } });
+      // Before the colour looks, the grade switch's one bold look.
+      if (!kept.look && kept.upgrades && kept.upgrades.grade) s.look = "bold";
       // Settings from before Medium was the browser's default go to it.
       if (!kept.v && s.quality !== "low") {
         s.quality = "medium";
@@ -216,8 +230,9 @@ export function args(s) {
     // The light mode: Auto is Low.
     const list = [`quality=${lite && s.quality === "auto" ? "low" : s.quality}`];
     // Auto picks the effects itself.
+    // The colour grade is the colour look's (look= below).
     if (s.quality !== "auto") for (const [n] of UPGRADES) {
-      if (!!s.upgrades[n] !== presetHas(s.quality, n)) list.push(s.upgrades[n] ? n : `no-${n}`);
+      if (n !== "grade" && !!s.upgrades[n] !== presetHas(s.quality, n)) list.push(s.upgrades[n] ? n : `no-${n}`);
     }
     // Auto: the effects this computer needed set aside last time
     // (the game tells the page, mm2page.autoShed), so it starts there.
@@ -227,6 +242,7 @@ export function args(s) {
     }
     if (s.time) list.push(`time=${s.time}`);
     if (s.weather !== "clear") list.push(`weather=${s.weather}`);
+    if (s.look && s.look !== "original") list.push(`look=${s.look}`);
     if (Math.abs(s.detail - 0.5) > 1e-3) list.push(`detail=${Number(s.detail).toFixed(2)}`);
     a.push(`enhanced=${list.join(",")}`);
   }
@@ -307,17 +323,20 @@ export function render(lookBox, box, s, changed) {
         s.quality = q;
         for (const [n] of UPGRADES) s.upgrades[n] = presetHas(q, n);
         set("quality", q, true);
-      }, ABOUT_QUALITY),
+      }, `${ABOUT_QUALITY} ${ABOUT_NEXTGEN}`),
       el("span", { textContent: "Time of day", title: ABOUT_TIME }),
       select(TIMES, s.time, (v) => set("time", v), ABOUT_TIME),
       el("span", { textContent: "Weather", title: ABOUT_WEATHER }),
       select(WEATHERS, s.weather, (v) => set("weather", v), ABOUT_WEATHER),
+      el("span", { textContent: "Colour look", title: ABOUT_LOOK }),
+      select(LOOKS, s.look || "original", (v) => set("look", v), ABOUT_LOOK),
       el("span", { textContent: "Ground detail", title: ABOUT_DETAIL }),
       el("span", { title: ABOUT_DETAIL }, ...slider(0, 1, 0.05, "", s.detail, (v) => set("detail", v), ABOUT_DETAIL)),
     );
     const effects = el("details", {}, el("summary", { textContent: "Individual effects", title: "Each effect on its own. Point at one to see what it does." }));
     const list = el("div", { className: "two" });
     for (const [n, text, , about] of UPGRADES) {
+      if (n === "grade") continue; // picked as the colour look
       list.append(checkbox(text, about, !!s.upgrades[n], (on) => {
         s.upgrades[n] = on;
         // Under Auto, changing an effect means choosing yourself.

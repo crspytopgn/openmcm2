@@ -533,7 +533,7 @@ impl LapTapes {
 
 /// The player's speeds (`0x489c20`, the game's `+0x2e0`): play, the two
 /// fast forwards, and to the end, which runs at 30 times.
-const PLAY: f32 = 1.0;
+pub const PLAY: f32 = 1.0;
 const FF: f32 = 2.0;
 const FFF: f32 = 8.0;
 const TO_END: f32 = 30.0;
