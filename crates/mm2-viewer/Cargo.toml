@@ -50,6 +50,10 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots", "rustls-tls-native-roots"] }
 webrtc = "0.13"
+# Gyro steering (gyro.rs): SDL reads the motion sensors of the pads that
+# have them (Steam Deck, Steam Controller, DualSense, DualShock 4, Switch
+# Pro, Joy-Cons), which gilrs can't. Built in, only its pad parts.
+sdl3-sys = { version = "0.7", optional = true, default-features = false, features = ["build-from-source-static", "no-default-subsystems", "sdl-joystick", "sdl-hidapi", "sdl-sensor", "sdl-unix-console-build"] }
 
 [dev-dependencies]
 # The shader test (src/shader_tests.rs): the compiler the GPU code uses.
@@ -59,9 +63,12 @@ naga = { version = "30.0.1", features = ["wgsl-in", "spv-out", "msl-out", "hlsl-
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 
 [features]
-default = ["gamepad", "audio"]
+default = ["gamepad", "audio", "gyro"]
 # Gamepad support. On Linux it needs libudev (libudev-dev).
 gamepad = ["dep:gilrs"]
+# Gyro steering, off until the Extras setting turns it on. It builds SDL
+# from source (needs CMake and a C compiler); not in the browser.
+gyro = ["gamepad", "dep:sdl3-sys"]
 # Sound. On Linux it needs ALSA (libasound2-dev).
 audio = ["dep:cpal"]
 

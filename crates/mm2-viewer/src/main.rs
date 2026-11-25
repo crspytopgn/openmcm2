@@ -129,6 +129,8 @@ mod ride;
 mod riding;
 mod roster;
 mod rumble;
+#[cfg(all(feature = "gyro", not(target_arch = "wasm32")))]
+mod gyro;
 mod lapgap;
 mod tweaks;
 mod water;
@@ -4831,6 +4833,10 @@ struct App {
     /// The pad's vibration from the player's riding, and this frame's
     /// strengths of its heavy and light motors.
     rumble: rumble::Rumble,
+    /// Gyro steering's sensor reading, started the first time the extra
+    /// is wanted (the bool: tried, so a failure isn't retried).
+    #[cfg(all(feature = "gyro", not(target_arch = "wasm32")))]
+    gyro: (Option<gyro::Gyro>, bool),
     shake: [f32; 2],
     /// The window out of focus or covered: the pad keeps still.
     quiet: bool,
@@ -5005,6 +5011,8 @@ impl App {
             #[cfg(not(feature = "gamepad"))]
             pads: None,
             rumble: rumble::Rumble::default(),
+            #[cfg(all(feature = "gyro", not(target_arch = "wasm32")))]
+            gyro: (None, false),
             shake: [0.0; 2],
             quiet: false,
             shoot: false,
@@ -6263,6 +6271,22 @@ impl App {
     /// pad's triggers also work the gas and brake, past a third.
     #[cfg(feature = "gamepad")]
     fn gamepad(&mut self, mut c: Controls) -> Controls {
+        // Gyro steering (an extra): the pad's tilt steers on top of the
+        // stick, in straight proportion (not cubed like a stick).
+        #[cfg(all(feature = "gyro", not(target_arch = "wasm32")))]
+        let tilt = {
+            let full = crate::tweaks::more().gyro_steer;
+            if full == 0 {
+                0.0
+            } else {
+                if !self.gyro.1 {
+                    self.gyro = (gyro::Gyro::new(), true);
+                }
+                self.gyro.0.as_mut().map_or(0.0, |g| g.steer(full as f32))
+            }
+        };
+        #[cfg(not(all(feature = "gyro", not(target_arch = "wasm32"))))]
+        let tilt = 0.0f32;
         let map = self.pad_map;
         let flip = if self.joy_flipped { -1.0 } else { 1.0 };
         let Some(pad) = self.pads.as_ref() else {
@@ -6342,6 +6366,9 @@ impl App {
             if lean != 0.0 {
                 c.lean = lean;
             }
+        }
+        if tilt != 0.0 {
+            c.steer = (c.steer + tilt).clamp(-1.0, 1.0);
         }
         c
     }

@@ -415,6 +415,10 @@ pub struct More {
     /// How curved a stick's steering is, % (`--pad-curve=N`): 100 is the
     /// game's (cubed: fine near the middle, steep at the edge), 0 straight.
     pub pad_curve: u32,
+    /// Gyro steering: on a pad with motion sensors, tipping it sideways
+    /// steers, full lock at this many degrees; 0 off, the game's
+    /// (`--gyro-steer=N`).
+    pub gyro_steer: u32,
     /// The most frames a second, 0 for no cap (`--fps-cap=N`).
     pub fps_cap: u32,
     /// Smoother edges after the picture is drawn (`--fxaa`).
@@ -470,6 +474,8 @@ pub struct More {
     pub free_tracks: bool,
 }
 
+/// Gyro steering's widest full-lock tilt, degrees.
+pub const GYRO_MOST: u32 = 90;
 /// The game's own pad dead zone, %.
 pub const PAD_DEAD_ZONE: u32 = 4;
 /// The most riders on the gate the extra allows.
@@ -487,6 +493,7 @@ impl Default for More {
             pad_sensitivity: 100,
             pad_smoothing: 0,
             pad_curve: 100,
+            gyro_steer: 0,
             fps_cap: 0,
             fxaa: false,
             sharpen: 0,
@@ -521,6 +528,7 @@ impl More {
             "pad_sensitivity" => self.pad_sensitivity = n(200, 100).max(25),
             "pad_smoothing" => self.pad_smoothing = n(90, 0),
             "pad_curve" => self.pad_curve = n(100, 100),
+            "gyro_steer" => self.gyro_steer = n(GYRO_MOST, 0),
             "fps_cap" => self.fps_cap = n(500, 0),
             "fxaa" => self.fxaa = yes,
             "sharpen" => self.sharpen = n(100, 0),
@@ -558,7 +566,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfresh_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\ndemo_tracks={}\nfree_tracks={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfresh_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\ndemo_tracks={}\nfree_tracks={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -566,6 +574,7 @@ impl More {
             self.pad_sensitivity,
             self.pad_smoothing,
             self.pad_curve,
+            self.gyro_steer,
             self.fps_cap,
             b(self.fxaa),
             self.sharpen,
@@ -618,6 +627,7 @@ impl More {
             (self.pad_sensitivity, d.pad_sensitivity, "--pad-sensitivity"),
             (self.pad_smoothing, d.pad_smoothing, "--pad-smoothing"),
             (self.pad_curve, d.pad_curve, "--pad-curve"),
+            (self.gyro_steer, d.gyro_steer, "--gyro-steer"),
             (self.fps_cap, d.fps_cap, "--fps-cap"),
             (self.sharpen, d.sharpen, "--sharpen"),
             (self.riders, d.riders, "--gate-riders"),
@@ -662,6 +672,7 @@ impl More {
             ("--pad-sensitivity", "pad_sensitivity"),
             ("--pad-smoothing", "pad_smoothing"),
             ("--pad-curve", "pad_curve"),
+            ("--gyro-steer", "gyro_steer"),
             ("--fps-cap", "fps_cap"),
             ("--sharpen", "sharpen"),
             ("--gate-riders", "riders"),
@@ -1245,6 +1256,7 @@ mod tests {
             pad_sensitivity: 120,
             pad_smoothing: 30,
             pad_curve: 50,
+            gyro_steer: 30,
             fps_cap: 144,
             fxaa: true,
             sharpen: 40,
