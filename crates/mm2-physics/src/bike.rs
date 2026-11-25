@@ -704,6 +704,9 @@ pub struct Bike {
     /// A trick or a taunt is running (`f_430`): it ends the air pose, and
     /// a crash meanwhile is a fall, not a bail. The caller sets it.
     pub stunting: bool,
+    /// The drawn "Bike" frame's turn in model space, when the caller
+    /// hands it over (see [`Bike::set_pose_turn`]).
+    pub pose_turn: Option<Quat>,
     pending: f32,
     /// This step's length: 0.02 s, or the whole frame when frames come
     /// faster than that (0x506b20).
@@ -810,6 +813,7 @@ impl Bike {
             hit: None,
             seed: 0x2545_f491,
             stunting: false,
+            pose_turn: None,
             pending: 0.0,
             h: STEP,
             gas_gyro: false,
@@ -936,6 +940,23 @@ impl Bike {
     pub fn set_rider_probes(&mut self, points: Vec<Vec3>, pelvis: Mat4) {
         self.rider_probes = points;
         self.rider_pelvis = pelvis;
+    }
+
+    /// Hands over the drawn turn of the bike's "Bike" frame (its pose
+    /// node) in model space: what a cross-up or a trick's bike motion does
+    /// to it. The crash rules and the wheels read it while either plays.
+    pub fn set_pose_turn(&mut self, turn: Quat) {
+        self.pose_turn = Some(turn);
+    }
+
+    /// The pose node's turn the physics steps with (KrustyBike::
+    /// SaveBodyOrientation 0x496d40): while the cross-up or a trick plays
+    /// the saved body angles are the "Bike" frame's, not the model's.
+    pub(crate) fn body_turn(&self) -> Option<Quat> {
+        if self.crash.is_some() || !(self.air_pose || self.stunting) {
+            return None;
+        }
+        Some(self.pose_turn.unwrap_or_else(|| if self.air_pose { self.cross_turn() } else { Quat::IDENTITY }))
     }
 
     /// Speed along the bike, ft/s.
@@ -2876,6 +2897,11 @@ mod tests {
             bike.pose_phase
         );
         assert_eq!(bike.drawn_turn(), bike.cross_turn());
+        // The crash rules see the crossed-up bike (SaveBodyOrientation).
+        assert_eq!(bike.body_turn(), Some(bike.cross_turn()));
+        bike.set_pose_turn(Quat::from_rotation_y(0.3));
+        assert_eq!(bike.body_turn(), Some(Quat::from_rotation_y(0.3)));
+        bike.pose_turn = None;
         // Within 2 ft of the ground the bike takes the drawn turn.
         let heading = bike.heading;
         let want = bike.pose_phase * 60.0 * 0.01;
@@ -2883,6 +2909,7 @@ mod tests {
         bike.pose(0.02);
         assert!((bike.heading - heading - want).abs() < 1e-3);
         assert_eq!(bike.drawn_turn(), Quat::IDENTITY);
+        assert_eq!(bike.body_turn(), None);
     }
 
     #[test]

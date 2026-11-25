@@ -1736,6 +1736,20 @@ fn feel_riders(race: &mut Race, renderer: &TerrainRenderer) {
         if r.bike.wreck().is_some() {
             continue;
         }
+        // The bike's pose node, as drawn: what the cross-up or a trick's
+        // bike motion turns it by.
+        if let Some(frame) = renderer.object_frame_index(r.object, "Bike") {
+            if let Some(Some(m)) = renderer.object_frames(r.object, &[frame], race.time).first() {
+                let local = r.bike.place().inverse() * *m;
+                let x = local.x_axis.truncate().normalize_or(Vec3::X);
+                let z = x.cross(local.y_axis.truncate()).normalize_or(Vec3::Z);
+                let turn = glam::Quat::from_mat3(&glam::Mat3::from_cols(x, z.cross(x), z));
+                if std::env::var_os("MM2_POSEDBG").is_some() {
+                    eprintln!("pose turn {:.3?} drawn {:.3?}", turn.to_euler(glam::EulerRot::YXZ), r.bike.drawn_turn().to_euler(glam::EulerRot::YXZ));
+                }
+                r.bike.set_pose_turn(turn);
+            }
+        }
         let rider = r.object + 1;
         let frames: Option<Vec<usize>> = RIDER_PROBES.iter().map(|(bone, _)| renderer.object_frame_index(rider, bone)).collect();
         let Some(frames) = frames else {

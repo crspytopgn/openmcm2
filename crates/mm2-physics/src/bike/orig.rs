@@ -804,7 +804,13 @@ impl Bike {
         self.o.prev_speed = prev_speed;
         let mut linear = prev_speed;
         let mut f = self.frame();
-        let saved = Angles::of(f.o.z_axis, f.o.y_axis);
+        let saved = match self.body_turn() {
+            Some(turn) => {
+                let posed = f.o * Mat3::from_quat(turn);
+                Angles::of(posed.z_axis, posed.y_axis)
+            }
+            None => Angles::of(f.o.z_axis, f.o.y_axis),
+        };
         self.o.saved = saved;
         let mut center = f.point(COM);
         // Bike::ApplySteerRate (0x40a8d0): the rider steers; once he is

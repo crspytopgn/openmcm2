@@ -593,6 +593,13 @@ impl Bike {
         }
     }
 
+    /// The drawn "Bike" frame's turn in model space (cross-ups, tricks).
+    pub fn set_pose_turn(&mut self, turn: glam::Quat) {
+        if let Bike::Player(b) = self {
+            b.set_pose_turn(turn);
+        }
+    }
+
     /// Where the thrown rider's motion puts the pelvis (model space) and
     /// the body parts' corners (the pelvis's space) now.
     pub fn set_wreck_pose(&mut self, pelvis: Mat4, points: Vec<glam::Vec3>, probes: Vec<glam::Vec3>) {
