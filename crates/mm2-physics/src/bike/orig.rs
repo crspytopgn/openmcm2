@@ -50,6 +50,15 @@ const RIDING_PROBES: [Vec3; 15] = [
     Vec3::new(0.628, 0.887, -1.086),
 ];
 
+/// The rider's Pelvis frame in that same pose (Turn2D's first key), in
+/// the bike's model space.
+pub(super) fn riding_pelvis() -> Mat4 {
+    let look = Vec3::new(0.021_774, 0.061_049, 0.997_897);
+    let up = Vec3::new(-0.054_909, 0.996_700, -0.059_777);
+    let at = Vec3::new(-0.012_543, 4.206_554, -1.291_397);
+    Mat4::from_cols(up.cross(look).extend(0.0), up.extend(0.0), look.extend(0.0), at.extend(1.0))
+}
+
 /// The nose-over limit on the shipped tracks: every terrain header has 3
 /// at Terrain+0xbe8, and anything but 1 makes it cos 70° (UpdateCrashState).
 const NOSE_OVER: f32 = 0.342;
@@ -2034,11 +2043,14 @@ impl Bike {
             return Some(Crash::Edge);
         }
         // The rider's probes (the Wrecker's bones): those under the
-        // ground, their middle in the rider's frame; above 1 ft is a crash
-        // (reason 11). Without a posed rider, the centred riding pose.
+        // ground, their middle in the rider's Pelvis frame (the rider
+        // model's first child, model+0x140, 0x502680); more than 1 ft up
+        // the pelvis is a crash (reason 11): the upper body in the dirt,
+        // not a foot put down in a turn. Without a posed rider, the
+        // centred riding pose.
         {
             let place = self.place();
-            let probes: &[Vec3] = if self.rider_probes.is_empty() { &RIDING_PROBES } else { &self.rider_probes };
+            let (probes, pelvis): (&[Vec3], Mat4) = if self.rider_probes.is_empty() { (&RIDING_PROBES, riding_pelvis()) } else { (&self.rider_probes, self.rider_pelvis) };
             let (mut sum, mut n) = (Vec3::ZERO, 0.0);
             for p in probes {
                 let w = place.transform_point3(*p);
@@ -2047,7 +2059,7 @@ impl Bike {
                     n += 1.0;
                 }
             }
-            if n > 0.0 && sum.y / n > 1.0 {
+            if n > 0.0 && pelvis.inverse().transform_point3(sum / n).y > 1.0 {
                 if std::env::var_os("MM2_CRASHDBG").is_some() {
                     eprintln!("probe crash: {} probes, middle {:?}", n, sum / n);
                 }
@@ -2158,4 +2170,30 @@ fn clamp_and_step(s: &mut Shock, max: f32, dt: f32, full: f32, arm: Option<f32>)
     }
     s.extending = s.length > s.prev_length;
     s.prev_length = s.length;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn riding_pelvis_carries_the_pelvis_probe() {
+        // The Wrecker's first probe sits 0.35 ft behind the Pelvis.
+        let p = riding_pelvis().transform_point3(Vec3::new(0.0, 0.0, -0.35));
+        assert!(p.distance(RIDING_PROBES[0]) < 0.01, "{p:?}");
+    }
+
+    #[test]
+    fn a_foot_down_is_no_body_hit_but_the_head_is() {
+        // Reason 11 counts the probes' middle in the Pelvis frame: a foot
+        // (well below the pelvis) put down in a turn stays a ride, the
+        // head or shoulders in the dirt is a crash.
+        let pelvis = riding_pelvis().inverse();
+        for foot in [RIDING_PROBES[10], RIDING_PROBES[11], RIDING_PROBES[13], RIDING_PROBES[14], Vec3::new(1.74, 1.23, 1.92)] {
+            assert!(pelvis.transform_point3(foot).y < 1.0, "{foot:?}");
+        }
+        for upper in [RIDING_PROBES[2], RIDING_PROBES[3], RIDING_PROBES[4]] {
+            assert!(pelvis.transform_point3(upper).y > 1.0, "{upper:?}");
+        }
+    }
 }

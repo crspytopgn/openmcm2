@@ -587,9 +587,9 @@ impl Bike {
 
     /// Where the riding motion puts the rider's Wrecker probes, in the
     /// bike's model space (the player's original physics reads them).
-    pub fn set_rider_probes(&mut self, points: Vec<glam::Vec3>) {
+    pub fn set_rider_probes(&mut self, points: Vec<glam::Vec3>, pelvis: glam::Mat4) {
         if let Bike::Player(b) = self {
-            b.set_rider_probes(points);
+            b.set_rider_probes(points, pelvis);
         }
     }
 

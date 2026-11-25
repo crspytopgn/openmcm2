@@ -1753,8 +1753,9 @@ fn feel_riders(race: &mut Race, renderer: &TerrainRenderer) {
             .zip(RIDER_PROBES)
             .map(|(m, (_, at))| m.map(|m| to_model.transform_point3(m.transform_point3(Vec3::from(at)))))
             .collect();
-        if let Some(points) = points {
-            r.bike.set_rider_probes(points);
+        // The first probe's bone is the Pelvis.
+        if let (Some(points), Some(Some(pelvis))) = (points, posed.first()) {
+            r.bike.set_rider_probes(points, to_model * *pelvis);
         }
     }
 }
