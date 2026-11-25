@@ -593,6 +593,13 @@ impl Bike {
         }
     }
 
+    /// The drawn "Bike" frame's turn in model space (cross-ups, tricks).
+    pub fn set_pose_turn(&mut self, turn: glam::Quat) {
+        if let Bike::Player(b) = self {
+            b.set_pose_turn(turn);
+        }
+    }
+
     /// Where the thrown rider's motion puts the pelvis (model space) and
     /// the body parts' corners (the pelvis's space) now.
     pub fn set_wreck_pose(&mut self, pelvis: Mat4, points: Vec<glam::Vec3>, probes: Vec<glam::Vec3>) {
@@ -741,6 +748,12 @@ impl Bike {
             },
             Bike::Taped(b) => b.velocity,
         }
+    }
+
+    /// Just put back (KrustyBike::IsSpawnProtected): no crashes and no
+    /// bumping other bikes for the first 3 s.
+    fn protected(&self) -> bool {
+        matches!(self, Bike::Player(b) if b.spawn_guard > 0.0)
     }
 
     /// The bike as the bike-to-bike bounce sees it, standing where it was
@@ -1147,6 +1160,9 @@ impl Racer {
                 bike.racing = false;
                 bike.hull = HULL.get().cloned();
                 bike.cross_up = CROSS_UP.get().cloned();
+                // Settled on the ground as the original places it.
+                bike.original = original_physics();
+                bike.settle(ground);
                 // The launcher's Forgiving landings (not the game's).
                 bike.forgiving_landings = crate::tweaks::get().forgiving_landings;
                 Bike::Player(Box::new(bike))
@@ -2545,6 +2561,10 @@ impl Race {
             for j in i + 1..self.racers.len() {
                 let Some(hull) = &hull else { break };
                 if self.away(i) || self.away(j) {
+                    continue;
+                }
+                // Either just put back: they pass through (0x48dcd0).
+                if self.racers[i].bike.protected() || self.racers[j].bike.protected() {
                     continue;
                 }
                 let (a, b) = self.racers.split_at_mut(j);

@@ -1,3 +1,19 @@
+# OpenMCM2 0.8.2
+
+More of the original's riding rules, found by checking the physics
+against the original's code line by line:
+
+* **A moment to get going.** After a crash you can't crash again or
+  bump into other bikes for 3 seconds, like the original.
+* **Your rider hits things too.** Low branches, signs and overhangs now
+  hit the rider, not just the bike, as in the original. Once you're down,
+  only the bike collides.
+* **Cross-ups count.** Landing still crossed up or mid-trick now judges
+  the bike's angle as drawn, like the original.
+* **Settled starts.** At the start and after a crash, the bike sits on
+  the slope the way the original places it.
+* **Crashed bikes** swing their bars as they slide, like the original.
+
 # OpenMCM2 0.8.1
 
 * **Turns ride like the original again.** 0.8.0 could throw you off in

@@ -267,6 +267,9 @@ pub(super) struct Orig {
     pub points: [Point; 3],
     pub angle: f32,
     pub steer_rate: f32,
+    /// The crashed bike's bars' own swing (Bike +0x5d4), in model axes:
+    /// IntegrateSteerTorque turns them with it.
+    pub steer_torque: Vec3,
     /// The rider's weight shift (Bike +0x640), 0.5 centred.
     pub steer_value: f32,
     pub lean_angle: f32,
@@ -319,6 +322,7 @@ impl Default for Orig {
             points: [bar(-1.305), bar(1.305), tail],
             angle: 0.0,
             steer_rate: 0.0,
+            steer_torque: Vec3::ZERO,
             steer_value: 1.0 - rest_rear,
             lean_angle: 0.0,
             lean_cos: 1.0,
@@ -352,6 +356,17 @@ fn wheel_base() -> f32 {
 }
 
 /// The fork's stroke, model space, from the bars toward the axle.
+/// The steering's inverse inertia (Bike's loader, +0x5e0): a twentieth
+/// of the bike's weight in a box the front tyre's diameter by the rider's
+/// width and height (the rider's box sizes squared from [`INERTIA`]).
+fn steer_gains(bike_weight: f32) -> Vec3 {
+    let rider_h2 = (INERTIA.x + INERTIA.z - INERTIA.y) / 2.0;
+    let rider_w2 = INERTIA.z - rider_h2;
+    let d = TYRE_RADII[0] * 2.0;
+    let m = bike_weight * 0.05 * 0.031_055_9 / 12.0;
+    Vec3::new(1.0 / ((d * d + rider_h2) * m), 1.0 / ((rider_w2 + d * d) * m), 1.0 / (m * (rider_w2 + rider_h2)))
+}
+
 fn fork_axis() -> Vec3 {
     (FRONT_AXLE - HANDLEBARS).normalize()
 }
@@ -502,12 +517,55 @@ impl Bike {
             sh.cleared = sh.length;
         }
         self.o.angle = self.steer;
+        self.o.steer_torque = Vec3::ZERO;
         let f = self.frame();
         self.o.saved = Angles::of(f.o.z_axis, f.o.y_axis);
         self.o.prev_speed = self.velocity.length();
         self.o.world_spin = f.o * self.spin;
         self.o.prev_lean = self.rider.1;
         self.o.ready = true;
+    }
+
+    /// Vehicle::ResetToPlacement (0x5300d0): the bike dropped from far
+    /// below, then twice the wheels placed and the body settled on them
+    /// (SettleBodyToWheels 0x52a0f0): its up the wheels' ground normal,
+    /// its height so the highest tyre's rim meets the ground, then leaned
+    /// to the ground about the rear tyre.
+    pub(super) fn settle_original(&mut self, ground: &dyn Ground) {
+        self.orig_start();
+        let mut f = self.frame();
+        f.origin.y = -1000.0;
+        self.set_frame(f);
+        let lst = self.last_h;
+        for _ in 0..2 {
+            let f = self.frame();
+            let saved = Angles::of(f.o.z_axis, f.o.y_axis);
+            self.place_wheels(ground, &f, &saved, lst);
+            let [front, rear] = self.o.wheels;
+            let top = if rear.cp.surface.y > front.cp.surface.y { rear } else { front };
+            let up = ((front.cp.normal + rear.cp.normal) * 0.5).normalize_or(Vec3::Y);
+            let forward = norm_or(f.o.z_axis - up * f.o.z_axis.dot(up), f.o.z_axis);
+            let mut f = Frame { origin: f.origin, o: Mat3::from_cols(up.cross(forward), up, forward) };
+            f.origin.y += top.cp.surface.y - top.cp.world.y;
+            let axis = (front.cp.world - rear.cp.world).normalize_or(f.o.z_axis);
+            let pivot = f.local_point(rear.cp.world);
+            let saved = Angles::of(f.o.z_axis, f.o.y_axis);
+            let lean_cos = (self.o.lean_cos, self.o.wheels.map(|w| w.lean_cos));
+            self.lean_from_normal(axis, &f, &saved);
+            self.o.lean_cos = lean_cos.0;
+            for (w, c) in self.o.wheels.iter_mut().zip(lean_cos.1) {
+                w.lean_cos = c;
+            }
+            let local = f.local(axis);
+            if self.o.lean_angle.abs() > 0.001 && local.abs().max_element() > 0.001 {
+                f.rotate_about(pivot, local, self.o.lean_angle);
+            }
+            self.set_frame(f);
+        }
+        self.airborne = false;
+        self.update_angles();
+        let f = self.frame();
+        self.o.saved = Angles::of(f.o.z_axis, f.o.y_axis);
     }
 
     /// Advances the bike by `dt` the way the game's frame does (0x52ffb0,
@@ -578,6 +636,78 @@ impl Bike {
                 break;
             }
         }
+    }
+
+    /// Bike::IntegrateSteerTorque (0x40a520): the crashed bike's bars
+    /// turned by a quarter of its weight pressing through the front tyre's
+    /// contact and a bar end on the ground, as a torque on the fork about
+    /// the wheel's node, integrated through the steering's own inertia;
+    /// they stop at 0.785 rad. The share of that torque that is about the
+    /// fork is what the bars take from the frame (the caller's 1 - this).
+    fn steer_torque_step(&mut self, f: &Frame, h: f32, weight: f32) -> f32 {
+        let base = Vec3::new(0.0, -weight * 0.25, 0.0);
+        let front = self.o.wheels[0];
+        let node = front.center;
+        let push = |p: &Point| {
+            let d = base.dot(p.normal);
+            if d >= 0.0 { Vec3::ZERO } else { p.normal * -d }
+        };
+        let mut driven = false;
+        let mut result = 0.0;
+        if !self.airborne {
+            let mut torque = None;
+            if front.in_contact {
+                driven = true;
+                let load = front.cp.normal * front.cp.normal_load;
+                let mut t = (front.cp.world - node).cross(load);
+                self.o.wheels[0].cp.state = 2;
+                for k in 0..2 {
+                    let p = self.o.points[k];
+                    if p.in_contact {
+                        t += (p.world - node).cross(push(&p));
+                        self.o.points[k].state = 2;
+                        break;
+                    }
+                }
+                torque = Some(t);
+            } else {
+                for k in 0..2 {
+                    let p = self.o.points[k];
+                    if p.in_contact {
+                        driven = true;
+                        torque = Some((p.world - node).cross(push(&p)));
+                        self.o.points[k].state = 2;
+                        break;
+                    }
+                }
+            }
+            if let Some(t) = torque {
+                let len = t.length();
+                if len > 0.001 {
+                    let local = f.local(t);
+                    result = local.dot(fork_axis()).abs() / len;
+                    self.o.steer_torque += local * steer_gains(self.spec.weight) * (result * h);
+                }
+            }
+        }
+        let sign = if self.o.steer_torque.dot(fork_axis()) >= 0.0 { 1.0 } else { -1.0 };
+        let angle = self.o.steer_torque.length() * h * sign;
+        if (angle + self.o.angle).abs() < 0.785 {
+            self.o.angle += angle;
+            self.o.steer_torque *= 0.99;
+            return result;
+        }
+        if self.o.angle.abs() < 0.785 {
+            self.o.angle = self.o.angle.signum() * 0.7851;
+            if self.o.angle == 0.0 {
+                self.o.angle = 0.7851;
+            }
+            self.o.steer_torque *= if driven { -0.02 } else { -0.1 };
+            return result;
+        }
+        self.o.angle += angle;
+        self.o.steer_torque *= 0.99;
+        0.0
     }
 
     /// Where the first of the frame's points (bar ends, tail) touches the
@@ -716,17 +846,33 @@ impl Bike {
         self.o.prev_speed = prev_speed;
         let mut linear = prev_speed;
         let mut f = self.frame();
-        let saved = Angles::of(f.o.z_axis, f.o.y_axis);
+        let saved = match self.body_turn() {
+            Some(turn) => {
+                let posed = f.o * Mat3::from_quat(turn);
+                Angles::of(posed.z_axis, posed.y_axis)
+            }
+            None => Angles::of(f.o.z_axis, f.o.y_axis),
+        };
         self.o.saved = saved;
         let mut center = f.point(COM);
-        if !crashed {
+        // Bike::ApplySteerRate (0x40a8d0): the rider steers; once he is
+        // thrown the bars swing on their own and take a share of the
+        // frame's turn.
+        let torque_scale = if !crashed {
             self.o.angle += self.o.steer_rate * h;
             if !self.o.angle.is_finite() || self.o.angle.abs() < 1e-4 {
                 self.o.angle = 0.0;
             }
-        }
-        let torque_scale = 1.0;
+            1.0
+        } else {
+            1.0 - self.steer_torque_step(&f, h, weight)
+        };
         self.place_wheels(ground, &f, &saved, lst);
+        // The spawn protection's countdown (Vehicle 0x52ffb0, after
+        // PlaceWheels).
+        if self.spawn_guard > 0.0 {
+            self.spawn_guard = (self.spawn_guard - h).max(0.0);
+        }
         let wic = self.o.wheels_in_contact;
         let all = wic == 2;
         let any = wic > 0;
@@ -911,6 +1057,10 @@ impl Bike {
             }
             if !self.airborne {
                 for i in 0..2 {
+                    if self.o.wheels[i].in_contact && self.o.wheels[i].cp.state == 2 {
+                        local_torque *= torque_scale;
+                        self.o.wheels[i].cp.state = 0;
+                    }
                     let w = self.o.wheels[i];
                     if w.in_contact && i == 1 {
                         force += w.drive_force;
@@ -1001,7 +1151,7 @@ impl Bike {
         // The object's contact crashes the bike through the same speed
         // test (the collision's callback sets the crash; 0x52fc60 then
         // ends the frame's steps).
-        if self.crash.is_none() && !crashed_now {
+        if self.crash.is_none() && !crashed_now && self.spawn_guard <= 0.0 {
             if std::env::var_os("MM2_CRASHDBG").is_some() && self.velocity.length() < before - 5.0 {
                 eprintln!("object hit {:.1} -> {:.1} prev {:.1}", before, self.velocity.length(), prev_speed);
             }
@@ -2041,6 +2191,11 @@ impl Bike {
     fn orig_crash(&mut self, ground: &dyn Ground, prev_speed: f32, linear: f32, alignment: f32, saved: &Angles, h: f32) -> Option<Crash> {
         if self.off_the_edge(ground) {
             return Some(Crash::Edge);
+        }
+        // Spawn protected: no crash at all (KrustyBike::EvaluateCrash
+        // returns before Bike's rules while IsSpawnProtected).
+        if self.spawn_guard > 0.0 {
+            return None;
         }
         // The rider's probes (the Wrecker's bones): those under the
         // ground, their middle in the rider's Pelvis frame (the rider

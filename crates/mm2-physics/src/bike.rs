@@ -142,6 +142,9 @@ const SPIN_DECAY: f32 = 0.999;
 /// Crash limits (0x40a950, 0x492650): roll, the nose within 5° of
 /// vertical, an endo, a lowside, and a loss of speed in one step of more
 /// than `crash_tolerance` × 1000 × h.
+/// How long a placed bike can't crash, s (KrustyBike::GetSpawnProtectionDuration,
+/// vehicle slot 45; 0 only for the Tag event's followed rider).
+pub const SPAWN_GUARD: f32 = 3.0;
 const CRASH_ROLL: f32 = 1.919_86;
 const CRASH_VERTICAL: f32 = 0.996_194_7;
 const CRASH_ENDO: f32 = 0.766;
@@ -221,6 +224,14 @@ pub(crate) const PUSH_MARGIN: f32 = 0.075;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Hull {
     pub body: Vec<Vec3>,
+    /// The shape the original actually sweeps against objects: the bike
+    /// loads with no `honda.col` collision of its own (KrustyBike passes
+    /// createCollision 0) and collides as `BikeAndRider.col` while ridden,
+    /// rider and all up to his helmet, and as `Bike.col` once crashed
+    /// (0x48fc80 builds both on the pose node; the wreck swaps them). Each
+    /// is empty without the game's files, and then `body` stands in.
+    pub riding: Vec<Vec3>,
+    pub crashed: Vec<Vec3>,
     pub wheels: [Vec<Vec3>; 2],
     /// The same parts as meshes, for the other bikes' points to hit
     /// (0x405fb0 against an object of type 100): `None` for the frame,
@@ -257,6 +268,47 @@ impl Hull {
 }
 
 impl Hull {
+    /// Adds the riding (`BikeAndRider.col`) and crashed (`Bike.col`)
+    /// shapes, each one part in the bike's model space.
+    pub fn with_shells(
+        mut self,
+        riding: Option<&mm2_formats::col::Collision>,
+        crashed: Option<&mm2_formats::col::Collision>,
+    ) -> Self {
+        let points = |col: &mm2_formats::col::Collision| {
+            let mut list: Vec<Vec3> = Vec::new();
+            for part in &col.parts {
+                let m = &part.body.matrix;
+                let own =
+                    Mat3::from_cols_array(&[m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]]);
+                let at = Vec3::new(m[9], m[10], m[11]);
+                for node in &part.body.points {
+                    if let mm2_formats::col::Node::Leaf(p) = node {
+                        let p = own * Vec3::from(*p) + at;
+                        if !list.iter().any(|q| q.distance(p) < 1e-4) {
+                            list.push(p);
+                        }
+                    }
+                }
+            }
+            list
+        };
+        if let Some(col) = riding {
+            self.riding = points(col);
+        }
+        if let Some(col) = crashed {
+            self.crashed = points(col);
+        }
+        self
+    }
+
+    /// The points swept against objects for the body: the rider's shape
+    /// with him on, the bare bike's once down.
+    pub fn body_points(&self, crashed: bool) -> &[Vec3] {
+        let own = if crashed { &self.crashed } else { &self.riding };
+        if own.is_empty() { &self.body } else { own }
+    }
+
     /// The hull every bike of the original rides with (`honda.col`, which
     /// the Yamaha, Kazuyuki and KTM share byte for byte), for a bike
     /// without a `.col` of its own: the Free Pack's bikes collide as the
@@ -276,13 +328,17 @@ impl Hull {
                 .collect();
             Part { frame: Some(frame), body: body(&corners, &faces, Some(order)) }
         };
-        Hull::new(&Collision {
+        let hull = Hull::new(&Collision {
             parts: vec![
                 part(1, &FRAME_CORNERS, &FRAME_FACES, &FRAME_POINTS),
                 part(7, &FRONT_CORNERS, &FRONT_FACES, &FRONT_POINTS),
                 part(8, &REAR_CORNERS, &REAR_FACES, &REAR_POINTS),
             ],
-        })
+        });
+        let mut hull = hull;
+        hull.riding = RIDING_POINTS.iter().map(|&p| Vec3::from(p)).collect();
+        hull.crashed = CRASHED_POINTS.iter().map(|&p| Vec3::from(p)).collect();
+        hull
     }
 
     /// A hull of convex shells round each part's points, the frame's in
@@ -588,6 +644,10 @@ pub struct Bike {
     /// same pose put it, in the bike's model space: the crash check
     /// measures the probes' middle in it.
     rider_pelvis: Mat4,
+    /// Spawn protection left, s: after each placement the original can't
+    /// crash for 3 s (Vehicle::ResetToPlacement -> SetSpawnProtection,
+    /// KrustyBike::GetSpawnProtectionDuration; counted down each step).
+    pub spawn_guard: f32,
     /// The player's crash tolerance: 1, 1.05 or 1.15 by difficulty.
     pub crash_tolerance: f32,
     /// How much steering in the air also bends the flight, turning the
@@ -644,6 +704,9 @@ pub struct Bike {
     /// A trick or a taunt is running (`f_430`): it ends the air pose, and
     /// a crash meanwhile is a fall, not a bail. The caller sets it.
     pub stunting: bool,
+    /// The drawn "Bike" frame's turn in model space, when the caller
+    /// hands it over (see [`Bike::set_pose_turn`]).
+    pub pose_turn: Option<Quat>,
     pending: f32,
     /// This step's length: 0.02 s, or the whole frame when frames come
     /// faster than that (0x506b20).
@@ -728,6 +791,7 @@ impl Bike {
             original: false,
             rider_probes: Vec::new(),
             rider_pelvis: orig::riding_pelvis(),
+            spawn_guard: SPAWN_GUARD,
             reset_face: None,
             o: orig::Orig::default(),
             crash_tolerance: 1.05,
@@ -749,6 +813,7 @@ impl Bike {
             hit: None,
             seed: 0x2545_f491,
             stunting: false,
+            pose_turn: None,
             pending: 0.0,
             h: STEP,
             gas_gyro: false,
@@ -778,10 +843,20 @@ impl Bike {
         }
     }
 
+    /// With the original physics, settles the bike where it stands as the
+    /// original's ResetToPlacement does (wheels on the ground, body to
+    /// the slope).
+    pub fn settle(&mut self, ground: &dyn Ground) {
+        if self.original {
+            self.settle_original(ground);
+        }
+    }
+
     /// Puts the bike upright and at rest on the ground at `origin` (the
     /// model's origin) facing `direction`, pitched to the slope, with its
     /// static sag; any crash is over.
     pub fn reset(&mut self, ground: &dyn Ground, origin: Vec3, direction: Vec3) {
+        self.spawn_guard = SPAWN_GUARD;
         self.touched = false;
         self.edge_clear = false;
         self.edge_flight = 0.0;
@@ -824,6 +899,9 @@ impl Bike {
         self.position = origin + self.orientation * COM;
         self.update_angles();
         self.o.ready = false;
+        if self.original {
+            self.settle_original(ground);
+        }
     }
 
     /// Puts the bike into a state read from the running game (a memory
@@ -874,6 +952,23 @@ impl Bike {
     pub fn set_rider_probes(&mut self, points: Vec<Vec3>, pelvis: Mat4) {
         self.rider_probes = points;
         self.rider_pelvis = pelvis;
+    }
+
+    /// Hands over the drawn turn of the bike's "Bike" frame (its pose
+    /// node) in model space: what a cross-up or a trick's bike motion does
+    /// to it. The crash rules and the wheels read it while either plays.
+    pub fn set_pose_turn(&mut self, turn: Quat) {
+        self.pose_turn = Some(turn);
+    }
+
+    /// The pose node's turn the physics steps with (KrustyBike::
+    /// SaveBodyOrientation 0x496d40): while the cross-up or a trick plays
+    /// the saved body angles are the "Bike" frame's, not the model's.
+    pub(crate) fn body_turn(&self) -> Option<Quat> {
+        if self.crash.is_some() || !(self.air_pose || self.stunting) {
+            return None;
+        }
+        Some(self.pose_turn.unwrap_or_else(|| if self.air_pose { self.cross_turn() } else { Quat::IDENTITY }))
     }
 
     /// Speed along the bike, ft/s.
@@ -2261,7 +2356,9 @@ impl Bike {
                 if on_object[i] { &none } else { &hull.wheels[i] },
             )
         });
-        for (part, (offset, points)) in [(Vec3::ZERO, &hull.body)].into_iter().chain(wheels).enumerate() {
+        let body = hull.body_points(self.crash.is_some());
+        let wheels = wheels.map(|(o, w)| (o, &w[..]));
+        for (part, (offset, points)) in [(Vec3::ZERO, body)].into_iter().chain(wheels).enumerate() {
             for &p in points {
                 let from = place(was_at, was_turned, p + offset);
                 let to = place(self.position, self.orientation, p + offset);
@@ -2582,6 +2679,20 @@ mod tests {
                 assert_eq!(a.vertices, b.vertices, "{name}");
             }
         }
+        // And its riding and crashed shapes, the game's own.
+        let shell = |n: &str| mm2_formats::col::parse(archive.get(n).unwrap()).unwrap();
+        let game = Hull::default().with_shells(Some(&shell("BikeAndRider.col")), Some(&shell("Bike.col")));
+        let same = |a: &[Vec3], b: &[Vec3]| a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.distance(*q) < 1e-5);
+        assert!(same(&game.riding, &hull.riding) && same(&game.crashed, &hull.crashed));
+    }
+
+    #[test]
+    fn a_ridden_bike_hits_with_its_rider() {
+        let hull = Hull::shared();
+        let top = |p: &[Vec3]| p.iter().map(|p| p.y).fold(f32::MIN, f32::max);
+        assert!(top(hull.body_points(false)) > 6.0, "rider's helmet");
+        assert!(top(hull.body_points(true)) < 4.5, "bare bike");
+        assert!(Hull::default().body_points(false).is_empty());
     }
 
     #[test]
@@ -2798,6 +2909,11 @@ mod tests {
             bike.pose_phase
         );
         assert_eq!(bike.drawn_turn(), bike.cross_turn());
+        // The crash rules see the crossed-up bike (SaveBodyOrientation).
+        assert_eq!(bike.body_turn(), Some(bike.cross_turn()));
+        bike.set_pose_turn(Quat::from_rotation_y(0.3));
+        assert_eq!(bike.body_turn(), Some(Quat::from_rotation_y(0.3)));
+        bike.pose_turn = None;
         // Within 2 ft of the ground the bike takes the drawn turn.
         let heading = bike.heading;
         let want = bike.pose_phase * 60.0 * 0.01;
@@ -2805,6 +2921,7 @@ mod tests {
         bike.pose(0.02);
         assert!((bike.heading - heading - want).abs() < 1e-3);
         assert_eq!(bike.drawn_turn(), Quat::IDENTITY);
+        assert_eq!(bike.body_turn(), None);
     }
 
     #[test]
