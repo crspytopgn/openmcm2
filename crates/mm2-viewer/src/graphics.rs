@@ -377,6 +377,10 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             e.taa = true;
             e.fsr = true;
             e.fewer_samples_past_qhd = false;
+            // As modern engines do: the scene at most 1440p's worth, the
+            // temporal rebuild and FSR bringing it to a bigger screen's
+            // size (at 4K, native drawing cost an M4 well over twice).
+            e.pixels = Some(QHD);
             e.far = true;
             e.raytracing = true;
             e.bounce = true;
@@ -1033,6 +1037,8 @@ mod tests {
         assert!(Enhanced::parse("look=sepia").is_err());
         let ng = Enhanced::parse("quality=nextgen").unwrap();
         assert!(ng.nextgen && ng.taa && ng.msaa == 1 && ng.bounce && ng.clouds && ng.sheds);
+        assert_eq!(ng.scene_size((3840, 2160)), (2560, 1440));
+        assert_eq!(ng.scene_size((1920, 1080)), (1920, 1080));
         assert_eq!(ng.look, Look::Original);
         // In a browser it keeps its sun shafts; set aside, the old look.
         assert!(ng.for_browser().shafts);

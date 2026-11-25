@@ -1810,7 +1810,7 @@ impl Launcher {
                 if !fits(s.window, points) {
                     s.window = fitting(SHAPES[shape_of(s.window)].2, points)
                         .or_else(|| SHAPES.iter().rev().find_map(|z| fitting(z.2, points)))
-                        .unwrap_or((1024, 768));
+                        .unwrap_or(settings::DEFAULT_WINDOW);
                 }
                 let shape = shape_of(s.window);
                 look::label(ui, "Shape", "The window's shape. The race shows more to the sides on a wider one.");
@@ -1819,10 +1819,11 @@ impl Launcher {
                     .enumerate()
                     .map(|(k, (name, about, sizes))| {
                         let hover = match fitting(sizes, points) {
-                            Some(_) => about.to_string(),
-                            None => format!("{about} Too big for a window on your screen: use Full screen."),
+                            Some(_) => format!("{name}: {about}"),
+                            None => format!("{name}: {about} Too big for a window on your screen: use Full screen."),
                         };
-                        Choice::new(k, *name).hover(hover)
+                        // Five shapes in a row: the ratio alone, the name on hover.
+                        Choice::new(k, name.split(' ').next().unwrap_or(name)).hover(hover)
                     })
                     .collect();
                 if let Some(k) = look::segmented(ui, shape, &shapes) {
