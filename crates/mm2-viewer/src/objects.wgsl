@@ -373,7 +373,8 @@ fn vs_enhanced(
         let up = sway.x;
         // A trunk bends from its foot: the tops of a 30 ft tree move about
         // half a foot; stronger in the rain's wind.
-        let windy = 1.0 + enh.world.y * 0.8;
+        // Next-gen: a breezier day, the trees plainly moving.
+        let windy = (1.0 + enh.world.y * 0.8) * select(1.0, select(1.6, 2.2, next_gen()), windy_day());
         let bend = min(up * up * 0.0016, 1.6) * windy;
         let g = gust(time * 0.6, out.world.xz * 0.2) + sin(time * 0.9 + sway.y) * 0.35;
         // The leaves flutter on their own, faster and smaller.

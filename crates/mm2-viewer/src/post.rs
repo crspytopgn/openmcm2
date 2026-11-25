@@ -40,6 +40,10 @@ const FSR_TAA_SHARPNESS_STOPS: f32 = 0.35;
 /// How far the bounced light reaches (ft), and how strongly it shows.
 const BOUNCE_REACH: f32 = 8.0;
 const BOUNCE_STRENGTH: f32 = 1.2;
+/// The Next-gen preset's bounce light, and its sun shafts, this many times
+/// as strong: plainly there rather than a hint.
+const NEXTGEN_BOUNCE: f32 = 1.6;
+const NEXTGEN_SHAFTS: f32 = 1.5;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -632,6 +636,7 @@ impl Post {
         let contact = showing.map_or(0.0, |e| if e.contact { screen_fx.contact } else { 0.0 });
         let wet = showing.map_or(0.0, |e| if e.ssr && !e.raytracing { screen_fx.wet } else { 0.0 });
         let bounce = showing.is_some_and(|e| e.bounce);
+        let bold = showing.is_some_and(|e| e.look == crate::graphics::Look::Bold);
         // FSR in place of the plain stretch (and of temporal anti-aliasing's
         // own sharpening): only drawn smaller than the screen, or temporally
         // anti-aliased; supersampled, the plain shrink.
@@ -650,12 +655,22 @@ impl Post {
                     Some(_) => 1.0,
                     None => 0.0,
                 },
-                showing.is_some_and(|e| e.grade) as u32 as f32,
+                showing.map_or(0.0, |e| e.look.index()),
             ],
             // A 3 ft reach, its strength, the bloom's, and how many pixels a foot
             // spans 1 ft away.
-            params: [3.0, if showing.is_some_and(|e| e.grade) { 2.2 } else { 1.5 }, if showing.is_some_and(|e| e.grade) { 0.9 } else { 0.6 }, proj.y_axis.y * 0.5 * h],
-            sun: sun.filter(|_| showing.is_some_and(|e| e.shafts)).map_or([0.0; 4], |(s, _)| [s[0], s[1], s[2], 0.0]),
+            // Next-gen's bloom is softer than the bold look's: a glow
+            // round the sun and bright sky, not a haze over everything.
+            params: [
+                3.0,
+                if bold { 2.2 } else { 1.5 },
+                if bold { 0.9 } else if showing.is_some_and(|e| e.nextgen) { 0.35 } else { 0.6 },
+                proj.y_axis.y * 0.5 * h,
+            ],
+            sun: sun.filter(|_| showing.is_some_and(|e| e.shafts)).map_or([0.0; 4], |(s, _)| {
+                let k = if showing.is_some_and(|e| e.nextgen) { NEXTGEN_SHAFTS } else { 1.0 };
+                [s[0], s[1], s[2] * k, 0.0]
+            }),
             sun_colour: match sun {
                 _ if self.traced_shafts.is_some() => [self.shaft_colour[0], self.shaft_colour[1], self.shaft_colour[2], 0.0],
                 Some((_, c)) => [c[0], c[1], c[2], 0.0],
@@ -687,7 +702,11 @@ impl Post {
             view_sun: to_view(screen_fx.to_sun).extend(contact).into(),
             view_up: to_view(glam::Vec3::Y).extend(wet).into(),
             // w: FSR 2's temporal rebuild in place of the plain one (fs_taa).
-            extra: [showing.is_some_and(|e| e.gtao) as u32 as f32, if bounce { BOUNCE_STRENGTH } else { 0.0 }, BOUNCE_REACH, (fsr.is_some() && taa.is_some()) as u32 as f32],
+            extra: [showing.is_some_and(|e| e.gtao) as u32 as f32, match showing {
+                Some(e) if bounce && e.nextgen => BOUNCE_STRENGTH * NEXTGEN_BOUNCE,
+                _ if bounce => BOUNCE_STRENGTH,
+                _ => 0.0,
+            }, BOUNCE_REACH, (fsr.is_some() && taa.is_some()) as u32 as f32],
         };
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         if fsr.is_some() {

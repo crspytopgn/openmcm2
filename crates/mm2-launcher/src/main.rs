@@ -2305,6 +2305,19 @@ impl Launcher {
                 {
                     s.detail = detail as f32 / 100.0;
                 }
+                ui.add_space(6.0);
+                look::label(ui, "Colour look", "A gentle colour grade over the finished picture. Original leaves the colours as drawn.");
+                let current = settings::LOOKS.iter().find(|l| l.0 == s.look).map_or("original", |l| l.0);
+                let choices: Vec<_> = settings::LOOKS
+                    .iter()
+                    .map(|l| Choice::new(l.0, l.1).hover(look_about(l.0)))
+                    .collect();
+                if let Some(l) = look::segmented(ui, current, &choices) {
+                    s.look = l.into();
+                    if let Some(i) = UPGRADES.iter().position(|u| u.0 == "grade") {
+                        s.upgrades[i] = l != "original";
+                    }
+                }
             });
             look::card(ui, icon::ICON_AUTO_FIX_HIGH, "Effects", |ui| {
                 ui.label(look::weak("Each on its own. The preset sets them; change any and it becomes Custom."));
@@ -2314,7 +2327,11 @@ impl Launcher {
                 let shadows = UPGRADES.iter().zip(&s.upgrades).any(|(u, on)| u.0 == "shadows" && *on);
                 let width = ((ui.available_width() - 8.0) / 2.0).floor();
                 // Ray tracing first, the biggest change; then as listed.
-                let order: Vec<usize> = (0..UPGRADES.len()).filter(|&i| UPGRADES[i].0 == "raytracing").chain((0..UPGRADES.len()).filter(|&i| UPGRADES[i].0 != "raytracing")).collect();
+                // The colour grade is picked as the colour look (Picture).
+                let order: Vec<usize> = (0..UPGRADES.len())
+                    .filter(|&i| UPGRADES[i].0 == "raytracing")
+                    .chain((0..UPGRADES.len()).filter(|&i| UPGRADES[i].0 != "raytracing" && UPGRADES[i].0 != "grade"))
+                    .collect();
                 for pair in order.chunks(2) {
                     ui.horizontal_top(|ui| {
                         for &i in pair {
@@ -2758,7 +2775,8 @@ fn popular_card(ui: &mut egui::Ui, t: &mut Tracks, game: &std::path::Path, remov
 /// Whether the effects, anti-aliasing and scene resolution in `s` are just
 /// what preset `q` sets.
 fn is_preset(s: &Settings, q: Quality) -> bool {
-    s.antialiasing == q.antialiasing() && s.resolution == "auto" && UPGRADES.iter().zip(&s.upgrades).all(|(u, on)| *on == q.has(u.0))
+    // The colour grade is the colour look's, apart from the presets.
+    s.antialiasing == q.antialiasing() && s.resolution == "auto" && UPGRADES.iter().zip(&s.upgrades).all(|(u, on)| u.0 == "grade" || *on == q.has(u.0))
 }
 
 /// The preset `s` is: the one picked, or another it was changed to match;
@@ -2801,7 +2819,7 @@ fn effect_about(name: &str) -> &'static str {
         "air" => "The haze over distant land behaves like real air: it glows a little brighter and warmer looking toward the sun, thins higher up so far hilltops stand clearer, and cools far hills a touch. Open-air tracks only.",
         "nightlights" => "Only when the time of day is set to Night: a stadium is lit by its own lamp banks high under the roof. The floor, bikes and riders are lit from above, each bank casting a soft shadow, and the lamps glow. Off, a stadium at night keeps its daytime light.",
         "ground" => "The ground re-made from photo materials.",
-        "grass" => "Grass growing on the grassy ground near you.",
+        "grass" => "Grass growing on the grassy ground near you, swaying in the wind and pushed aside as bikes ride through it. With the Next-gen preset it grows thicker and taller, on drier verges too, and the wind rolls across it in waves.",
         "smooth" => "The hills round you smoothed, not faceted.",
         "dust" => "Soft clouds of dust the colour of the ground behind the bikes: thicker when you pull hard or spin, a ring of it when you land a jump, and on a dry track a thin haze that hangs and drifts on the wind. The clouds are lit by the sun and cast shadows. Fewer, bigger puffs on Low and Medium, so it stays light on frame rate (Steam Deck included).",
         "roost" => "Real roost: while the back tyre spins (or you pull hard, or slide through a turn) it throws a low jet of fine grit, crumbs and a few clods out from under it, with a brown plume of dirt hanging behind. The harder it spins, the more it throws. It all falls fast. Only on dirt; mud in the rain. Replaces the original's tiny dirt specks. Light on frame rate, and fewer pieces on Low.",
@@ -2816,7 +2834,21 @@ fn effect_about(name: &str) -> &'static str {
         "supersample" => "For a strong graphics card: the 3D scene is drawn with more pixels than your screen has (up to 4K's worth, at most twice across) and shrunk to fit, so the edges of fences, trees, bikes and far hills are as clean as they can be and fine detail doesn't shimmer. The colours and light don't change. Costs up to four times the work on a 1080p screen; nothing extra on a 4K one.",
         "bounce" => "Sunlight bouncing off the ground and walls, as it does in real life: sunlit dirt throws a soft warm light into the shaded side of the bike and rider, and onto walls and banks close by, and pale corners don't go as dark as dark ones. Subtle, worked out on screen each frame. Costs a little on a slower graphics card.",
         "fsr" => "AMD FidelityFX Super Resolution (FSR 1): when the 3D scene is drawn smaller than your screen (Resolution below 100%, or Auto on a big screen), it is stretched up along its edges and gently sharpened, so it looks close to full sharpness instead of soft. With TAA (best), it rebuilds the picture from several frames the way FSR 2 does, which is sharper still. A big help on laptops: pick 67% or 75% for the speed with most of the sharpness. Does nothing at 100% without TAA.",
+        "closeup" => "Near your wheels the ground is real photo dirt, with clods, stones and grain, instead of the original's painted texture stretched and smeared up close. Further off the painted ground shows as before. Needs Detailed ground on. Costs next to nothing.",
+        "wind" => "A breezy day: gusts roll across the 3D grass in waves and the trees sway a little more. Costs next to nothing.",
+        "litair" => "Sunlight in the air near the ground: a faint glow where the sun lights it and darker streaks where hills, trees and riders shade it, so beams of light show through the trees, strongest looking toward the sun. Faint on these presets, plain on Next-gen. Costs some frame rate, so it's off on Low and Medium.",
         "far" => "The 3D grass reaches half as far again, the smoothed hills round you about twice as far, and the sun's shadows keep going nearly twice as far before fading, so more of the view looks finished. Close up nothing changes. Takes effect from the next track loaded.",
+        _ => "",
+    }
+}
+
+/// A line on each colour look ([`settings::LOOKS`]), for its hover.
+fn look_about(name: &str) -> &'static str {
+    match name {
+        "original" => "The colours exactly as drawn, no grade.",
+        "bold" => "Richer colour, a little more contrast and slightly darker corners.",
+        "warm" => "A late-afternoon feel: sunlit parts a touch golden, the shade lifted a little so it isn't black. Gentle, not an orange filter.",
+        "overcast" => "A soft grey day: a little less colour and contrast, with a cool tint in the shade.",
         _ => "",
     }
 }
@@ -2839,6 +2871,7 @@ fn preset_text(q: Quality) -> String {
         Quality::High => "every effect that's on unless changed",
         Quality::Ultra => "every effect but ray tracing",
         Quality::Max => "for the strongest graphics cards: Ultra's effects drawn finer, the scene supersampled (drawn with more pixels than the screen and shrunk to it) and the grass, smooth hills and shadows reaching further; the same light and colours as High",
+        Quality::NextGen => "a modern game's look, much bolder than the others: thicker sunlit air you can see shafts of light in, thick grass blowing in waves of wind, trees plainly moving, photo dirt sharp right up to your wheels, the real sky with clouds, bounce light, a soft glow round bright light, glossier bikes and trackside props, with ray tracing where your card can. Heavy: for a strong graphics card. If frames come late it draws softer and sets effects aside, so a laptop gets what it can",
     };
     let msaa = ANTIALIASING.iter().find(|a| a.0 == q.antialiasing()).map_or("", |a| a.1);
     // Past 1440p each pixel is small enough that 4x looks the same, for
