@@ -127,7 +127,7 @@ OpenMCM2 is free and always will be. Making it has real monthly costs,
 though. If you enjoy it, a small donation helps cover them and pays for
 future updates.
 
-**[♥ Donate on GitHub Sponsors](https://github.com/sponsors/crspytopgn)**
+**[♥ Buy me a coffee on Ko-fi](https://ko-fi.com/crspytopgn)** · **[Sponsor on GitHub](https://github.com/sponsors/crspytopgn)**
 
 More from me: [OpenSGolf](https://github.com/crspytopgn/opensgolf) · [OpenLinks2003](https://github.com/crspytopgn/openlinks2003) · [Pitwall](https://github.com/crspytopgn/pitwall).
 
@@ -282,13 +282,16 @@ the pad is found, and the game says so when one connects mid-ride.
   turns on things the original didn't have, all off unless chosen: a
   modernised HUD, quick get-up (G), air steering and braking, a live gap
   to your best lap, a steadier camera, a field of view slider, controller
-  vibration, a difficulty table, cleaner AI starts, one-lap races, a km/h
+  vibration, gyro steering (Steam Deck, Steam Controller, PlayStation and
+  Switch pads), a difficulty table, cleaner AI starts, one-lap races, a km/h
   speedometer, mute in the background and a screenshot key (Ctrl+P).
   "Back to the original" turns them all off again.
 
 On Linux, building needs ALSA and libudev headers
 (`sudo apt install libasound2-dev libudev-dev pkg-config`); build with
-`--no-default-features` to leave gamepad support out.
+`--no-default-features` to leave gamepad support out. Gyro steering builds
+SDL from source, which needs CMake; `--no-default-features --features
+gamepad,audio` leaves it out.
 
 ## How close it is
 

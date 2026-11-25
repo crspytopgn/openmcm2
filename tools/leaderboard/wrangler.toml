@@ -27,3 +27,13 @@ class_name = "Room"
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["Room"]
+
+# Shared Course Builder tracks (worker.js, Shared): one Durable Object,
+# the tracks' .course files in its own SQLite tables.
+[[durable_objects.bindings]]
+name = "SHARED"
+class_name = "Shared"
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["Shared"]

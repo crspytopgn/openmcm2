@@ -84,6 +84,44 @@ midnight UTC. The $5 a month Workers plan covers far more.
 A race not heard of for 90 seconds drops off. Each address can list four
 races at once, and the list holds at most 300.
 
+## Shared Course Builder tracks
+
+Players share their Course Builder tracks from the builder (Save / Export,
+Share with other players) and get everyone's from Open, Shared tracks, or
+the launcher's Tracks page. What goes up is the track's recipe only: the
+builder's `.course` without any files packed in, a few KB (a dressed Baja
+track is about 40 KB). The game bakes the track from it on the player's
+computer. They are kept in one Durable Object (`Shared`, its own SQLite
+tables, migration `v3` in `wrangler.toml`), which `npx wrangler deploy`
+sets up.
+
+The worker takes a recipe and nothing else: at most 128 KB, only the
+builder's fields, no models or pictures, and no text longer than 80
+characters anywhere in it, so nothing else can ride along. A copy of a
+track names that track's file and never the folder it came from
+(whoever downloads it needs that track). The game leaves a player's own
+models, ground picture and plant maps out when it shares.
+
+- `POST /shared?voter=ID`: the recipe, as JSON (128 KB at most). The answer
+  is `ok<TAB>id<TAB>key`; the game keeps the key, which shares a new
+  version (`POST /shared?voter=ID&id=ID&key=KEY`) or removes it. Each
+  address can share 12 a day, and all of them can take 1 GB.
+- `GET /shared?mode=National&sort=new|top|most&q=WORDS&page=0`: 60 at a
+  time, as `id<TAB>name<TAB>author<TAB>mode<TAB>base<TAB>downloads<TAB>stars
+  times ten<TAB>votes<TAB>shared<TAB>bytes<TAB>changed` lines (Unix seconds).
+- `GET /shared/track?id=ID&voter=ID`: its JSON; a download counts once
+  for each player.
+- `POST /shared/rate`: `id<TAB>voter<TAB>stars` (1 to 5, one vote each,
+  changeable): `ok<TAB>stars times ten<TAB>votes`.
+- `POST /shared/report`: `id<TAB>voter`. Three players' reports take it
+  off the list (it stays kept, `hidden = 1`, to look at).
+- `POST /shared/remove`: `id<TAB>key`. With a `SHARED_ADMIN` secret set
+  (`npx wrangler secret put SHARED_ADMIN`), `id<TAB>that secret` removes
+  any track.
+
+A voter is a random name each game makes for itself
+(`shared-tracks.txt` in the user folder): there are no accounts.
+
 OpenMCM2's own server runs at `https://openmcm2-laps.openmcm2-laps.workers.dev`
 (the default `LEADERBOARD_URL`). To update it after changing `worker.js`,
 run `npx wrangler deploy` here again.

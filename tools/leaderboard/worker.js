@@ -26,6 +26,16 @@
 //   GET  /ghosts   the ghosts kept, one per track and course:
 //                track<TAB>event<TAB>course<TAB>class<TAB>rider<TAB>ms<TAB>name
 //   GET  /ghost?track=&event=&course=   that ghost's tape, in base64
+//   POST /shared?voter=   a Course Builder track to share (its .course
+//                JSON); answers ok<TAB>id<TAB>key (the key changes or
+//                removes it later). With &id=&key=, a new version of it
+//   GET  /shared?mode=&sort=new|top|most&q=&page=   the shared tracks:
+//                id<TAB>name<TAB>author<TAB>mode<TAB>base<TAB>downloads<TAB>
+//                stars x10<TAB>votes<TAB>shared (s)<TAB>bytes<TAB>updated (s)
+//   GET  /shared/track?id=&voter=   one track's .course JSON
+//   POST /shared/rate   id<TAB>voter<TAB>stars (1 to 5): ok<TAB>stars x10<TAB>votes
+//   POST /shared/report   id<TAB>voter: hidden once three players report it
+//   POST /shared/remove   id<TAB>key (or the SHARED_ADMIN secret)
 //
 // Each board keeps one lap per rider (their best), at most KEEP of them.
 
@@ -401,6 +411,7 @@ export default {
     if (request.method === "POST" && url.pathname === "/ghost") return addGhost(request, env);
     if (request.method === "GET" && url.pathname === "/ghosts") return ghosts(env);
     if (request.method === "GET" && url.pathname === "/ghost") return ghost(url, env);
+    if (url.pathname === "/shared" || url.pathname.startsWith("/shared/")) return shared(request, url, env);
     if (request.method === "OPTIONS") return text("", 204);
     return text("OpenMCM2 lap leaderboards\n", url.pathname === "/" ? 200 : 404);
   },
@@ -715,5 +726,253 @@ export class Room extends DurableObject {
 
   async webSocketError(ws) {
     await this.gone(ws);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Shared Course Builder tracks: players' .course recipes (the line, jumps,
+// shaping and paint, a few KB; the game bakes the track from it), kept in one
+// Durable Object's SQLite tables. Never a game's own files: the JSON is
+// read and written again here, so only the builder's fields go in, and a
+// copy of a track names its file without the folder it came from (the
+// player who downloads it needs that track themselves).
+
+const SHARED_MOST = 128 * 1024;
+const SHARED_PART = 1000 * 1000;
+const SHARED_TOTAL = 1024 * 1024 * 1024;
+const SHARED_PER_DAY = 12;
+const SHARED_PAGE = 60;
+const SHARED_REPORTS = 3;
+const MODES = ["Supercross", "National", "Baja", "Enduro"];
+// The fields of a .course (mm2-course's Course); anything else is dropped.
+const COURSE_KEYS = new Set(["version", "name", "author", "mode", "land", "line", "jumps", "strokes", "paint", "objects", "plants", "rivers", "flights", "look", "models", "dress", "base"]);
+
+function line(s, most) {
+  return String(s ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, most).trim();
+}
+
+async function sha(s) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function random(n, abc = "abcdefghjkmnpqrstuvwxyz23456789") {
+  const b = crypto.getRandomValues(new Uint8Array(n));
+  return [...b].map((v) => abc[v % abc.length]).join("");
+}
+
+const voterOk = (v) => /^[0-9a-z]{12,40}$/.test(v ?? "");
+
+// The course as it's kept: parsed, its fields checked, the player's own
+// folders taken out of a copy's track, written again.
+// Numbers, short text, true/false, and lists and objects of those, not
+// too deep: what a builder recipe is made of.
+function plain(v, depth) {
+  if (depth > 12) return false;
+  if (v === null || typeof v === "number" || typeof v === "boolean") return true;
+  if (typeof v === "string") return v.length <= 80;
+  if (Array.isArray(v)) return v.every((x) => plain(x, depth + 1));
+  if (typeof v === "object") return Object.entries(v).every(([k, x]) => k.length <= 40 && plain(x, depth + 1));
+  return false;
+}
+
+function tidyCourse(body) {
+  let c;
+  try {
+    c = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  if (!c || typeof c !== "object" || Array.isArray(c)) return null;
+  if (!Number.isInteger(c.version) || !MODES.includes(c.mode) || typeof c.line !== "object" || c.line === null) return null;
+  for (const k of Object.keys(c)) if (!COURSE_KEYS.has(k)) delete c[k];
+  // A recipe only: no packed files (models, pictures), and nothing in it
+  // that could carry one (no long text anywhere).
+  if ((Array.isArray(c.models) && c.models.length) || c.models === null) return null;
+  delete c.models;
+  if (c.look?.ground || c.land?.heightmap) return null;
+  if (Array.isArray(c.plants) && c.plants.some((p) => p?.map)) return null;
+  c.name = line(c.name, 40) || "Shared track";
+  c.author = line(c.author, 24);
+  if (c.base) {
+    const file = String(c.base.file ?? "").split(/[\\/]/).pop();
+    if (!/^[^<>:"|?*]{1,64}\.env$/i.test(file)) return null;
+    c.base = { file, course: Number.isInteger(c.base.course) ? c.base.course : 0 };
+  }
+  if (!plain(c, 0)) return null;
+  return c;
+}
+
+async function shared(request, url, env) {
+  const box = env.SHARED.get(env.SHARED.idFromName("all"));
+  const p = url.pathname;
+  if (request.method === "GET" && p === "/shared") {
+    const rows = await box.list(
+      url.searchParams.get("mode") ?? "",
+      url.searchParams.get("sort") ?? "new",
+      line(url.searchParams.get("q"), 40),
+      Math.max(0, Number.parseInt(url.searchParams.get("page") ?? "0", 10) || 0),
+    );
+    return text(rows.map((r) => `${[r.id, r.name, r.author, r.mode, r.base, r.downloads, r.stars, r.votes, r.created, r.bytes, r.updated].join("\t")}\n`).join(""));
+  }
+  if (request.method === "GET" && p === "/shared/track") {
+    const id = url.searchParams.get("id") ?? "";
+    const voter = url.searchParams.get("voter") ?? "";
+    const json = await box.get(id, voterOk(voter) ? voter : "");
+    if (json === null) return text("gone\n", 404);
+    return new Response(json, { headers: { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" } });
+  }
+  if (request.method !== "POST") return text("which?\n", 404);
+  const body = await request.text();
+  if (p === "/shared") {
+    if (body.length > SHARED_MOST) return text("too big\n", 413);
+    const voter = url.searchParams.get("voter") ?? "";
+    if (!voterOk(voter)) return text("who?\n", 400);
+    const c = tidyCourse(body);
+    if (!c) return text("not a track\n", 400);
+    const ip = request.headers.get("cf-connecting-ip") ?? "";
+    const from = await sha(`shared:${ip}`);
+    const id = url.searchParams.get("id");
+    const key = url.searchParams.get("key");
+    const json = JSON.stringify(c);
+    const meta = { name: c.name, author: c.author, mode: c.mode, base: c.base?.file ?? "" };
+    if (id) {
+      const r = await box.replace(id, await sha(key ?? ""), json, meta);
+      return text(r === "ok" ? `ok\t${id}\t${key}\n` : `${r}\n`, r === "ok" ? 200 : 403);
+    }
+    const newKey = random(24, "0123456789abcdef");
+    const r = await box.add(json, meta, from, voter, await sha(newKey));
+    if (!r.startsWith("ok")) return text(`${r}\n`, r === "full" ? 507 : 429);
+    return text(`${r}\t${newKey}\n`);
+  }
+  const f = body.split("\n")[0].replace(/\r$/, "").split("\t");
+  if (p === "/shared/rate") {
+    const stars = Number.parseInt(f[2], 10);
+    if (!voterOk(f[1]) || !(stars >= 1 && stars <= 5)) return text("which?\n", 400);
+    const r = await box.rate(f[0], f[1], stars);
+    return r ? text(`ok\t${r.stars}\t${r.votes}\n`) : text("gone\n", 404);
+  }
+  if (p === "/shared/report") {
+    if (!voterOk(f[1])) return text("who?\n", 400);
+    return text(`${await box.report(f[0], f[1])}\n`);
+  }
+  if (p === "/shared/remove") {
+    const admin = env.SHARED_ADMIN && f[1] === env.SHARED_ADMIN;
+    return text(`${await box.remove(f[0], admin ? null : await sha(f[1] ?? ""))}\n`);
+  }
+  return text("which?\n", 404);
+}
+
+export class Shared extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS tracks (
+      id TEXT PRIMARY KEY, name TEXT, author TEXT, mode TEXT, base TEXT,
+      bytes INTEGER, parts INTEGER, created INTEGER, updated INTEGER,
+      origin TEXT, voter TEXT, key TEXT, downloads INTEGER DEFAULT 0,
+      stars_sum INTEGER DEFAULT 0, votes INTEGER DEFAULT 0, hidden INTEGER DEFAULT 0)`);
+    this.sql.exec("CREATE TABLE IF NOT EXISTS parts (id TEXT, n INTEGER, data TEXT, PRIMARY KEY (id, n))");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS votes (id TEXT, voter TEXT, stars INTEGER, PRIMARY KEY (id, voter))");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS got (id TEXT, voter TEXT, PRIMARY KEY (id, voter))");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS reports (id TEXT, voter TEXT, PRIMARY KEY (id, voter))");
+  }
+
+  putParts(id, json) {
+    this.sql.exec("DELETE FROM parts WHERE id = ?", id);
+    let n = 0;
+    for (let at = 0; at < json.length; at += SHARED_PART, n++) {
+      this.sql.exec("INSERT INTO parts VALUES (?, ?, ?)", id, n, json.slice(at, at + SHARED_PART));
+    }
+    return n;
+  }
+
+  add(json, meta, origin, voter, keyHash) {
+    const now = Math.floor(Date.now() / 1000);
+    const today = this.sql.exec("SELECT COUNT(*) AS n FROM tracks WHERE origin = ? AND created > ?", origin, now - 86400).one().n;
+    if (today >= SHARED_PER_DAY) return "slow down";
+    const total = this.sql.exec("SELECT COALESCE(SUM(bytes), 0) AS n FROM tracks").one().n;
+    if (total + json.length > SHARED_TOTAL) return "full";
+    let id;
+    do id = random(8);
+    while (this.sql.exec("SELECT 1 FROM tracks WHERE id = ?", id).toArray().length);
+    const parts = this.putParts(id, json);
+    this.sql.exec(
+      "INSERT INTO tracks (id, name, author, mode, base, bytes, parts, created, updated, origin, voter, key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      id, meta.name, meta.author, meta.mode, meta.base, json.length, parts, now, now, origin, voter, keyHash,
+    );
+    return `ok\t${id}`;
+  }
+
+  replace(id, keyHash, json, meta) {
+    const r = this.sql.exec("SELECT key FROM tracks WHERE id = ?", id).toArray()[0];
+    if (!r) return "gone";
+    if (r.key !== keyHash) return "not yours";
+    const parts = this.putParts(id, json);
+    this.sql.exec(
+      "UPDATE tracks SET name = ?, author = ?, mode = ?, base = ?, bytes = ?, parts = ?, updated = ? WHERE id = ?",
+      meta.name, meta.author, meta.mode, meta.base, json.length, parts, Math.floor(Date.now() / 1000), id,
+    );
+    return "ok";
+  }
+
+  list(mode, sort, q, page) {
+    const order = {
+      top: "CASE WHEN votes > 0 THEN (stars_sum * 1.0 + 3 * 2) / (votes + 2) ELSE 0 END DESC, votes DESC, created DESC",
+      most: "downloads DESC, created DESC",
+    }[sort] ?? "updated DESC";
+    const where = ["hidden = 0"];
+    const args = [];
+    if (MODES.includes(mode)) {
+      where.push("mode = ?");
+      args.push(mode);
+    }
+    if (q) {
+      where.push("(name LIKE ? OR author LIKE ?)");
+      args.push(`%${q}%`, `%${q}%`);
+    }
+    return this.sql
+      .exec(
+        `SELECT id, name, author, mode, base, downloads, CASE WHEN votes > 0 THEN (stars_sum * 10 + votes / 2) / votes ELSE 0 END AS stars, votes, created, bytes, updated
+         FROM tracks WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ? OFFSET ?`,
+        ...args, SHARED_PAGE, page * SHARED_PAGE,
+      )
+      .toArray();
+  }
+
+  get(id, voter) {
+    const r = this.sql.exec("SELECT parts FROM tracks WHERE id = ?", id).toArray()[0];
+    if (!r) return null;
+    const json = this.sql.exec("SELECT data FROM parts WHERE id = ? ORDER BY n", id).toArray().map((p) => p.data).join("");
+    if (voter && !this.sql.exec("SELECT 1 FROM got WHERE id = ? AND voter = ?", id, voter).toArray().length) {
+      this.sql.exec("INSERT INTO got VALUES (?, ?)", id, voter);
+      this.sql.exec("UPDATE tracks SET downloads = downloads + 1 WHERE id = ?", id);
+    }
+    return json;
+  }
+
+  rate(id, voter, stars) {
+    if (!this.sql.exec("SELECT 1 FROM tracks WHERE id = ?", id).toArray().length) return null;
+    this.sql.exec("INSERT OR REPLACE INTO votes VALUES (?, ?, ?)", id, voter, stars);
+    const t = this.sql.exec("SELECT COALESCE(SUM(stars), 0) AS s, COUNT(*) AS n FROM votes WHERE id = ?", id).one();
+    this.sql.exec("UPDATE tracks SET stars_sum = ?, votes = ? WHERE id = ?", t.s, t.n, id);
+    return { stars: t.n ? Math.floor((t.s * 10 + Math.floor(t.n / 2)) / t.n) : 0, votes: t.n };
+  }
+
+  report(id, voter) {
+    if (!this.sql.exec("SELECT 1 FROM tracks WHERE id = ?", id).toArray().length) return "gone";
+    this.sql.exec("INSERT OR IGNORE INTO reports VALUES (?, ?)", id, voter);
+    const n = this.sql.exec("SELECT COUNT(*) AS n FROM reports WHERE id = ?", id).one().n;
+    if (n >= SHARED_REPORTS) this.sql.exec("UPDATE tracks SET hidden = 1 WHERE id = ?", id);
+    return "ok";
+  }
+
+  // With keyHash null (the admin), any track.
+  remove(id, keyHash) {
+    const r = this.sql.exec("SELECT key FROM tracks WHERE id = ?", id).toArray()[0];
+    if (!r) return "gone";
+    if (keyHash !== null && r.key !== keyHash) return "not yours";
+    for (const t of ["tracks", "parts", "votes", "got", "reports"]) this.sql.exec(`DELETE FROM ${t} WHERE id = ?`, id);
+    return "ok";
   }
 }

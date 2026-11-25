@@ -52,6 +52,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bench;
+#[cfg(not(target_arch = "wasm32"))]
+mod clip;
+mod replay_edit;
 mod gpu_free;
 mod free_text;
 mod demo;
@@ -77,6 +80,7 @@ mod gpu_time;
 mod grass;
 mod ruts;
 mod dust;
+mod grime;
 mod rain;
 mod smooth;
 mod scenery;
@@ -129,6 +133,8 @@ mod ride;
 mod riding;
 mod roster;
 mod rumble;
+#[cfg(all(feature = "gyro", not(target_arch = "wasm32")))]
+mod gyro;
 mod lapgap;
 mod tweaks;
 mod water;
@@ -256,6 +262,28 @@ fn main() -> Result<(), BoxError> {
         };
         std::fs::write(to, &env).map_err(|e| format!("{to}: {e}"))?;
         eprintln!("{to}: {:.1} MB for the original game", env.len() as f32 / 1e6);
+        return Ok(());
+    }
+    // A Course Builder track baked into an OpenMCM2 track, with no window
+    // (`--bake-course <track.course> <out.env>`; the launcher's shared
+    // tracks, downloaded as the builder's .course).
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(i) = args.iter().position(|a| a == "--bake-course") {
+        let (Some(from), Some(to)) = (args.get(i + 1), args.get(i + 2)) else {
+            return Err("usage: --bake-course <track.course> <out.env>".into());
+        };
+        let bytes = std::fs::read(from).map_err(|e| format!("{from}: {e}"))?;
+        let mut course = mm2_course::Course::from_json(&String::from_utf8_lossy(&bytes))?;
+        if let Some(base) = course.base.clone() {
+            let track = std::fs::read(&base.file).map_err(|e| format!("{}: {e}", base.file))?;
+            mm2_course::copy::attach(&mut course, &track)?;
+        }
+        let env = mm2_course::env::write_with(&course, &fine_ground::builder_pictures()).env;
+        if let Some(dir) = Path::new(to).parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        std::fs::write(to, &env).map_err(|e| format!("{to}: {e}"))?;
+        eprintln!("{to}: {:.1} MB", env.len() as f32 / 1e6);
         return Ok(());
     }
     // The enhanced graphics, all of them or less those named after `=`.
@@ -1022,7 +1050,17 @@ fn main() -> Result<(), BoxError> {
         .and_then(|n| n.parse().ok())
         .unwrap_or(race::DEFAULT_LAPS);
     let race = make_race(&track, laps);
-    run(App::new(Some(track), race, None))
+    let mut app = App::new(Some(track), race, None);
+    // `--replay` without `--screenshot`: the tape plays in a window.
+    if let Some(mut rp) = tape {
+        if let Some(t) = flag("--at").and_then(|t| t.parse::<f32>().ok()) {
+            rp.time = t.clamp(rp.start(), rp.end());
+        }
+        app.follow = true;
+        app.replay = Some(rp);
+        app.editor = tweaks::more().replay_editor.then(replay_edit::Editor::new);
+    }
+    run(app)
 }
 
 /// The command line; in a browser, the page address's options, so that
@@ -1519,11 +1557,12 @@ fn tyre_places(race: &Race, ground: &TrackGround) -> Vec<([Option<Vec3>; 2], dus
                     dusty: dusty(at[1]) || dusty(at[0]),
                     spin: b.roost().1,
                     dirt: at[1].is_some_and(|(p, on)| !on && dirt(Some(p))),
+                    crashed: b.crash.is_some(),
                 };
                 (at.map(|t| t.map(|(at, _)| at)), kick)
             }
             race::Bike::Computer(c) => match &c.wreck {
-                Some(_) => ([None; 2], dust::Kick::default()),
+                Some(_) => ([None; 2], dust::Kick { crashed: true, ..Default::default() }),
                 None => {
                     let rd = &c.rider;
                     let ends = drawn_ends(r.bike.place());
@@ -1532,6 +1571,7 @@ fn tyre_places(race: &Race, ground: &TrackGround) -> Vec<([Option<Vec3>; 2], dus
                         dusty: at.iter().flatten().any(|&p| dusty(Some((p, false)))),
                         spin: 0.0,
                         dirt: dirt(at[1]),
+                        crashed: false,
                     };
                     (at, kick)
                 }
@@ -1544,6 +1584,7 @@ fn tyre_places(race: &Race, ground: &TrackGround) -> Vec<([Option<Vec3>; 2], dus
                     dusty: at.iter().flatten().any(|&p| dusty(Some((p, false)))),
                     spin: 0.0,
                     dirt: dirt(at[1]),
+                    crashed: b.crashed(),
                 };
                 (at, kick)
             }
@@ -4600,6 +4641,34 @@ fn save_png(
     target: &wgpu::Texture,
     out: &Path,
 ) -> Result<(), BoxError> {
+    let (width, height, mut pixels) = read_pixels(device, queue, draw, target)?;
+    // A window's picture (the screenshot key) may be blue first, and its
+    // alpha isn't meant to be seen.
+    if matches!(target.format(), wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb) {
+        pixels.chunks_exact_mut(4).for_each(|p| {
+            p.swap(0, 2);
+            p[3] = 255;
+        });
+    }
+    let mut encoder = png::Encoder::new(
+        std::io::BufWriter::new(crate::fs::File::create(out)?),
+        width,
+        height,
+    );
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.write_header()?.write_image_data(&pixels)?;
+    eprintln!("wrote {}", out.display());
+    Ok(())
+}
+
+/// Runs `draw` and reads `target` back: its width, height and pixels, 4
+/// bytes each, in its own order.
+fn read_pixels(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    draw: wgpu::CommandBuffer,
+    target: &wgpu::Texture,
+) -> Result<(u32, u32, Vec<u8>), BoxError> {
     let (width, height) = (target.width(), target.height());
     let row = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
@@ -4631,28 +4700,12 @@ fn save_png(
         .map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
     device.poll(wgpu::PollType::wait_indefinitely())?;
     let data = readback.slice(..).get_mapped_range()?;
-    let mut pixels: Vec<u8> = data
+    let pixels: Vec<u8> = data
         .chunks(row as usize)
         .flat_map(|r| &r[..(width * 4) as usize])
         .copied()
         .collect();
-    // A window's picture (the screenshot key) may be blue first, and its
-    // alpha isn't meant to be seen.
-    if matches!(target.format(), wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb) {
-        pixels.chunks_exact_mut(4).for_each(|p| {
-            p.swap(0, 2);
-            p[3] = 255;
-        });
-    }
-    let mut encoder = png::Encoder::new(
-        std::io::BufWriter::new(crate::fs::File::create(out)?),
-        width,
-        height,
-    );
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.write_header()?.write_image_data(&pixels)?;
-    eprintln!("wrote {}", out.display());
-    Ok(())
+    Ok((width, height, pixels))
 }
 
 /// The loading bar's steps so far: the game's bar is 20 steps long (0x451e30)
@@ -4853,6 +4906,10 @@ struct App {
     /// The pad's vibration from the player's riding, and this frame's
     /// strengths of its heavy and light motors.
     rumble: rumble::Rumble,
+    /// Gyro steering's sensor reading, started the first time the extra
+    /// is wanted (the bool: tried, so a failure isn't retried).
+    #[cfg(all(feature = "gyro", not(target_arch = "wasm32")))]
+    gyro: (Option<gyro::Gyro>, bool),
     shake: [f32; 2],
     /// The window out of focus or covered: the pad keeps still.
     quiet: bool,
@@ -4864,6 +4921,13 @@ struct App {
     photo: bool,
     photo_follow: bool,
     photo_note: Option<(String, Instant)>,
+    /// The replay editor over the VCR player (an extra), while a replay
+    /// plays.
+    editor: Option<replay_edit::Editor>,
+    /// The replay editor's clip being made (a browser's page makes its
+    /// own).
+    #[cfg(not(target_arch = "wasm32"))]
+    clip: Option<clip::Clip>,
     /// The Course Builder (an extra), open over the menus.
     builder: Option<builder::Builder>,
     /// The builder's ride check under way: computer riders lapping the
@@ -5028,12 +5092,17 @@ impl App {
             #[cfg(not(feature = "gamepad"))]
             pads: None,
             rumble: rumble::Rumble::default(),
+            #[cfg(all(feature = "gyro", not(target_arch = "wasm32")))]
+            gyro: (None, false),
             shake: [0.0; 2],
             quiet: false,
             shoot: false,
             photo: false,
             photo_follow: false,
             photo_note: None,
+            editor: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            clip: None,
             builder: None,
             checking: None,
             builder_waiting: None,
@@ -5312,6 +5381,7 @@ impl App {
                     _ => None,
                 };
                 self.replay = self.tape.take();
+                self.editor = (self.replay.is_some() && tweaks::more().replay_editor).then(replay_edit::Editor::new);
                 self.remote.clear();
                 if let (Some(n), Some(r)) = (self.net, &mut self.race) {
                     self.remote = (0..r.racers.len())
@@ -5629,6 +5699,8 @@ impl App {
             .take()
             .filter(|g| g.improved)
             .and_then(|g| g.best().cloned());
+        self.stop_clip();
+        self.editor = None;
         let replayed = self.replay.take().is_some() || self.tape.take().is_some();
         self.race = None;
         self.track = None;
@@ -5891,6 +5963,196 @@ impl App {
         self.photo_note = None;
     }
 
+    /// The replay editor's keys; false for a key it leaves to the race.
+    fn editor_key(&mut self, code: KeyCode) -> bool {
+        if self.editor.is_none() || self.ctrl() {
+            return false;
+        }
+        if code == KeyCode::KeyR {
+            self.flip_clip();
+            return true;
+        }
+        let time = self.replay.as_ref().map_or(0.0, |r| r.time);
+        let camera = self.state.as_ref().map(|s| s.camera);
+        let Some(e) = &mut self.editor else { return false };
+        // While a clip is made only R (above) and Escape do anything.
+        if e.recording {
+            return code != KeyCode::Escape;
+        }
+        match code {
+            KeyCode::Tab => {
+                let v = e.next_view();
+                self.follow = v == replay_edit::View::Race && self.race.is_some();
+            }
+            KeyCode::Comma => e.step_slow(-1),
+            KeyCode::Period => e.step_slow(1),
+            KeyCode::KeyI => e.set_in(time),
+            KeyCode::KeyO => e.set_out(time),
+            KeyCode::KeyL => e.flip_loop(),
+            KeyCode::KeyK => {
+                if let Some(c) = camera {
+                    e.add_key(time, c);
+                }
+            }
+            KeyCode::Backspace | KeyCode::Delete => e.remove_key(time),
+            KeyCode::KeyT => e.flip_aim(),
+            KeyCode::KeyH => e.hidden = !e.hidden,
+            KeyCode::Slash => e.help(),
+            _ => return false,
+        }
+        true
+    }
+
+    /// The free camera turned to the rider followed, when asked to.
+    fn aim_free_camera(&mut self) {
+        let (Some(e), Some(r), Some(state)) = (&self.editor, &self.race, &mut self.state) else {
+            return;
+        };
+        if !e.aim || e.view != replay_edit::View::Free {
+            return;
+        }
+        let rider = r.racers[r.watching()].bike.position();
+        let cam = &mut state.camera;
+        let aimed = Camera::looking_at(cam.position, renderer::from_game(rider + Vec3::Y * 2.0));
+        cam.yaw = aimed.yaw;
+        cam.pitch = aimed.pitch;
+    }
+
+    /// R in the replay editor: a clip starts, or ends and is kept.
+    fn flip_clip(&mut self) {
+        if self.editor.as_ref().is_some_and(|e| e.recording) {
+            self.stop_clip();
+        } else {
+            self.start_clip();
+        }
+    }
+
+    /// A clip starts: from In when In and Out are both marked, else from
+    /// where the tape is, at the speed chosen, forwards.
+    fn start_clip(&mut self) {
+        let (Some(e), Some(rp)) = (&mut self.editor, &mut self.replay) else { return };
+        if let (Some(i), Some(_)) = (e.mark_in, e.mark_out) {
+            rp.time = i;
+        }
+        if rp.time >= rp.end() - 0.05 {
+            e.say("The tape is at its end: go back a little to record a clip");
+            return;
+        }
+        rp.paused = false;
+        if rp.rate < 0.0 {
+            rp.rate = replay::PLAY;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let kind = clip::Kind::native();
+            match clip::new_path(kind).and_then(|p| clip::Clip::start(&p, kind)) {
+                Ok(c) => {
+                    eprintln!("clip: recording {}", c.path.display());
+                    self.clip = Some(c);
+                }
+                Err(err) => {
+                    eprintln!("clip: {err}");
+                    e.say("Couldn't start a clip");
+                    return;
+                }
+            }
+            // A clip is made at its own pace, so the sound would stutter.
+            self.audio.set_muted(true);
+        }
+        #[cfg(target_arch = "wasm32")]
+        if !web::clip_start(replay_edit::CLIP_FPS) {
+            e.say("This browser can't record clips");
+            return;
+        }
+        e.recording = true;
+    }
+
+    /// A clip under way is ended and kept.
+    fn stop_clip(&mut self) {
+        let Some(e) = &mut self.editor else { return };
+        if !std::mem::take(&mut e.recording) {
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(c) = self.clip.take() {
+            let name = c.path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            match c.finish() {
+                Ok(frames) => {
+                    eprintln!("clip: {frames} frames");
+                    e.say(format!(
+                        "Clip saved: {name}, {:.1} s, in the Clips folder beside your saves",
+                        frames as f32 / replay_edit::CLIP_FPS as f32
+                    ));
+                }
+                Err(err) => {
+                    eprintln!("clip: {err}");
+                    e.say("Couldn't save the clip");
+                }
+            }
+            self.audio.set_muted(self.quiet && tweaks::get().mute_in_background);
+        }
+        #[cfg(target_arch = "wasm32")]
+        e.say(if web::clip_stop() { "Clip saved to your downloads" } else { "Couldn't save the clip" });
+    }
+
+    /// The clip being made has reached Out or the end of the tape.
+    fn clip_ended(&self) -> bool {
+        let (Some(e), Some(rp)) = (&self.editor, &self.replay) else { return false };
+        e.recording && (rp.paused || e.mark_out.is_some_and(|o| rp.time >= o))
+    }
+
+    /// A pad in a replay with the editor: X changes the camera, Y adds a
+    /// camera key, A pauses, B hides the player, Back records a clip, the
+    /// D-pad's left and right change the speed and its up the race
+    /// camera's view, the left stick's click aims the free camera at the
+    /// rider and Start leaves; the sticks and triggers fly the free
+    /// camera as in photo mode.
+    #[cfg(feature = "gamepad")]
+    fn editor_pad(&mut self, presses: &[pad::Press], [stick, right]: [[f32; 2]; 2], rise: f32, fast: bool, dt: f32) {
+        let pressed = |b: i32| presses.contains(&pad::Press::Button(b));
+        if pressed(7) {
+            if self.front.is_some() && self.loading.is_none() {
+                self.end_race();
+            }
+            return;
+        }
+        for (b, key) in [
+            (2, KeyCode::Tab),
+            (3, KeyCode::KeyK),
+            (1, KeyCode::KeyH),
+            (6, KeyCode::KeyR),
+            (8, KeyCode::KeyT),
+            (pad::DPAD_LEFT, KeyCode::Comma),
+            (pad::DPAD_RIGHT, KeyCode::Period),
+        ] {
+            if pressed(b) {
+                self.editor_key(key);
+            }
+        }
+        let recording = self.editor.as_ref().is_some_and(|e| e.recording);
+        if pressed(0) && !recording {
+            if let Some(rp) = &mut self.replay {
+                rp.paused = !rp.paused;
+            }
+        }
+        if pressed(pad::DPAD_UP) && self.follow && !recording {
+            if let Some(r) = &mut self.race {
+                r.next_view();
+            }
+        }
+        if self.follow || self.editor.as_ref().is_some_and(|e| e.view != replay_edit::View::Free) {
+            return;
+        }
+        let Some(state) = &mut self.state else { return };
+        let dead = |v: f32| if v.abs() < 0.15 { 0.0 } else { (v.abs() - 0.15) / 0.85 * v.signum() };
+        let cam = &mut state.camera;
+        let speed = if fast { replay_edit::FLY.1 } else { replay_edit::FLY.0 };
+        let way = cam.forward() * -dead(stick[1]) + cam.right() * dead(stick[0]) + Vec3::Y * dead(rise);
+        cam.position += way.clamp_length_max(1.0) * speed * dt;
+        cam.look(dead(right[0]) * replay_edit::FLY.2 * dt, dead(right[1]) * replay_edit::FLY.2 * dt);
+        self.aim_free_camera();
+    }
+
     /// A pad in photo mode: the left stick flies (RB faster), the right
     /// stick looks round, the right trigger rises and the left sinks, A
     /// saves a picture, and B, Start or both sticks again go back.
@@ -5937,7 +6199,13 @@ impl App {
             dir -= Vec3::Y
         }
         // Photo mode's camera goes at a walk, to frame a picture close up.
-        let (slow, fast, turn) = if self.photo { PHOTO_SPEEDS } else { (200.0, 900.0, 1.5) };
+        let (slow, fast, turn) = if self.photo {
+            PHOTO_SPEEDS
+        } else if self.editor.is_some() && self.replay.is_some() {
+            replay_edit::FLY
+        } else {
+            (200.0, 900.0, 1.5)
+        };
         let speed = if key(KeyCode::ShiftLeft) || key(KeyCode::ShiftRight) { fast } else { slow };
         cam.position += dir.normalize_or_zero() * speed * dt;
         let turn = turn * dt;
@@ -6302,6 +6570,22 @@ impl App {
     /// pad's triggers also work the gas and brake, past a third.
     #[cfg(feature = "gamepad")]
     fn gamepad(&mut self, mut c: Controls) -> Controls {
+        // Gyro steering (an extra): the pad's tilt steers on top of the
+        // stick, in straight proportion (not cubed like a stick).
+        #[cfg(all(feature = "gyro", not(target_arch = "wasm32")))]
+        let tilt = {
+            let full = crate::tweaks::more().gyro_steer;
+            if full == 0 {
+                0.0
+            } else {
+                if !self.gyro.1 {
+                    self.gyro = (gyro::Gyro::new(), true);
+                }
+                self.gyro.0.as_mut().map_or(0.0, |g| g.steer(full as f32))
+            }
+        };
+        #[cfg(not(all(feature = "gyro", not(target_arch = "wasm32"))))]
+        let tilt = 0.0f32;
         let map = self.pad_map;
         let flip = if self.joy_flipped { -1.0 } else { 1.0 };
         let Some(pad) = self.pads.as_ref() else {
@@ -6381,6 +6665,9 @@ impl App {
             if lean != 0.0 {
                 c.lean = lean;
             }
+        }
+        if tilt != 0.0 {
+            c.steer = (c.steer + tilt).clamp(-1.0, 1.0);
         }
         c
     }
@@ -6479,6 +6766,10 @@ impl App {
                     b.pad_button(what);
                 }
             }
+            return;
+        }
+        if self.replay.is_some() && self.editor.is_some() && !self.in_menus() {
+            self.editor_pad(&presses, [stick, right], zoom, fast, dt);
             return;
         }
         if !self.in_menus() {
@@ -6687,7 +6978,15 @@ impl App {
         let Some(track) = &self.track else { return };
         let Some(state) = &mut self.state else { return };
         if let (Some(rp), Some(r)) = (&mut self.replay, &mut self.race) {
-            rp.advance(dt);
+            // The replay editor: slow motion, back to In when looping, and
+            // while a desktop clip is made, a steady 30 frames a second of
+            // tape however long each takes to draw.
+            let fixed = cfg!(not(target_arch = "wasm32")) && self.editor.as_ref().is_some_and(|e| e.recording);
+            let dt = if fixed { 1.0 / replay_edit::CLIP_FPS as f32 } else { dt };
+            rp.advance(dt * self.editor.as_ref().map_or(1.0, |e| e.speed()));
+            if let Some(t) = self.editor.as_ref().and_then(|e| e.wrap(rp.time, rp.rate)) {
+                rp.time = t;
+            }
             let (eye, target) = rp.show(r, &track.terrain);
             if let Some(sounds) = &mut self.sounds {
                 let l = listener(r, eye, target);
@@ -6695,7 +6994,22 @@ impl App {
                 sounds.ambient(&self.audio, &l, |site| track.site(site, r.time), dt);
             }
             if let Some(renderer) = &mut state.renderer {
+                // The editor's clean picture leaves out the marker over
+                // the rider, as photo mode does.
+                let clean = self.editor.as_ref().is_some_and(|e| e.hidden || e.recording);
+                let marker = r.player_indicator;
+                r.player_indicator &= !clean;
                 show(r, track, renderer, eye, None);
+                r.player_indicator = marker;
+            }
+            let path = self
+                .editor
+                .as_ref()
+                .filter(|e| e.view == replay_edit::View::Path)
+                .and_then(|e| e.path_at(rp.time));
+            if let Some(c) = path {
+                state.camera = c;
+                return;
             }
             if self.follow {
                 state.camera =
@@ -6705,6 +7019,7 @@ impl App {
                 return;
             }
             self.fly(dt);
+            self.aim_free_camera();
             return;
         }
         // The podium runs its 7 s and then leaves for the results.
@@ -6966,20 +7281,28 @@ impl App {
                 // nothing but its line at the bottom for a few seconds
                 // (never in the picture it saves).
                 let note = self.photo_note.as_ref().filter(|(_, at)| at.elapsed().as_secs_f32() < PHOTO_NOTE_SECS);
+                let clean = self.editor.as_ref().is_some_and(|e| e.hidden || e.recording);
                 match &mut self.replay {
                     _ if self.photo => {
                         if let (Some((text, _)), false) = (note, self.shoot) {
                             ui.bottom_note(&mut gfx, text);
                         }
                     }
-                    Some(rp) => rp.draw(ui, &mut gfx, now),
+                    // The replay editor's clean picture: nothing over it.
+                    Some(_) if clean => {}
+                    Some(rp) => {
+                        rp.draw(ui, &mut gfx, now);
+                        if let Some(e) = &self.editor {
+                            ui.top_lines(&mut gfx, &e.lines());
+                        }
+                    }
                     None if race.podium.is_some() => {}
                     None => hud.draw(ui, &mut gfx, race, self.frame),
                 }
-                if let (Some(fps), false) = (self.fps_shown, self.photo) {
+                if let (Some(fps), false) = (self.fps_shown, self.photo || clean) {
                     ui.frame_rate(&mut gfx, fps);
                 }
-                if self.replay.is_some() && !self.photo && ui::draws_pointer() {
+                if self.replay.is_some() && !self.photo && !clean && ui::draws_pointer() {
                     ui.pointer(&mut gfx, self.pointer);
                 }
                 let mut encoder = s.device.create_command_encoder(&Default::default());
@@ -7054,6 +7377,25 @@ impl App {
         frame_log("sending the drawing to the graphics card");
         s.queue.submit(commands);
         frame_log("sent");
+        // The replay editor's clip takes the picture just drawn.
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut clip_over = false;
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(c) = &mut self.clip {
+            let none = s.device.create_command_encoder(&Default::default()).finish();
+            clip_over = match read_pixels(&s.device, &s.queue, none, &frame.texture) {
+                Ok((width, height, pixels)) => {
+                    let bgra = matches!(frame.texture.format(), wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb);
+                    !c.push(clip::Frame { width, height, bgra, pixels })
+                }
+                Err(e) => {
+                    eprintln!("clip: {e}");
+                    true
+                }
+            };
+        }
+        #[cfg(target_arch = "wasm32")]
+        let clip_over = false;
         let shoot = std::mem::take(&mut self.shoot);
         // A browser can't wait for the picture to come back from the
         // GPU: the page saves the canvas, after it is shown.
@@ -7089,6 +7431,9 @@ impl App {
         }
         if suboptimal {
             s.fit_surface();
+        }
+        if clip_over || self.clip_ended() {
+            self.stop_clip();
         }
     }
 
@@ -7355,6 +7700,9 @@ impl ApplicationHandler for App {
                             self.back_to_menu();
                             return;
                         }
+                        if self.replay.is_some() && self.editor_key(code) {
+                            return;
+                        }
                         match code {
                             KeyCode::Tab => self.follow = !self.follow && self.race.is_some(),
                             KeyCode::KeyR => {
@@ -7503,6 +7851,10 @@ impl ApplicationHandler for App {
                 state,
                 ..
             } if self.replay.is_some() => {
+                // The replay editor's clean picture has no player to click.
+                if self.editor.as_ref().is_some_and(|e| e.hidden || e.recording) {
+                    return;
+                }
                 let (x, y) = self.pointer;
                 let (Some(rp), Some((ui, _))) = (&mut self.replay, &mut self.hud) else {
                     return;

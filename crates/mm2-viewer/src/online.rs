@@ -19,21 +19,26 @@ pub fn address() -> Option<String> {
 }
 
 pub fn get(url: String) -> Reply {
-    request(url, None, false)
+    request(url, None, false, 1 << 20)
+}
+
+/// A get whose answer can be a few MB (a shared track).
+pub fn get_big(url: String) -> Reply {
+    request(url, None, false, mm2_settings::shared::MOST_BYTES as u64 + 4096)
 }
 
 pub fn post(url: String, body: String) -> Reply {
-    request(url, Some(body), false)
+    request(url, Some(body), false, 1 << 20)
 }
 
 /// A post over IPv4 only, on a computer: the server browser lists a race
 /// at the address its word came from, and the game hosts on IPv4.
 pub fn post_v4(url: String, body: String) -> Reply {
-    request(url, Some(body), true)
+    request(url, Some(body), true, 1 << 20)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn request(url: String, body: Option<String>, v4: bool) -> Reply {
+fn request(url: String, body: Option<String>, v4: bool, limit: u64) -> Reply {
     let reply: Reply = Arc::default();
     let out = reply.clone();
     std::thread::spawn(move || {
@@ -49,14 +54,14 @@ fn request(url: String, body: Option<String>, v4: bool) -> Reply {
         };
         let text = sent
             .map_err(|e| e.to_string())
-            .and_then(|mut r| r.body_mut().with_config().limit(1 << 20).read_to_string().map_err(|e| e.to_string()));
+            .and_then(|mut r| r.body_mut().with_config().limit(limit).read_to_string().map_err(|e| e.to_string()));
         *out.lock().unwrap() = Some(text);
     });
     reply
 }
 
 #[cfg(target_arch = "wasm32")]
-fn request(url: String, body: Option<String>, _v4: bool) -> Reply {
+fn request(url: String, body: Option<String>, _v4: bool, _limit: u64) -> Reply {
     use wasm_bindgen::JsCast;
     let reply: Reply = Arc::default();
     let out = reply.clone();

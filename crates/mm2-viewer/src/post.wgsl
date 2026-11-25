@@ -472,6 +472,34 @@ fn grade(linear: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
     return pow(max(c, vec3<f32>(0.0)), vec3<f32>(2.2));
 }
 
+// A warm afternoon: the lights a touch golden, the shadows lifted a
+// little and kept neutral, colour a shade richer. Gentle, as a film
+// stock's warmth, never an orange filter; no vignette.
+fn grade_warm(linear: vec3<f32>) -> vec3<f32> {
+    var c = pow(max(linear, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.2));
+    let grey = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    c = mix(vec3<f32>(grey), c, 1.06);
+    // Warmth grows with brightness: none in the deep shadows.
+    let lit = smoothstep(0.15, 0.85, grey);
+    c *= mix(vec3<f32>(1.0), vec3<f32>(1.045, 1.0, 0.92), lit);
+    // Shadows lifted a little (a soft toe), so the shade reads as warm
+    // light bouncing about rather than black.
+    c = c + (vec3<f32>(0.03, 0.025, 0.02)) * (1.0 - smoothstep(0.0, 0.35, grey));
+    return pow(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2));
+}
+
+// A soft overcast day: a little less colour and contrast, a cool
+// grey-blue cast in the shade, the lights slightly flattened.
+fn grade_overcast(linear: vec3<f32>) -> vec3<f32> {
+    var c = pow(max(linear, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.2));
+    let grey = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    c = mix(vec3<f32>(grey), c, 0.85);
+    // Contrast 0.92 about the middle grey.
+    c = (c - 0.45) * 0.92 + 0.45;
+    c *= mix(vec3<f32>(0.97, 0.99, 1.04), vec3<f32>(0.99, 1.0, 1.01), smoothstep(0.2, 0.8, grey));
+    return pow(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2));
+}
+
 // Shafts of sunlight (light scattered in the air, after Mitchell 2007):
 // marching toward the sun on the screen, the open sky on the way shines
 // along the line, and whatever stands in front of it, hills, trees,
@@ -667,7 +695,11 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
     } else if (post.flags.z > 0.5) {
         c = neutral(c);
     }
-    if (post.flags.w > 0.5) {
+    if (post.flags.w > 2.5) {
+        c = grade_overcast(c);
+    } else if (post.flags.w > 1.5) {
+        c = grade_warm(c);
+    } else if (post.flags.w > 0.5) {
         c = grade(c, in.uv);
     }
     let shown = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));

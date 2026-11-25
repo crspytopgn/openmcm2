@@ -77,7 +77,8 @@ pub struct EnhGlobals {
     /// x the objects' photo materials, y swaying trees, z round bikes and
     /// riders, w a stadium's floodlights.
     pub surfaces: [f32; 4],
-    /// x whether the shadows are ray traced.
+    /// x whether the shadows are ray traced; y whether dirt builds up on
+    /// the bikes and riders (crate::grime).
     pub traced: [f32; 4],
     /// From the drawing to the screen, for the ray-traced shadows.
     pub view_proj: [[f32; 4]; 4],

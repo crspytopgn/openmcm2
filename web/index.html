@@ -129,6 +129,8 @@
   label.plainbutton { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost:hover { border-color: var(--accent); }
+  a.button.ghost { background: none; color: var(--fg); border: 1px solid #55524a; margin-left: .4rem; }
+  a.button.ghost:hover { border-color: var(--accent); }
   /* A popular track's picture, while the mouse rests on it (or it's tapped). */
   #popularlist li { position: relative; cursor: default; }
   #popularlist li img { display: none; position: absolute; left: 0; top: 100%; z-index: 5; width: min(360px, 80vw);
@@ -424,7 +426,8 @@
     <p>OpenMCM2 is free and always will be. Making it has real monthly costs,
       though. If you enjoy it, a small donation helps cover them and pays for
       future updates: more fixes, more tracks and more of the original game brought back.</p>
-    <a class="button" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener"><span aria-hidden="true">♥</span> Donate on GitHub Sponsors</a>
+    <a class="button" href="https://ko-fi.com/crspytopgn" target="_blank" rel="noopener"><span aria-hidden="true">♥</span> Buy me a coffee on Ko-fi</a>
+    <a class="button ghost" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener">Sponsor on GitHub</a>
   </div>
 </div></div>
 <div id="loader" hidden role="status" aria-live="polite"><div class="plate">
@@ -479,7 +482,7 @@
 <div id="update" hidden>A new version of OpenMCM2 is out. <button id="reload">Reload to update</button>
   <button id="later" class="plain">Later</button></div>
 <button id="look" hidden title="Switch between the original look and the enhanced one (F3)"></button>
-<a id="heart" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener" hidden><span aria-hidden="true">♥</span> Enjoying it? Support OpenMCM2</a>
+<a id="heart" href="https://ko-fi.com/crspytopgn" target="_blank" rel="noopener" hidden><span aria-hidden="true">♥</span> Enjoying it? Support OpenMCM2</a>
 <script type="module">
 // This build's version: everything below is fetched for it, so a new
 // release never mixes with old files the browser kept.
@@ -1058,6 +1061,49 @@ globalThis.mm2page = {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 10000);
     }, "image/png");
+    return true;
+  },
+  // The replay editor's clip: the canvas recorded as it is drawn, as a
+  // WebM (or an MP4 where that is what the browser makes), then put in
+  // the downloads when it ends. No sound.
+  clip: null,
+  clipStart(fps) {
+    const c = $("mm2");
+    if (!c?.captureStream || typeof MediaRecorder === "undefined") return false;
+    const kinds = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4"];
+    const type = kinds.find((k) => MediaRecorder.isTypeSupported?.(k));
+    let rec;
+    try {
+      rec = new MediaRecorder(c.captureStream(fps), { ...(type ? { mimeType: type } : {}), videoBitsPerSecond: 16_000_000 });
+    } catch (e) {
+      console.warn("clip:", e);
+      return false;
+    }
+    const parts = [];
+    rec.ondataavailable = (e) => e.data.size && parts.push(e.data);
+    rec.onstop = () => {
+      const kind = rec.mimeType || type || "video/webm";
+      const blob = new Blob(parts, { type: kind });
+      const d = new Date();
+      const two = (n) => String(n).padStart(2, "0");
+      const ext = kind.includes("mp4") ? "mp4" : "webm";
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `OpenMCM2 clip ${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}.${two(d.getMinutes())}.${two(d.getSeconds())}.${ext}`;
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    };
+    rec.start(1000);
+    this.clip = rec;
+    return true;
+  },
+  clipStop() {
+    const rec = this.clip;
+    this.clip = null;
+    if (!rec || rec.state === "inactive") return false;
+    rec.stop();
     return true;
   },
   // A box in the menus wants typing (what it holds), or none (null):

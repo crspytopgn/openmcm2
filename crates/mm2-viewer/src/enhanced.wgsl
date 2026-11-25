@@ -32,7 +32,8 @@ struct Enh {
     // x the objects' photo materials, y swaying trees, z round bikes and
     // riders, w a stadium's floodlights.
     surfaces: vec4<f32>,
-    // x the shadows ray traced.
+    // x the shadows ray traced; y the dirt building up on the bikes and
+    // riders (grime.rs) in place of the quicker caking.
     traced: vec4<f32>,
     // From the drawing to the screen, for the ray-traced shadows.
     view_proj: mat4x4<f32>,

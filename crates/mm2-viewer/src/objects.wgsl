@@ -65,6 +65,10 @@ struct VertexOut {
     @location(10) rest_normal: vec3<f32>,
     // The enhanced drawing's: a plant's height above its foot, ft.
     @location(11) plant_up: f32,
+    // The enhanced drawing's dirt built up on a bike or rider (grime.rs):
+    // the film of dust, the spatter from others' roost, the scuffs from
+    // going down (0 to 1), and its colour packed, 5 bits each of r, g, b.
+    @location(12) @interpolate(flat) coat: vec4<f32>,
 };
 
 // How a vertex is lit, from the top bits of its node (objects.rs).
@@ -171,6 +175,7 @@ fn game_vertex(position: vec3<f32>, normal: vec3<f32>, uv: vec2<f32>, color: vec
     out.rest = position;
     out.rest_normal = normal;
     out.mud = m[1][3];
+    out.coat = vec4<f32>(0.0);
     out.plant_up = 0.0;
     return out;
 }
@@ -373,7 +378,8 @@ fn vs_enhanced(
         let up = sway.x;
         // A trunk bends from its foot: the tops of a 30 ft tree move about
         // half a foot; stronger in the rain's wind.
-        let windy = 1.0 + enh.world.y * 0.8;
+        // Next-gen: a breezier day, the trees plainly moving.
+        let windy = (1.0 + enh.world.y * 0.8) * select(1.0, select(1.6, 2.2, next_gen()), windy_day());
         let bend = min(up * up * 0.0016, 1.6) * windy;
         let g = gust(time * 0.6, out.world.xz * 0.2) + sin(time * 0.9 + sway.y) * 0.35;
         // The leaves flutter on their own, faster and smaller.
@@ -382,6 +388,18 @@ fn vs_enhanced(
         out.world = moved;
         out.clip = globals.view_proj * vec4<f32>(moved, 1.0);
         out.plant_up = up;
+    }
+    // The dirt built up on it, unpacked (grime.rs, Coat::packed).
+    if (enh.traced.y > 0.5 && out.moving > 0.5) {
+        let m = node_matrix(node & 0x3fffffffu);
+        if (m[2][3] < -0.5) {
+            let a = u32(m[1][3] + 0.5);
+            let b = u32(-m[2][3] - 0.5);
+            out.mud = f32(a & 255u) / 255.0;
+            out.coat = vec4<f32>(f32(b >> 15u) / 255.0, f32((a >> 8u) & 255u) / 255.0, f32(a >> 16u) / 63.0, f32(b & 32767u));
+        } else {
+            out.mud = 0.0;
+        }
     }
     if (enh.surfaces.z > 0.5 && dot(smooth_normal, smooth_normal) > 0.5) {
         let m = node_matrix(node & 0x3fffffffu);
@@ -620,7 +638,69 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
         albedo = mat.base * (1.0 - mat.metal);
     }
     var caked = 0.0;
-    if (enh.sky.y > 0.5 && in.mud > 0.0 && in.moving > 0.5) {
+    if (enh.traced.y > 0.5 && in.moving > 0.5) {
+        // Dirt built up through the race (grime.rs), all of it soft: a
+        // thin film of dust whose line climbs from the wheels up the legs
+        // as it builds, spatter on what faces forward from riding in
+        // others' roost, scuffs up the sides from going down, and on top
+        // the clumps of caked mud, the paint showing through all but them.
+        let film = in.coat.x;
+        let spatter = in.coat.y;
+        let scuffs = in.coat.z;
+        let packed = u32(in.coat.w + 0.5);
+        let wet = enh.world.y;
+        // The ground's own colour: paler dry dust, dark when wet.
+        var dirt = vec3<f32>(f32((packed >> 10u) & 31u), f32((packed >> 5u) & 31u), f32(packed & 31u)) / 31.0;
+        dirt *= mix(1.08, 0.5, wet);
+        // A touch richer than the ground's averaged paint, which greys it.
+        dirt = max(mix(vec3<f32>(luminance(dirt)), dirt, 1.3), vec3<f32>(0.0));
+        // Laid on as the eye sees colour: a physically based material's
+        // linear colour taken near to its picture's for the mix, so a
+        // coat looks the same on the free art as on the original's.
+        var paint = albedo;
+        if (physical) {
+            paint = sqrt(max(albedo, vec3<f32>(0.0)));
+        }
+        let rest_n = normalize(in.rest_normal);
+        // Where real bikes get it: most round the wheels (the tyres, the
+        // fenders over them, the lower forks, the swingarm), then low down
+        // (under the engine, the boots and shins), the line creeping up
+        // only slowly; less up top, where nothing throws dirt.
+        let wobble = (noise3(in.rest * 1.3) - 0.5) * 0.5;
+        let axle = vec2<f32>(in.rest.y - 1.05, abs(in.rest.z) - 2.45);
+        let wheel = 1.0 - smoothstep(1.25, 1.9 + film * 0.8, length(axle) + wobble);
+        let line = mix(0.6, 2.4, film) + wobble * 1.6;
+        let low = 1.0 - smoothstep(line * 0.4, line, in.rest.y);
+        let under = smoothstep(0.1, -0.7, n.y) * 0.5;
+        let grain = noise3(in.rest * 6.0 + 2.0);
+        var cover = film * min(max(wheel, low * 0.75) + under, 1.0) * (0.65 + 0.5 * grain);
+        let front = smoothstep(0.15, 0.75, rest_n.z);
+        cover = max(cover, spatter * front * 0.35 * grain);
+        let blot = smoothstep(0.42, 0.68, noise3(in.rest * 2.2 + 7.0));
+        cover = max(cover, scuffs * abs(rest_n.x) * blot * (1.0 - smoothstep(3.0, 5.5, in.rest.y)) * 0.85);
+        // A little more on the free art's darker, physically lit paint.
+        let dusted = min(clamp(cover, 0.0, 1.0) * select(0.55, 2.2, physical), 0.85);
+        paint = mix(paint, dirt * (0.8 + 0.4 * luminance(paint)), dusted);
+        // The clumps: low down where the film is thickest, and up the side
+        // after a crash.
+        // (After a crash in the dry it is dust; only wet ground cakes on.)
+        let reach = in.mud * (0.1 + 0.9 * max(wheel, low) + under) + scuffs * abs(rest_n.x) * blot * 0.35 * wet;
+        var clumps = 0.0;
+        var rim = 1.0;
+        var splat = 0.5;
+        if (reach > 0.01) {
+            splat = noise3(in.rest * 1.6) * 0.55 + noise3(in.rest * 5.0 + 4.0) * 0.3 + noise3(in.rest * 14.0 + 9.0) * 0.15;
+            let over = reach * 1.2 - (1.0 - splat);
+            clumps = smoothstep(0.0, 0.05, over) * 0.85;
+            rim = 1.0 - 0.3 * (1.0 - smoothstep(0.05, 0.2, over)) * step(0.0, over);
+        }
+        // Specks flung on the front from the roost ahead.
+        let specks = smoothstep(1.0 - spatter * 0.3, 1.04 - spatter * 0.3, noise3(in.rest * 22.0)) * front * 0.8;
+        let lumps = max(clumps, specks);
+        paint = mix(paint, dirt * 0.8 * rim * (0.85 + 0.3 * splat), lumps);
+        albedo = select(paint, paint * paint, physical);
+        caked = max(lumps, dusted * 0.8);
+    } else if (enh.sky.y > 0.5 && in.mud > 0.0 && in.moving > 0.5) {
         let low = 1.0 - smoothstep(0.3, 3.2, in.rest.y);
         let under = smoothstep(0.2, -0.8, n.y) * 0.3;
         let reach = in.mud * (0.1 + 0.9 * low + under);
