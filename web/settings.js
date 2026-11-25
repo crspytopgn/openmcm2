@@ -40,6 +40,7 @@ export const UPGRADES = [
   ["wind", "Wind in the grass and trees", true, "A breezy day: gusts roll across the 3D grass in waves and the trees sway a little more. Costs next to nothing."],
   ["litair", "Sunlight in the air", true, "Sunlight in the air near the ground, with darker streaks where trees and hills shade it, so beams of light show. Faint, plain on Next-gen. Not in a browser except with Next-gen: too heavy."],
   ["fsr", "AMD FSR upscaling", true, "AMD FidelityFX Super Resolution: on a big screen the 3D scene is drawn smaller to stay smooth; FSR stretches it back up along its edges and gently sharpens it, so it looks close to full sharpness instead of soft. With TAA it rebuilds the picture from several frames, as FSR 2 does. A big help on laptops."],
+  ["grime", "Dirt builds up on bikes and riders", false, "Dirt builds up very slowly on the bikes and riders through a race, the colour of the track you ride: a light dust on the wheels and lower bike first, creeping up the boots and legs lap by lap. Riding in another rider's roost spatters your front, a crash scuffs dirt up your side, and wet tracks cake on mud much faster. Takes the place of the quicker mud caking. Looks only, light on frame rate."],
 ];
 
 // In a browser, Ultra draws as High does (the game caps both: see
@@ -52,7 +53,7 @@ const QUALITIES = [["auto", "Auto (picks for your computer)"], ["low", "Low"], [
 function presetHas(quality, name) {
   if (quality === "auto") quality = "low"; // browsers seldom name the graphics card
   const off = { low: ["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr", "bounce", "litair"], medium: ["shafts", "smooth", "gtao", "ssr", "bounce", "litair"] }[quality] || [];
-  if (quality === "nextgen" && ["bounce", "bloom", "bikes", "scenery"].includes(name)) return true;
+  if (quality === "nextgen" && ["bounce", "bloom", "bikes", "scenery", "grime"].includes(name)) return true;
   return !off.includes(name) && UPGRADES.some(([n, , on]) => n === name && on);
 }
 

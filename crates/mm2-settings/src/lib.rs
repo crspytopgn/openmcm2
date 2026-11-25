@@ -199,7 +199,7 @@ impl Quality {
             Quality::Max => &["supersample", "far"],
             // Ray tracing only where the card can (the shadow maps
             // elsewhere).
-            Quality::NextGen => &["raytracing", "far", "bounce", "bloom", "bikes", "scenery"],
+            Quality::NextGen => &["raytracing", "far", "bounce", "bloom", "bikes", "scenery", "grime"],
             _ => &[],
         };
         if on.contains(&name) {
@@ -267,7 +267,7 @@ pub fn parse_difficulty(text: &str) -> Option<[[u32; 3]; 4]> {
     (n.len() == 12 && n.iter().all(|v| (1..=MOST_STEP).contains(v))).then_some(t)
 }
 
-pub const UPGRADES: [(&str, &str, bool); 34] = [
+pub const UPGRADES: [(&str, &str, bool); 35] = [
     ("lighting", "Per-pixel lighting", true),
     ("shadows", "Sun shadows", true),
     ("distance", "Far draw distance and haze", true),
@@ -310,6 +310,8 @@ pub const UPGRADES: [(&str, &str, bool); 34] = [
     ("closeup", "Sharp dirt up close", true),
     ("wind", "Wind in the grass and trees", true),
     ("litair", "Sunlight in the air", true),
+    // Dirt building up on the bikes and riders through a race.
+    ("grime", "Dirt builds up on bikes and riders", false),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
