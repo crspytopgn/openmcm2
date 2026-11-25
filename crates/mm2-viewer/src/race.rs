@@ -750,10 +750,14 @@ impl Bike {
         }
     }
 
-    /// Just put back (KrustyBike::IsSpawnProtected): no crashes and no
-    /// bumping other bikes for the first 3 s.
+    /// Just put back (KrustyBike::IsSpawnProtected): for the first 3 s
+    /// no bumping other bikes, and the player can't crash.
     fn protected(&self) -> bool {
-        matches!(self, Bike::Player(b) if b.spawn_guard > 0.0)
+        match self {
+            Bike::Player(b) => b.spawn_guard > 0.0,
+            Bike::Computer(c) => c.wreck.is_none() && c.rider.spawn_guard > 0.0,
+            Bike::Taped(_) => false,
+        }
     }
 
     /// The bike as the bike-to-bike bounce sees it, standing where it was
@@ -894,6 +898,118 @@ fn ai_share(span: f32, frame: f32, clock: f32) -> f32 {
         ((span - frame + clock) / span).clamp(0.0, 1.0)
     } else {
         1.0
+    }
+}
+
+/// The rider's riding motion and the bike's (0x48fe50 mixes them).
+pub const RIDING: &str = "LeanR02";
+pub const BIKE_RIDING: &str = "BLeanR02";
+
+/// What one of a rider's two models plays: a motion from `start`,
+/// faded in over `span` s, and the mix laid over it.
+pub struct Play<'a> {
+    pub name: &'a str,
+    pub start: f32,
+    pub span: f32,
+    pub blend: Option<&'a [crate::riding::Mix]>,
+}
+
+impl Play<'_> {
+    /// Sets it on `model`.
+    pub fn on(&self, model: &mut crate::objects::AnimatedModel) {
+        model.fade_to(self.name, self.start, self.span);
+        if let Some(b) = self.blend {
+            model.set_blend(b);
+        }
+    }
+}
+
+/// The bike's and the rider's motions at `time`: a trick's, a crash's
+/// (`wreck`), or riding with `mixes`.
+pub fn plays<'a>(
+    trick: Option<(&'a TrickMotion, f32)>,
+    wreck: Option<&'a str>,
+    mixes: &'a (Vec<crate::riding::Mix>, Vec<crate::riding::Mix>),
+    time: f32,
+) -> [Play<'a>; 2] {
+    let play = |name, start, span, blend| Play { name, start, span, blend };
+    match (trick.filter(|_| wreck.is_none()), wreck) {
+        (Some((trick, clock)), _) => {
+            let start = time - clock;
+            [play(trick.bike.as_str(), start, 0.0, None), play(trick.rider.as_str(), start, 0.0, None)]
+        }
+        (None, Some(motion)) => {
+            // A bail starts at once (0x537890); a fall and the landing
+            // after it fade in over 0.5 s (0x537980, 0x535d50).
+            use mm2_physics::wreck::{FALLS, HITS};
+            let span = if FALLS.contains(&motion) || HITS.contains(&motion) { 0.5 } else { 0.0 };
+            [play(BIKE_RIDING, 0.0, 0.0, None), play(motion, time, span, None)]
+        }
+        // Riding: the turn and lean motions mixed by the steer, the
+        // rider's weight and the speed (0x48fe50).
+        (None, None) => [play(BIKE_RIDING, 0.0, 0.0, Some(&mixes.1)), play(RIDING, 0.0, 0.0, Some(&mixes.0))],
+    }
+}
+
+/// The player's rider as the physics feels it, posed at each 0.02 s step
+/// rather than each frame (live play): copies of the bike's and rider's
+/// models and of the riding pose, stepped with the bike, so the probes
+/// and the bike frame's turn the crash rules read don't change with the
+/// frame rate. (The game poses its rider once a frame, at its 50 Hz
+/// step.)
+#[derive(Clone)]
+pub struct Feel {
+    pub bike: crate::objects::AnimatedModel,
+    pub rider: crate::objects::AnimatedModel,
+    /// The bike model's "Bike" frame.
+    pub bike_frame: Option<usize>,
+    /// Each probe's bone in the rider model and the point in its frame;
+    /// the first is the Pelvis.
+    pub probes: Vec<(usize, Vec3)>,
+    pub pose: crate::riding::Pose,
+}
+
+impl Feel {
+    /// Poses the models for the bike `b` at `time` and hands the bike
+    /// the pose node's turn and the rider's probes, as `feel_riders` does
+    /// each frame.
+    fn feel(&mut self, b: &mut mm2_physics::Bike, trick: Option<(&TrickMotion, f32)>, taunt: Option<f32>, h: f32, time: f32) {
+        if b.wreck.is_some() {
+            return;
+        }
+        let inputs = crate::riding::Inputs {
+            steer: -b.rider.0,
+            lean: b.rider.1,
+            computer: false,
+            bike: b.pose_inputs(),
+        };
+        let mut mixes = self.pose.update(&inputs, h);
+        if let Some(phase) = taunt {
+            mixes = crate::riding::taunting(phase);
+        }
+        let place = if self.pose.crossed() { b.place() } else { b.place() * Mat4::from_quat(b.drawn_turn()) };
+        let [bike, rider] = plays(trick, None, &mixes, time);
+        bike.on(&mut self.bike);
+        rider.on(&mut self.rider);
+        self.bike.set_place(place);
+        self.rider.set_place(place);
+        if let Some(Some(m)) = self.bike_frame.map(|f| self.bike.frames_at(&[f], time)[0]) {
+            let local = b.place().inverse() * m;
+            let x = local.x_axis.truncate().normalize_or(Vec3::X);
+            let z = x.cross(local.y_axis.truncate()).normalize_or(Vec3::Z);
+            b.set_pose_turn(glam::Quat::from_mat3(&glam::Mat3::from_cols(x, z.cross(x), z)));
+        }
+        let bones: Vec<usize> = self.probes.iter().map(|p| p.0).collect();
+        let posed = self.rider.frames_at(&bones, time);
+        let to_model = place.inverse();
+        let points: Option<Vec<Vec3>> = posed
+            .iter()
+            .zip(&self.probes)
+            .map(|(m, (_, at))| m.map(|m| to_model.transform_point3(m.transform_point3(*at))))
+            .collect();
+        if let (Some(points), Some(Some(pelvis))) = (points, posed.first()) {
+            b.set_rider_probes(points, to_model * *pelvis);
+        }
     }
 }
 
@@ -1954,6 +2070,13 @@ pub struct Race {
     /// The player's bike steps in whole 0.02 s steps (live play), not
     /// once a frame as the game does (the scripted comparison runs).
     pub fixed_step: bool,
+    /// The player's input read at each of those steps (live play and
+    /// `--live-steps` runs): set, it stands in for the frame's controls,
+    /// so frame rate changes nothing. None, the frame's controls.
+    pub input: Option<crate::input::StepInput>,
+    /// The player's rider posed at each of those steps (see [`Feel`]);
+    /// set by the viewer from its models.
+    pub feel: Option<Feel>,
     /// The computer riders' frame, s: their controller and two-wheel
     /// model run once a frame, with rules per frame, so they ride as the
     /// original's did at its frame rate only at that rate. 0 runs them
@@ -2115,6 +2238,8 @@ impl Race {
             player_indicator: true,
             watched: None,
             fixed_step: true,
+            input: None,
+            feel: None,
             ai_frame: AI_FRAME,
             ai_clock: 0.0,
             ai_span: AI_FRAME,
@@ -2218,6 +2343,7 @@ impl Race {
             self.ai_span = ai_dt;
         }
         let mut left = dt;
+        let frame_start = self.time;
         while left > 0.0 {
             let first = left == dt;
             let step = left.min(Self::STEP);
@@ -2305,7 +2431,34 @@ impl Race {
                 if let Bike::Player(b) = &mut r.bike {
                     b.stunting = busy;
                 }
-                r.bike.step(ground, c, dt, first, self.fixed_step);
+                let trick = r.trick_motion(&self.tricks);
+                let taunt = r.taunt.map(|(_, p)| p);
+                match (&mut r.bike, &mut self.input) {
+                    (Bike::Player(b), Some(input)) if !computer && self.fixed_step => {
+                        if first {
+                            b.fixed_step = true;
+                            b.original = original_physics();
+                            // The whole frame's steps at once, as
+                            // `Bike::step` does, each with its own input
+                            // and the rider posed for it.
+                            let feel = &mut self.feel;
+                            let start = frame_start;
+                            c = b.step_each(
+                                ground,
+                                dt,
+                                &mut |b, t, h| {
+                                    if let Some(f) = feel.as_mut() {
+                                        f.feel(b, trick, taunt, h, start + t);
+                                    }
+                                    input.at(t, h)
+                                },
+                                r.controls,
+                            );
+                            r.controls = c;
+                        }
+                    }
+                    _ => r.bike.step(ground, c, dt, first, self.fixed_step),
+                }
                 let scored = if i == self.player {
                     if let Bike::Player(b) = &mut r.bike {
                         if self.actions[0] && !busy {

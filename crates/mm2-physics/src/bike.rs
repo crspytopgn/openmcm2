@@ -1067,6 +1067,45 @@ impl Bike {
         self.tyres.map(|t| t.squeeze)
     }
 
+    /// Advances the bike by `dt` seconds in whole 0.02 s steps, each one
+    /// a game frame of its own (the game at 50 fps), with the controls
+    /// asked for again at every step: `controls(bike, start, h)` gets the
+    /// step's start in seconds from this frame's start (negative for time
+    /// carried over from the last frame) and its length. A key pressed
+    /// part way through a frame so lands on the same step at any frame
+    /// rate, and nothing in a step depends on how long the frames are.
+    /// The rest of the frame waits for the next one. Returns the last
+    /// step's controls (the last frame's when no step ran).
+    pub fn step_each(
+        &mut self,
+        ground: &dyn Ground,
+        dt: f32,
+        controls: &mut dyn FnMut(&mut Bike, f32, f32) -> Controls,
+        last: Controls,
+    ) -> Controls {
+        let carried = self.pending;
+        let t = carried + dt;
+        let whole = (t / STEP) as u32;
+        let (fixed, mut last) = (self.fixed_step, last);
+        let mut hit = None;
+        if whole == 0 {
+            self.pending = t;
+            self.hit = None;
+            return last;
+        }
+        self.fixed_step = true;
+        for i in 0..whole.min(MAX_STEPS) {
+            last = controls(self, i as f32 * STEP - carried, STEP);
+            self.pending = 0.0;
+            self.step(ground, last, STEP);
+            hit = hit.or(self.hit);
+        }
+        self.fixed_step = fixed;
+        self.pending = t - whole as f32 * STEP;
+        self.hit = hit;
+        last
+    }
+
     /// Advances the bike by `dt` seconds in the game's fixed steps.
     pub fn step(&mut self, ground: &dyn Ground, controls: Controls, dt: f32) {
         if self.original {
@@ -2596,6 +2635,47 @@ fn sag(i: usize, load: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn steps_alike_at_any_frame_rate() {
+        // The same keys at the same steps give the same ride whatever the
+        // frame rate: the state after each step count matches exactly.
+        let ride = |fps: f32, original: bool| {
+            let mut bike = Bike::new(&Flat, Vec3::ZERO, Vec3::Z);
+            bike.original = original;
+            bike.fixed_step = true;
+            let mut steps = 0u32;
+            let mut states = std::collections::HashMap::new();
+            while steps < 200 {
+                bike.step_each(
+                    &Flat,
+                    1.0 / fps,
+                    &mut |_, _, _| {
+                        steps += 1;
+                        Controls { throttle: 1.0, steer: if steps > 75 { 0.6 } else { 0.0 }, ..Controls::default() }
+                    },
+                    Controls::default(),
+                );
+                states.insert(steps, (bike.position, bike.velocity));
+            }
+            states
+        };
+        for original in [true, false] {
+            let fifty = ride(50.0, original);
+            assert!(fifty[&200].1.length() > 10.0, "it rode off");
+            for fps in [30.0, 60.0, 144.0, 240.0] {
+                let other = ride(fps, original);
+                let mut alike = 0;
+                for (n, state) in &other {
+                    if let Some(s) = fifty.get(n) {
+                        assert_eq!(s, state, "{fps} fps, step {n}");
+                        alike += 1;
+                    }
+                }
+                assert!(alike > 50, "{fps} fps: {alike} steps compared");
+            }
+        }
+    }
     #[test]
     fn shell_round_points_is_closed_and_outward() {
         let mut cube = Vec::new();

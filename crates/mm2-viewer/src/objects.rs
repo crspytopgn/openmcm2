@@ -368,6 +368,46 @@ impl AnimatedModel {
 
     /// Each frame's transform at `time` on the track, game coordinates,
     /// with any fade from the motion before.
+    /// Plays motion `name` from `start`, fading in from the pose before
+    /// over `span` seconds (0x4aa1e0), unless it is already playing.
+    pub fn fade_to(&mut self, name: &str, start: f32, span: f32) {
+        let found = self.motions.iter().position(|m| m.0.eq_ignore_ascii_case(name));
+        if found.is_some() && (found != self.motion || !self.blend.is_empty()) {
+            self.from = (span > 0.0).then(|| (self.motion, self.motion_start, self.blend.clone(), start, span));
+            self.motion = found;
+            self.motion_start = start;
+        }
+        if found.is_some() {
+            self.blend.clear();
+        }
+    }
+
+    /// Mixes motions: each by name, at a phase (0 to 1 through it), with
+    /// a weight, and in a layer (a later layer replaces the frames it
+    /// moves). Names it lacks are left out; with none found the motion
+    /// playing stays.
+    pub fn set_blend(&mut self, mix: &[(&str, f32, f32, u8)]) {
+        let blend: Vec<(usize, f32, f32, u8)> = mix
+            .iter()
+            .filter(|m| m.2 > 0.0)
+            .filter_map(|&(name, phase, weight, layer)| {
+                self.motions
+                    .iter()
+                    .position(|m| m.0.eq_ignore_ascii_case(name))
+                    .map(|i| (i, phase, weight, layer))
+            })
+            .collect();
+        if !blend.is_empty() {
+            self.blend = blend;
+        }
+    }
+
+    /// Where frames `frames` are at `time`, game coordinates.
+    pub fn frames_at(&self, frames: &[usize], time: f32) -> Vec<Option<Mat4>> {
+        let world = self.posed(time);
+        frames.iter().map(|&f| world.get(f).copied()).collect()
+    }
+
     fn posed(&self, time: f32) -> Vec<Mat4> {
         let mut local = self.locals(self.motion, self.motion_start, &self.blend, time);
         if let Some((motion, start, blend, at, span)) = &self.from {
@@ -2067,18 +2107,7 @@ impl ObjectRenderer {
     /// over `span` seconds (0x4aa1e0).
     pub fn fade_to(&mut self, index: usize, name: &str, start: f32, span: f32) {
         if let Some(a) = self.animated.get_mut(index) {
-            let found = a
-                .motions
-                .iter()
-                .position(|m| m.0.eq_ignore_ascii_case(name));
-            if found.is_some() && (found != a.motion || !a.blend.is_empty()) {
-                a.from = (span > 0.0).then(|| (a.motion, a.motion_start, a.blend.clone(), start, span));
-                a.motion = found;
-                a.motion_start = start;
-            }
-            if found.is_some() {
-                a.blend.clear();
-            }
+            a.fade_to(name, start, span);
         }
     }
 
@@ -2088,19 +2117,7 @@ impl ObjectRenderer {
     /// none found the motion playing stays.
     pub fn set_blend(&mut self, index: usize, mix: &[(&str, f32, f32, u8)]) {
         if let Some(a) = self.animated.get_mut(index) {
-            let blend: Vec<(usize, f32, f32, u8)> = mix
-                .iter()
-                .filter(|m| m.2 > 0.0)
-                .filter_map(|&(name, phase, weight, layer)| {
-                    a.motions
-                        .iter()
-                        .position(|m| m.0.eq_ignore_ascii_case(name))
-                        .map(|i| (i, phase, weight, layer))
-                })
-                .collect();
-            if !blend.is_empty() {
-                a.blend = blend;
-            }
+            a.set_blend(mix);
         }
     }
 
@@ -2130,6 +2147,11 @@ impl ObjectRenderer {
 
     /// Where animated model `index`'s frames are at `time`, game
     /// coordinates; `None` for a frame the model lacks.
+    /// A copy of animated model `index`.
+    pub fn model(&self, index: usize) -> Option<AnimatedModel> {
+        self.animated.get(index).cloned()
+    }
+
     pub fn frames_at(&self, index: usize, frames: &[usize], time: f32) -> Vec<Option<Mat4>> {
         let Some(a) = self.animated.get(index) else {
             return vec![None; frames.len()];

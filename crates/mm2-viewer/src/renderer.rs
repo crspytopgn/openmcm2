@@ -896,6 +896,11 @@ impl TerrainRenderer {
         self.objects.as_ref()?.frame_index(index, name)
     }
 
+    /// A copy of animated object `index`, to pose apart from the drawing.
+    pub fn object_model(&self, index: usize) -> Option<crate::objects::AnimatedModel> {
+        self.objects.as_ref()?.model(index)
+    }
+
     /// Where animated object `index`'s frames are at `time`, game
     /// coordinates.
     pub fn object_frames(&self, index: usize, frames: &[usize], time: f32) -> Vec<Option<glam::Mat4>> {

@@ -57,6 +57,69 @@ impl KeyAxis {
     }
 }
 
+/// The player's input over a frame, read again at each 0.02 s physics
+/// step: the keys' ramps run a step at a time, and a key pressed part
+/// way through a frame counts from the step it lands in, so the bike
+/// gets the same input at 30 fps as at 240.
+#[derive(Debug, Clone, Default)]
+pub struct StepInput {
+    pub steer: KeyAxis,
+    pub lean: KeyAxis,
+    /// The frame's start on the clock of `held`, s.
+    pub base: f64,
+    /// The actions held from each time on, oldest first; the first entry
+    /// holds from before the frame.
+    pub held: Vec<(f64, [bool; crate::profile::ACTIONS])>,
+    /// The stick's say this frame: gas and brake from the triggers (1
+    /// for pulled), and its steer and lean when it moves them (NaN when
+    /// it leaves them to the keys).
+    pub stick: crate::ride::Controls,
+}
+
+impl StepInput {
+    /// A frame's input with the actions held all through it.
+    pub fn hold(&mut self, held: [bool; crate::profile::ACTIONS], stick: crate::ride::Controls) {
+        self.base = 0.0;
+        self.held.clear();
+        self.held.push((f64::NEG_INFINITY, held));
+        self.stick = stick;
+    }
+
+    /// The controls for the step from `t` (seconds from the frame's start)
+    /// `h` long: the keys held at its end, read to the millisecond so
+    /// the clocks' rounding at different frame rates can't move a key
+    /// to another step.
+    pub fn at(&mut self, t: f32, h: f32) -> crate::ride::Controls {
+        let end = ((self.base + t as f64 + h as f64) * 1000.0).round() / 1000.0;
+        let a = self
+            .held
+            .iter()
+            .rev()
+            .find(|(at, _)| *at <= end)
+            .or(self.held.first())
+            .map_or([false; crate::profile::ACTIONS], |e| e.1);
+        let mut c = crate::ride::Controls {
+            throttle: a[ACCELERATE] as i32 as f32,
+            brake: a[BRAKE] as i32 as f32,
+            steer: self.steer.update(a[STEER_LEFT], a[STEER_RIGHT], h),
+            lean: self.lean.update(a[LEAN_BACK], a[LEAN_FORWARD], h),
+        };
+        if self.stick.throttle > 0.0 {
+            c.throttle = 1.0;
+        }
+        if self.stick.brake > 0.0 {
+            c.brake = 1.0;
+        }
+        if !self.stick.steer.is_nan() {
+            c.steer = self.stick.steer;
+        }
+        if !self.stick.lean.is_nan() {
+            c.lean = self.stick.lean;
+        }
+        c
+    }
+}
+
 /// The actions of the controls page (strings 402 to 415) that riding reads.
 pub const STEER_LEFT: usize = 0;
 pub const STEER_RIGHT: usize = 1;
@@ -185,6 +248,11 @@ impl Script {
         held
     }
 
+    /// The times of the key events after `from` up to `to`.
+    pub fn changes(&self, from: f32, to: f32) -> impl Iterator<Item = f32> + '_ {
+        self.events.iter().map(|e| e.0).filter(move |&t| t > from && t <= to)
+    }
+
     /// When the last key event happens.
     pub fn length(&self) -> f32 {
         self.events.last().map_or(0.0, |e| e.0)
@@ -300,6 +368,25 @@ mod tests {
         for fps in [30.0, 60.0, 144.0, 240.0] {
             assert!((at(fps) - fifty).abs() <= 0.018 + 1e-5, "{fps}: {} vs {fifty}", at(fps));
         }
+    }
+
+    #[test]
+    fn steps_read_the_keys_where_they_land() {
+        let mut held = [false; crate::profile::ACTIONS];
+        let mut input = StepInput::default();
+        let none = crate::ride::Controls { steer: f32::NAN, lean: f32::NAN, ..Default::default() };
+        input.hold(held, none);
+        // Right goes down 0.03 s into a frame: the step ending at 0.02
+        // hasn't got it, the one ending at 0.04 has (and loses its time,
+        // as a fresh press does), the next moves the bars on.
+        held[STEER_RIGHT] = true;
+        input.held.push((0.03, held));
+        assert_eq!(input.at(0.0, 0.02).steer, 0.0);
+        assert_eq!(input.at(0.02, 0.02).steer, 0.0);
+        assert!(input.at(0.04, 0.02).steer >= STEP);
+        // The stick's steer, when it has one, wins.
+        input.stick.steer = -0.5;
+        assert_eq!(input.at(0.06, 0.02).steer, -0.5);
     }
 
     #[test]
