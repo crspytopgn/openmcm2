@@ -234,7 +234,7 @@ impl Quality {
             Quality::Max => &["supersample", "far"],
             // Ray tracing only where the card can (the shadow maps
             // elsewhere).
-            Quality::NextGen => &["raytracing", "far", "bounce", "bloom", "bikes", "scenery", "grime"],
+            Quality::NextGen => &["raytracing", "far", "bounce", "bloom", "bikes", "scenery"],
             _ => &[],
         };
         if on.contains(&name) {
@@ -345,8 +345,9 @@ pub const UPGRADES: [(&str, &str, bool); 35] = [
     ("closeup", "Sharp dirt up close", true),
     ("wind", "Wind in the grass and trees", true),
     ("litair", "Sunlight in the air", true),
-    // Dirt building up on the bikes and riders through a race.
-    ("grime", "Dirt builds up on bikes and riders", false),
+    // Dirt building up on the bikes and riders through a race, very
+    // gently.
+    ("grime", "Dirt builds up on bikes and riders", true),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -951,6 +952,10 @@ impl Settings {
                 // Before version 5 the ruts were the old deep grooves, off
                 // by default; the tyre marks that build up start on now.
                 "upgrade.ruts" if version < 5 => {}
+                // Before version 6 the dirt building up was off by default
+                // (and the tyre marks were too faint to see): both start
+                // on now.
+                "upgrade.grime" | "upgrade.ruts" if version < 6 => {}
                 k => {
                     if let Some(i) = UPGRADES.iter().position(|u| k == format!("upgrade.{}", u.0)) {
                         s.upgrades[i] = yes(v);
@@ -1458,7 +1463,13 @@ mod tests {
         // ruts off.
         let ruts = UPGRADES.iter().position(|u| u.0 == "ruts").unwrap();
         assert!(Settings::parse("version=4\nupgrade.ruts=0\n").upgrades[ruts]);
-        assert!(!Settings::parse("version=5\nupgrade.ruts=0\n").upgrades[ruts]);
+        assert!(Settings::parse("version=5\nupgrade.ruts=0\n").upgrades[ruts]);
+        assert!(!Settings::parse("version=6\nupgrade.ruts=0\n").upgrades[ruts]);
+        // The dirt building up starts on, where an older file kept it off.
+        let grime = UPGRADES.iter().position(|u| u.0 == "grime").unwrap();
+        assert!(Settings::default().upgrades[grime]);
+        assert!(Settings::parse("version=5\nupgrade.grime=0\n").upgrades[grime]);
+        assert!(!Settings::parse("version=6\nupgrade.grime=0\n").upgrades[grime]);
         let none = More { leaderboard_url: String::new(), ..More::default() };
         assert_eq!(More::from_args(&none.args()).leaderboard_url, "");
         let kept = Settings { more: none.clone(), ..Settings::default() };
