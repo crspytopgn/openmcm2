@@ -9,6 +9,7 @@
 //! filling the window. Every button and slider explains itself on hover.
 
 mod panel;
+mod share;
 pub mod view;
 
 use crate::job::Job;
@@ -273,6 +274,10 @@ enum Popup {
     Kind,
     /// Which game to save the track for.
     Save,
+    /// Sharing the track with other players.
+    Share,
+    /// Everyone's shared tracks.
+    Shared { scroll: usize },
 }
 
 thread_local! {
@@ -386,6 +391,8 @@ pub struct Builder {
     /// The tracks there are to copy, once the game has listed them.
     pub tracks: Vec<GameTrack>,
     pub wants_tracks: bool,
+    /// Shared tracks: the list, and what's on its way to or from the server.
+    sharing: share::Sharing,
 }
 
 impl Builder {
@@ -468,6 +475,7 @@ impl Builder {
             rode: false,
             tracks: Vec::new(),
             wants_tracks: false,
+            sharing: Default::default(),
         };
         b.frame_track();
         // Opened to ride (the Tools page's Ride it): bake and go.
@@ -1679,6 +1687,7 @@ impl Builder {
     pub fn update(&mut self, dt: f32, now: f32) {
         use winit::keyboard::KeyCode as K;
         self.now = now;
+        self.poll_sharing();
         if self.copy_job.as_ref().is_some_and(|j| j.is_finished()) {
             match self.copy_job.take().unwrap().join() {
                 Ok(Ok(c)) => {
@@ -2290,6 +2299,9 @@ impl Builder {
 
     fn draw_panels(&mut self, p: &mut Painter, input: &mut Input) {
         let w = self.width();
+        // With a pop-up open, the controls behind it neither light up nor
+        // take its clicks (they are drawn first, and would claim them).
+        let behind = self.popup.is_some().then(|| (std::mem::replace(&mut input.pointer, (-1e4, -1e4)), input.press.take(), std::mem::take(&mut input.released)));
         // ---- top bar ----
         p.panel(input, [0.0, 0.0, w, 26.0]);
         // The title, where there is room for it beside the name.
@@ -2492,6 +2504,11 @@ impl Builder {
         }
 
         // ---- pop-ups ----
+        if let Some((pointer, press, released)) = behind {
+            input.pointer = pointer;
+            input.press = press;
+            input.released = released;
+        }
         match self.popup.take() {
             Some(Popup::New { mut surprise }) => {
                 let (pw, ph) = (300.0, 200.0);
@@ -2619,11 +2636,15 @@ impl Builder {
                 if p.button(input, "cancel", [px + pw - 84.0, py + ph - 28.0, 70.0, 20.0], "Cancel", "Keep working on this track.", false) {
                     keep = false;
                 }
+                if p.button(input, "open-shared", [px + 14.0, py + ph - 28.0, col, 20.0], "Shared tracks...", "Tracks other players made in the Course Builder and shared: download them to ride, change and rate.", false) {
+                    self.open_shared();
+                    keep = false;
+                }
                 if let Some(c) = opened {
                     self.open_copy(c);
                     keep = false;
                 }
-                if keep {
+                if keep && self.popup.is_none() {
                     self.popup = Some(Popup::Open { files, mode, scroll });
                 }
             }
@@ -2666,17 +2687,18 @@ impl Builder {
                 }
             }
             Some(Popup::Save) => {
-                let (pw, ph) = (360.0, 196.0);
+                let (pw, ph) = (360.0, 232.0);
                 let (px, py) = ((w - pw) / 2.0, 100.0);
                 p.fill([0.0, 0.0, w, 480.0], [0.0, 0.0, 0.0, 0.35]);
                 p.panel(input, [px, py, pw, ph]);
                 p.text([px + 14.0, py + 12.0], "SAVE / EXPORT", 14.0, true, [ACCENT[0], ACCENT[1], ACCENT[2], 1.0]);
                 let mut keep = true;
                 let bw = pw - 28.0;
-                let choices: [(&str, &str, &str); 3] = [
+                let choices: [(&str, &str, &str); 4] = [
                     ("save-game", "Save into my game", "Save the track and put it in this game's track list for its race, ready to race (Ctrl+S)."),
                     ("save-open", "Export for OpenMCM2 (.ENV)", "Make a copy of the track to share with players of OpenMCM2. It keeps the builder's finer ground, and they can open it in their Course Builder too."),
                     ("save-orig", "Export for MM2 (.ENV)", "Make a copy that plays in the original Motocross Madness 2 from 2000, for its Teraform folder. Anyone can race it without OpenMCM2 (OpenMCM2 plays it too)."),
+                    ("save-share", "Share with other players...", "Put the track on the shared tracks list, for everyone with OpenMCM2 to download, ride and rate: in the game, the launcher and the browser version. Only what you made goes up."),
                 ];
                 for (k, (id, label, tip)) in choices.iter().enumerate() {
                     if p.button(input, id, [px + 14.0, py + 38.0 + k as f32 * 36.0, bw, 30.0], label, tip, k == 0) {
@@ -2686,7 +2708,8 @@ impl Builder {
                                 self.say("Saving...");
                             }
                             1 => self.export(true),
-                            _ => self.export(false),
+                            2 => self.export(false),
+                            _ => self.popup = Some(Popup::Share),
                         }
                         keep = false;
                     }
@@ -2694,8 +2717,18 @@ impl Builder {
                 if p.button(input, "save-close", [px + pw - 84.0, py + ph - 30.0, 70.0, 20.0], "Close", "Don't save now.", false) {
                     keep = false;
                 }
-                if keep {
+                if keep && self.popup.is_none() {
                     self.popup = Some(Popup::Save);
+                }
+            }
+            Some(Popup::Share) => {
+                if self.share_popup(p, input, w) && self.popup.is_none() {
+                    self.popup = Some(Popup::Share);
+                }
+            }
+            Some(Popup::Shared { mut scroll }) => {
+                if self.shared_popup(p, input, w, &mut scroll) && self.popup.is_none() {
+                    self.popup = Some(Popup::Shared { scroll });
                 }
             }
             None => {}

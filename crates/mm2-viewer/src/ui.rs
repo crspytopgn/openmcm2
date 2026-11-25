@@ -618,6 +618,24 @@ impl Ui {
         gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [x, y, w, h], [1.0, 1.0, 1.0, 1.0]);
     }
 
+    /// Lines across the top, the first bold, each on its own dark band
+    /// (the replay editor's), made smaller to fit if too long.
+    pub fn top_lines(&mut self, gfx: &mut Gfx, lines: &[String]) {
+        let mut y = 6.0;
+        for (i, line) in lines.iter().enumerate() {
+            let Some(t) = self.text(gfx, line, if i == 0 { 9.0 } else { 8.0 }, i == 0) else {
+                continue;
+            };
+            let (tw, th) = gfx.sprites.size(t);
+            let k = (620.0 / tw as f32).min(1.0);
+            let (w, h) = (tw as f32 * k, th as f32 * k);
+            let x = (640.0 - w) / 2.0;
+            self.fill(gfx, [x - 6.0, y - 2.0, w + 12.0, h + 4.0], [0.0, 0.0, 0.0, 0.55]);
+            gfx.sprites.quad(t, [0.0, 0.0, 1.0, 1.0], [x, y, w, h], [1.0, 1.0, 1.0, 1.0]);
+            y += h + 6.0;
+        }
+    }
+
     /// The mouse pointer, the classic arrow with its tip at (`x`, `y`), for
     /// where the system's is not shown (see [`draws_pointer`]).
     pub fn pointer(&mut self, gfx: &mut Gfx, (x, y): (f32, f32)) {

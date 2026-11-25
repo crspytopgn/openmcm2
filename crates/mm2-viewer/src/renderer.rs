@@ -1163,7 +1163,14 @@ impl TerrainRenderer {
         // and the view reaching on till it has all but hidden the land.
         let haze = (showing.is_some_and(|e| e.distance) && self.fog_range != NO_FOG).then(|| {
             let span = (end - start).max(1.0);
-            (start, std::f32::consts::LN_2 / span, (start + 7.0 * span).clamp(end, 20_000.0))
+            let far = (start + 7.0 * span).clamp(end, 20_000.0);
+            // Next-gen: the haze begins nearer and is thicker, so the air
+            // between the rider and the hills shows (the far plane stays).
+            if showing.is_some_and(|e| e.nextgen) {
+                (start * 0.5, std::f32::consts::LN_2 / span * 1.5, far)
+            } else {
+                (start, std::f32::consts::LN_2 / span, far)
+            }
         });
         let far = haze.map_or(end, |h| h.2);
         let plain = Mat4::perspective_rh(camera.fovy(aspect), aspect, 1.0, far);
@@ -1378,10 +1385,16 @@ impl TerrainRenderer {
                 horizon: day.as_ref().map_or([0.0; 4], |d| d.horizon.extend(1.0).into()),
                 smooth: e.smooth.as_ref().filter(|_| on.smooth).map_or([0.0; 4], |g| g.uniform(camera.position)),
                 surfaces: [flag(on.surfaces), flag(on.trees), flag(on.round), flag(on.floodlights && self.sky.is_none())],
-                traced: [flag(traced), flag(e.grime.is_some()), 0.0, 0.0],
+                // y: the dirt building up (grime), z how strongly the air is
+                // lit, w the wind in the grass and trees (enhanced_fns.wgsl
+                // `air_light`, `windy_day`).
+                traced: [flag(traced), flag(e.grime.is_some()), if on.lit_air { if on.nextgen { 1.0 } else { LIT_AIR_SUBTLE } } else { 0.0 }, flag(on.wind)],
                 view_proj: (proj * camera.view()).to_cols_array_2d(),
                 ambient: lights.globals().0,
-                terrain: [self.grid[1], self.grid[2] * self.grid[3], 0.0, 0.0],
+                // z: the Next-gen preset's stronger look (enhanced_fns.wgsl
+                // `next_gen`): lusher grass, firmer ground detail; w the photo
+                // dirt up close (`close_up`).
+                terrain: [self.grid[1], self.grid[2] * self.grid[3], flag(on.nextgen), flag(on.close_up)],
                 night: {
                     let (a, s, t) = self.lights.globals();
                     let own = Vec3::new(a[0], a[1], a[2]) + Vec3::new(s[0], s[1], s[2]) * t[1].max(0.0);
@@ -1390,7 +1403,9 @@ impl TerrainRenderer {
                 headlights: [
                     flag(self.enhanced.as_ref().is_some_and(|e| e.rt.is_some()) && !self.headlights.is_empty()),
                     if day.as_ref().is_some_and(|d| d.night > 0.0) { (self.headlights.len() + self.pole_lamps.len()).min(crate::enhance::LAMPS) as f32 } else { 0.0 },
-                    0.0,
+                    // z: how many of the lamps are the bikes (the first),
+                    // day or night, for the grass they push aside.
+                    self.headlights.len().min(crate::enhance::LAMPS) as f32,
                     0.0,
                 ],
                 lamps: {
@@ -2225,6 +2240,9 @@ const FLOODLIGHTS_ABOVE: f32 = 300.0;
 /// against the day's ambient, and the haze against the day's.
 const NIGHT_BOUNCE: f32 = 0.3;
 const NIGHT_HAZE: f32 = 0.12;
+/// How thick the lit air is on the usual presets, of Next-gen's: a hint of
+/// light and shade in the air, not a haze.
+const LIT_AIR_SUBTLE: f32 = 0.5;
 const NIGHT_SKY: wgpu::Color = wgpu::Color { r: 0.006, g: 0.008, b: 0.016, a: 1.0 };
 
 /// How strongly the ray-traced light shafts show (crate::rt).

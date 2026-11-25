@@ -30,8 +30,22 @@ pub struct Enhanced {
     pub ao: bool,
     /// A glow round the sun and haze along the horizon.
     pub sky: bool,
-    /// The bolder look: colour, contrast and a vignette.
-    pub grade: bool,
+    /// The colour grade (`look=`): none (the colours as drawn), the
+    /// bolder look, a warm afternoon or a soft overcast day.
+    pub look: Look,
+    /// The Next-gen preset's stronger light (`quality=nextgen`): the
+    /// bounce light, the sun's shafts and a soft bloom turned up, for a
+    /// modern game's look; Michael's subtle presets leave it off.
+    pub nextgen: bool,
+    /// The photo dirt taking over from the painted ground's smears near
+    /// the eye (terrain.wgsl `close_up`).
+    pub close_up: bool,
+    /// Gusts rolling across the grass in waves, the trees moving with them.
+    pub wind: bool,
+    /// Sunlight in the air near the ground, marched through the sun's
+    /// shadows so shafts of light and shade show in it (enhanced_fns.wgsl
+    /// `lit_air`): faint on the usual presets, plain on Next-gen.
+    pub lit_air: bool,
     /// The ground re-made from photo materials and lit by the sun.
     pub ground: bool,
     /// Grass growing on the grassy ground near the camera.
@@ -169,6 +183,38 @@ pub struct Enhanced {
     pub shed: u8,
 }
 
+/// The colour grades (`look=`, mm2_settings::LOOKS). Each is gentle:
+/// a nudge of warmth or coolness and a little contrast, never a filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Look {
+    /// The colours as drawn, no grade.
+    Original,
+    /// Richer colour, more contrast and darker corners (the old `grade`).
+    Bold,
+    /// Late-afternoon warmth: golden lights, softly lifted shadows.
+    Warm,
+    /// A soft grey day: a little less colour and contrast, cooler.
+    Overcast,
+}
+
+impl Look {
+    /// The look a name (`look=`) stands for.
+    pub fn parse(name: &str) -> Option<Look> {
+        match name {
+            "original" | "none" | "" => Some(Look::Original),
+            "bold" => Some(Look::Bold),
+            "warm" | "afternoon" => Some(Look::Warm),
+            "overcast" | "grey" | "gray" => Some(Look::Overcast),
+            _ => None,
+        }
+    }
+
+    /// What post.wgsl's `flags.w` gets for it.
+    pub fn index(self) -> f32 {
+        self as u32 as f32
+    }
+}
+
 /// The weather, for looks only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Weather {
@@ -188,7 +234,11 @@ impl Default for Enhanced {
             bloom: false,
             ao: true,
             sky: true,
-            grade: false,
+            look: Look::Original,
+            nextgen: false,
+            close_up: true,
+            wind: true,
+            lit_air: true,
             ground: true,
             grass: true,
             clouds: false,
@@ -262,6 +312,7 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             // The plain 3×3 filter on the shadows' edges: the soft one's
             // 32 taps a pixel were a third of the frame.
             e.soft_shadows = false;
+            e.lit_air = false;
             // Half the dust, in bigger puffs, without the hanging haze or
             // the dust's own shadows.
             e.dust_amount = 0.5;
@@ -276,6 +327,7 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             e.smooth = false;
             e.gtao = false;
             e.ssr = false;
+            e.lit_air = false;
             e.dust_amount = 0.75;
             e.pixels = Some(1920 * 1080);
         }
@@ -311,6 +363,36 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             e.supersample = true;
             e.far = true;
         }
+        // A modern game's look, for those who want it bolder than the
+        // original: Max's finer drawing, with ray tracing where the card
+        // can (the shadow maps elsewhere), bounce light, glossier bikes,
+        // the trackside props, a soft bloom and stronger sun shafts.
+        // Temporal anti-aliasing with FSR in place of MSAA, as modern
+        // engines draw. It holds the frame rate by drawing softer and
+        // setting effects aside when frames come late, so a weaker
+        // computer (or a browser, Enhanced::for_browser) gets what it can.
+        "nextgen" | "next-gen" => {
+            preset(e, "ultra")?;
+            e.msaa = 1;
+            e.taa = true;
+            e.fsr = true;
+            e.fewer_samples_past_qhd = false;
+            e.far = true;
+            e.raytracing = true;
+            e.bounce = true;
+            e.bikes = true;
+            e.scenery = true;
+            e.bloom = true;
+            e.clouds = true;
+            e.nextgen = true;
+            e.grime = true;
+            // The photo detail fully on up close (`detail=` after still
+            // sets it).
+            e.detail = 1.0;
+            e.dynamic = true;
+            e.sheds = true;
+            e.dust_amount = 1.25;
+        }
         // For the computer it's on: Medium until the graphics card is
         // known, then [`pick_auto`]'s.
         "auto" => {
@@ -318,7 +400,7 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             e.dynamic = true;
             e.sheds = true;
         }
-        _ => return Err(format!("quality must be auto, low, medium, high, raytraced, ultra or max, not {name}")),
+        _ => return Err(format!("quality must be auto, low, medium, high, raytraced, ultra, max or nextgen, not {name}")),
     }
     Ok(())
 }
@@ -400,6 +482,10 @@ impl Enhanced {
                 };
                 continue;
             }
+            if let Some(l) = name.strip_prefix("look=") {
+                e.look = Look::parse(l).ok_or_else(|| format!("look must be original, bold, warm or overcast, not {l}"))?;
+                continue;
+            }
             if let Some(q) = name.strip_prefix("quality=") {
                 preset(&mut e, q)?;
                 continue;
@@ -455,7 +541,7 @@ impl Enhanced {
                 "bloom" => e.bloom = on,
                 "ao" => e.ao = on,
                 "sky" => e.sky = on,
-                "grade" => e.grade = on,
+                "grade" => e.look = if on { Look::Bold } else { Look::Original },
                 "ground" => e.ground = on,
                 "grass" => e.grass = on,
                 "clouds" => e.clouds = on,
@@ -493,9 +579,12 @@ impl Enhanced {
                 "far" | "far-detail" => e.far = on,
                 "bounce" | "gi" => e.bounce = on,
                 "fsr" | "upscaling" => e.fsr = on,
+                "closeup" | "close-up" => e.close_up = on,
+                "wind" => e.wind = on,
+                "litair" | "lit-air" => e.lit_air = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-roost, no-bikes, no-shafts, no-cinematic, no-mud, grime, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-dynamic, raytracing, taa, supersample, far, bounce, fsr, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra/max, resolution=1080p or 85%, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-roost, no-bikes, no-shafts, no-cinematic, no-mud, grime, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-closeup, no-wind, no-litair, no-dynamic, raytracing, taa, supersample, far, bounce, fsr, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra/max/nextgen, look=warm, resolution=1080p or 85%, weather=rain or time=dusk"
                     ))
                 }
             }
@@ -793,7 +882,12 @@ impl Enhanced {
             self.scale = None;
             self.pixels = Some(((FULL_HD as f32) * k * k) as u32);
         }
-        self.shafts = false;
+        // Next-gen keeps its sun shafts (the frame rate is held by setting
+        // effects aside, Enhanced::sheds); elsewhere they're too heavy here.
+        if !self.nextgen {
+            self.shafts = false;
+            self.lit_air = false;
+        }
         self.cinematic = false;
         // Screen-space reflections march far across the screen per pixel,
         // and the horizon-based occlusion many taps a pixel: too heavy here.
@@ -872,7 +966,7 @@ impl Enhanced {
     /// least seen first: 1 the soft shadow edges, smooth hills, horizon
     /// occlusion, reflections, light shafts and bounce light (about Medium);
     /// 2 also the grass, occlusion, contact shadows and flying dirt (about
-    /// Low); 3 also the sun's shadows and the dust clouds (with fewer puffs
+    /// Low, and Next-gen's lit air back to the plain haze); 3 also the sun's shadows and the dust clouds (with fewer puffs
     /// from step 2). Only turned off, never on, so nothing
     /// is needed that was not made when the race loaded; and the
     /// anti-aliasing and the scene's size are left to dynamic resolution.
@@ -886,6 +980,7 @@ impl Enhanced {
             self.cinematic = false;
             self.supersample = false;
             self.bounce = false;
+            self.lit_air = false;
         }
         if n >= 2 {
             self.dust_amount = self.dust_amount.min(0.5);
@@ -893,6 +988,8 @@ impl Enhanced {
             self.ao = false;
             self.contact = false;
             self.roost = false;
+            // Next-gen's lit air and lusher grass: the old look's.
+            self.nextgen = false;
         }
         if n >= 3 {
             self.shadows = false;
@@ -929,6 +1026,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn colour_looks_and_next_gen() {
+        assert_eq!(Enhanced::parse("grade").unwrap().look, Look::Bold);
+        assert_eq!(Enhanced::parse("look=warm").unwrap().look, Look::Warm);
+        assert_eq!(Enhanced::parse("look=overcast").unwrap().look, Look::Overcast);
+        assert!(Enhanced::parse("look=sepia").is_err());
+        let ng = Enhanced::parse("quality=nextgen").unwrap();
+        assert!(ng.nextgen && ng.taa && ng.msaa == 1 && ng.bounce && ng.clouds && ng.sheds);
+        assert_eq!(ng.look, Look::Original);
+        // In a browser it keeps its sun shafts; set aside, the old look.
+        assert!(ng.for_browser().shafts);
+        assert!(!ng.shed_to(2).nextgen);
+        assert!(!Enhanced::parse("quality=ultra").unwrap().nextgen);
+    }
+
+    #[test]
     fn a_browser_draws_at_most_1080p_without_the_heaviest_passes() {
         let e = Enhanced::parse("quality=ultra,raytracing").unwrap().for_browser();
         assert!(!e.raytracing && !e.shafts && e.msaa == 1 && e.taa);
@@ -951,13 +1063,13 @@ mod tests {
         assert!(Enhanced::parse("quality=potato").is_err());
         let rt = Enhanced::parse("quality=raytraced").unwrap();
         assert_eq!((rt.msaa, rt.raytracing, rt.scene_size((3840, 2160))), (2, true, (2560, 1440)));
-        assert!(rt.grass && rt.smooth && !rt.scenery && !rt.grade);
+        assert!(rt.grass && rt.smooth && !rt.scenery && rt.look == Look::Original);
         let medium = Enhanced::parse("quality=medium").unwrap();
         assert!(medium.taa && medium.msaa == 1);
         let ultra = Enhanced::parse("quality=ultra").unwrap();
-        assert!(!ultra.scenery && ultra.ruts && !ultra.grade && !ultra.raytracing);
+        assert!(!ultra.scenery && ultra.ruts && ultra.look == Look::Original && !ultra.raytracing);
         let high = Enhanced::parse("quality=high").unwrap();
-        assert!(!high.scenery && !high.grade && high.smooth);
+        assert!(!high.scenery && high.look == Look::Original && high.smooth);
         // A preset's anti-aliasing and resolution, then changed after it.
         let mixed = Enhanced::parse("quality=ultra,msaa=4,resolution=1440p").unwrap();
         assert_eq!((mixed.msaa, mixed.scene_size((3840, 2160))), (4, (2560, 1440)));
@@ -970,7 +1082,7 @@ mod tests {
     #[test]
     fn max_draws_finer_than_ultra() {
         let max = Enhanced::parse("quality=max").unwrap();
-        assert!(max.supersample && max.far && max.ruts && !max.raytracing && !max.scenery && !max.grade && !max.bloom);
+        assert!(max.supersample && max.far && max.ruts && !max.raytracing && !max.scenery && max.look == Look::Original && !max.bloom);
         assert_eq!(max.msaa, 4);
         assert_eq!(max.shadow_side, 2 * crate::enhance::SHADOW_SIDE);
         // A 1080p screen drawn at 4K, 1440p at 4K, 4K as it is.
