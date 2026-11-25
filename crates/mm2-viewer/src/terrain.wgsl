@@ -457,17 +457,20 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     // The detail fades with distance, where the painted colour suffices;
     // mostly its light and dark, a little of its own colour.
     // `detail=` (enh.haze.w, 0 to 1) sets how strongly, and how far.
-    // Next-gen: more of the photo's own colour, laid on fully up close, so
-    // the dirt reads as real dirt (clods, stones, grain) at the wheels.
+    // Close up (and more so on Next-gen): the photo dirt laid on firmly
+    // near the eye, so it reads as real dirt (clods, stones, grain) at the
+    // wheels; Next-gen also keeps more of the photo's own colour.
     let ng = next_gen();
+    let firm = close_up();
     colour = mix(vec3<f32>(luminance(colour)), colour, select(0.35, 0.6, ng));
-    if (ng) {
-        // Firmer: the photo's clods and stones darker and lighter, so the
-        // grain reads at riding speed and not as noise.
-        colour = pow(max(colour, vec3<f32>(0.0)), vec3<f32>(1.5));
+    if (firm) {
+        // The photo's clods and stones darker and lighter, so the grain
+        // reads at riding speed and not as noise.
+        colour = pow(max(colour, vec3<f32>(0.0)), vec3<f32>(select(1.3, 1.5, ng)));
     }
     // Gently: the painted ground stays what the eye reads.
-    colour = mix(vec3<f32>(1.0), colour, near * select(0.35 + 0.5 * detail, 0.95, ng));
+    let lay = select(0.35 + 0.5 * detail, select(max(0.35 + 0.5 * detail, 0.8), 0.95, ng), firm);
+    colour = mix(vec3<f32>(1.0), colour, near * lay);
     // Further off, where the painted texture is stretched soft, the main
     // material again at six times its size: only its light and dark,
     // faintly, so the middle distance has grain without new colour.
@@ -486,7 +489,7 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     // up the texture is -z.
     let t = normalize(vec3<f32>(1.0, 0.0, 0.0) - n * n.x);
     let b = cross(t, n);
-    let nm = normalize(mix(vec3<f32>(0.0, 0.0, 1.0), normalize(normal), near * select(0.4 + 0.5 * detail, 1.0, ng)));
+    let nm = normalize(mix(vec3<f32>(0.0, 0.0, 1.0), normalize(normal), near * select(0.4 + 0.5 * detail, 1.0, firm)));
     var bent = normalize(t * nm.x + b * nm.y + n * nm.z);
     // The ruts: dark, damp grooves where the tyres have run.
     var rut = 0.0;
@@ -654,7 +657,7 @@ fn enhanced_ground(in: VertexOut) -> vec4<f32> {
     let dist = length(in.world - globals.camera.xyz);
     // Next-gen, with the new ground: near the eye the painted texture's
     // smears give way to the photo dirt's grain (new_ground).
-    let soft = select(1.0, mix(12.0, 1.0, smoothstep(30.0, 160.0, dist)), next_gen() && enh.more.x > 0.5);
+    let soft = select(1.0, mix(select(6.0, 12.0, next_gen()), 1.0, smoothstep(30.0, 160.0, dist)), close_up() && enh.more.x > 0.5);
     let colour = ground_soft(in, soft);
     let n = normalize(in.normal);
     // The new ground lights itself: none of the plain light below is

@@ -36,6 +36,9 @@ export const UPGRADES = [
   ["nightlights", "Stadium lights at night", true, "With the time of day set to Night, a stadium is lit by its own lamp banks: the floor, bikes and riders lit from above, with soft shadows from each bank."],
   ["roost", "Flying dirt (roost)", true, "Real roost: while the back tyre spins (or you pull hard, or slide) it throws a low jet of fine grit, crumbs and clods with a brown plume of dirt behind, all falling fast. Only on dirt; mud in the rain. Fewer pieces on Low."],
   ["bounce", "Bounce light", true, "Sunlight bouncing off the ground and walls: sunlit dirt throws a soft warm light into the shaded side of the bike and rider, and pale corners don't go as dark. Subtle. Costs a little on a slower computer."],
+  ["closeup", "Sharp dirt up close", true, "Near your wheels the ground is real photo dirt, with clods, stones and grain, instead of the painted texture smeared up close. Needs Detailed ground on. Costs next to nothing."],
+  ["wind", "Wind in the grass and trees", true, "A breezy day: gusts roll across the 3D grass in waves and the trees sway a little more. Costs next to nothing."],
+  ["litair", "Sunlight in the air", true, "Sunlight in the air near the ground, with darker streaks where trees and hills shade it, so beams of light show. Faint, plain on Next-gen. Not in a browser except with Next-gen: too heavy."],
   ["fsr", "AMD FSR upscaling", true, "AMD FidelityFX Super Resolution: on a big screen the 3D scene is drawn smaller to stay smooth; FSR stretches it back up along its edges and gently sharpens it, so it looks close to full sharpness instead of soft. With TAA it rebuilds the picture from several frames, as FSR 2 does. A big help on laptops."],
 ];
 
@@ -48,7 +51,7 @@ const QUALITIES = [["auto", "Auto (picks for your computer)"], ["low", "Low"], [
 // Whether a quality preset keeps an upgrade on (Quality::has).
 function presetHas(quality, name) {
   if (quality === "auto") quality = "low"; // browsers seldom name the graphics card
-  const off = { low: ["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr", "bounce"], medium: ["shafts", "smooth", "gtao", "ssr", "bounce"] }[quality] || [];
+  const off = { low: ["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr", "bounce", "litair"], medium: ["shafts", "smooth", "gtao", "ssr", "bounce", "litair"] }[quality] || [];
   if (quality === "nextgen" && ["bounce", "bloom", "bikes", "scenery"].includes(name)) return true;
   return !off.includes(name) && UPGRADES.some(([n, , on]) => n === name && on);
 }

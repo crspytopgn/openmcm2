@@ -1355,12 +1355,15 @@ impl TerrainRenderer {
                 horizon: day.as_ref().map_or([0.0; 4], |d| d.horizon.extend(1.0).into()),
                 smooth: e.smooth.as_ref().filter(|_| on.smooth).map_or([0.0; 4], |g| g.uniform(camera.position)),
                 surfaces: [flag(on.surfaces), flag(on.trees), flag(on.round), flag(on.floodlights && self.sky.is_none())],
-                traced: [flag(traced), 0.0, 0.0, 0.0],
+                // y: the wind in the grass and trees, z how strongly the air is
+                // lit (enhanced_fns.wgsl `windy_day`, `air_light`).
+                traced: [flag(traced), flag(on.wind), if on.lit_air { if on.nextgen { 1.0 } else { LIT_AIR_SUBTLE } } else { 0.0 }, 0.0],
                 view_proj: (proj * camera.view()).to_cols_array_2d(),
                 ambient: lights.globals().0,
                 // z: the Next-gen preset's stronger look (enhanced_fns.wgsl
-                // `next_gen`): lit air, lusher grass, firmer ground detail.
-                terrain: [self.grid[1], self.grid[2] * self.grid[3], flag(on.nextgen), 0.0],
+                // `next_gen`): lusher grass, firmer ground detail; w the photo
+                // dirt up close (`close_up`).
+                terrain: [self.grid[1], self.grid[2] * self.grid[3], flag(on.nextgen), flag(on.close_up)],
                 night: {
                     let (a, s, t) = self.lights.globals();
                     let own = Vec3::new(a[0], a[1], a[2]) + Vec3::new(s[0], s[1], s[2]) * t[1].max(0.0);
@@ -2206,6 +2209,9 @@ const FLOODLIGHTS_ABOVE: f32 = 300.0;
 /// against the day's ambient, and the haze against the day's.
 const NIGHT_BOUNCE: f32 = 0.3;
 const NIGHT_HAZE: f32 = 0.12;
+/// How thick the lit air is on the usual presets, of Next-gen's: a hint of
+/// light and shade in the air, not a haze.
+const LIT_AIR_SUBTLE: f32 = 0.5;
 const NIGHT_SKY: wgpu::Color = wgpu::Color { r: 0.006, g: 0.008, b: 0.016, a: 1.0 };
 
 /// How strongly the ray-traced light shafts show (crate::rt).

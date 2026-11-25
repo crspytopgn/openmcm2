@@ -183,7 +183,7 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     let time = enh.world.x;
     let gust = sin(time * 1.6 + xz.x * 0.21 + xz.y * 0.17) * 0.5 + sin(time * 2.7 + xz.x * 0.5) * 0.25;
     var bend = vec3<f32>(0.7, 0.0, 0.4) * gust * 0.18 * corner.y * corner.y * tall;
-    if (next_gen()) {
+    if (windy_day()) {
         // Gusts rolling across the field as waves (as wind over a meadow),
         // the blades bowing with them, and a quick flutter on top.
         let wind = normalize(vec2<f32>(0.87, 0.5));

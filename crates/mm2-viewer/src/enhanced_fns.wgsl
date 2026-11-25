@@ -166,6 +166,24 @@ fn next_gen() -> bool {
     return enh.terrain.z > 0.5;
 }
 
+// The photo dirt taking over from the painted ground's smears near the eye
+// (renderer: enh.terrain.w).
+fn close_up() -> bool {
+    return enh.terrain.w > 0.5;
+}
+
+// Gusts rolling across the grass in waves, and the trees moving with them
+// (renderer: enh.traced.y).
+fn windy_day() -> bool {
+    return enh.traced.y > 0.5;
+}
+
+// How strongly the air near the ground is lit (renderer: enh.traced.z),
+// 0 for none: a hint on the usual presets, plainly there on Next-gen.
+fn air_light() -> f32 {
+    return enh.traced.z;
+}
+
 // Whether the sun reaches point `p` in the air, from the shadow
 // cascades: one tap, as the light in the air is many taps blended. 1 past
 // the shadows' reach.
@@ -224,7 +242,7 @@ fn lit_air(c: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
     let lit = seen * marched + (1.0 - marched);
     // Thinner higher up, by e every 600 ft above the eye.
     let thin = exp(-max(to.y, 0.0) / 600.0);
-    let amount = (1.0 - exp(-dist / AIR_CLEAR)) * thin;
+    let amount = (1.0 - exp(-dist * air_light() / AIR_CLEAR)) * thin;
     let cos_t = dot(v, enh.to_sun.xyz);
     // Forward scattering: much brighter toward the sun (a soft glow), a
     // little all round.
@@ -237,7 +255,7 @@ fn lit_air(c: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
 
 fn apply_haze(c0: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
     var c = c0;
-    if (next_gen()) {
+    if (air_light() > 0.0) {
         c = lit_air(c, world, dist);
     }
     if (enh.flags.z > 0.5) {

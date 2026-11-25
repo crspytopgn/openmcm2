@@ -37,6 +37,15 @@ pub struct Enhanced {
     /// bounce light, the sun's shafts and a soft bloom turned up, for a
     /// modern game's look; Michael's subtle presets leave it off.
     pub nextgen: bool,
+    /// The photo dirt taking over from the painted ground's smears near
+    /// the eye (terrain.wgsl `close_up`).
+    pub close_up: bool,
+    /// Gusts rolling across the grass in waves, the trees moving with them.
+    pub wind: bool,
+    /// Sunlight in the air near the ground, marched through the sun's
+    /// shadows so shafts of light and shade show in it (enhanced_fns.wgsl
+    /// `lit_air`): faint on the usual presets, plain on Next-gen.
+    pub lit_air: bool,
     /// The ground re-made from photo materials and lit by the sun.
     pub ground: bool,
     /// Grass growing on the grassy ground near the camera.
@@ -222,6 +231,9 @@ impl Default for Enhanced {
             sky: true,
             look: Look::Original,
             nextgen: false,
+            close_up: true,
+            wind: true,
+            lit_air: true,
             ground: true,
             grass: true,
             clouds: false,
@@ -294,6 +306,7 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             // The plain 3×3 filter on the shadows' edges: the soft one's
             // 32 taps a pixel were a third of the frame.
             e.soft_shadows = false;
+            e.lit_air = false;
             // Half the dust, in bigger puffs, without the hanging haze or
             // the dust's own shadows.
             e.dust_amount = 0.5;
@@ -308,6 +321,7 @@ fn preset(e: &mut Enhanced, name: &str) -> Result<(), String> {
             e.smooth = false;
             e.gtao = false;
             e.ssr = false;
+            e.lit_air = false;
             e.dust_amount = 0.75;
             e.pixels = Some(1920 * 1080);
         }
@@ -557,9 +571,12 @@ impl Enhanced {
                 "far" | "far-detail" => e.far = on,
                 "bounce" | "gi" => e.bounce = on,
                 "fsr" | "upscaling" => e.fsr = on,
+                "closeup" | "close-up" => e.close_up = on,
+                "wind" => e.wind = on,
+                "litair" | "lit-air" => e.lit_air = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-roost, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-dynamic, raytracing, taa, supersample, far, bounce, fsr, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra/max/nextgen, look=warm, resolution=1080p or 85%, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-roost, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-closeup, no-wind, no-litair, no-dynamic, raytracing, taa, supersample, far, bounce, fsr, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra/max/nextgen, look=warm, resolution=1080p or 85%, weather=rain or time=dusk"
                     ))
                 }
             }
@@ -861,6 +878,7 @@ impl Enhanced {
         // effects aside, Enhanced::sheds); elsewhere they're too heavy here.
         if !self.nextgen {
             self.shafts = false;
+            self.lit_air = false;
         }
         self.cinematic = false;
         // Screen-space reflections march far across the screen per pixel,
@@ -954,6 +972,7 @@ impl Enhanced {
             self.cinematic = false;
             self.supersample = false;
             self.bounce = false;
+            self.lit_air = false;
         }
         if n >= 2 {
             self.dust_amount = self.dust_amount.min(0.5);

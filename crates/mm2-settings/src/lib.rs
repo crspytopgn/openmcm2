@@ -187,8 +187,8 @@ impl Quality {
     /// as `--enhanced=quality=` sets it.
     pub fn has(self, name: &str) -> bool {
         let off: &[&str] = match self {
-            Quality::Low => &["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr", "bounce"],
-            Quality::Medium => &["shafts", "smooth", "gtao", "ssr", "bounce"],
+            Quality::Low => &["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr", "bounce", "litair"],
+            Quality::Medium => &["shafts", "smooth", "gtao", "ssr", "bounce", "litair"],
             _ => &[],
         };
         // On with this preset though off unless asked. The trackside
@@ -267,7 +267,7 @@ pub fn parse_difficulty(text: &str) -> Option<[[u32; 3]; 4]> {
     (n.len() == 12 && n.iter().all(|v| (1..=MOST_STEP).contains(v))).then_some(t)
 }
 
-pub const UPGRADES: [(&str, &str, bool); 31] = [
+pub const UPGRADES: [(&str, &str, bool); 34] = [
     ("lighting", "Per-pixel lighting", true),
     ("shadows", "Sun shadows", true),
     ("distance", "Far draw distance and haze", true),
@@ -306,6 +306,10 @@ pub const UPGRADES: [(&str, &str, bool); 31] = [
     // screen, or with TAA).
     ("bounce", "Bounce light", true),
     ("fsr", "AMD FSR upscaling", true),
+    // From the Next-gen work, the gentle versions on by default.
+    ("closeup", "Sharp dirt up close", true),
+    ("wind", "Wind in the grass and trees", true),
+    ("litair", "Sunlight in the air", true),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
