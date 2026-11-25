@@ -1410,6 +1410,11 @@ fn ai_check(
             if let (Some(&lane), race::Bike::Computer(c)) = (lanes.get(i), &mut racer.bike) {
                 c.rider.lane = lane;
             }
+            // Picked up mid race, a rider is long past its start's spawn
+            // protection.
+            if let (true, race::Bike::Computer(c)) = (start > mm2_physics::bike::SPAWN_GUARD, &mut racer.bike) {
+                c.rider.spawn_guard = 0.0;
+            }
         }
         let mut k = k0;
         while k + 1 < rows[1].len() && rows[1][k + 1].0 <= start + seconds {
