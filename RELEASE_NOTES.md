@@ -3,8 +3,8 @@
 More of the original's riding rules, found by checking the physics
 against the original's code line by line:
 
-* **A moment to get going.** After a crash or at the start, you can't
-  crash or bump into other bikes for 3 seconds, like the original.
+* **A moment to get going.** After a crash you can't crash again or
+  bump into other bikes for 3 seconds, like the original.
 * **Your rider hits things too.** Low branches, signs and overhangs now
   hit the rider, not just the bike, as in the original. Once you're down,
   only the bike collides.

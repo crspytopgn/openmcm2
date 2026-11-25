@@ -750,6 +750,12 @@ impl Bike {
         }
     }
 
+    /// Just put back (KrustyBike::IsSpawnProtected): no crashes and no
+    /// bumping other bikes for the first 3 s.
+    fn protected(&self) -> bool {
+        matches!(self, Bike::Player(b) if b.spawn_guard > 0.0)
+    }
+
     /// The bike as the bike-to-bike bounce sees it, standing where it was
     /// last step at `was`; `None` while it is down or played from a tape.
     fn bump_state(&self, was: (Vec3, glam::Mat3)) -> Option<mm2_physics::bump::State> {
@@ -2555,6 +2561,10 @@ impl Race {
             for j in i + 1..self.racers.len() {
                 let Some(hull) = &hull else { break };
                 if self.away(i) || self.away(j) {
+                    continue;
+                }
+                // Either just put back: they pass through (0x48dcd0).
+                if self.racers[i].bike.protected() || self.racers[j].bike.protected() {
                     continue;
                 }
                 let (a, b) = self.racers.split_at_mut(j);
