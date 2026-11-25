@@ -383,7 +383,11 @@ const TEXTS_KEPT: usize = 2048;
 
 /// Everything the front end loads, cached.
 pub struct Ui {
+    /// The `UI` folder the dialogs come from: the game's own, or, with the
+    /// free graphics and the original menus picked, the player's MM2's.
     dir: PathBuf,
+    /// The game folder (the Free Pack's with the free graphics).
+    root: PathBuf,
     global: Option<Pack>,
     packs: HashMap<String, Option<Pack>>,
     images: HashMap<(String, String), Option<TextureId>>,
@@ -416,10 +420,13 @@ impl Ui {
     /// The front end of the game in `game` (the folder with `UI` and
     /// `UILANG.DLL`).
     pub fn new(game: &Path) -> Self {
-        let dir = game.join("UI");
+        // The original menus over the free graphics: the dialogs and their
+        // words from the player's MM2 files, the rest from the pack.
+        let menus = crate::freepack::menus_game().unwrap_or_else(|| game.to_path_buf());
+        let dir = menus.join("UI");
         crate::hud::find_pictures(game);
         let strings = |name: &str| {
-            crate::fs::read(game.join(name))
+            crate::fs::read(menus.join(name))
                 .ok()
                 .and_then(|b| mm2_formats::pe::strings(&b).ok())
                 .unwrap_or_default()
@@ -445,6 +452,7 @@ impl Ui {
         Ui {
             global: Pack::load(&dir.join("GLOBAL.DAT")),
             dir,
+            root: game.to_path_buf(),
             packs: HashMap::new(),
             images: HashMap::new(),
             sounds: HashMap::new(),
@@ -464,7 +472,7 @@ impl Ui {
 
     /// The game folder.
     pub fn game(&self) -> &Path {
-        self.dir.parent().unwrap_or(&self.dir)
+        &self.root
     }
 
     /// A string the game's code shows, from `LANG.DLL`.

@@ -77,17 +77,6 @@ pub fn original_res() -> Option<PathBuf> {
     (has("BIKE.RES") || has("ENGINE.RES") || has("AUDIO.RES")).then_some(res)
 }
 
-/// The `RES` folder of the player's own game or demo with its
-/// `ENGINE.RES`, whichever graphics were picked: for the freshened engine
-/// sounds.
-pub fn game_engine_res() -> Option<PathBuf> {
-    GAME.get()
-        .map(|g| g.join("RES"))
-        .into_iter()
-        .chain(crate::find_game().map(|g| g.join("RES")))
-        .find(|res| crate::fs::is_file(res.join("ENGINE.RES")))
-}
-
 /// Whether the player picked the free graphics (`--freepack`), rather
 /// than a pack set up beside the original's files.
 pub fn chosen() -> bool {
@@ -108,6 +97,22 @@ pub fn set_menus(new: bool, dir: Option<PathBuf>) {
     if let Some(dir) = dir {
         let _ = MENUS_FROM.set(dir);
     }
+}
+
+/// The player's own MM2 (or demo) folder, for the original menus over
+/// the free graphics.
+static MENUS_GAME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Notes the game whose menus go over the free graphics.
+pub fn set_menus_game(game: &std::path::Path) {
+    let _ = MENUS_GAME.set(game.to_path_buf());
+}
+
+/// The game folder the menus come from when it isn't the game's own:
+/// with the free graphics picked (the pack's folder standing in for the
+/// game's) and the original menus, the player's MM2's.
+pub fn menus_game() -> Option<PathBuf> {
+    (chosen() && ui_root().is_none()).then(|| MENUS_GAME.get().cloned()).flatten()
 }
 
 /// Whether the menus wear the new look.
@@ -1722,6 +1727,16 @@ pub fn ui_sound(file: &str) -> Option<Vec<u8>> {
 /// Whether the pack has menus of its own.
 pub fn has_menus() -> bool {
     menu_layout("MAINMENU").is_some()
+}
+
+/// Whether the free graphics' pack has menus of its own, whichever menus
+/// were picked.
+pub fn pack_has_menus() -> bool {
+    root().is_some_and(|r| {
+        let dir = r.join("menus");
+        crate::fs::is_file(dir.join("MAINMENU.dtm"))
+            || crate::fs::read_dir(&dir).ok().is_some_and(|mut d| d.any(|e| e.is_ok_and(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("MAINMENU.dtm"))))
+    })
 }
 
 /// The menus' text in the pack's own words (`menus/strings.txt`: lines of

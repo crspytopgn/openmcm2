@@ -125,6 +125,9 @@
   .seg button { background: none; color: var(--dim); border-radius: 0; padding: .3rem .9rem; font-weight: 500; }
   .seg button[aria-checked="true"] { background: var(--accent); color: #111; font-weight: 600; }
   .seg button[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+  .switches { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: .1rem .8rem; margin: .2rem 0 .6rem; }
+  .switches .seg { justify-self: start; }
+  .switchname { color: var(--dim); font-size: .9rem; }
   .line { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .3rem 0; color: var(--dim); }
   label.plainbutton { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost { background: none; color: var(--fg); border: 1px solid #55524a; }
@@ -231,6 +234,23 @@
     <span class="tag">Ready</span>
     <h2 id="readytitle">Your MM2 game</h2>
     <p id="readywhy">Remembered in this browser.</p>
+    <!-- Both choices here, one press each. -->
+    <div class="switches">
+      <span class="switchname">Graphics</span>
+      <div class="seg" role="radiogroup" aria-label="Graphics">
+        <button type="button" id="readymm2" role="radio" aria-checked="true"
+          title="The original game's bikes, riders, tracks and sounds, from your MM2 files.">MM2</button>
+        <button type="button" id="readyfree" role="radio" aria-checked="false"
+          title="The Free Pack's all-new bikes, riders, tracks and sounds, even with your MM2 files kept here.">Free version</button>
+      </div>
+      <span class="switchname">Menus</span>
+      <div class="seg" role="radiogroup" aria-label="Menus">
+        <button type="button" id="readyoldmenus" role="radio" aria-checked="true"
+          title="The menus exactly as Motocross Madness 2 had them, from your MM2 files.">Original</button>
+        <button type="button" id="readynewmenus" role="radio" aria-checked="false"
+          title="The same menus and buttons, redrawn in a new style.">New look</button>
+      </div>
+    </div>
     <div class="row">
       <button id="play" class="play" title="Starts the game with your Motocross Madness 2 files.">Play</button>
       <button id="playfree" class="play" hidden title="Starts the free version, fetching any update to the Free Pack first.">Play</button>
@@ -1798,6 +1818,7 @@ function setFree(f) {
     localStorage.setItem("mm2graphics", f ? "free" : "original");
   } catch {}
   if (pageReady) layout();
+  showMenus();
 }
 $("pickfree").addEventListener("click", () => {
   changing = false;
@@ -1826,16 +1847,20 @@ try {
 let haveGame = false;
 // The demo has the original's menus too.
 let haveMenus = false;
-const menusNew = () => newMenus || !haveMenus;
+// The demo's menus don't go over the free graphics (it lacks some).
+const oldMenusHere = () => haveMenus && !(free && isDemo(kept));
+const menusNew = () => newMenus || !oldMenusHere();
 function showMenus() {
-  $("picknewmenus").setAttribute("aria-checked", String(menusNew()));
-  $("pickoldmenus").setAttribute("aria-checked", String(!menusNew()));
-  $("pickoldmenus").setAttribute("aria-disabled", String(!haveMenus));
+  for (const [n, o] of [["picknewmenus", "pickoldmenus"], ["readynewmenus", "readyoldmenus"]]) {
+    $(n).setAttribute("aria-checked", String(menusNew()));
+    $(o).setAttribute("aria-checked", String(!menusNew()));
+    $(o).setAttribute("aria-disabled", String(!oldMenusHere()));
+  }
 }
-for (const [id, n] of [["picknewmenus", true], ["pickoldmenus", false]]) {
+for (const [id, n] of [["picknewmenus", true], ["pickoldmenus", false], ["readynewmenus", true], ["readyoldmenus", false]]) {
   $(id).addEventListener("click", () => {
-    if (!n && !haveMenus) {
-      $("oldmenustate").textContent = "Needs your MM2 files or the demo: pick them above first";
+    if (!n && !oldMenusHere()) {
+      $("oldmenustate").textContent = haveMenus ? "The free version with the demo wears the new look" : "Needs your MM2 files or the demo: pick them above first";
       return;
     }
     newMenus = n;
@@ -2417,6 +2442,21 @@ function layout() {
   $("pickfree").hidden = free && !packReady;
   $("mm2card").classList.toggle("quiet", free && !packReady);
   $("backrow").hidden = !(changing && (mm2Ready || freeReady));
+  // The graphics switch on the Ready card: both need their files here.
+  const both = !!kept && packReady;
+  $("readymm2").textContent = demo ? "MM2 demo" : "MM2";
+  $("readymm2").setAttribute("aria-checked", String(!freeReady));
+  $("readyfree").setAttribute("aria-checked", String(freeReady));
+  for (const id of ["readymm2", "readyfree"]) $(id).setAttribute("aria-disabled", String(!both));
+}
+for (const [id, f] of [["readymm2", false], ["readyfree", true]]) {
+  $(id).addEventListener("click", () => {
+    if ($(id).getAttribute("aria-disabled") === "true") {
+      $("readywhy").textContent = f ? "Get the free version with Change first." : "Pick your MM2 files or the demo with Change first.";
+      return;
+    }
+    setFree(f);
+  });
 }
 showReady();
 $("play").addEventListener("click", () => kept && go(kept, false));

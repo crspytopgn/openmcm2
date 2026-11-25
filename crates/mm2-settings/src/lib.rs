@@ -473,7 +473,7 @@ pub struct More {
     pub builder_menu: bool,
     /// The engine sounds from the player's own game or demo, freshened as
     /// they load (EQ, a touch of pitch and saturation, seamless loops),
-    /// with the free graphics too; on unless turned off
+    /// with the MM2 graphics (the free version keeps its own); on unless turned off
     /// (`--no-fresh-sounds`).
     pub fresh_sounds: bool,
     /// Drive the scenery: in Practice and free roam, V gets in the
