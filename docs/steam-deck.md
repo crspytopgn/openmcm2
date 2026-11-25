@@ -86,6 +86,21 @@ D-pad or stick moves between the buttons, A presses the one outlined, and
 the shoulder buttons step through everything in order. The touch screen
 works everywhere too.
 
+### Rumble and gyro steering
+
+The pad thumps on landings, knocks over sharp bumps and jolts in crashes
+when the profile's Force Feedback box (Options > Controls) or the
+launcher's **Controller vibration** is on.
+
+**Gyro steering** (launcher Extras, off unless you set it) steers by
+tipping the Deck, a Steam Controller or a PlayStation or Switch pad left
+and right like handlebars, on top of the stick. The number is how far you
+tip it for full lock: 20 to 30° is quick, 45° and more is gentle. Near
+level always rides straight, whether you hold it flat or upright. The
+game reads the motion sensors itself, so leave Steam's own gyro setting
+for OpenMCM2 off (Steam's "Gyro to Joystick" also works, through the
+stick, if you prefer it).
+
 ## Good to know
 
 * **Graphics.** The Auto graphics setting picks Medium on a Deck. The
