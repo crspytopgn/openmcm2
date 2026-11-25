@@ -21,8 +21,11 @@ const FILM: f32 = 0.0035;
 /// And the caked mud, riding in the dry; far faster on wet ground.
 const CAKED_DRY: f32 = 0.0006;
 const CAKED_WET: f32 = 0.005;
-/// The most mud the dry ground cakes on by itself.
-const CAKED_DRY_MOST: f32 = 0.3;
+/// The most mud the dry ground cakes on by itself: next to none, as dry
+/// dirt only dusts a real bike. And the most of the dust film it lays
+/// down: it levels off, the bike dusty rather than brown.
+const CAKED_DRY_MOST: f32 = 0.08;
+const FILM_DRY_MOST: f32 = 0.7;
 /// How far behind a bike its roost reaches, ft, and how wide it spreads
 /// at its far end, ft either side.
 const ROOST_REACH: f32 = 45.0;
@@ -200,7 +203,8 @@ impl Grime {
             };
             if down {
                 // The film: from the riding, more as the rear tyre spins.
-                grow(&mut coat.film, (FILM * pace + 0.004 * kick.spin) * pick * wet_more, 1.0);
+                let most = if wet { 1.0 } else { FILM_DRY_MOST };
+                grow(&mut coat.film, (FILM * pace + 0.004 * kick.spin) * pick * wet_more, most);
                 if wet {
                     grow(&mut coat.caked, CAKED_WET * pace * pick, 1.0);
                 } else {
@@ -236,7 +240,7 @@ impl Grime {
                 let hit = hit.min(1.5);
                 if hit > 0.0 {
                     grow(&mut coat.spatter, SPATTER * hit * wet_more, 1.0);
-                    grow(&mut coat.film, FILM * 0.6 * hit, 1.0);
+                    grow(&mut coat.film, FILM * 0.6 * hit, if wet { 1.0 } else { FILM_DRY_MOST });
                     let most = if wet { 1.0 } else { CAKED_DRY_MOST };
                     grow(&mut coat.caked, if wet { 0.01 } else { 0.0015 } * hit, most);
                 }
@@ -246,8 +250,8 @@ impl Grime {
                 let hard = 0.5 + 0.5 * (before.speed / 50.0).min(1.0);
                 coat.scuffs = (coat.scuffs + (1.0 - coat.scuffs) * 0.45 * hard).min(1.0);
                 coat.film = (coat.film + (1.0 - coat.film) * 0.12 * hard).min(1.0);
-                let most = if wet { 1.0 } else { 0.6 };
-                coat.caked = coat.caked.max((coat.caked + if wet { 0.25 } else { 0.1 } * hard).min(most));
+                let most = if wet { 1.0 } else { 0.25 };
+                coat.caked = coat.caked.max((coat.caked + if wet { 0.25 } else { 0.05 } * hard).min(most));
                 coat.spatter = (coat.spatter + 0.15 * hard).min(1.0);
             }
         }
@@ -282,9 +286,9 @@ mod tests {
             }
             last = c;
         }
-        // Four minutes in the dry: about half the film, little mud.
-        assert!((0.4..0.75).contains(&last.film), "{last:?}");
-        assert!(last.caked < 0.2, "{last:?}");
+        // Four minutes in the dry: about half the film, next to no mud.
+        assert!((0.3..=FILM_DRY_MOST).contains(&last.film), "{last:?}");
+        assert!(last.caked < 0.1, "{last:?}");
         assert_eq!(last.spatter, 0.0);
     }
 
@@ -327,7 +331,7 @@ mod tests {
         g.step(&[(riding(4.0, 0.0), dirt())], 0.1, false, |_| DIRT);
         g.step(&[([None; 2], crashed)], 0.1, false, |_| DIRT);
         let once = g.coat(0);
-        assert!(once.scuffs > 0.2 && once.caked > 0.05, "{once:?}");
+        assert!(once.scuffs > 0.2 && once.caked > 0.02, "{once:?}");
         for _ in 0..10 {
             g.step(&[([None; 2], crashed)], 0.1, false, |_| DIRT);
         }

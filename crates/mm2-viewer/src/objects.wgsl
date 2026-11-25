@@ -661,21 +661,29 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
             paint = sqrt(max(albedo, vec3<f32>(0.0)));
         }
         let rest_n = normalize(in.rest_normal);
-        let line = mix(0.8, 3.8, film) + (noise3(in.rest * 1.3) - 0.5) * 0.9;
-        let low = 1.0 - smoothstep(line * 0.35, line, in.rest.y);
+        // Where real bikes get it: most round the wheels (the tyres, the
+        // fenders over them, the lower forks, the swingarm), then low down
+        // (under the engine, the boots and shins), the line creeping up
+        // only slowly; less up top, where nothing throws dirt.
+        let wobble = (noise3(in.rest * 1.3) - 0.5) * 0.5;
+        let axle = vec2<f32>(in.rest.y - 1.05, abs(in.rest.z) - 2.45);
+        let wheel = 1.0 - smoothstep(1.25, 1.9 + film * 0.8, length(axle) + wobble);
+        let line = mix(0.6, 2.4, film) + wobble * 1.6;
+        let low = 1.0 - smoothstep(line * 0.4, line, in.rest.y);
         let under = smoothstep(0.1, -0.7, n.y) * 0.5;
         let grain = noise3(in.rest * 6.0 + 2.0);
-        var cover = film * min(low + under, 1.0) * (0.65 + 0.5 * grain);
+        var cover = film * min(max(wheel, low * 0.75) + under, 1.0) * (0.65 + 0.5 * grain);
         let front = smoothstep(0.15, 0.75, rest_n.z);
         cover = max(cover, spatter * front * 0.35 * grain);
         let blot = smoothstep(0.42, 0.68, noise3(in.rest * 2.2 + 7.0));
         cover = max(cover, scuffs * abs(rest_n.x) * blot * (1.0 - smoothstep(3.0, 5.5, in.rest.y)) * 0.85);
         // A little more on the free art's darker, physically lit paint.
-        let dusted = clamp(cover, 0.0, 1.0) * select(0.6, 0.75, physical);
+        let dusted = min(clamp(cover, 0.0, 1.0) * select(0.55, 2.2, physical), 0.85);
         paint = mix(paint, dirt * (0.8 + 0.4 * luminance(paint)), dusted);
         // The clumps: low down where the film is thickest, and up the side
         // after a crash.
-        let reach = in.mud * (0.1 + 0.9 * low + under) + scuffs * abs(rest_n.x) * blot * 0.35;
+        // (After a crash in the dry it is dust; only wet ground cakes on.)
+        let reach = in.mud * (0.1 + 0.9 * max(wheel, low) + under) + scuffs * abs(rest_n.x) * blot * 0.35 * wet;
         var clumps = 0.0;
         var rim = 1.0;
         var splat = 0.5;
@@ -686,7 +694,7 @@ fn fs_enhanced(in: VertexOut) -> @location(0) vec4<f32> {
             rim = 1.0 - 0.3 * (1.0 - smoothstep(0.05, 0.2, over)) * step(0.0, over);
         }
         // Specks flung on the front from the roost ahead.
-        let specks = smoothstep(1.0 - spatter * 0.42, 1.04 - spatter * 0.42, noise3(in.rest * 22.0)) * front * 0.8;
+        let specks = smoothstep(1.0 - spatter * 0.3, 1.04 - spatter * 0.3, noise3(in.rest * 22.0)) * front * 0.8;
         let lumps = max(clumps, specks);
         paint = mix(paint, dirt * 0.8 * rim * (0.85 + 0.3 * splat), lumps);
         albedo = select(paint, paint * paint, physical);
