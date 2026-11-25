@@ -526,6 +526,48 @@ impl Bike {
         self.o.ready = true;
     }
 
+    /// Vehicle::ResetToPlacement (0x5300d0): the bike dropped from far
+    /// below, then twice the wheels placed and the body settled on them
+    /// (SettleBodyToWheels 0x52a0f0): its up the wheels' ground normal,
+    /// its height so the highest tyre's rim meets the ground, then leaned
+    /// to the ground about the rear tyre.
+    pub(super) fn settle_original(&mut self, ground: &dyn Ground) {
+        self.orig_start();
+        let mut f = self.frame();
+        f.origin.y = -1000.0;
+        self.set_frame(f);
+        let lst = self.last_h;
+        for _ in 0..2 {
+            let f = self.frame();
+            let saved = Angles::of(f.o.z_axis, f.o.y_axis);
+            self.place_wheels(ground, &f, &saved, lst);
+            let [front, rear] = self.o.wheels;
+            let top = if rear.cp.surface.y > front.cp.surface.y { rear } else { front };
+            let up = ((front.cp.normal + rear.cp.normal) * 0.5).normalize_or(Vec3::Y);
+            let forward = norm_or(f.o.z_axis - up * f.o.z_axis.dot(up), f.o.z_axis);
+            let mut f = Frame { origin: f.origin, o: Mat3::from_cols(up.cross(forward), up, forward) };
+            f.origin.y += top.cp.surface.y - top.cp.world.y;
+            let axis = (front.cp.world - rear.cp.world).normalize_or(f.o.z_axis);
+            let pivot = f.local_point(rear.cp.world);
+            let saved = Angles::of(f.o.z_axis, f.o.y_axis);
+            let lean_cos = (self.o.lean_cos, self.o.wheels.map(|w| w.lean_cos));
+            self.lean_from_normal(axis, &f, &saved);
+            self.o.lean_cos = lean_cos.0;
+            for (w, c) in self.o.wheels.iter_mut().zip(lean_cos.1) {
+                w.lean_cos = c;
+            }
+            let local = f.local(axis);
+            if self.o.lean_angle.abs() > 0.001 && local.abs().max_element() > 0.001 {
+                f.rotate_about(pivot, local, self.o.lean_angle);
+            }
+            self.set_frame(f);
+        }
+        self.airborne = false;
+        self.update_angles();
+        let f = self.frame();
+        self.o.saved = Angles::of(f.o.z_axis, f.o.y_axis);
+    }
+
     /// Advances the bike by `dt` the way the game's frame does (0x52ffb0,
     /// SoultreePhysicsBaseObject 0x506b20 for the steps).
     pub(super) fn step_original(&mut self, ground: &dyn Ground, controls: Controls, dt: f32) {

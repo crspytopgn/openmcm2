@@ -1154,6 +1154,9 @@ impl Racer {
                 bike.racing = false;
                 bike.hull = HULL.get().cloned();
                 bike.cross_up = CROSS_UP.get().cloned();
+                // Settled on the ground as the original places it.
+                bike.original = original_physics();
+                bike.settle(ground);
                 // The launcher's Forgiving landings (not the game's).
                 bike.forgiving_landings = crate::tweaks::get().forgiving_landings;
                 Bike::Player(Box::new(bike))

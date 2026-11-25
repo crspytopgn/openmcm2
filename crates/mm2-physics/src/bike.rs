@@ -843,6 +843,15 @@ impl Bike {
         }
     }
 
+    /// With the original physics, settles the bike where it stands as the
+    /// original's ResetToPlacement does (wheels on the ground, body to
+    /// the slope).
+    pub fn settle(&mut self, ground: &dyn Ground) {
+        if self.original {
+            self.settle_original(ground);
+        }
+    }
+
     /// Puts the bike upright and at rest on the ground at `origin` (the
     /// model's origin) facing `direction`, pitched to the slope, with its
     /// static sag; any crash is over.
@@ -890,6 +899,9 @@ impl Bike {
         self.position = origin + self.orientation * COM;
         self.update_angles();
         self.o.ready = false;
+        if self.original {
+            self.settle_original(ground);
+        }
     }
 
     /// Puts the bike into a state read from the running game (a memory
