@@ -173,9 +173,9 @@ fn close_up() -> bool {
 }
 
 // Gusts rolling across the grass in waves, and the trees moving with them
-// (renderer: enh.traced.y).
+// (renderer: enh.traced.w).
 fn windy_day() -> bool {
-    return enh.traced.y > 0.5;
+    return enh.traced.w > 0.5;
 }
 
 // How strongly the air near the ground is lit (renderer: enh.traced.z),

@@ -1355,9 +1355,9 @@ impl TerrainRenderer {
                 horizon: day.as_ref().map_or([0.0; 4], |d| d.horizon.extend(1.0).into()),
                 smooth: e.smooth.as_ref().filter(|_| on.smooth).map_or([0.0; 4], |g| g.uniform(camera.position)),
                 surfaces: [flag(on.surfaces), flag(on.trees), flag(on.round), flag(on.floodlights && self.sky.is_none())],
-                // y: the wind in the grass and trees, z how strongly the air is
-                // lit (enhanced_fns.wgsl `windy_day`, `air_light`).
-                traced: [flag(traced), flag(on.wind), if on.lit_air { if on.nextgen { 1.0 } else { LIT_AIR_SUBTLE } } else { 0.0 }, 0.0],
+                // z: how strongly the air is lit, w the wind in the grass and
+                // trees (enhanced_fns.wgsl `air_light`, `windy_day`).
+                traced: [flag(traced), 0.0, if on.lit_air { if on.nextgen { 1.0 } else { LIT_AIR_SUBTLE } } else { 0.0 }, flag(on.wind)],
                 view_proj: (proj * camera.view()).to_cols_array_2d(),
                 ambient: lights.globals().0,
                 // z: the Next-gen preset's stronger look (enhanced_fns.wgsl
