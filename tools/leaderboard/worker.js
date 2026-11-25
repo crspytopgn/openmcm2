@@ -37,6 +37,12 @@
 //   POST /shared/report   id<TAB>voter: hidden once three players report it
 //   POST /shared/remove   id<TAB>key (or the SHARED_ADMIN secret)
 //
+// Each address (an IPv4 address, or an IPv6 /64) may send only so many
+// laps, ghosts, playtimes, ratings and reports a minute and a day
+// (LIMITS); past that the answer is 429 "slow down", which the game takes
+// as a failed send and tries again later. A shared track's stars, reports
+// and downloads count once per address, whatever voter name is sent.
+//
 // Each board keeps one lap per rider (their best), at most KEEP of them.
 
 import { connect } from "cloudflare:sockets";
@@ -68,6 +74,48 @@ function text(body, status = 200) {
     },
   });
 }
+
+// The address a request came from, as limits and votes count it: an IPv4
+// address whole, an IPv6 address by its /64 (one home's or phone's whole
+// block, which it can pick new addresses from at will).
+function network(ip) {
+  if (!ip.includes(":")) return ip;
+  const [head, tail] = ip.toLowerCase().split("::");
+  const h = head ? head.split(":") : [];
+  const t = tail ? tail.split(":") : [];
+  const all = tail === undefined ? h : [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t];
+  return `${all.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
+async function sha(s) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Who sent a request, hashed (no addresses are kept), with `what` in front
+// so the same address hashes apart for each use.
+function sender(request, what) {
+  return sha(`${what}:${network(request.headers.get("cf-connecting-ip") ?? "")}`);
+}
+
+// How many of each send one address may make: [a minute, a day]. Far
+// more than a player's game sends (laps and playtime after each race).
+const LIMITS = {
+  laps: [20, 400],
+  playtime: [20, 400],
+  ghost: [10, 150],
+  rate: [30, 300],
+  report: [5, 20],
+};
+
+// Whether this send is within its address's limits (and counts it).
+async function allowed(request, env, kind) {
+  const [minute, day] = LIMITS[kind];
+  const races = env.RACES.get(env.RACES.idFromName("all"));
+  return races.hit(await sender(request, "limit"), kind, minute, day);
+}
+
+const slowDown = () => text("slow down\n", 429);
 
 async function addLaps(request, env) {
   const body = await request.text();
@@ -335,6 +383,8 @@ export class Races extends DurableObject {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.sql.exec("CREATE TABLE IF NOT EXISTS rooms (name TEXT PRIMARY KEY, players INTEGER)");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS hits (who TEXT, kind TEXT, at INTEGER)");
+    this.sql.exec("CREATE INDEX IF NOT EXISTS hits_who ON hits (who, kind, at)");
     this.sql.exec(`CREATE TABLE IF NOT EXISTS races (
       id TEXT PRIMARY KEY, kind TEXT, address TEXT, origin TEXT, name TEXT,
       event INTEGER, track TEXT, players INTEGER, racing INTEGER,
@@ -343,6 +393,21 @@ export class Races extends DurableObject {
 
   sweep() {
     this.sql.exec("DELETE FROM races WHERE seen < ?", Date.now() - GONE);
+  }
+
+  // One send from `who` (a hashed address): false, and not counted, when
+  // it has made `minute` of this kind in the last minute or `day` in the
+  // last day.
+  hit(who, kind, minute, day) {
+    const now = Date.now();
+    if (now - (this.swept ?? 0) > 60 * 1000) {
+      this.sql.exec("DELETE FROM hits WHERE at < ?", now - 86400 * 1000);
+      this.swept = now;
+    }
+    const n = (since) => this.sql.exec("SELECT COUNT(*) AS n FROM hits WHERE who = ? AND kind = ? AND at > ?", who, kind, since).one().n;
+    if (n(now - 60 * 1000) >= minute || n(now - 86400 * 1000) >= day) return false;
+    this.sql.exec("INSERT INTO hits VALUES (?, ?, ?)", who, kind, now);
+    return true;
   }
 
   // A computer's race already looked at: whether it could be reached,
@@ -404,12 +469,12 @@ export default {
     if (request.method === "POST" && url.pathname === "/race/end") return endRace(request, env);
     if (request.method === "GET" && url.pathname === "/races") return listRaces(url, env);
     if (url.pathname.startsWith("/room/")) return joinRoom(request, url, env);
-    if (request.method === "POST" && url.pathname === "/laps") return addLaps(request, env);
+    if (request.method === "POST" && url.pathname === "/laps") return (await allowed(request, env, "laps")) ? addLaps(request, env) : slowDown();
     if (request.method === "GET" && url.pathname === "/board") return board(url, env);
     if (request.method === "GET" && url.pathname === "/boards") return boards(url, env);
-    if (request.method === "POST" && url.pathname === "/playtime") return addPlaytime(request, env);
+    if (request.method === "POST" && url.pathname === "/playtime") return (await allowed(request, env, "playtime")) ? addPlaytime(request, env) : slowDown();
     if (request.method === "GET" && url.pathname === "/playtime") return playtime(env);
-    if (request.method === "POST" && url.pathname === "/ghost") return addGhost(request, env);
+    if (request.method === "POST" && url.pathname === "/ghost") return (await allowed(request, env, "ghost")) ? addGhost(request, env) : slowDown();
     if (request.method === "GET" && url.pathname === "/ghosts") return ghosts(env);
     if (request.method === "GET" && url.pathname === "/ghost") return ghost(url, env);
     if (url.pathname === "/shared" || url.pathname.startsWith("/shared/")) return shared(request, url, env);
@@ -752,11 +817,6 @@ function line(s, most) {
   return String(s ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, most).trim();
 }
 
-async function sha(s) {
-  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 function random(n, abc = "abcdefghjkmnpqrstuvwxyz23456789") {
   const b = crypto.getRandomValues(new Uint8Array(n));
   return [...b].map((v) => abc[v % abc.length]).join("");
@@ -818,8 +878,10 @@ async function shared(request, url, env) {
   }
   if (request.method === "GET" && p === "/shared/track") {
     const id = url.searchParams.get("id") ?? "";
+    // A download counts once per address (the voter name only says the
+    // game wants it counted).
     const voter = url.searchParams.get("voter") ?? "";
-    const json = await box.get(id, voterOk(voter) ? voter : "");
+    const json = await box.get(id, voterOk(voter) ? await sender(request, "voter") : "");
     if (json === null) return text("gone\n", 404);
     return new Response(json, { headers: { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" } });
   }
@@ -831,8 +893,7 @@ async function shared(request, url, env) {
     if (!voterOk(voter)) return text("who?\n", 400);
     const c = tidyCourse(body);
     if (!c) return text("not a track\n", 400);
-    const ip = request.headers.get("cf-connecting-ip") ?? "";
-    const from = await sha(`shared:${ip}`);
+    const from = await sender(request, "shared");
     const id = url.searchParams.get("id");
     const key = url.searchParams.get("key");
     const json = JSON.stringify(c);
@@ -850,12 +911,16 @@ async function shared(request, url, env) {
   if (p === "/shared/rate") {
     const stars = Number.parseInt(f[2], 10);
     if (!voterOk(f[1]) || !(stars >= 1 && stars <= 5)) return text("which?\n", 400);
-    const r = await box.rate(f[0], f[1], stars);
+    if (!(await allowed(request, env, "rate"))) return slowDown();
+    // One vote per address: a new one from it replaces its last.
+    const r = await box.rate(f[0], await sender(request, "voter"), stars);
     return r ? text(`ok\t${r.stars}\t${r.votes}\n`) : text("gone\n", 404);
   }
   if (p === "/shared/report") {
     if (!voterOk(f[1])) return text("who?\n", 400);
-    return text(`${await box.report(f[0], f[1])}\n`);
+    if (!(await allowed(request, env, "report"))) return slowDown();
+    // Three reports from three addresses hide a track.
+    return text(`${await box.report(f[0], await sender(request, "voter"))}\n`);
   }
   if (p === "/shared/remove") {
     const admin = env.SHARED_ADMIN && f[1] === env.SHARED_ADMIN;
@@ -944,8 +1009,9 @@ export class Shared extends DurableObject {
       .toArray();
   }
 
+  // A hidden (reported) track is gone for downloads too.
   get(id, voter) {
-    const r = this.sql.exec("SELECT parts FROM tracks WHERE id = ?", id).toArray()[0];
+    const r = this.sql.exec("SELECT parts FROM tracks WHERE id = ? AND hidden = 0", id).toArray()[0];
     if (!r) return null;
     const json = this.sql.exec("SELECT data FROM parts WHERE id = ? ORDER BY n", id).toArray().map((p) => p.data).join("");
     if (voter && !this.sql.exec("SELECT 1 FROM got WHERE id = ? AND voter = ?", id, voter).toArray().length) {
