@@ -4670,6 +4670,23 @@ fn load_log(what: &str) {
     let _ = what;
 }
 
+/// The race frames drawn since the track loaded, for `frame_log`; at
+/// `u32::MAX` while no race has just begun.
+static RACE_FRAMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+
+/// How many of a race's first frames log each of their steps.
+const LOGGED_FRAMES: u32 = 10;
+
+/// A line in `last-run.log` for a step of one of the race's first frames,
+/// so a race that never shows its first picture shows where it stops
+/// (issue #192).
+fn frame_log(what: &str) {
+    let n = RACE_FRAMES.load(std::sync::atomic::Ordering::Relaxed);
+    if n < LOGGED_FRAMES {
+        load_log(&format!("race frame {}: {what}", n + 1));
+    }
+}
+
 /// The same in a browser alone, without a step of the game's bar.
 async fn page_stage(stage: &str) {
     #[cfg(target_arch = "wasm32")]
@@ -5202,6 +5219,7 @@ impl App {
         }
         let Loading { setup, job, .. } = self.loading.take().unwrap();
         load_log("track read");
+        RACE_FRAMES.store(0, std::sync::atomic::Ordering::Relaxed);
         #[cfg(target_arch = "wasm32")]
         web::track_loading(false);
         match job.join() {
@@ -6785,6 +6803,7 @@ impl App {
         // A suboptimal frame (the Steam Deck's full screen gives them) is
         // still drawn and shown, and the surface made anew after: wgpu
         // refuses to configure it while a frame is out.
+        frame_log("waiting for the window's picture");
         let (frame, suboptimal) = match s.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
@@ -6959,7 +6978,9 @@ impl App {
                 None => s.preview = None,
             }
         }
+        frame_log("sending the drawing to the graphics card");
         s.queue.submit(commands);
+        frame_log("sent");
         let shoot = std::mem::take(&mut self.shoot);
         // A browser can't wait for the picture to come back from the
         // GPU: the page saves the canvas, after it is shown.
@@ -6983,6 +7004,7 @@ impl App {
         }
         s.window.pre_present_notify();
         s.queue.present(frame);
+        frame_log("presented");
         #[cfg(target_arch = "wasm32")]
         if web_photo {
             let said = if web::save_picture() { "Picture saved to your downloads" } else { "Couldn't save the picture" };
@@ -7504,6 +7526,7 @@ impl ApplicationHandler for App {
                     dynres::reset();
                 }
                 self.poll_pads(event_loop, dt);
+                frame_log("riding");
                 self.update(dt);
                 self.builder_tick(dt);
                 if self.quit {
@@ -7511,7 +7534,12 @@ impl ApplicationHandler for App {
                     return;
                 }
                 self.feel_pad();
+                frame_log("drawing");
                 self.redraw();
+                frame_log("shown");
+                if racing {
+                    let _ = RACE_FRAMES.fetch_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |n| (n < LOGGED_FRAMES).then_some(n + 1));
+                }
                 #[cfg(target_arch = "wasm32")]
                 web::racing(self.race.is_some() && self.replay.is_none() && !self.in_menus());
                 #[cfg(target_arch = "wasm32")]
