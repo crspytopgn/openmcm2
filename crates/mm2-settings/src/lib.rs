@@ -250,7 +250,7 @@ pub fn parse_difficulty(text: &str) -> Option<[[u32; 3]; 4]> {
     (n.len() == 12 && n.iter().all(|v| (1..=MOST_STEP).contains(v))).then_some(t)
 }
 
-pub const UPGRADES: [(&str, &str, bool); 31] = [
+pub const UPGRADES: [(&str, &str, bool); 32] = [
     ("lighting", "Per-pixel lighting", true),
     ("shadows", "Sun shadows", true),
     ("distance", "Far draw distance and haze", true),
@@ -289,6 +289,8 @@ pub const UPGRADES: [(&str, &str, bool); 31] = [
     // screen, or with TAA).
     ("bounce", "Bounce light", true),
     ("fsr", "AMD FSR upscaling", true),
+    // Dirt building up on the bikes and riders through a race.
+    ("grime", "Dirt builds up on bikes and riders", false),
 ];
 
 #[derive(Debug, Clone, PartialEq)]

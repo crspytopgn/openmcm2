@@ -128,6 +128,11 @@ pub struct Enhanced {
     /// sharpened), and in place of temporal anti-aliasing's own
     /// sharpening. Off unless asked.
     pub fsr: bool,
+    /// Dirt that builds up very gradually on the bikes and riders through
+    /// a race (crate::grime): low down first, more riding in another's
+    /// roost, going down or on wet ground; in place of `mud`'s quicker
+    /// caking. Off unless asked.
+    pub grime: bool,
     /// How dirty the bikes start, 0 to 1.
     pub mud_start: f32,
     /// How strongly the new ground's detail shows, 0 to 1.
@@ -219,6 +224,7 @@ impl Default for Enhanced {
             far: false,
             bounce: false,
             fsr: false,
+            grime: false,
             mud_start: 0.0,
             detail: 0.5,
             weather: Weather::Clear,
@@ -460,6 +466,7 @@ impl Enhanced {
                 "shafts" => e.shafts = on,
                 "cinematic" | "blur" => e.cinematic = on,
                 "mud" | "splash" => e.mud = on,
+                "grime" | "dirty-bikes" => e.grime = on,
                 "smooth" => e.smooth = on,
                 "scenery" | "props" => e.scenery = on,
                 "surfaces" | "materials" => e.surfaces = on,
@@ -488,7 +495,7 @@ impl Enhanced {
                 "fsr" | "upscaling" => e.fsr = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-roost, no-bikes, no-shafts, no-cinematic, no-mud, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-dynamic, raytracing, taa, supersample, far, bounce, fsr, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra/max, resolution=1080p or 85%, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-roost, no-bikes, no-shafts, no-cinematic, no-mud, grime, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-dynamic, raytracing, taa, supersample, far, bounce, fsr, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra/max, resolution=1080p or 85%, weather=rain or time=dusk"
                     ))
                 }
             }

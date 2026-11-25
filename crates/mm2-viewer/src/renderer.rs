@@ -259,6 +259,9 @@ struct Enhanced {
     /// How dirty each bike and its rider are, 0 to 1, and where the bike
     /// was last frame (drawing coordinates).
     mud: Vec<(f32, Option<Vec3>)>,
+    /// Dirt building up on each bike and rider through the race, and the
+    /// ground's colours it takes (the "grime" switch, in place of `mud`).
+    grime: Option<(crate::grime::Grime, crate::grime::GroundColours)>,
     post: crate::post::Post,
     /// The scene for the ray-traced shadows, when they are drawn, and the
     /// terrain's pipeline for their depth pass.
@@ -369,6 +372,17 @@ impl TerrainRenderer {
             }
         }
         let images = textures;
+        // The painted ground's colour, tile by tile, for the dirt that
+        // builds up on the bikes (crate::grime), before the tiles are
+        // packed into layers.
+        let ground_colours = crate::graphics::made().is_some_and(|e| e.grime).then(|| {
+            let average: Vec<Vec3> = images.iter().map(crate::grime::average_colour).collect();
+            crate::grime::GroundColours {
+                cells: tile_map.iter().map(|&t| average.get(t as usize).copied().unwrap_or(crate::grime::DIRT)).collect(),
+                side: tiles_per_side,
+                span: tile_size as f32 * terrain.scale,
+            }
+        });
         // The same picture once, and four to a layer past what the GPU
         // takes (a browser may take only 256).
         // (MM2_MAX_LAYERS=256 tries a browser's limit on a desktop.)
@@ -593,6 +607,7 @@ impl TerrainRenderer {
                 crate::ruts::RutPainter::new(device, glam::Vec2::new(0.0, -size), size, wear)
             }),
             mud: Vec::new(),
+            grime: ground_colours.map(|g| (crate::grime::Grime::new(upgrades.map_or(0.0, |u| u.mud_start)), g)),
             crowd: None,
             bikes: Vec::new(),
             rain: upgrades.is_some_and(|e| e.weather == crate::graphics::Weather::Rain).then(|| {
@@ -992,9 +1007,14 @@ impl TerrainRenderer {
             };
             dust.step(feed, dt, wet, budget);
         }
-        // Dirt builds up as a bike runs on the ground: slowly in the dry,
-        // fast on wet ground.
-        if upgrades.is_some_and(|u| u.mud) && dt > 0.0 {
+        // Dirt builds up very gradually through the race, taking the
+        // ground's colour (crate::grime).
+        if let Some((grime, colours)) = &mut e.grime {
+            let drawn: Vec<([Option<Vec3>; 2], crate::dust::Kick)> = feed.iter().map(|(t, k)| (t.map(|p| p.map(from_game)), *k)).collect();
+            grime.step(&drawn, dt, wet, |at| colours.at(at));
+        } else if upgrades.is_some_and(|u| u.mud) && dt > 0.0 {
+            // Dirt builds up as a bike runs on the ground: slowly in the
+            // dry, fast on wet ground.
             let start = upgrades.map_or(0.0, |u| u.mud_start);
             e.mud.resize(bikes.len(), (start, None));
             for (m, tyres) in e.mud.iter_mut().zip(bikes) {
@@ -1032,6 +1052,16 @@ impl TerrainRenderer {
     /// has got.
     pub fn show_mud(&mut self, bike: usize, models: [usize; 2]) {
         let start = crate::graphics::enhanced().map_or(0.0, |u| u.mud_start);
+        if let Some((grime, _)) = self.enhanced.as_ref().and_then(|e| e.grime.as_ref()) {
+            let (a, b) = grime.coat(bike).packed();
+            if let Some(objects) = &mut self.objects {
+                for m in models {
+                    objects.set_mud(m, a);
+                    objects.set_coat(m, b);
+                }
+            }
+            return;
+        }
         let mud = self.enhanced.as_ref().and_then(|e| e.mud.get(bike)).map_or(start, |m| m.0);
         if let Some(objects) = &mut self.objects {
             for m in models {
@@ -1348,7 +1378,7 @@ impl TerrainRenderer {
                 horizon: day.as_ref().map_or([0.0; 4], |d| d.horizon.extend(1.0).into()),
                 smooth: e.smooth.as_ref().filter(|_| on.smooth).map_or([0.0; 4], |g| g.uniform(camera.position)),
                 surfaces: [flag(on.surfaces), flag(on.trees), flag(on.round), flag(on.floodlights && self.sky.is_none())],
-                traced: [flag(traced), 0.0, 0.0, 0.0],
+                traced: [flag(traced), flag(e.grime.is_some()), 0.0, 0.0],
                 view_proj: (proj * camera.view()).to_cols_array_2d(),
                 ambient: lights.globals().0,
                 terrain: [self.grid[1], self.grid[2] * self.grid[3], 0.0, 0.0],

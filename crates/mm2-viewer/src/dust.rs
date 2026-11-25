@@ -89,6 +89,9 @@ pub struct Kick {
     pub spin: f32,
     /// The ground under the rear tyre is dirt that flies (GenerateDirt).
     pub dirt: bool,
+    /// The rider is down (for the dirt it leaves on bike and rider,
+    /// crate::grime).
+    pub crashed: bool,
 }
 
 /// What the dust and dirt may do, from the graphics settings.
@@ -981,7 +984,7 @@ mod tests {
     /// spinning by `spin`.
     fn ride(d: &mut Cloud, k: usize, speed: f32, spin: f32) {
         let at = Vec3::new(0.0, 0.0, k as f32 * speed * 0.02);
-        let kick = Kick { dusty: true, spin, dirt: true };
+        let kick = Kick { dusty: true, spin, dirt: true, crashed: false };
         let budget = Budget { dust: true, roost: true, amount: 1.0 };
         d.step(&[([Some(at), Some(at - Vec3::Z * 4.5)], kick)], 0.02, false, budget);
     }

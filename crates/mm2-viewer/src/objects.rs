@@ -192,8 +192,11 @@ pub struct AnimatedModel {
     /// Left out of the camera's picture but still casting its shadow (the
     /// player's own rider, seen from the Helmet Cam).
     unseen: bool,
-    /// How dirty it is, 0 to 1, for the enhanced drawing.
+    /// How dirty it is, 0 to 1, for the enhanced drawing; or with the
+    /// dirt that builds up (crate::grime), its coat packed in two numbers,
+    /// the second negative (0 without).
     mud: f32,
+    coat: f32,
     /// The rider's morphs, the first of its vertices in the mesh and those
     /// vertices at rest.
     morph: Option<(Arc<Morphs>, u32, Arc<Vec<Vertex>>)>,
@@ -361,6 +364,7 @@ impl AnimatedModel {
                 0.0
             };
             node.y_axis.w = self.mud;
+            node.z_axis.w = self.coat;
             nodes[self.first_node as usize + i] = node;
         }
         world
@@ -797,6 +801,7 @@ impl ObjectMesh {
                 ghost: false,
                 unseen: false,
                 mud: 0.0,
+                coat: 0.0,
                 morph,
                 skin,
                 spins: Vec::new(),
@@ -841,6 +846,7 @@ impl ObjectMesh {
                 ghost: false,
                 unseen: false,
                 mud: 0.0,
+                coat: 0.0,
                 morph: None,
                 skin: None,
                 spins: Vec::new(),
@@ -2054,6 +2060,14 @@ impl ObjectRenderer {
     pub fn set_mud(&mut self, index: usize, mud: f32) {
         if let Some(a) = self.animated.get_mut(index) {
             a.mud = mud;
+        }
+    }
+
+    /// Animated model `index`'s coat of dirt (crate::grime::Coat::packed's
+    /// second number; 0 for none).
+    pub fn set_coat(&mut self, index: usize, coat: f32) {
+        if let Some(a) = self.animated.get_mut(index) {
+            a.coat = coat;
         }
     }
 

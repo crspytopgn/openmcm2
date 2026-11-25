@@ -77,6 +77,7 @@ mod gpu_time;
 mod grass;
 mod ruts;
 mod dust;
+mod grime;
 mod rain;
 mod smooth;
 mod scenery;
@@ -1503,11 +1504,12 @@ fn tyre_places(race: &Race, ground: &TrackGround) -> Vec<([Option<Vec3>; 2], dus
                     dusty: dusty(at[1]) || dusty(at[0]),
                     spin: b.roost().1,
                     dirt: at[1].is_some_and(|(p, on)| !on && dirt(Some(p))),
+                    crashed: b.crash.is_some(),
                 };
                 (at.map(|t| t.map(|(at, _)| at)), kick)
             }
             race::Bike::Computer(c) => match &c.wreck {
-                Some(_) => ([None; 2], dust::Kick::default()),
+                Some(_) => ([None; 2], dust::Kick { crashed: true, ..Default::default() }),
                 None => {
                     let rd = &c.rider;
                     let ends = drawn_ends(r.bike.place());
@@ -1516,6 +1518,7 @@ fn tyre_places(race: &Race, ground: &TrackGround) -> Vec<([Option<Vec3>; 2], dus
                         dusty: at.iter().flatten().any(|&p| dusty(Some((p, false)))),
                         spin: 0.0,
                         dirt: dirt(at[1]),
+                        crashed: false,
                     };
                     (at, kick)
                 }
@@ -1528,6 +1531,7 @@ fn tyre_places(race: &Race, ground: &TrackGround) -> Vec<([Option<Vec3>; 2], dus
                     dusty: at.iter().flatten().any(|&p| dusty(Some((p, false)))),
                     spin: 0.0,
                     dirt: dirt(at[1]),
+                    crashed: b.crashed(),
                 };
                 (at, kick)
             }

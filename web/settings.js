@@ -37,6 +37,7 @@ export const UPGRADES = [
   ["roost", "Flying dirt (roost)", true, "Real roost: while the back tyre spins (or you pull hard, or slide) it throws a low jet of fine grit, crumbs and clods with a brown plume of dirt behind, all falling fast. Only on dirt; mud in the rain. Fewer pieces on Low."],
   ["bounce", "Bounce light", true, "Sunlight bouncing off the ground and walls: sunlit dirt throws a soft warm light into the shaded side of the bike and rider, and pale corners don't go as dark. Subtle. Costs a little on a slower computer."],
   ["fsr", "AMD FSR upscaling", true, "AMD FidelityFX Super Resolution: on a big screen the 3D scene is drawn smaller to stay smooth; FSR stretches it back up along its edges and gently sharpens it, so it looks close to full sharpness instead of soft. With TAA it rebuilds the picture from several frames, as FSR 2 does. A big help on laptops."],
+  ["grime", "Dirt builds up on bikes and riders", false, "Dirt builds up very slowly on the bikes and riders through a race, the colour of the track you ride: a light dust on the wheels and lower bike first, creeping up the boots and legs lap by lap. Riding in another rider's roost spatters your front, a crash scuffs dirt up your side, and wet tracks cake on mud much faster. Takes the place of the quicker mud caking. Looks only, light on frame rate."],
 ];
 
 // In a browser, Ultra draws as High does (the game caps both: see
