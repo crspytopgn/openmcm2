@@ -9,9 +9,10 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Vec2, Vec3};
 
 /// The groove's width, ft, and how much one tyre's pass adds to it (of
-/// 1): a handful of bikes make a full rut.
+/// 1): a tyre's first pass leaves a mark you can see, two or three make
+/// a rut, a handful of bikes a deep one.
 const WIDTH: f32 = 0.5;
-const PASS: f32 = 0.15;
+const PASS: f32 = 0.35;
 /// One pass's share for the gentle wear instead.
 const WEAR_PASS: f32 = 0.1;
 /// Frames a tyre may be off the ground and its rut still join up.

@@ -274,7 +274,7 @@ impl Default for Enhanced {
             far: false,
             bounce: false,
             fsr: false,
-            grime: false,
+            grime: true,
             mud_start: 0.0,
             detail: 0.5,
             weather: Weather::Clear,
@@ -584,7 +584,7 @@ impl Enhanced {
                 "litair" | "lit-air" => e.lit_air = on,
                 _ => {
                     return Err(format!(
-                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-roost, no-bikes, no-shafts, no-cinematic, no-mud, grime, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-closeup, no-wind, no-litair, no-dynamic, raytracing, taa, supersample, far, bounce, fsr, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra/max/nextgen, look=warm, resolution=1080p or 85%, weather=rain or time=dusk"
+                        "unknown upgrade {item:?}: try no-msaa, no-lighting, no-shadows, no-distance, no-bloom, no-ao, no-sky, no-grade, no-ground, no-grass, no-clouds, no-ruts, no-dust, no-roost, no-bikes, no-shafts, no-cinematic, no-mud, no-grime, no-smooth, no-scenery, no-surfaces, no-trees, no-soft, no-wear, no-round, no-floodlights, no-nightlights, no-gtao, no-contact, no-ssr, no-skylight, no-pbr, no-filmic, no-air, no-closeup, no-wind, no-litair, no-dynamic, raytracing, taa, supersample, far, bounce, fsr, mud=0.5, detail=0.5, msaa=8, quality=low/medium/high/raytraced/ultra/max/nextgen, look=warm, resolution=1080p or 85%, weather=rain or time=dusk"
                     ))
                 }
             }

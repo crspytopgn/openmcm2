@@ -543,7 +543,7 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
         let deep = smoothstep(0.3, 1.0, here);
         // Loose dirt pushed out just beside a rut.
         lip = smoothstep(0.06, 0.16, blur) * (1.0 - smoothstep(0.08, 0.18, here)) * close;
-        worn = smoothstep(0.0, 0.3, blur) * (0.15 + 0.15 * (1.0 - close)) + mark * 0.12 * (1.0 - rut) + deep * 0.25;
+        worn = smoothstep(0.0, 0.3, blur) * (0.15 + 0.15 * (1.0 - close)) + mark * 0.2 * (1.0 - rut) + deep * 0.25;
         // The rut's walls, from its shape round about.
         let hx = rut_shape(px) - rut_shape(nx);
         let hz = rut_shape(pz) - rut_shape(nz);
