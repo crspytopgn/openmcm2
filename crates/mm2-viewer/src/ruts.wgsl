@@ -29,5 +29,7 @@ fn vs_main(@builtin(vertex_index) vi: u32, @location(0) ends: vec4<f32>, @locati
 @fragment
 fn fs_main(in: Out) -> @location(0) vec4<f32> {
     let d = abs(in.across);
-    return vec4<f32>(in.pass_depth * (1.0 - smoothstep(0.2, 1.0, d)), 0.0, 0.0, 1.0);
+    // A soft, rounded profile, so the passes add up to a smooth groove
+    // with no hard steps where one frame's line meets the next.
+    return vec4<f32>(in.pass_depth * 1.7 * (1.0 - smoothstep(0.0, 1.0, d)), 0.0, 0.0, 1.0);
 }

@@ -533,20 +533,28 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
         }
         let blur = (px + nx + pz + nz + ring) / 8.0;
         let close = 1.0 - smoothstep(50.0 * reach, 160.0 * reach, dist);
-        // Read as a contour of the smooth map, so a rut has a crisp, true
-        // edge however coarse the map's texels; broken up by the dirt's
-        // own grain, so no line is drawn clean.
-        let rough_edge = 0.75 + 0.5 * clamp(surface, 0.0, 1.0);
-        let here = mix(blur, c, close) * mix(1.0, rough_edge, close);
+        // Read as a contour of the map, smoothed a little first (a tent
+        // over the nearest texels) so the edge follows the tyre's line
+        // rather than the map's texels and the joins between one frame's
+        // line and the next; only gently broken up by the dirt's grain,
+        // so the edge is never ragged.
+        let tent = (c * 4.0 + px + nx + pz + nz) / 8.0;
+        let rough_edge = 0.92 + 0.16 * clamp(surface, 0.0, 1.0);
+        let here = mix(blur, tent, close) * mix(1.0, rough_edge, close);
         let mark = smoothstep(0.02, 0.07, here);
-        rut = smoothstep(0.16, 0.3, here);
+        rut = smoothstep(0.14, 0.32, here);
         let deep = smoothstep(0.3, 1.0, here);
         // Loose dirt pushed out just beside a rut.
         lip = smoothstep(0.06, 0.16, blur) * (1.0 - smoothstep(0.08, 0.18, here)) * close;
         worn = smoothstep(0.0, 0.3, blur) * (0.15 + 0.15 * (1.0 - close)) + mark * 0.2 * (1.0 - rut) + deep * 0.25;
-        // The rut's walls, from its shape round about.
-        let hx = rut_shape(px) - rut_shape(nx);
-        let hz = rut_shape(pz) - rut_shape(nz);
+        // The rut's walls, from its shape round about: from the wider ring
+        // of samples, so the light on them rolls smoothly.
+        let ring_x = (textureSampleLevel(rut_map, rut_sampler, ruv + vec2<f32>(2.4 * e, 0.0), 0.0).r + px) * 0.5;
+        let ring_nx = (textureSampleLevel(rut_map, rut_sampler, ruv - vec2<f32>(2.4 * e, 0.0), 0.0).r + nx) * 0.5;
+        let ring_z = (textureSampleLevel(rut_map, rut_sampler, ruv + vec2<f32>(0.0, 2.4 * e), 0.0).r + pz) * 0.5;
+        let ring_nz = (textureSampleLevel(rut_map, rut_sampler, ruv - vec2<f32>(0.0, 2.4 * e), 0.0).r + nz) * 0.5;
+        let hx = (rut_shape(ring_x) - rut_shape(ring_nx)) * 0.75;
+        let hz = (rut_shape(ring_z) - rut_shape(ring_nz)) * 0.75;
         bent = normalize(bent + vec3<f32>(hx, 0.0, hz) * 0.8 * close * near);
     }
     // Take out the light the painter put in: as the scene's sun would
