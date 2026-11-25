@@ -318,6 +318,49 @@ pub fn switch_tile(ui: &mut Ui, on: &mut bool, name: &str, about: &str, width: f
     tile.inner.on_hover_text(about)
 }
 
+/// A small switch with only its name, in a tile `width` wide; what it
+/// does shows when the pointer is on it. For long lists of them.
+pub fn switch_row(ui: &mut Ui, on: &mut bool, name: &str, about: &str, width: f32) -> egui::Response {
+    let tile = egui::Frame::new()
+        .fill(SUNKEN)
+        .corner_radius(8)
+        .inner_margin(egui::Margin::symmetric(10, 7))
+        .show(ui, |ui| {
+            ui.set_width(width - 20.0);
+            ui.set_min_height(24.0);
+            ui.horizontal(|ui| {
+                let r = switch(ui, on);
+                ui.add(egui::Label::new(RichText::new(name).color(TEXT)).wrap());
+                r
+            })
+            .inner
+        });
+    if !about.is_empty() {
+        tile.response.on_hover_text(about);
+    }
+    tile.inner.on_hover_text(about)
+}
+
+/// A setting with a few choices, its name above them, in a tile `width`
+/// wide like [`switch_row`]'s; the one clicked, if any.
+pub fn choice_tile<T: PartialEq + Copy>(ui: &mut Ui, name: &str, about: &str, current: T, choices: &[Choice<T>], width: f32) -> Option<T> {
+    let tile = egui::Frame::new()
+        .fill(SUNKEN)
+        .corner_radius(8)
+        .inner_margin(egui::Margin::symmetric(10, 7))
+        .show(ui, |ui| {
+            ui.set_width(width - 20.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(name).color(TEXT)).on_hover_text(about);
+                ui.add_space(8.0);
+                segmented(ui, current, choices)
+            })
+            .inner
+        });
+    tile.response.on_hover_text(about);
+    tile.inner
+}
+
 /// A page in the sidebar: its icon and name, filled when it shows.
 pub fn nav(ui: &mut Ui, on: bool, i: MaterialIcon, name: &str) -> bool {
     let text = RichText::new(with(i, name)).size(15.5).color(if on { Color32::WHITE } else { TEXT });

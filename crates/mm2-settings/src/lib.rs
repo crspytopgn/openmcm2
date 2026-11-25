@@ -6,30 +6,63 @@
 use std::path::PathBuf;
 
 /// The window sizes on offer by shape: its name, what it suits, and the
-/// sizes with their names.
-pub const SHAPES: [(&str, &str, &[(u32, u32, &str)]); 3] = [
-    (
-        "4:3 Classic",
-        "The original game's shape, for older square monitors.",
-        &[(800, 600, "SVGA"), (1024, 768, "XGA"), (1280, 960, ""), (1600, 1200, "UXGA")],
-    ),
+/// sizes with their names. Widescreen first: most screens are.
+pub const SHAPES: [(&str, &str, &[(u32, u32, &str)]); 5] = [
     (
         "16:9 Widescreen",
         "Most monitors, laptops and TVs.",
         &[
             (1280, 720, "HD 720p"),
+            (1366, 768, "WXGA"),
             (1600, 900, "HD+"),
             (1920, 1080, "Full HD 1080p"),
+            (2048, 1152, "QWXGA"),
             (2560, 1440, "QHD 1440p"),
+            (3200, 1800, "QHD+"),
             (3840, 2160, "4K UHD"),
+            (5120, 2880, "5K"),
+        ],
+    ),
+    (
+        "16:10",
+        "MacBooks, many laptops and older widescreen monitors.",
+        &[
+            (1280, 800, "WXGA"),
+            (1440, 900, "WXGA+"),
+            (1680, 1050, "WSXGA+"),
+            (1920, 1200, "WUXGA"),
+            (2560, 1600, "WQXGA"),
+            (2880, 1800, ""),
+            (3840, 2400, "WQUXGA"),
         ],
     ),
     (
         "21:9 Ultrawide",
         "Ultrawide monitors: the race shows more to the sides.",
-        &[(2560, 1080, "UW-FHD"), (3440, 1440, "UW-QHD"), (3840, 1600, "UW-QHD+")],
+        &[(2560, 1080, "UW-FHD"), (3440, 1440, "UW-QHD"), (3840, 1600, "UW-QHD+"), (5120, 2160, "5K2K")],
+    ),
+    (
+        "32:9 Super ultrawide",
+        "Super ultrawide monitors: the race is drawn 21:9 in the middle.",
+        &[(3840, 1080, "DFHD"), (5120, 1440, "DQHD")],
+    ),
+    (
+        "4:3 Classic",
+        "The original game's shape, for older square monitors.",
+        &[
+            (800, 600, "SVGA"),
+            (1024, 768, "XGA"),
+            (1280, 960, ""),
+            (1280, 1024, "SXGA (5:4)"),
+            (1400, 1050, "SXGA+"),
+            (1600, 1200, "UXGA"),
+            (2048, 1536, "QXGA"),
+        ],
     ),
 ];
+
+/// A new window's size: widescreen, and small enough for any screen.
+pub const DEFAULT_WINDOW: (u32, u32) = (1280, 720);
 
 /// Whether a window `size` fits on `monitor` with room to spare: narrower,
 /// and short enough to leave the title bar and taskbar showing.
@@ -46,9 +79,11 @@ pub fn parse_size(v: &str) -> Option<(u32, u32)> {
 /// Which of [`SHAPES`] a `width × height` is nearest.
 pub fn shape_of((w, h): (u32, u32)) -> usize {
     match w as f32 / h.max(1) as f32 {
-        r if r < 1.55 => 0,
-        r if r < 2.1 => 1,
-        _ => 2,
+        r if r < 1.45 => 4,
+        r if r < 1.7 => 1,
+        r if r < 2.1 => 0,
+        r if r < 2.9 => 2,
+        _ => 3,
     }
 }
 
@@ -180,7 +215,7 @@ impl Quality {
     /// The most pixels this preset draws the scene with on Auto, as the
     /// launcher says it.
     pub fn most_pixels(self) -> &'static str {
-        ["up to 1280×720 worth", "up to 1920×1080 worth", "up to 2560×1440 worth", "up to 2560×1440 worth", "the screen's own", "up to 3840×2160 worth, shrunk to the screen", "the screen's own"][self as usize]
+        ["up to 1280×720 worth", "up to 1920×1080 worth", "up to 2560×1440 worth", "up to 2560×1440 worth", "the screen's own", "up to 3840×2160 worth, shrunk to the screen", "up to 2560×1440 worth, rebuilt to the screen by TAA and FSR"][self as usize]
     }
 
     /// Whether the upgrade `name` is on with this preset unless changed,
@@ -746,7 +781,7 @@ impl Default for Settings {
             upgrades: UPGRADES.iter().map(|u| Quality::High.has(u.0)).collect(),
             fullscreen: false,
             screen: (0, 0),
-            window: (1024, 768),
+            window: DEFAULT_WINDOW,
             vsync: true,
             centred_display: false,
             show_fps: false,
@@ -876,7 +911,9 @@ impl Settings {
                 "screen" => s.screen = parse_size(v).unwrap_or((0, 0)),
                 "window" => {
                     if let Some(z) = parse_size(v).filter(|z| z.0 > 0 && z.1 > 0) {
-                        s.window = z;
+                        // Before version 6 a new window was 4:3, 1024 x 768:
+                        // that one, never picked, becomes widescreen.
+                        s.window = if version < 6 && z == (1024, 768) { DEFAULT_WINDOW } else { z };
                     }
                 }
                 "vsync" => s.vsync = yes(v),
@@ -943,7 +980,7 @@ impl Settings {
         let p = |o: &Option<PathBuf>| o.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let b = |v: bool| if v { "1" } else { "0" };
         let mut t = format!(
-            "version=5\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nauto_quality={}\nquality={}\nantialiasing={}\nresolution={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nscreen={}x{}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nupdate_notice={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\nopengl={}\nforgiving_landings={}\n",
+            "version=6\ngame={}\nhires={}\nuse_hires={}\nenhanced={}\nauto_quality={}\nquality={}\nantialiasing={}\nresolution={}\ntime={}\nweather={}\ndetail={}\nfullscreen={}\nscreen={}x{}\nwindow={}x{}\nvsync={}\ncentred_display={}\nshow_fps={}\ndifficulty={}\nvibration={}\nvibration_strength={}\nsharp_display={}\nair_steer={}\nair_brake={}\nquick_get_up={}\nlap_gap={}\nsteady_camera={}\nfov={}\ncheck_updates={}\nupdate_notice={}\nclean_starts={}\none_lap={}\nkmh={}\nmute_in_background={}\nscreenshot_key={}\nopengl={}\nforgiving_landings={}\n",
             p(&self.game),
             p(&self.hires),
             b(self.use_hires),
@@ -1306,6 +1343,18 @@ mod tests {
     }
 
     #[test]
+    fn windows_start_widescreen() {
+        assert_eq!(Settings::default().window, (1280, 720));
+        // The old 4:3 first window becomes widescreen; one picked since
+        // stays as it is.
+        assert_eq!(Settings::parse("version=5\nwindow=1024x768\n").window, (1280, 720));
+        assert_eq!(Settings::parse("version=5\nwindow=1600x1200\n").window, (1600, 1200));
+        let mut s = Settings::default();
+        s.window = (1024, 768);
+        assert_eq!(Settings::parse(&s.text()).window, (1024, 768));
+    }
+
+    #[test]
     fn full_screen_resolution() {
         let mut s = Settings::default();
         s.fullscreen = true;
@@ -1323,7 +1372,18 @@ mod tests {
         s.fullscreen = false;
         assert!(!s.args().iter().any(|a| a == "--screen"));
         assert_eq!(shape_of((2560, 1080)), 2);
-        assert_eq!(fitting(SHAPES[1].2, Some((1920, 1080))), Some((1600, 900)));
+        assert_eq!(shape_of((1920, 1080)), 0);
+        assert_eq!(shape_of((1440, 900)), 1);
+        assert_eq!(shape_of((5120, 1440)), 3);
+        assert_eq!(shape_of((1024, 768)), 4);
+        assert_eq!(shape_of((1280, 1024)), 4);
+        assert_eq!(fitting(SHAPES[0].2, Some((1920, 1080))), Some((1600, 900)));
+        // Every size is listed under its own shape.
+        for (k, shape) in SHAPES.iter().enumerate() {
+            for z in shape.2 {
+                assert_eq!(shape_of((z.0, z.1)), k, "{}x{}", z.0, z.1);
+            }
+        }
     }
 
     #[test]

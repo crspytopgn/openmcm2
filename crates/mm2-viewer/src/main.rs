@@ -1185,7 +1185,7 @@ fn full_screen(event_loop: &ActiveEventLoop) -> winit::window::Fullscreen {
     }
 }
 
-/// `--window WxH`: the window's size, 1024 × 768 unless given.
+/// `--window WxH`: the window's size, widescreen 1280 × 720 unless given.
 fn window_size() -> winit::dpi::LogicalSize<f64> {
     let args: Vec<String> = crate::args().collect();
     args.iter()
@@ -1193,7 +1193,10 @@ fn window_size() -> winit::dpi::LogicalSize<f64> {
         .and_then(|i| args.get(i + 1))
         .and_then(|s| s.split_once('x'))
         .and_then(|(w, h)| Some(winit::dpi::LogicalSize::new(w.parse().ok()?, h.parse().ok()?)))
-        .unwrap_or(winit::dpi::LogicalSize::new(1024.0, 768.0))
+        .unwrap_or({
+            let (w, h) = mm2_settings::DEFAULT_WINDOW;
+            winit::dpi::LogicalSize::new(w as f64, h as f64)
+        })
 }
 
 /// The game folder: `GAME` in or above the folder the port starts in, or
@@ -1423,6 +1426,11 @@ fn ai_check(
             );
             if let (Some(&lane), race::Bike::Computer(c)) = (lanes.get(i), &mut racer.bike) {
                 c.rider.lane = lane;
+            }
+            // Picked up mid race, a rider is long past its start's spawn
+            // protection.
+            if let (true, race::Bike::Computer(c)) = (start > mm2_physics::bike::SPAWN_GUARD, &mut racer.bike) {
+                c.rider.spawn_guard = 0.0;
             }
         }
         let mut k = k0;
@@ -4054,9 +4062,15 @@ async fn gpu_from(
     let specific = adapter.features() & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
     // Ray queries for the ray-traced shadows, only when they are asked
     // for and the GPU has them: wgpu still calls them experimental.
-    let rays = graphics::wants_ray_tracing() && adapter.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
+    // Next-gen traces rays only where they're quick: wgpu's ray tracing
+    // on Metal took an M4 from 26 to 70 ms a frame at 1080p, so on a Mac
+    // Next-gen keeps the shadow maps (the Ray traced preset still traces).
+    let slow_rays = adapter.get_info().backend == wgpu::Backend::Metal && graphics::enhanced().is_some_and(|e| e.nextgen);
+    let rays = graphics::wants_ray_tracing() && !slow_rays && adapter.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
     graphics::set_ray_queries(rays);
-    if graphics::wants_ray_tracing() && !rays {
+    if slow_rays && graphics::wants_ray_tracing() {
+        eprintln!("ray tracing: Next-gen draws the shadow maps on Metal, where tracing rays is slow");
+    } else if graphics::wants_ray_tracing() && !rays {
         eprintln!("ray tracing: this GPU cannot trace rays, so the shadow maps are drawn and nothing is reflected");
     }
     let (device, queue) = adapter
