@@ -2189,189 +2189,119 @@ impl Launcher {
 
     fn graphics_page(&mut self, ui: &mut egui::Ui, busy: bool) {
         use look::{icon, Choice};
-        look::page_title(ui, "Graphics", "How the game looks. F3 switches between the original look and the enhanced one while racing.");
+        look::page_title(ui, "Graphics", "How the game looks. Pick a look and a quality; the rest waits under Advanced. F3 switches between the original look and the enhanced one while racing.");
         self.menus_choice_card(ui, busy);
         let s = &mut self.settings;
+        // The preset the settings are (another one, if changed to just
+        // what it sets, which then stands for them).
+        if let Some(q) = preset_of(s) {
+            s.quality = q;
+        }
+        let next_gen = s.enhanced && !s.auto && s.quality == Quality::NextGen;
         look::card(ui, icon::ICON_PALETTE, "Look", |ui| {
+            // 0 Original, 1 Enhanced, 2 Next-gen.
+            let current = if !s.enhanced { 0 } else if next_gen { 2 } else { 1 };
             let choices = [
-                Choice::new(false, "Original").icon(icon::ICON_HISTORY).hover("As the game drew it in 2000."),
-                Choice::new(true, "Enhanced").icon(icon::ICON_AUTO_AWESOME).hover("Per-pixel light, real shadows, haze, dust and more. Each effect can be turned on or off on its own."),
+                Choice::new(0, "Original").icon(icon::ICON_HISTORY).hover("As the game drew it in 2000. The lightest on your computer."),
+                Choice::new(1, "Enhanced").icon(icon::ICON_AUTO_AWESOME).hover(
+                    "The original game with modern light: per-pixel lighting, real shadows, haze, dust, 3D grass and more, kept subtle so it still looks like MM2. Pick a quality below for your computer.",
+                ),
+                Choice::new(2, "Next-gen").icon(icon::ICON_BOLT).hover(NEXT_GEN_TEXT),
             ];
-            if let Some(v) = look::segmented(ui, s.enhanced, &choices) {
-                s.enhanced = v;
+            match look::segmented(ui, current, &choices) {
+                Some(0) => s.enhanced = false,
+                Some(1) => {
+                    s.enhanced = true;
+                    if next_gen {
+                        // Back from Next-gen: Auto picks for the computer.
+                        set_preset(s, Quality::High);
+                        s.auto = true;
+                    }
+                }
+                Some(2) => {
+                    s.enhanced = true;
+                    s.auto = false;
+                    set_preset(s, Quality::NextGen);
+                }
+                _ => {}
             }
-            ui.label(look::weak("The riding is the same either way."));
+            ui.label(look::weak("The riding is the same with every look."));
         });
         if s.enhanced {
-            look::card(ui, icon::ICON_SPEED, "Presets", |ui| {
-                // The preset the settings are (another one, if changed to
-                // just what it sets, which then stands for them), or none:
-                // Custom.
-                let shown = preset_of(s);
-                if let Some(q) = shown {
-                    s.quality = q;
+            let next_gen = !s.auto && s.quality == Quality::NextGen;
+            look::card(ui, icon::ICON_SPEED, "Quality", |ui| {
+                if next_gen {
+                    ui.add(egui::Label::new(look::weak(
+                        "Next-gen picks its own: it draws a little softer and sets effects aside when frames come late, so it keeps the racing smooth on any computer. Pick Enhanced for the quality choices.",
+                    )).wrap());
+                    return;
                 }
-                // Auto stands first, as its own pick (`Some(None)`).
-                const AUTO: Option<Option<Quality>> = Some(None);
-                let current = if s.auto { AUTO } else { shown.map(Some) };
-                let mut choices: Vec<_> = std::iter::once(Choice::new(AUTO, "Auto").icon(icon::ICON_AUTO_MODE).hover(AUTO_TEXT))
-                    .chain(Quality::ALL.iter().map(|&q| Choice::new(Some(Some(q)), q.label()).hover(preset_text(q))))
+                // Auto stands first, as its own pick (`None`).
+                let current = if s.auto { None } else { Some(tier(s.quality)) };
+                let choices: Vec<_> = std::iter::once(Choice::new(None, "Auto").icon(icon::ICON_AUTO_MODE).hover(AUTO_TEXT))
+                    .chain(TIERS.iter().map(|&q| Choice::new(Some(q), q.label()).hover(preset_text(q))))
                     .collect();
-                if shown.is_none() && !s.auto {
-                    choices.push(
-                        Choice::new(None, "Custom")
-                            .icon(icon::ICON_TUNE)
-                            .hover(format!("Your own mix, changed from the {} preset. Pick a preset to go back to its settings.", s.quality.label())),
-                    );
-                }
-                let picked = look::segmented(ui, current, &choices);
-                if picked == Some(AUTO) {
-                    s.auto = true;
-                }
-                if let Some(Some(Some(q))) = picked {
-                    // A preset sets the effects, the anti-aliasing and the
-                    // resolution; any can be changed after.
-                    s.auto = false;
-                    s.quality = q;
-                    for (u, on) in UPGRADES.iter().zip(s.upgrades.iter_mut()) {
-                        *on = q.has(u.0);
+                match look::segmented(ui, current, &choices) {
+                    Some(None) => s.auto = true,
+                    Some(Some(q)) => {
+                        s.auto = false;
+                        set_preset(s, q);
                     }
-                    s.antialiasing = q.antialiasing().into();
-                    s.resolution = "auto".into();
+                    None => {}
                 }
-                let about = match preset_of(s) {
-                    _ if s.auto => match auto_last() {
-                        Some((q, card)) => format!("{AUTO_TEXT} Last time it picked {q} for your {card}."),
-                        None => format!("{AUTO_TEXT} It says what it picked here after the game's first start."),
-                    },
-                    Some(q) => format!("{} Change any of the settings below and it becomes Custom.", preset_text(q)),
-                    None => format!(
-                        "Custom: your own mix of the settings below, changed from the {} preset. Pick a preset to go back to its settings.",
-                        s.quality.label()
-                    ),
+                let about = if s.auto {
+                    match auto_last() {
+                        Some((q, card)) => format!("Auto picks for your computer each time the game starts. Last time it picked {q} for your {card}."),
+                        None => "Auto picks for your computer each time the game starts. It says what it picked here after the game's first start.".into(),
+                    }
+                } else {
+                    format!("{}.", tier_line(tier(s.quality)))
                 };
                 ui.add(egui::Label::new(look::weak(about)).wrap());
+                if !s.auto && preset_of(s).is_none() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(look::weak("You've changed some settings under Advanced."));
+                        let label = format!("Back to {}", tier(s.quality).label());
+                        if ui.button(label).on_hover_text("Puts every setting under Advanced back to what this quality sets.").clicked() {
+                            let q = s.quality;
+                            set_preset(s, q);
+                        }
+                    });
+                }
             });
-            // Under Auto, changing what it picks means picking yourself.
-            let before = (s.antialiasing.clone(), s.resolution.clone(), s.upgrades.clone());
-            look::card(ui, icon::ICON_IMAGE, "Picture", |ui| {
-                look::label(
-                    ui,
-                    "Anti-aliasing",
-                    "MSAA smooths the edges of models and ground. TAA blends each frame with the ones before, so billboards, leaves and fences hold still too, and sharpens a scene drawn below 100%.",
-                );
-                let current = ANTIALIASING.iter().find(|a| a.0 == s.antialiasing).map_or("msaa4", |a| a.0);
-                let choices: Vec<_> = ANTIALIASING
-                    .iter()
-                    .map(|a| Choice::new(a.0, if a.0 == "taa" { "TAA" } else { a.1 }).hover(match a.0 {
-                        "off" => "None: the fastest, the roughest edges.",
-                        "taa" => "Temporal: steadier and about as fast as MSAA 2×; a little softer.",
-                        _ => "Each step up costs frame rate, most with ray tracing.",
-                    }))
-                    .collect();
-                if let Some(a) = look::segmented(ui, current, &choices) {
-                    s.antialiasing = a.into();
-                }
-                ui.add_space(6.0);
-                let named = look::label(
-                    ui,
-                    "Scene resolution",
-                    "How big the 3D scene is drawn, as a share of the screen; the menus and race display stay sharp. The biggest cost to frame rate, ray tracing most of all.",
-                );
-                let mut auto = s.resolution == "auto";
-                let mut pct = s.resolution.trim_end_matches('%').parse::<u32>().unwrap_or(100);
-                ui.horizontal(|ui| {
-                    if look::switch(ui, &mut auto).on_hover_text("The preset's own scene size. Turn it off to pick a share of the screen.").changed() {
-                        s.resolution = if auto { "auto".into() } else { format!("{pct}%") };
-                    }
-                    ui.label(egui::RichText::new("Auto").family(look::bold_family()));
-                    ui.label(look::weak(format!("the preset's own: {}", s.quality.most_pixels())));
-                });
-                ui.add_enabled_ui(!auto, |ui| {
-                    if ui
-                        .add(egui::Slider::new(&mut pct, 50..=100).suffix("%").trailing_fill(true))
-                        .labelled_by(named)
-                        .on_hover_text("How big the 3D scene is drawn, as a share of the screen. Lower is faster.")
-                        .changed()
-                    {
-                        s.resolution = format!("{pct}%");
-                    }
-                });
-                ui.add_space(6.0);
-                let named = look::label(ui, "Ground detail", "How strongly the grain of the photo ground shows.");
-                let mut detail = (s.detail * 100.0).round() as u32;
-                if ui
-                    .add(egui::Slider::new(&mut detail, 0..=100).suffix("%").trailing_fill(true))
-                    .labelled_by(named)
-                    .on_hover_text("How strongly the grain of the photo ground shows.")
-                    .changed()
-                {
-                    s.detail = detail as f32 / 100.0;
-                }
-                ui.add_space(6.0);
-                look::label(ui, "Colour look", "A gentle colour grade over the finished picture. Original leaves the colours as drawn.");
+            look::card(ui, icon::ICON_IMAGE, "Colour look", |ui| {
                 let current = settings::LOOKS.iter().find(|l| l.0 == s.look).map_or("original", |l| l.0);
-                let choices: Vec<_> = settings::LOOKS
-                    .iter()
-                    .map(|l| Choice::new(l.0, l.1).hover(look_about(l.0)))
-                    .collect();
+                let choices: Vec<_> = settings::LOOKS.iter().map(|l| Choice::new(l.0, l.1).hover(look_about(l.0))).collect();
                 if let Some(l) = look::segmented(ui, current, &choices) {
                     s.look = l.into();
                     if let Some(i) = UPGRADES.iter().position(|u| u.0 == "grade") {
                         s.upgrades[i] = l != "original";
                     }
                 }
+                ui.label(look::weak("A gentle colour grade over the finished picture. Original leaves the colours as drawn."));
             });
-            look::card(ui, icon::ICON_AUTO_FIX_HIGH, "Effects", |ui| {
-                ui.label(look::weak("Each on its own. The preset sets them; change any and it becomes Custom."));
-                ui.add_space(4.0);
-                // Ray tracing takes the place of the sun's shadows, so it
-                // needs those on.
-                let shadows = UPGRADES.iter().zip(&s.upgrades).any(|(u, on)| u.0 == "shadows" && *on);
-                let width = ((ui.available_width() - 8.0) / 2.0).floor();
-                // Ray tracing first, the biggest change; then as listed.
-                // The colour grade is picked as the colour look (Picture).
-                let order: Vec<usize> = (0..UPGRADES.len())
-                    .filter(|&i| UPGRADES[i].0 == "raytracing")
-                    .chain((0..UPGRADES.len()).filter(|&i| UPGRADES[i].0 != "raytracing" && UPGRADES[i].0 != "grade"))
-                    .collect();
-                for pair in order.chunks(2) {
-                    ui.horizontal_top(|ui| {
-                        for &i in pair {
-                            let u = UPGRADES[i];
-                            let enabled = u.0 != "raytracing" || shadows;
-                            ui.add_enabled_ui(enabled, |ui| {
-                                let r = look::switch_tile(ui, &mut s.upgrades[i], u.1, effect_about(u.0), width);
-                                if u.0 == "raytracing" {
-                                    r.on_hover_text("Needs Sun shadows on, and a graphics card that can trace rays (NVIDIA RTX, AMD RX 6000 or newer); on others the usual look shows.");
-                                }
-                            });
-                        }
-                    });
-                }
+            // Under Auto, changing what it picks means picking yourself.
+            let before = (s.antialiasing.clone(), s.resolution.clone(), s.upgrades.clone());
+            look::card(ui, icon::ICON_TUNE, "Advanced", |ui| {
+                egui::CollapsingHeader::new(look::weak("Anti-aliasing, scene resolution and each effect on its own. The quality above sets them all."))
+                    .id_salt("graphics-advanced")
+                    // Open only in the pictures of it (`shots`).
+                    .default_open(cfg!(test) && std::env::var_os("MM2_SHOTS_ADVANCED").is_some())
+                    .show(ui, |ui| advanced_graphics(ui, s));
             });
             if s.auto && before != (s.antialiasing.clone(), s.resolution.clone(), s.upgrades.clone()) {
                 s.auto = false;
             }
         }
-        if !cfg!(target_os = "macos") {
-            look::card(ui, icon::ICON_MEMORY, "Graphics card", |ui| {
-                look::switch_tile(
-                    ui,
-                    &mut s.opengl,
-                    "Use OpenGL",
-                    "For older graphics cards: draws with OpenGL instead of Vulkan or DirectX. Try it if the game won't start or shows a black window. The enhanced look needs Vulkan or DirectX.",
-                    ui.available_width(),
-                );
-            });
-        }
-        look::card(ui, icon::ICON_TEXTURE, "Textures", |ui| {
+        look::card(ui, icon::ICON_MEMORY, "Textures and troubleshooting", |ui| {
+            let width = ui.available_width();
             ui.horizontal(|ui| {
                 look::switch(ui, &mut s.use_hires)
                     .on_hover_text("Draws the game with a pack of sharper textures from a folder you choose, in place of the game's own.");
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.label(egui::RichText::new("High-res textures").family(look::bold_family()));
+                    ui.label(egui::RichText::new("High-res textures").family(look::bold_family()))
+                        .on_hover_text("Draws the game with a pack of sharper textures from a folder you choose, in place of the game's own.");
                     let text = s.hires.as_ref().map_or("No folder chosen".to_string(), |h| h.display().to_string());
                     ui.add(egui::Label::new(look::weak(text)).truncate());
                 });
@@ -2388,6 +2318,16 @@ impl Launcher {
                     }
                 });
             });
+            if !cfg!(target_os = "macos") {
+                ui.add_space(8.0);
+                look::switch_tile(
+                    ui,
+                    &mut s.opengl,
+                    "Use OpenGL",
+                    "For older graphics cards: draws with OpenGL instead of Vulkan or DirectX. Try it if the game won't start or shows a black window. The enhanced look needs Vulkan or DirectX.",
+                    width,
+                );
+            }
         });
     }
 
@@ -2780,6 +2720,186 @@ fn popular_card(ui: &mut egui::Ui, t: &mut Tracks, game: &std::path::Path, remov
     });
 }
 
+/// The qualities the Quality row offers. Ray traced is High with the
+/// ray tracing switch, Max is Ultra with supersampling and far detail
+/// (both under Advanced), and Next-gen is a look of its own; settings
+/// saved on those still work and show as the nearest of these.
+const TIERS: [Quality; 4] = [Quality::Low, Quality::Medium, Quality::High, Quality::Ultra];
+
+/// The Quality row's button standing for preset `q`.
+fn tier(q: Quality) -> Quality {
+    match q {
+        Quality::RayTraced => Quality::High,
+        Quality::Max | Quality::NextGen => Quality::Ultra,
+        q => q,
+    }
+}
+
+/// One line on what a quality is for, under the Quality row.
+fn tier_line(q: Quality) -> &'static str {
+    match q {
+        Quality::Low => "Low: for older laptops and handhelds, the lightest effects",
+        Quality::Medium => "Medium: for most laptops, with TAA keeping it sharp",
+        Quality::High => "High: for a gaming PC, every effect that's on unless changed",
+        _ => "Ultra: for a strong graphics card, the finest edges and the whole screen's pixels. Supersampling, far detail and ray tracing are under Advanced",
+    }
+}
+
+/// What Next-gen is, for its hover.
+const NEXT_GEN_TEXT: &str = "A modern game's look, much bolder than Enhanced: sunlit air you can see shafts of light in, thick grass blowing in waves of wind, trees plainly moving, photo dirt sharp right up to your wheels, the real sky with clouds, bounce light, a soft glow round bright light, glossier bikes and trackside props. Heavy: for a strong graphics card. If frames come late it draws softer and sets effects aside, so a laptop gets what it can.";
+
+/// Puts the effects, anti-aliasing and resolution to what preset `q` sets.
+fn set_preset(s: &mut Settings, q: Quality) {
+    s.quality = q;
+    for (u, on) in UPGRADES.iter().zip(s.upgrades.iter_mut()) {
+        // The colour grade is the colour look's.
+        if u.0 != "grade" {
+            *on = q.has(u.0);
+        }
+    }
+    s.antialiasing = q.antialiasing().into();
+    s.resolution = "auto".into();
+}
+
+/// The effects under Advanced, in groups, by their [`UPGRADES`] names.
+/// The colour grade is the colour look's; the second of each of
+/// [`PAIRS`] shows with the first. Any switch in none shows in the last
+/// group (see [`grouped`]).
+const EFFECT_GROUPS: [(&str, &[&str]); 5] = [
+    ("Light and shadow", &["raytracing", "lighting", "shadows", "contact", "ao", "skylight", "bounce", "pbr", "shafts", "litair", "air", "bloom", "ssr", "nightlights", "filmic"]),
+    ("Ground and grass", &["ground", "closeup", "smooth", "grass", "wind", "ruts", "distance", "far"]),
+    ("Dirt and mud", &["dust", "roost", "mud"]),
+    ("Bikes and scenery", &["bikes", "scenery", "cinematic"]),
+    ("Speed and sharpness", &["dynamic", "fsr", "supersample"]),
+];
+
+/// Two switches doing one job, shown as one choice of three: off, the
+/// first alone, or both. The first's name, the second's, the choice's
+/// name, its three words and what it does.
+const PAIRS: [(&str, &str, &str, [&str; 3], &str); 2] = [
+    (
+        "ao",
+        "gtao",
+        "Ambient occlusion",
+        ["Off", "Standard", "Better"],
+        "Corners and contacts darkened, as ambient light is. Better (GTAO) works it out from the horizon round each pixel: deeper in creases and corners, cleaner round edges, for a little more frame rate.",
+    ),
+    (
+        "mud",
+        "grime",
+        "Mud on bikes and riders",
+        ["Off", "Quick caking", "Builds up slowly"],
+        "Mud and spray on the bikes and riders. Quick caking: mud cakes on fully in a few minutes, as before. Builds up slowly: dirt the colour of the track creeps up the bike and rider lap by lap, another rider's roost spatters your front and a crash scuffs your side; wet tracks cake on faster. Looks only.",
+    ),
+];
+
+/// [`EFFECT_GROUPS`], with any switch in none (a new one) in the last.
+fn grouped() -> Vec<(&'static str, Vec<&'static str>)> {
+    let shown = |n: &str| n == "grade" || EFFECT_GROUPS.iter().any(|g| g.1.contains(&n)) || PAIRS.iter().any(|p| p.1 == n);
+    let rest: Vec<_> = UPGRADES.iter().map(|u| u.0).filter(|n| !shown(n)).collect();
+    let last = EFFECT_GROUPS.len() - 1;
+    EFFECT_GROUPS
+        .iter()
+        .enumerate()
+        .map(|(i, g)| (g.0, g.1.iter().copied().chain(if i == last { rest.clone() } else { vec![] }).collect()))
+        .collect()
+}
+
+/// Inside Advanced: the picture's settings, then the effects by group.
+fn advanced_graphics(ui: &mut egui::Ui, s: &mut Settings) {
+    use look::Choice;
+    let at = |name: &str| UPGRADES.iter().position(|u| u.0 == name);
+    ui.add_space(4.0);
+    look::label(
+        ui,
+        "Anti-aliasing",
+        "MSAA smooths the edges of models and ground. TAA blends each frame with the ones before, so billboards, leaves and fences hold still too, and sharpens a scene drawn below 100%.",
+    );
+    let current = ANTIALIASING.iter().find(|a| a.0 == s.antialiasing).map_or("msaa4", |a| a.0);
+    let choices: Vec<_> = ANTIALIASING
+        .iter()
+        .map(|a| Choice::new(a.0, if a.0 == "taa" { "TAA" } else { a.1 }).hover(match a.0 {
+            "off" => "None: the fastest, the roughest edges.",
+            "taa" => "Temporal: steadier and about as fast as MSAA 2×; a little softer.",
+            _ => "Each step up costs frame rate, most with ray tracing.",
+        }))
+        .collect();
+    if let Some(a) = look::segmented(ui, current, &choices) {
+        s.antialiasing = a.into();
+    }
+    ui.add_space(6.0);
+    let about = "How big the 3D scene is drawn, as a share of the screen; the menus and race display stay sharp. The biggest cost to frame rate, ray tracing most of all.";
+    let named = look::label(ui, "Scene resolution", about);
+    let mut auto = s.resolution == "auto";
+    let mut pct = s.resolution.trim_end_matches('%').parse::<u32>().unwrap_or(100);
+    ui.horizontal(|ui| {
+        if look::switch(ui, &mut auto).on_hover_text("The quality's own scene size. Turn it off to pick a share of the screen.").changed() {
+            s.resolution = if auto { "auto".into() } else { format!("{pct}%") };
+        }
+        ui.label(egui::RichText::new("Auto").family(look::bold_family()));
+        ui.label(look::weak(format!("the quality's own: {}", s.quality.most_pixels())));
+    });
+    ui.add_enabled_ui(!auto, |ui| {
+        if ui
+            .add(egui::Slider::new(&mut pct, 50..=100).suffix("%").trailing_fill(true))
+            .labelled_by(named)
+            .on_hover_text("How big the 3D scene is drawn, as a share of the screen. Lower is faster.")
+            .changed()
+        {
+            s.resolution = format!("{pct}%");
+        }
+    });
+    ui.add_space(6.0);
+    let named = look::label(ui, "Ground detail", "How strongly the grain of the photo ground shows.");
+    let mut detail = (s.detail * 100.0).round() as u32;
+    if ui
+        .add(egui::Slider::new(&mut detail, 0..=100).suffix("%").trailing_fill(true))
+        .labelled_by(named)
+        .on_hover_text("How strongly the grain of the photo ground shows.")
+        .changed()
+    {
+        s.detail = detail as f32 / 100.0;
+    }
+    // Ray tracing takes the place of the sun's shadows, so it needs those.
+    let shadows = at("shadows").is_some_and(|i| s.upgrades[i]);
+    let width = ((ui.available_width() - 16.0) / 3.0).floor();
+    for (group, names) in grouped() {
+        ui.add_space(10.0);
+        ui.label(egui::RichText::new(group).size(15.5).family(look::bold_family()));
+        ui.add_space(2.0);
+        // The pairs first, each across the whole width, then the switches.
+        for p in PAIRS.iter().filter(|p| names.contains(&p.0)) {
+            let (Some(i), Some(j)) = (at(p.0), at(p.1)) else { continue };
+            let level = match (s.upgrades[i], s.upgrades[j]) {
+                (false, _) => 0,
+                (true, false) => 1,
+                (true, true) => 2,
+            };
+            let choices: Vec<_> = p.3.iter().enumerate().map(|(k, w)| Choice::new(k, *w).hover(p.4)).collect();
+            if let Some(k) = look::choice_tile(ui, p.2, p.4, level, &choices, width * 3.0 + 16.0) {
+                s.upgrades[i] = k > 0;
+                s.upgrades[j] = k == 2;
+            }
+        }
+        let switches: Vec<&str> = names.iter().copied().filter(|n| !PAIRS.iter().any(|p| p.0 == *n)).collect();
+        for row in switches.chunks(3) {
+            ui.horizontal_top(|ui| {
+                for &n in row {
+                    let Some(i) = at(n) else { continue };
+                    let enabled = n != "raytracing" || shadows;
+                    ui.add_enabled_ui(enabled, |ui| {
+                        let mut about = effect_about(n).to_string();
+                        if n == "raytracing" {
+                            about += " Needs Sun shadows on, and a graphics card that can trace rays (NVIDIA RTX, AMD RX 6000 or newer); on others the usual look shows.";
+                        }
+                        look::switch_row(ui, &mut s.upgrades[i], UPGRADES[i].1, &about, width);
+                    });
+                }
+            });
+        }
+    }
+}
+
 /// Whether the effects, anti-aliasing and scene resolution in `s` are just
 /// what preset `q` sets.
 fn is_preset(s: &Settings, q: Quality) -> bool {
@@ -2893,6 +3013,18 @@ fn preset_text(q: Quality) -> String {
 mod shots {
     use super::*;
 
+    /// Every effect shows once under Advanced: in a group, or with its pair.
+    #[test]
+    fn every_effect_shows_once() {
+        let shown: Vec<&str> = grouped().into_iter().flat_map(|g| g.1).chain(PAIRS.iter().map(|p| p.1)).collect();
+        for u in UPGRADES.iter().filter(|u| u.0 != "grade") {
+            assert_eq!(shown.iter().filter(|&&n| n == u.0).count(), 1, "{}", u.0);
+        }
+        assert!(shown.iter().all(|n| UPGRADES.iter().any(|u| u.0 == *n)));
+        // The quality row stands for every preset.
+        assert!(Quality::ALL.iter().all(|&q| TIERS.contains(&tier(q))));
+    }
+
     /// The popular tracks' list with the mouse resting on one, from the
     /// list at `MM2_TRACKPACK_URL`, drawn into `MM2_SHOTS`.
     #[test]
@@ -2957,9 +3089,10 @@ mod shots {
         let dir = std::env::var("MM2_SHOTS").expect("MM2_SHOTS: where to draw the pages");
         for (name, page, enhanced, height) in [
             ("play", Page::Play, true, 1300.0),
-            ("graphics", Page::Graphics, true, 1900.0),
+            ("graphics", Page::Graphics, true, 1000.0),
+            ("graphics_advanced", Page::Graphics, true, 2300.0),
+            ("graphics_nextgen", Page::Graphics, true, 900.0),
             ("graphics_original", Page::Graphics, false, 760.0),
-            ("tracks", Page::Tracks, true, 760.0),
             ("updates", Page::Updates, true, 760.0),
             ("extras", Page::Extras, true, 3100.0),
             ("graphics_small", Page::Graphics, true, 520.0),
@@ -2975,6 +3108,8 @@ mod shots {
             // The window as it opens, and a Steam Deck's screen.
             ("window", Page::Play, true, 675.0),
             ("deck", Page::Play, true, 800.0),
+            // Last: its spinner can keep the harness from settling.
+            ("tracks", Page::Tracks, true, 760.0),
         ] {
             let width = match name {
                 n if n.ends_with("small") => 760.0,
@@ -2986,7 +3121,7 @@ mod shots {
             s.enhanced = enhanced;
             s.game = (name != "play_new").then(|| "C:/Games/Motocross Madness 2/GAME".into());
             s.quality = Quality::RayTraced;
-            s.auto = name == "graphics_auto";
+            s.auto = name == "graphics_auto" || name == "graphics";
             s.fullscreen = name == "play_full";
             s.free_graphics = name.starts_with("play_free");
             if name == "play_free" {
@@ -3002,9 +3137,23 @@ mod shots {
                 s.more.leaderboards = true;
                 s.more.leaderboard_url = "https://laps.example.org".into();
             }
+            if name == "graphics_nextgen" {
+                s.quality = Quality::NextGen;
+                s.antialiasing = "taa".into();
+                s.resolution = "auto".into();
+                for (u, on) in UPGRADES.iter().zip(s.upgrades.iter_mut()) {
+                    *on = Quality::NextGen.has(u.0);
+                }
+            }
             if custom {
                 // Changed from the preset: Custom.
                 s.antialiasing = "msaa4".into();
+            }
+            // The Advanced section open, in its picture.
+            if name == "graphics_advanced" {
+                std::env::set_var("MM2_SHOTS_ADVANCED", "1");
+            } else {
+                std::env::remove_var("MM2_SHOTS_ADVANCED");
             }
             let mut l = Launcher::with(s, Err("built from source".into()));
             l.page = page;
