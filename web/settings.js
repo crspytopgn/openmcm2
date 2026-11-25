@@ -48,7 +48,24 @@ export const UPGRADES = [
 // default: High has stalled a whole Mac in Safari.
 // Next-gen is offered: the game keeps its look but holds the frame rate
 // by setting effects aside when frames come late.
-const QUALITIES = [["auto", "Auto (picks for your computer)"], ["low", "Low"], ["medium", "Medium"], ["high", "High (a fast computer)"], ["nextgen", "Next-gen (bold, a strong computer)"]];
+// Next-gen is a look of its own (beside Original and Enhanced), so the
+// quality row offers the rest.
+const QUALITIES = [["auto", "Auto (picks for your computer)"], ["low", "Low"], ["medium", "Medium"], ["high", "High (a fast computer)"]];
+// The effects under Advanced, in groups, by their names in UPGRADES (the
+// launcher's EFFECT_GROUPS). The colour grade is the colour look's.
+const GROUPS = [
+  ["Light and shadow", ["lighting", "shadows", "contact", "ao", "skylight", "bounce", "pbr", "shafts", "litair", "air", "bloom", "ssr", "nightlights", "filmic"]],
+  ["Ground and grass", ["ground", "closeup", "smooth", "grass", "wind", "ruts", "distance"]],
+  ["Dirt and mud", ["dust", "roost", "mud"]],
+  ["Bikes and scenery", ["bikes", "scenery", "cinematic"]],
+  ["Speed and sharpness", ["fsr"]],
+];
+// Pairs that do one job, shown as one choice of three: off, the first
+// alone, or both (the launcher's PAIRS).
+const PAIRS = {
+  ao: ["gtao", "Ambient occlusion", ["Off", "Standard", "Better (GTAO)"], "Corners and contacts darkened, as ambient light is. Better: a truer ambient occlusion, deeper in creases and corners. Not in a browser: too heavy, so Better draws as Standard."],
+  mud: ["grime", "Mud on bikes and riders", ["Off", "Quick caking", "Builds up slowly"], "Mud and spray on the bikes and riders. Quick caking: mud cakes on in a few minutes, as before. Builds up slowly: dirt the colour of the track creeps up the bike and rider lap by lap, roost spatters your front and a crash scuffs your side."],
+};
 // Whether a quality preset keeps an upgrade on (Quality::has).
 function presetHas(quality, name) {
   if (quality === "auto") quality = "low"; // browsers seldom name the graphics card
@@ -289,6 +306,14 @@ function slider(min, max, step, unit, value, change, about = "") {
   return [r, out];
 }
 
+/// GROUPS with any effect not in one (a new switch) in the last, so
+/// none goes missing.
+function grouped() {
+  const shown = new Set(["grade", ...GROUPS.flatMap(([, n]) => n), ...Object.values(PAIRS).map((p) => p[0])]);
+  const rest = UPGRADES.map(([n]) => n).filter((n) => !shown.has(n));
+  return GROUPS.map(([g, n], i) => [g, i === GROUPS.length - 1 ? [...n, ...rest] : n]);
+}
+
 /// Fills `lookBox` with the look's controls and `box` with the rest;
 /// `changed` hears each change.
 export function render(lookBox, box, s, changed) {
@@ -302,52 +327,87 @@ export function render(lookBox, box, s, changed) {
   box.replaceChildren();
   lookBox.replaceChildren();
 
-  // The look.
+  // The look: Original, Enhanced or Next-gen.
   const look = el("fieldset", {}, el("legend", { textContent: "Look" }));
+  const nextgen = s.enhanced && s.quality === "nextgen";
+  const current = !s.enhanced ? "original" : nextgen ? "nextgen" : "enhanced";
   for (const [v, b, text, about] of [
-    [false, "Original", ": the game as it looked in 2000", "The game drawn as it was in 2000. The lightest on your computer."],
-    [true, "Enhanced", ": modern lighting, shadows and materials", "Per-pixel light, real shadows, haze, dust and more, each of which you can turn on or off."],
+    ["original", "Original", ": the game as it looked in 2000", "The game drawn as it was in 2000. The lightest on your computer."],
+    ["enhanced", "Enhanced", ": modern light, kept subtle", "The original game with modern light: per-pixel lighting, real shadows, haze, dust, 3D grass and more, kept subtle so it still looks like MM2. Pick a quality for your computer."],
+    ["nextgen", "Next-gen", ": a bold modern look", ABOUT_NEXTGEN],
   ]) {
-    const r = el("input", { type: "radio", name: "look", checked: s.enhanced === v });
-    r.addEventListener("change", () => set("enhanced", v, true));
+    const r = el("input", { type: "radio", name: "look", checked: current === v });
+    r.addEventListener("change", () => {
+      if (v === "original") return set("enhanced", false, true);
+      s.enhanced = true;
+      if (v === "nextgen") setQuality(s, "nextgen");
+      else if (nextgen) setQuality(s, "auto");
+      set("quality", s.quality, true);
+    });
     look.append(el("label", { title: about }, r, " ", el("b", { textContent: b }), text));
   }
   if (device.touch) {
     look.append(checkbox("Light mode for phones", ABOUT_LIGHT, light(s), (on) => set("light", on, true)));
   }
-  look.append(el("p", { className: "hint", textContent: "While racing, the button at the top left (or F3) switches between the two. The riding is the same either way." }));
+  look.append(el("p", { className: "hint", textContent: "While racing, the button at the top left (or F3) switches to the original look. The riding is the same with every look." }));
   if (s.enhanced) {
     const grid = el("div", { className: "grid" });
+    if (!nextgen) {
+      grid.append(
+        el("span", { textContent: "Quality", title: ABOUT_QUALITY }),
+        select(QUALITIES, s.quality, (q) => {
+          setQuality(s, q);
+          set("quality", q, true);
+        }, ABOUT_QUALITY),
+      );
+    }
     grid.append(
-      el("span", { textContent: "Quality", title: ABOUT_QUALITY }),
-      select(QUALITIES, s.quality, (q) => {
-        s.quality = q;
-        for (const [n] of UPGRADES) s.upgrades[n] = presetHas(q, n);
-        set("quality", q, true);
-      }, `${ABOUT_QUALITY} ${ABOUT_NEXTGEN}`),
+      el("span", { textContent: "Colour look", title: ABOUT_LOOK }),
+      select(LOOKS, s.look || "original", (v) => set("look", v), ABOUT_LOOK),
+    );
+    look.append(grid);
+    if (nextgen) look.append(el("p", { className: "hint", textContent: "Next-gen picks its own quality: it draws a little softer and sets effects aside when frames come late." }));
+
+    // Everything else, closed unless opened.
+    const adv = el("details", {}, el("summary", { textContent: "Advanced", title: "Time of day, weather, ground detail and each effect on its own. The quality sets them all; point at one to see what it does." }));
+    const more = el("div", { className: "grid" });
+    more.append(
       el("span", { textContent: "Time of day", title: ABOUT_TIME }),
       select(TIMES, s.time, (v) => set("time", v), ABOUT_TIME),
       el("span", { textContent: "Weather", title: ABOUT_WEATHER }),
       select(WEATHERS, s.weather, (v) => set("weather", v), ABOUT_WEATHER),
-      el("span", { textContent: "Colour look", title: ABOUT_LOOK }),
-      select(LOOKS, s.look || "original", (v) => set("look", v), ABOUT_LOOK),
       el("span", { textContent: "Ground detail", title: ABOUT_DETAIL }),
       el("span", { title: ABOUT_DETAIL }, ...slider(0, 1, 0.05, "", s.detail, (v) => set("detail", v), ABOUT_DETAIL)),
     );
-    const effects = el("details", {}, el("summary", { textContent: "Individual effects", title: "Each effect on its own. Point at one to see what it does." }));
-    const list = el("div", { className: "two" });
-    for (const [n, text, , about] of UPGRADES) {
-      if (n === "grade") continue; // picked as the colour look
-      list.append(checkbox(text, about, !!s.upgrades[n], (on) => {
-        s.upgrades[n] = on;
-        // Under Auto, changing an effect means choosing yourself.
-        const wasAuto = s.quality === "auto";
-        if (wasAuto) s.quality = "medium";
-        set("upgrades", s.upgrades, wasAuto);
-      }));
+    adv.append(more);
+    // Under Auto, changing an effect means choosing yourself.
+    const changeEffects = (f) => {
+      f();
+      const wasAuto = s.quality === "auto";
+      if (wasAuto) s.quality = "medium";
+      set("upgrades", s.upgrades, true);
+    };
+    const about = Object.fromEntries(UPGRADES.map(([n, text, , a]) => [n, [text, a]]));
+    for (const [group, names] of grouped()) {
+      adv.append(el("h4", { textContent: group }));
+      const list = el("div", { className: "two" });
+      for (const n of names) {
+        const pair = PAIRS[n];
+        if (pair) {
+          const [second, label, words, hover] = pair;
+          const level = !s.upgrades[n] ? "0" : s.upgrades[second] ? "2" : "1";
+          list.append(el("label", { className: "check", title: hover }, label + " ", select(words.map((w, i) => [String(i), w]), level, (v) => changeEffects(() => {
+            s.upgrades[n] = v !== "0";
+            s.upgrades[second] = v === "2";
+          }), hover)));
+        } else {
+          const [text, a] = about[n];
+          list.append(checkbox(text, a, !!s.upgrades[n], (on) => changeEffects(() => (s.upgrades[n] = on))));
+        }
+      }
+      adv.append(list);
     }
-    effects.append(list);
-    look.append(grid, effects);
+    look.append(adv);
   }
   lookBox.append(look);
 
