@@ -126,6 +126,14 @@ pub struct Rider {
     /// the bike and rider weigh, lb, for [`Rider::hit_objects`].
     pub hull: Option<Arc<crate::bike::Hull>>,
     pub weight: f32,
+    /// How long the rider is still spawn protected, s: placed at the
+    /// start or put back after a crash or off the course, for 3 s
+    /// (the race's start and Vehicle::ResetToPlacement set
+    /// GetSpawnProtectionDuration's 3 s; SimulateAIFrame counts it down
+    /// each frame). The collision callbacks skip a protected bike, so it
+    /// neither hits solids nor bumps other bikes; its crash rules still
+    /// run.
+    pub spawn_guard: f32,
     /// Where the model stood last frame: its origin and axes.
     previous: Option<(Vec3, Mat3)>,
     /// The axes the spin was last measured against. The game keeps the
@@ -164,6 +172,7 @@ impl Rider {
             hull: None,
             weight: 220.0 + crate::bike::RIDER,
             previous: None,
+            spawn_guard: crate::bike::SPAWN_GUARD,
             spin_axes: None,
             air_pose: true,
             near_only: false,
@@ -190,6 +199,11 @@ impl Rider {
         gates: bool,
         movers: &[ai::Mover],
     ) -> bool {
+        // SimulateAIFrame counts the spawn protection down after placing
+        // the wheels.
+        if self.spawn_guard > 0.0 {
+            self.spawn_guard -= dt;
+        }
         // The pitch the rider asks for in the air, and the lean it shows.
         let mut pitch = 0.0;
         let lean_to;
@@ -319,6 +333,9 @@ impl Rider {
     fn hit_objects(&mut self, ground: &dyn Ground) -> bool {
         let axes = self.axes();
         let was = self.previous.replace((self.position, axes));
+        if self.spawn_guard > 0.0 {
+            return false;
+        }
         let (Some(hull), Some((was_at, was_axes))) = (self.hull.clone(), was) else {
             return false;
         };

@@ -671,6 +671,22 @@ fn main() -> Result<(), BoxError> {
                     };
                     r.buttons = [held(input::STUNTS_LOW), held(input::STUNTS_HIGH)];
                     r.actions = [held(input::KAHUNA), held(input::TAUNT)];
+                    if live {
+                        // Live steps read the script at each physics step.
+                        let from = r.time - script_at;
+                        let acts = |t: f32| {
+                            let codes = s.held(t);
+                            std::array::from_fn(|a| key_map.held_code(a, &codes))
+                        };
+                        let input = r.input.get_or_insert_with(Default::default);
+                        input.base = from as f64;
+                        input.held.clear();
+                        input.held.push((f64::NEG_INFINITY, acts(from)));
+                        for t in s.changes(from, from + frame + 0.04) {
+                            input.held.push((t as f64, acts(t)));
+                        }
+                        input.stick = Controls { steer: f32::NAN, lean: f32::NAN, ..Controls::default() };
+                    }
                 }
                 // A state from the running game to go on from (`MM2_STATE`:
                 // t|com|velocity|right|up|forward|world spin|squeeze front,rear).
@@ -1773,8 +1789,29 @@ const RIDER_PROBES: [(&str, [f32; 3]); 15] = [
 /// the bike: the original physics crashes when the body's upper probes go
 /// under the ground.
 fn feel_riders(race: &mut Race, renderer: &TerrainRenderer) {
-    for r in &mut race.racers {
-        if r.bike.wreck().is_some() {
+    // Live play poses the player's rider at each physics step instead,
+    // from copies of the models (race::Feel).
+    let stepped = race.fixed_step && race.input.is_some();
+    if stepped && race.feel.is_none() {
+        let me = &race.racers[race.player];
+        let rider = me.object + 1;
+        let bones: Option<Vec<(usize, Vec3)>> = RIDER_PROBES
+            .iter()
+            .map(|(bone, at)| renderer.object_frame_index(rider, bone).map(|f| (f, Vec3::from(*at))))
+            .collect();
+        if let (Some(bike), Some(rider_model), Some(probes)) = (renderer.object_model(me.object), renderer.object_model(rider), bones) {
+            race.feel = Some(race::Feel {
+                bike_frame: renderer.object_frame_index(me.object, "Bike"),
+                bike,
+                rider: rider_model,
+                probes,
+                pose: Default::default(),
+            });
+        }
+    }
+    let skip = stepped.then_some(race.player).filter(|_| race.feel.is_some());
+    for (i, r) in race.racers.iter_mut().enumerate() {
+        if r.bike.wreck().is_some() || Some(i) == skip {
             continue;
         }
         // The bike's pose node, as drawn: what the cross-up or a trick's
@@ -1874,28 +1911,11 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
         let wreck = r.bike.wreck();
         let (rider, motion) = wreck.unwrap_or((place, RIDING));
         renderer.set_object_place(r.object + 1, rider);
-        match r.trick_motion(&race.tricks).filter(|_| wreck.is_none()) {
-            Some((trick, clock)) => {
-                let start = race.time - clock;
-                renderer.set_motion(r.object + 1, &trick.rider, start);
-                renderer.set_motion(r.object, &trick.bike, start);
-            }
-            None if wreck.is_some() => {
-                // A bail starts at once (0x537890); a fall and the landing
-                // after it fade in over 0.5 s (0x537980, 0x535d50).
-                use mm2_physics::wreck::{FALLS, HITS};
-                let span = if FALLS.contains(&motion) || HITS.contains(&motion) { 0.5 } else { 0.0 };
-                renderer.fade_motion(r.object + 1, motion, race.time, span);
-                renderer.set_motion(r.object, BIKE_RIDING, 0.0);
-            }
-            None => {
-                // Riding: the turn and lean motions mixed by the steer,
-                // the rider's weight and the speed (0x48fe50).
-                let (rider, bike) = &r.mixes;
-                renderer.set_motion(r.object + 1, RIDING, 0.0);
-                renderer.set_blend(r.object + 1, rider);
-                renderer.set_motion(r.object, BIKE_RIDING, 0.0);
-                renderer.set_blend(r.object, bike);
+        let plays = race::plays(r.trick_motion(&race.tricks), wreck.map(|_| motion), &r.mixes, race.time);
+        for (object, p) in [r.object, r.object + 1].into_iter().zip(plays) {
+            renderer.fade_motion(object, p.name, p.start, p.span);
+            if let Some(b) = p.blend {
+                renderer.set_blend(object, b);
             }
         }
         // An empty place in a free roam session: nobody there to draw.
@@ -2171,8 +2191,8 @@ const TAG_MODELS: [&str; 3] = ["Itind.slt", "BBHighLod.slt", "YouInd.slt"];
 const GHOST: (&str, &str) = ("Ghost.mcf", "GhostRider.mcf");
 
 /// The rider's motion on the bike, and the bike's.
-const RIDING: &str = "LeanR02";
-const BIKE_RIDING: &str = "BLeanR02";
+const RIDING: &str = race::RIDING;
+const BIKE_RIDING: &str = race::BIKE_RIDING;
 
 /// The player's bike from the game's `UI/UIRES.RES`: the Honda CR250,
 /// a 250 (`bikes.pb`) with the first preset of its class (`presets.pb`).
@@ -4784,6 +4804,8 @@ struct App {
     /// The steering and lean keys as the game's key axes.
     steer_keys: input::KeyAxis,
     lean_keys: input::KeyAxis,
+    /// The game pad's part of the last frame's controls (see `controls`).
+    stick: Controls,
     /// The keyboard's keys for the 14 actions, from the profile.
     key_map: input::KeyMap,
     /// The profile's joystick map (its current device, or the first
@@ -5014,6 +5036,7 @@ impl App {
             watch_lap: false,
             steer_keys: input::KeyAxis::default(),
             lean_keys: input::KeyAxis::default(),
+            stick: Controls::default(),
             key_map: input::KeyMap::factory(),
             pad_map: input::factory_pad(),
             analog: true,
@@ -6486,7 +6509,7 @@ impl App {
     fn controls(&mut self, dt: f32) -> Controls {
         let acts = self.actions_held();
         let held = |a: usize| acts[a];
-        let keyboard = Controls {
+        let mut c = Controls {
             throttle: held(input::ACCELERATE) as i32 as f32,
             brake: held(input::BRAKE) as i32 as f32,
             steer: self
@@ -6496,7 +6519,23 @@ impl App {
                 .lean_keys
                 .update(held(input::LEAN_BACK), held(input::LEAN_FORWARD), dt),
         };
-        self.gamepad(keyboard)
+        // The stick's say on its own (NaN where it leaves the keys be),
+        // kept for the bike's steps to read with the keys.
+        self.stick = self.gamepad(Controls { steer: f32::NAN, lean: f32::NAN, ..Controls::default() });
+        let p = self.stick;
+        if p.throttle > 0.0 {
+            c.throttle = 1.0;
+        }
+        if p.brake > 0.0 {
+            c.brake = 1.0;
+        }
+        if !p.steer.is_nan() {
+            c.steer = p.steer;
+        }
+        if !p.lean.is_nan() {
+            c.lean = p.lean;
+        }
+        c
     }
 
     #[cfg(not(feature = "gamepad"))]
@@ -6993,6 +7032,22 @@ impl App {
             }
             state.camera = Camera::looking_at(renderer::from_game(eye), renderer::from_game(target));
             return;
+        }
+        // The bike reads the keys again at each 0.02 s step, so the
+        // bars ramp the same way at any frame rate. At the wheel of a
+        // vehicle it waits on the frame's controls (the brake on).
+        if let Some(r) = &mut self.race {
+            if self.drive.is_some() {
+                r.input = None;
+            } else {
+                let held = if self.follow { acts } else { [false; profile::ACTIONS] };
+                let stick = if self.follow {
+                    self.stick
+                } else {
+                    Controls { steer: f32::NAN, lean: f32::NAN, ..Controls::default() }
+                };
+                r.input.get_or_insert_with(Default::default).hold(held, stick);
+            }
         }
         match &mut self.race {
             Some(r) => {

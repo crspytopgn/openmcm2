@@ -1,3 +1,28 @@
+# OpenMCM2 0.8.3
+
+* **The same ride at any frame rate.** At 30 fps a hard turn could end
+  differently than at 60 or 144 fps, because the game read your keys
+  once a frame. Now it reads them at every physics step, so the same
+  ride gives the same result at 30, 60, 144 or 240 fps.
+* **Computer riders get a moment too.** After the start and after a
+  crash, computer riders don't bump into you, other bikes or objects for
+  3 seconds, like the original.
+* **Share your Course Builder tracks** with other players. Only the
+  track's recipe is uploaded; your own models and pictures stay on your
+  computer.
+* **Replay editor** (Extras, off by default): a free camera, slow
+  motion, loops, camera keys, and clips you can save as movies.
+* **Gyro steering** on the Steam Deck, Steam Controller, PlayStation
+  and Switch pads (off until you turn it up).
+* **Dirt that builds up** on bikes and riders, lap by lap (Enhanced,
+  off by default).
+* **New Enhanced looks**: colour looks, a Next-gen preset, and grass
+  that bikes push aside (all off by default).
+* **Names stay clean.** Rude words in shared track names, leaderboards,
+  server and room names, and chat are starred out.
+* **Ko-fi**: you can now support OpenMCM2 on Ko-fi as well as GitHub
+  Sponsors.
+
 # OpenMCM2 0.8.2
 
 More of the original's riding rules, found by checking the physics
