@@ -105,6 +105,10 @@ jobs:
             mkdir -p "$PACK/sound"
             cp -R "$RUNNER_TEMP/snd/sound/." "$PACK/sound/"
           fi
+          # The menus' Donate button opens Ko-fi (freepack/menu/make_ui.py
+          # writes it so now; older sources still point at Sponsors).
+          grep -rlIZ 'open_url:https://github.com/sponsors/crspytopgn' "$PACK" \
+            | xargs -0 -r sed -i 's#open_url:https://github.com/sponsors/crspytopgn#open_url:https://ko-fi.com/crspytopgn#'
           # A little more colour in the scenery (ground, skies, plants, trackside
           # objects), before the previews below are drawn from the ground.
           sudo apt-get install -y -q python3-numpy python3-pil

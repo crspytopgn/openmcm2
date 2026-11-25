@@ -7,6 +7,19 @@
 * **Computer riders get a moment too.** After the start and after a
   crash, computer riders don't bump into you, other bikes or objects for
   3 seconds, like the original.
+* **Share your Course Builder tracks** with other players. Only the
+  track's recipe is uploaded; your own models and pictures stay on your
+  computer.
+* **Replay editor** (Extras, off by default): a free camera, slow
+  motion, loops, camera keys, and clips you can save as movies.
+* **Gyro steering** on the Steam Deck, Steam Controller, PlayStation
+  and Switch pads (off until you turn it up).
+* **Dirt that builds up** on bikes and riders, lap by lap (Enhanced,
+  off by default).
+* **New Enhanced looks**: colour looks, a Next-gen preset, and grass
+  that bikes push aside (all off by default).
+* **Ko-fi**: you can now support OpenMCM2 on Ko-fi as well as GitHub
+  Sponsors.
 
 # OpenMCM2 0.8.2
 
