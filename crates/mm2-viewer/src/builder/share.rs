@@ -1,10 +1,10 @@
 //! Sharing tracks with other players, straight from the builder: Share
 //! (in Save / Export) sends the track's `.course` to the leaderboard
 //! server, and Shared tracks (in Open) lists everyone's, to download,
-//! ride and rate. Only what the player made goes up: a copy of another
-//! track names that track's file and the player who downloads it needs
-//! that track, and files of the game's own packed into a track are found
-//! and turned away before anything is sent.
+//! ride and rate. Only the track's recipe goes up (a few KB): a copy of
+//! another track names that track's file and the player who downloads it
+//! needs that track, and pictures and models of the player's own stay on
+//! their computer (`mm2_course::share`).
 
 use super::panel::{self, Input, Painter};
 use super::{load_file, Builder, Popup, ACCENT};
@@ -12,7 +12,7 @@ use crate::job::Job;
 use crate::online::{self, Reply};
 use mm2_course::{share, Course, Mode};
 use mm2_settings::shared::{self, Mine, Row, Sort};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// What the builder is doing with shared tracks.
 #[derive(Default)]
@@ -53,6 +53,11 @@ fn random_seed() -> u64 {
     {
         shared::seed()
     }
+}
+
+fn capital(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
 }
 
 /// The player's name to put on a shared track: the last profile played.
@@ -111,8 +116,7 @@ impl Builder {
         }
         self.save();
         let course = self.course.clone();
-        let game = self.game.clone();
-        self.sharing.ready = Some(Job::spawn(move || ready_to_share(&course, game.as_deref())));
+        self.sharing.ready = Some(Job::spawn(move || ready_to_share(&course)));
         self.say("Getting the track ready to share...");
     }
 
@@ -289,7 +293,14 @@ impl Builder {
         if let Some(b) = &self.course.base {
             say += &format!(" It's a copy of {}: only your changes go up, and players need that track to ride it.", share::file_name(&b.file));
         }
-        say += " Nothing of the game's own goes up.";
+        say += " Only its recipe goes up (the line, jumps, shaping, paint and plants, a few KB): nothing of the game's own.";
+        if let Ok((_, left)) = share::for_sharing(&self.course) {
+            if !left.is_empty() {
+                say += &format!(" {} stay on your computer: players get the track without them.", capital(&left.join(", ")));
+            }
+        } else if self.course.land.heightmap.is_some() {
+            say += " Its hills come from a height map picture of yours, so it can't be shared.";
+        }
         let mut y = py + 34.0;
         for line in panel::wrap(p, &say, pw - 28.0, 11.0) {
             p.text([px + 14.0, y], &line, 11.0, false, soft);
@@ -469,36 +480,16 @@ impl Builder {
     }
 }
 
-/// The track's `.course` as it goes up, once no file of the game's own is
-/// found packed into it.
-fn ready_to_share(course: &Course, game: Option<&Path>) -> Result<String, String> {
-    let out = share::for_sharing(course);
-    if !share::embedded(&out).is_empty() {
-        let mut stock = share::Stock::default();
-        if let Some(game) = game {
-            let res = game.join("RES");
-            for e in crate::fs::read_dir(&res).into_iter().flatten().flatten() {
-                let p = e.path();
-                if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("res")) {
-                    if let Ok(bytes) = crate::fs::read(&p) {
-                        stock.add_archive(&bytes);
-                    }
-                }
-            }
-        }
-        if let Some(b) = &course.base {
-            if let Ok(bytes) = crate::fs::read(&b.file) {
-                stock.add_archive(&bytes);
-            }
-        }
-        let found = share::stock_files(&out, &stock);
-        if !found.is_empty() {
-            return Err(format!("{} is the game's own: take it out to share the track", found.join(", ")));
-        }
-    }
+/// The track's recipe as it goes up: the builder's own fields alone, the
+/// player's own pictures and models left on their computer (and said).
+fn ready_to_share(course: &Course) -> Result<String, String> {
+    let (out, left) = share::for_sharing(course)?;
     let json = out.to_json_compact();
-    if json.len() > shared::MOST_BYTES {
-        return Err(format!("The track is {:.1} MB, too big to share (6 MB at most): use smaller pictures", json.len() as f32 / 1e6));
+    if json.len() > share::MOST_BYTES {
+        return Err(format!("The track's recipe is {} KB, more than the {} KB that can be shared", json.len() / 1024, share::MOST_BYTES / 1024));
+    }
+    if !left.is_empty() {
+        eprintln!("sharing without {}", left.join(", "));
     }
     Ok(json)
 }
