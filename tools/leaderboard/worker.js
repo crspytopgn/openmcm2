@@ -730,16 +730,16 @@ export class Room extends DurableObject {
 }
 
 // ---------------------------------------------------------------------
-// Shared Course Builder tracks: players' own .course files (the builder's
-// recipe, a few hundred KB; the game bakes the track from it), kept in one
+// Shared Course Builder tracks: players' .course recipes (the line, jumps,
+// shaping and paint, a few KB; the game bakes the track from it), kept in one
 // Durable Object's SQLite tables. Never a game's own files: the JSON is
 // read and written again here, so only the builder's fields go in, and a
 // copy of a track names its file without the folder it came from (the
 // player who downloads it needs that track themselves).
 
-const SHARED_MOST = 6 * 1024 * 1024;
+const SHARED_MOST = 128 * 1024;
 const SHARED_PART = 1000 * 1000;
-const SHARED_TOTAL = 3 * 1024 * 1024 * 1024;
+const SHARED_TOTAL = 1024 * 1024 * 1024;
 const SHARED_PER_DAY = 12;
 const SHARED_PAGE = 60;
 const SHARED_REPORTS = 3;
@@ -765,6 +765,17 @@ const voterOk = (v) => /^[0-9a-z]{12,40}$/.test(v ?? "");
 
 // The course as it's kept: parsed, its fields checked, the player's own
 // folders taken out of a copy's track, written again.
+// Numbers, short text, true/false, and lists and objects of those, not
+// too deep: what a builder recipe is made of.
+function plain(v, depth) {
+  if (depth > 12) return false;
+  if (v === null || typeof v === "number" || typeof v === "boolean") return true;
+  if (typeof v === "string") return v.length <= 80;
+  if (Array.isArray(v)) return v.every((x) => plain(x, depth + 1));
+  if (typeof v === "object") return Object.entries(v).every(([k, x]) => k.length <= 40 && plain(x, depth + 1));
+  return false;
+}
+
 function tidyCourse(body) {
   let c;
   try {
@@ -775,6 +786,12 @@ function tidyCourse(body) {
   if (!c || typeof c !== "object" || Array.isArray(c)) return null;
   if (!Number.isInteger(c.version) || !MODES.includes(c.mode) || typeof c.line !== "object" || c.line === null) return null;
   for (const k of Object.keys(c)) if (!COURSE_KEYS.has(k)) delete c[k];
+  // A recipe only: no packed files (models, pictures), and nothing in it
+  // that could carry one (no long text anywhere).
+  if ((Array.isArray(c.models) && c.models.length) || c.models === null) return null;
+  delete c.models;
+  if (c.look?.ground || c.land?.heightmap) return null;
+  if (Array.isArray(c.plants) && c.plants.some((p) => p?.map)) return null;
   c.name = line(c.name, 40) || "Shared track";
   c.author = line(c.author, 24);
   if (c.base) {
@@ -782,6 +799,7 @@ function tidyCourse(body) {
     if (!/^[^<>:"|?*]{1,64}\.env$/i.test(file)) return null;
     c.base = { file, course: Number.isInteger(c.base.course) ? c.base.course : 0 };
   }
+  if (!plain(c, 0)) return null;
   return c;
 }
 

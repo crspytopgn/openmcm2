@@ -9,8 +9,9 @@ use std::path::Path;
 /// The file in the user folder.
 pub const FILE: &str = "shared-tracks.txt";
 
-/// The biggest track the server takes, bytes of `.course` JSON.
-pub const MOST_BYTES: usize = 6 * 1024 * 1024;
+/// The biggest track recipe the server takes, bytes of `.course` JSON
+/// (`mm2_course::share::MOST_BYTES`).
+pub const MOST_BYTES: usize = 128 * 1024;
 
 /// One shared track, as the server lists it.
 #[derive(Debug, Clone, PartialEq, Default)]

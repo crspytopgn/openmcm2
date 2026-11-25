@@ -88,21 +88,24 @@ races at once, and the list holds at most 300.
 
 Players share their Course Builder tracks from the builder (Save / Export,
 Share with other players) and get everyone's from Open, Shared tracks, or
-the launcher's Tracks page. What goes up is the builder's `.course` file,
-a few KB to a few MB (pictures and models of the player's own are packed
-in); the game bakes the track from it on the player's computer. They are
-kept in one Durable Object (`Shared`, its own SQLite tables, migration
-`v3` in `wrangler.toml`), which `npx wrangler deploy` sets up.
+the launcher's Tracks page. What goes up is the track's recipe only: the
+builder's `.course` without any files packed in, a few KB (a dressed Baja
+track is about 40 KB). The game bakes the track from it on the player's
+computer. They are kept in one Durable Object (`Shared`, its own SQLite
+tables, migration `v3` in `wrangler.toml`), which `npx wrangler deploy`
+sets up.
 
-Nothing of a game's own goes up: the worker keeps only the builder's
-fields, and a copy of a track names that track's file and never the
-folder it came from (whoever downloads it needs that track). The game
-also turns away a track with a file of the game's own packed into it.
+The worker takes a recipe and nothing else: at most 128 KB, only the
+builder's fields, no models or pictures, and no text longer than 80
+characters anywhere in it, so nothing else can ride along. A copy of a
+track names that track's file and never the folder it came from
+(whoever downloads it needs that track). The game leaves a player's own
+models, ground picture and plant maps out when it shares.
 
-- `POST /shared?voter=ID`: the `.course` JSON (6 MB at most). The answer
+- `POST /shared?voter=ID`: the recipe, as JSON (128 KB at most). The answer
   is `ok<TAB>id<TAB>key`; the game keeps the key, which shares a new
   version (`POST /shared?voter=ID&id=ID&key=KEY`) or removes it. Each
-  address can share 12 a day, and all of them can take 3 GB.
+  address can share 12 a day, and all of them can take 1 GB.
 - `GET /shared?mode=National&sort=new|top|most&q=WORDS&page=0`: 60 at a
   time, as `id<TAB>name<TAB>author<TAB>mode<TAB>base<TAB>downloads<TAB>stars
   times ten<TAB>votes<TAB>shared<TAB>bytes<TAB>changed` lines (Unix seconds).
