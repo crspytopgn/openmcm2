@@ -123,7 +123,7 @@ jobs:
             python3 tools/freepack/make_ui_sounds.py "$PACK"
           fi
           # Every sound as Ogg Vorbis (from the WAV sources), a sixth the download.
-          command -v ffmpeg >/dev/null || sudo apt-get install -y -q ffmpeg
+          command -v ffmpeg >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q ffmpeg; }
           python3 tools/freepack/ogg_sounds.py "$PACK"
           python3 tools/freepack/pack.py "$PACK" out "${{ inputs.version }}"
 
