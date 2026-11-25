@@ -14,6 +14,7 @@ mod iso;
 mod look;
 mod pad;
 mod settings;
+mod shared;
 mod shortcut;
 mod tracks;
 mod update;
@@ -309,6 +310,8 @@ struct Tracks {
     /// The popular tracks' pictures by address, fetched the first time
     /// the mouse rests on a track, then kept.
     pictures: std::collections::HashMap<String, Picture>,
+    /// Players' shared Course Builder tracks.
+    shared: shared::SharedTracks,
 }
 
 /// A track's picture: on its way, there, or not to be had.
@@ -2523,6 +2526,8 @@ impl Launcher {
             ui.label(look::weak("Waiting for the game data to finish copying…"));
             return;
         }
+        let server = self.settings.more.leaderboard_url.trim().trim_end_matches('/').to_string();
+        let (viewer, args) = (settings::viewer(), self.settings.args());
         let t = &mut self.tracks;
         t.homes = homes.clone();
         if t.listing.is_none() && t.fetching.is_none() && t.error.is_none() {
@@ -2536,6 +2541,7 @@ impl Launcher {
         let mut add = None;
         let mut remove = None;
         popular_card(ui, t, &game, &mut remove);
+        shared::card(ui, &mut t.shared, &server, &homes, viewer, args);
         look::card(ui, look::icon::ICON_SEARCH, &format!("Browse {}", site.name), |ui| {
             let kinds: Vec<_> = site.kinds.iter().enumerate().map(|(i, k)| look::Choice::new(Some(i), k.label)).collect();
             if let Some(k) = look::segmented(ui, t.kind, &kinds) {

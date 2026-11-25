@@ -1098,6 +1098,7 @@ pub mod laps;
 pub mod playtime;
 pub mod races;
 pub mod release;
+pub mod shared;
 
 #[cfg(test)]
 mod tests {
