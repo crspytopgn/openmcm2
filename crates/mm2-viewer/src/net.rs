@@ -986,6 +986,8 @@ impl Session {
                     out.push(Heard::Players);
                 }
                 Msg::Chat(t) => {
+                    // Rude words starred, for everyone.
+                    let t = mm2_settings::clean::mask(&t);
                     self.broadcast(&Msg::Chat(t.clone()), None);
                     out.push(Heard::Chat(t));
                 }
@@ -1038,7 +1040,7 @@ impl Session {
                 self.players = ps;
                 out.push(Heard::Players);
             }
-            Msg::Chat(t) => out.push(Heard::Chat(t)),
+            Msg::Chat(t) => out.push(Heard::Chat(mm2_settings::clean::mask(&t))),
             Msg::Game(g) => {
                 self.game = Some(g.clone());
                 out.push(Heard::Game(g));

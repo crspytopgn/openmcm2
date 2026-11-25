@@ -348,7 +348,7 @@ pub fn parse_board(text: &str) -> Vec<(String, u32, u32)> {
         .lines()
         .filter_map(|l| {
             let f: Vec<&str> = l.split('\t').collect();
-            Some((laps::clean(f.first()?), f.get(1)?.trim().parse().ok()?, f.get(2).and_then(|c| c.trim().parse().ok()).unwrap_or(0)))
+            Some((mm2_settings::clean::mask(&laps::clean(f.first()?)), f.get(1)?.trim().parse().ok()?, f.get(2).and_then(|c| c.trim().parse().ok()).unwrap_or(0)))
         })
         .collect();
     rows.sort_by_key(|r| r.1);
