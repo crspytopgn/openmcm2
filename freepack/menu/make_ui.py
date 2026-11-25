@@ -385,7 +385,7 @@ def write_layout(dat, rects):
         for k, v in rects.items():
             f.write('\n[controls.%s]\nrect = [%s]\n' % (k, ", ".join(map(str, v))))
             if k == "FreeDonate":
-                f.write('new = true  # not in the stock dialog: a button the Free Pack adds\nkind = "button"\nimages = { up = "01_Main/FreeDonateUp.png", lit = "01_Main/FreeDonateLit.png", down = "01_Main/FreeDonateDown.png", grey = "01_Main/FreeDonateGrey.png" }\ntip = "Support OpenMCM2: opens the donate page"\naction = "open_url:https://github.com/sponsors/crspytopgn"\n')
+                f.write('new = true  # not in the stock dialog: a button the Free Pack adds\nkind = "button"\nimages = { up = "01_Main/FreeDonateUp.png", lit = "01_Main/FreeDonateLit.png", down = "01_Main/FreeDonateDown.png", grey = "01_Main/FreeDonateGrey.png" }\ntip = "Support OpenMCM2: opens the donate page"\naction = "open_url:https://ko-fi.com/crspytopgn"\n')
             if k == "FreeBuilder":
                 f.write('new = true  # not in the stock dialog: a button the Free Pack adds\nkind = "button"\nimages = { up = "01_Main/FreeBuilderUp.png", lit = "01_Main/FreeBuilderLit.png", down = "01_Main/FreeBuilderDown.png", grey = "01_Main/FreeBuilderGrey.png" }\ntip = "Course Builder: make your own track and ride it"\naction = "course_builder"\n')
     written.append(p)
