@@ -1,3 +1,11 @@
+# OpenMCM2 0.8.1
+
+* **Turns ride like the original again.** 0.8.0 could throw you off in
+  ordinary turns, mostly when the rider put a foot down or leaned hard.
+  The new crash check now only crashes you when your upper body hits the
+  ground, the same as the original. Thanks to darkranger-red for the
+  report (#199).
+
 # OpenMCM2 0.8.0: The Big Physics Update
 
 **It rides like MM2 again.** Grip, suspension, jumps, landings and

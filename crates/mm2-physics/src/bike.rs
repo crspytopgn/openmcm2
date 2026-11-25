@@ -584,6 +584,10 @@ pub struct Bike {
     /// 0x40c0f0), where the riding motion last put them, in the bike's
     /// model space; empty when nothing posed the rider.
     rider_probes: Vec<Vec3>,
+    /// The rider's Pelvis frame (the rider model's first frame) where the
+    /// same pose put it, in the bike's model space: the crash check
+    /// measures the probes' middle in it.
+    rider_pelvis: Mat4,
     /// The player's crash tolerance: 1, 1.05 or 1.15 by difficulty.
     pub crash_tolerance: f32,
     /// How much steering in the air also bends the flight, turning the
@@ -723,6 +727,7 @@ impl Bike {
             fixed_step: false,
             original: false,
             rider_probes: Vec::new(),
+            rider_pelvis: orig::riding_pelvis(),
             reset_face: None,
             o: orig::Orig::default(),
             crash_tolerance: 1.05,
@@ -864,9 +869,11 @@ impl Bike {
     }
 
     /// Hands over where the riding motion puts the rider's 15 probes, in
-    /// the bike's model space (the Wrecker's state 0 follows the pose).
-    pub fn set_rider_probes(&mut self, points: Vec<Vec3>) {
+    /// the bike's model space (the Wrecker's state 0 follows the pose),
+    /// and the rider's Pelvis frame in the same space.
+    pub fn set_rider_probes(&mut self, points: Vec<Vec3>, pelvis: Mat4) {
         self.rider_probes = points;
+        self.rider_pelvis = pelvis;
     }
 
     /// Speed along the bike, ft/s.
