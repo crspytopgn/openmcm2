@@ -16,7 +16,7 @@ export const UPGRADES = [
   ["bloom", "HDR bloom", false, "Bright lights and the sun glow softly."],
   ["ao", "Ambient occlusion", true, "Corners and contacts darkened, as ambient light is."],
   ["ground", "Detailed ground", true, "The ground re-made from photo materials."],
-  ["grass", "3D grass", true, "Grass growing on the grassy ground near you."],
+  ["grass", "3D grass", true, "Grass growing on the grassy ground near you, swaying in the wind and pushed aside as bikes ride through it. With Next-gen it grows thicker and taller and the wind rolls across it in waves."],
   ["smooth", "Smooth hills", true, "The hills round you smoothed, not faceted."],
   ["dust", "Dust clouds", true, "Soft clouds of dust the colour of the ground behind the bikes: thicker when you pull hard or spin, a ring of it when you land, and on a dry track a thin haze that hangs on the wind. Fewer, bigger puffs on Low and Medium, so it stays light."],
   ["mud", "Mud and spray", true, "Mud and spray caking bikes and riders."],
@@ -42,11 +42,14 @@ export const UPGRADES = [
 // In a browser, Ultra draws as High does (the game caps both: see
 // graphics::Enhanced::for_browser), so it isn't offered. Medium is the
 // default: High has stalled a whole Mac in Safari.
-const QUALITIES = [["auto", "Auto (picks for your computer)"], ["low", "Low"], ["medium", "Medium"], ["high", "High (a fast computer)"]];
+// Next-gen is offered: the game keeps its look but holds the frame rate
+// by setting effects aside when frames come late.
+const QUALITIES = [["auto", "Auto (picks for your computer)"], ["low", "Low"], ["medium", "Medium"], ["high", "High (a fast computer)"], ["nextgen", "Next-gen (bold, a strong computer)"]];
 // Whether a quality preset keeps an upgrade on (Quality::has).
 function presetHas(quality, name) {
   if (quality === "auto") quality = "low"; // browsers seldom name the graphics card
   const off = { low: ["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr", "bounce"], medium: ["shafts", "smooth", "gtao", "ssr", "bounce"] }[quality] || [];
+  if (quality === "nextgen" && ["bounce", "bloom", "bikes", "scenery"].includes(name)) return true;
   return !off.includes(name) && UPGRADES.some(([n, , on]) => n === name && on);
 }
 
@@ -56,6 +59,10 @@ const ABOUT_WEATHER = "Clear, overcast or rain, for looks only: the riding is th
 const ABOUT_DETAIL = "How strongly the grain of the photo ground shows.";
 const TIMES = [["", "Track's own"], ["dawn", "Dawn"], ["morning", "Morning"], ["noon", "Noon"], ["afternoon", "Afternoon"], ["dusk", "Dusk"]];
 const WEATHERS = [["clear", "Clear"], ["overcast", "Overcast"], ["rain", "Rain"]];
+// The colour looks (mm2_settings::LOOKS), a gentle grade over the picture.
+const LOOKS = [["original", "Original"], ["bold", "Bold"], ["warm", "Warm afternoon"], ["overcast", "Overcast"]];
+const ABOUT_LOOK = "A gentle colour grade over the finished picture. Original: the colours as drawn. Bold: richer colour, a little more contrast, slightly darker corners. Warm afternoon: sunlit parts a touch golden, the shade lifted a little. Overcast: a little less colour and contrast, a cool tint in the shade.";
+const ABOUT_NEXTGEN = "Next-gen: a modern game's look, much bolder than the others. Sunlit air you can see shafts of light in, thick grass blowing in waves of wind, trees plainly moving, photo dirt sharp right up to your wheels, the real sky with clouds, bounce light, a soft glow round bright light, glossier bikes and trackside props. Heavy: for a strong computer. If frames come late it draws softer and sets effects aside.";
 
 // The extras the original game didn't have, all off unless turned on,
 // by group: the setting, its flag, the label and what it does. A number
@@ -159,6 +166,7 @@ export function defaults() {
     quality: "auto",
     time: "",
     weather: "clear",
+    look: "original",
     detail: 0.5,
     upgrades: Object.fromEntries(UPGRADES.map(([n]) => [n, presetHas("medium", n)])),
     show_fps: false,
@@ -177,6 +185,8 @@ export function load() {
       // that build up start on now.
       if ((kept.v || 0) < 3 && kept.upgrades) delete kept.upgrades.ruts;
       Object.assign(s, kept, { upgrades: { ...s.upgrades, ...(kept.upgrades || {}) } });
+      // Before the colour looks, the grade switch's one bold look.
+      if (!kept.look && kept.upgrades && kept.upgrades.grade) s.look = "bold";
       // Settings from before Medium was the browser's default go to it.
       if (!kept.v && s.quality !== "low") {
         s.quality = "medium";
@@ -216,8 +226,9 @@ export function args(s) {
     // The light mode: Auto is Low.
     const list = [`quality=${lite && s.quality === "auto" ? "low" : s.quality}`];
     // Auto picks the effects itself.
+    // The colour grade is the colour look's (look= below).
     if (s.quality !== "auto") for (const [n] of UPGRADES) {
-      if (!!s.upgrades[n] !== presetHas(s.quality, n)) list.push(s.upgrades[n] ? n : `no-${n}`);
+      if (n !== "grade" && !!s.upgrades[n] !== presetHas(s.quality, n)) list.push(s.upgrades[n] ? n : `no-${n}`);
     }
     // Auto: the effects this computer needed set aside last time
     // (the game tells the page, mm2page.autoShed), so it starts there.
@@ -227,6 +238,7 @@ export function args(s) {
     }
     if (s.time) list.push(`time=${s.time}`);
     if (s.weather !== "clear") list.push(`weather=${s.weather}`);
+    if (s.look && s.look !== "original") list.push(`look=${s.look}`);
     if (Math.abs(s.detail - 0.5) > 1e-3) list.push(`detail=${Number(s.detail).toFixed(2)}`);
     a.push(`enhanced=${list.join(",")}`);
   }
@@ -307,17 +319,20 @@ export function render(lookBox, box, s, changed) {
         s.quality = q;
         for (const [n] of UPGRADES) s.upgrades[n] = presetHas(q, n);
         set("quality", q, true);
-      }, ABOUT_QUALITY),
+      }, `${ABOUT_QUALITY} ${ABOUT_NEXTGEN}`),
       el("span", { textContent: "Time of day", title: ABOUT_TIME }),
       select(TIMES, s.time, (v) => set("time", v), ABOUT_TIME),
       el("span", { textContent: "Weather", title: ABOUT_WEATHER }),
       select(WEATHERS, s.weather, (v) => set("weather", v), ABOUT_WEATHER),
+      el("span", { textContent: "Colour look", title: ABOUT_LOOK }),
+      select(LOOKS, s.look || "original", (v) => set("look", v), ABOUT_LOOK),
       el("span", { textContent: "Ground detail", title: ABOUT_DETAIL }),
       el("span", { title: ABOUT_DETAIL }, ...slider(0, 1, 0.05, "", s.detail, (v) => set("detail", v), ABOUT_DETAIL)),
     );
     const effects = el("details", {}, el("summary", { textContent: "Individual effects", title: "Each effect on its own. Point at one to see what it does." }));
     const list = el("div", { className: "two" });
     for (const [n, text, , about] of UPGRADES) {
+      if (n === "grade") continue; // picked as the colour look
       list.append(checkbox(text, about, !!s.upgrades[n], (on) => {
         s.upgrades[n] = on;
         // Under Auto, changing an effect means choosing yourself.

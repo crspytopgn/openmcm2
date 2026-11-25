@@ -1133,7 +1133,14 @@ impl TerrainRenderer {
         // and the view reaching on till it has all but hidden the land.
         let haze = (showing.is_some_and(|e| e.distance) && self.fog_range != NO_FOG).then(|| {
             let span = (end - start).max(1.0);
-            (start, std::f32::consts::LN_2 / span, (start + 7.0 * span).clamp(end, 20_000.0))
+            let far = (start + 7.0 * span).clamp(end, 20_000.0);
+            // Next-gen: the haze begins nearer and is thicker, so the air
+            // between the rider and the hills shows (the far plane stays).
+            if showing.is_some_and(|e| e.nextgen) {
+                (start * 0.5, std::f32::consts::LN_2 / span * 1.5, far)
+            } else {
+                (start, std::f32::consts::LN_2 / span, far)
+            }
         });
         let far = haze.map_or(end, |h| h.2);
         let plain = Mat4::perspective_rh(camera.fovy(aspect), aspect, 1.0, far);
@@ -1351,7 +1358,9 @@ impl TerrainRenderer {
                 traced: [flag(traced), 0.0, 0.0, 0.0],
                 view_proj: (proj * camera.view()).to_cols_array_2d(),
                 ambient: lights.globals().0,
-                terrain: [self.grid[1], self.grid[2] * self.grid[3], 0.0, 0.0],
+                // z: the Next-gen preset's stronger look (enhanced_fns.wgsl
+                // `next_gen`): lit air, lusher grass, firmer ground detail.
+                terrain: [self.grid[1], self.grid[2] * self.grid[3], flag(on.nextgen), 0.0],
                 night: {
                     let (a, s, t) = self.lights.globals();
                     let own = Vec3::new(a[0], a[1], a[2]) + Vec3::new(s[0], s[1], s[2]) * t[1].max(0.0);
@@ -1360,7 +1369,9 @@ impl TerrainRenderer {
                 headlights: [
                     flag(self.enhanced.as_ref().is_some_and(|e| e.rt.is_some()) && !self.headlights.is_empty()),
                     if day.as_ref().is_some_and(|d| d.night > 0.0) { (self.headlights.len() + self.pole_lamps.len()).min(crate::enhance::LAMPS) as f32 } else { 0.0 },
-                    0.0,
+                    // z: how many of the lamps are the bikes (the first),
+                    // day or night, for the grass they push aside.
+                    self.headlights.len().min(crate::enhance::LAMPS) as f32,
                     0.0,
                 ],
                 lamps: {

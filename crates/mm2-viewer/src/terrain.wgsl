@@ -177,10 +177,17 @@ fn fine_ground(xz: vec2<f32>) -> vec3<f32> {
 // The ground's colour at a pixel, as the game shows it, before its
 // shadow and fog.
 fn ground(in: VertexOut) -> vec3<f32> {
+    return ground_soft(in, 1.0);
+}
+
+// The painted ground, its texture read `soft` times blurrier (a coarser
+// mip): Next-gen softens the painted streaks near the eye, where the photo
+// materials' own grain takes over.
+fn ground_soft(in: VertexOut, soft: f32) -> vec3<f32> {
     // Continuous coordinates in tiles, so mip selection has no seams.
     let t = in.terrain_xz / globals.grid.z;
-    let ddx = dpdx(t);
-    let ddy = dpdy(t);
+    let ddx = dpdx(t) * soft;
+    let ddy = dpdy(t) * soft;
     let cell = vec2<i32>(floor(t));
     // Each tile is its own texture, so their edges need not match (the
     // upscaled ones least of all): near an edge, fade into the next tile
@@ -450,9 +457,17 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     // The detail fades with distance, where the painted colour suffices;
     // mostly its light and dark, a little of its own colour.
     // `detail=` (enh.haze.w, 0 to 1) sets how strongly, and how far.
-    colour = mix(vec3<f32>(luminance(colour)), colour, 0.35);
+    // Next-gen: more of the photo's own colour, laid on fully up close, so
+    // the dirt reads as real dirt (clods, stones, grain) at the wheels.
+    let ng = next_gen();
+    colour = mix(vec3<f32>(luminance(colour)), colour, select(0.35, 0.6, ng));
+    if (ng) {
+        // Firmer: the photo's clods and stones darker and lighter, so the
+        // grain reads at riding speed and not as noise.
+        colour = pow(max(colour, vec3<f32>(0.0)), vec3<f32>(1.5));
+    }
     // Gently: the painted ground stays what the eye reads.
-    colour = mix(vec3<f32>(1.0), colour, near * (0.35 + 0.5 * detail));
+    colour = mix(vec3<f32>(1.0), colour, near * select(0.35 + 0.5 * detail, 0.95, ng));
     // Further off, where the painted texture is stretched soft, the main
     // material again at six times its size: only its light and dark,
     // faintly, so the middle distance has grain without new colour.
@@ -471,7 +486,7 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     // up the texture is -z.
     let t = normalize(vec3<f32>(1.0, 0.0, 0.0) - n * n.x);
     let b = cross(t, n);
-    let nm = normalize(mix(vec3<f32>(0.0, 0.0, 1.0), normalize(normal), near * (0.4 + 0.5 * detail)));
+    let nm = normalize(mix(vec3<f32>(0.0, 0.0, 1.0), normalize(normal), near * select(0.4 + 0.5 * detail, 1.0, ng)));
     var bent = normalize(t * nm.x + b * nm.y + n * nm.z);
     // The ruts: dark, damp grooves where the tyres have run.
     var rut = 0.0;
@@ -636,9 +651,12 @@ fn fs_smooth(in: VertexOut) -> @location(0) vec4<f32> {
 }
 
 fn enhanced_ground(in: VertexOut) -> vec4<f32> {
-    let colour = ground(in);
-    let n = normalize(in.normal);
     let dist = length(in.world - globals.camera.xyz);
+    // Next-gen, with the new ground: near the eye the painted texture's
+    // smears give way to the photo dirt's grain (new_ground).
+    let soft = select(1.0, mix(12.0, 1.0, smoothstep(30.0, 160.0, dist)), next_gen() && enh.more.x > 0.5);
+    let colour = ground_soft(in, soft);
+    let n = normalize(in.normal);
     // The new ground lights itself: none of the plain light below is
     // needed, and its shadow lookups were most of a pixel's cost.
     if (enh.more.x > 0.5) {

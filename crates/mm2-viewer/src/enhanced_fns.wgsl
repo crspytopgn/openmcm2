@@ -161,7 +161,85 @@ fn sunlit_air(c: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
     return mix(c, air, amount);
 }
 
-fn apply_haze(c: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
+// The Next-gen preset's stronger look is on (renderer: enh.terrain.z).
+fn next_gen() -> bool {
+    return enh.terrain.z > 0.5;
+}
+
+// Whether the sun reaches point `p` in the air, from the shadow
+// cascades: one tap, as the light in the air is many taps blended. 1 past
+// the shadows' reach.
+fn sun_in_air(p: vec3<f32>) -> f32 {
+    if (enh.flags.y < 0.5) {
+        return 1.0;
+    }
+    let d = length(p - globals.camera.xyz);
+    if (d > enh.splits.w) {
+        return 1.0;
+    }
+    var c = 0u;
+    if (d > enh.splits.x) {
+        c = 1u;
+    }
+    if (d > enh.splits.y) {
+        c = 2u;
+    }
+    let q = enh.cascades[c] * vec4<f32>(p, 1.0);
+    let uv = vec2<f32>(q.x * 0.5 + 0.5, 0.5 - q.y * 0.5);
+    if (any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || q.z > 1.0) {
+        return 1.0;
+    }
+    return textureSampleCompareLevel(sun_map, sun_sampler, uv, c, q.z);
+}
+
+// How thick the Next-gen air is near the ground: light lost by e every
+// this many ft.
+const AIR_CLEAR: f32 = 2600.0;
+// How far out the air's light is marched through the shadows, ft, and in
+// how many steps.
+const AIR_REACH: f32 = 320.0;
+const AIR_STEPS: i32 = 10;
+
+// Next-gen's lit air (volumetric light, as Unreal's and Frostbite's
+// height fog, marched through the sun's shadow cascades): a thin air from
+// the eye out, lit by the sun where the sun reaches it, so the shade of
+// hills, trees and riders shows as darker shafts in it, the light
+// brightest looking toward the sun. Over `c`, seen at `world`.
+fn lit_air(c: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
+    let eye = globals.camera.xyz;
+    let to = world - eye;
+    let v = to / max(length(to), 1e-3);
+    let reach = min(dist, AIR_REACH);
+    // A different start along the ray each pixel, so the steps don't band
+    // (temporal anti-aliasing blends them smooth).
+    let jitter = fract(sin(dot(world.xz, vec2<f32>(12.9898, 78.233)) + enh.world.x * 7.31) * 43758.547);
+    var seen = 0.0;
+    for (var i = 0; i < AIR_STEPS; i++) {
+        let t = (f32(i) + jitter) / f32(AIR_STEPS);
+        seen += sun_in_air(eye + v * reach * t);
+    }
+    seen /= f32(AIR_STEPS);
+    // Past the marched stretch the air is lit as on open ground.
+    let marched = reach / max(dist, 1.0);
+    let lit = seen * marched + (1.0 - marched);
+    // Thinner higher up, by e every 600 ft above the eye.
+    let thin = exp(-max(to.y, 0.0) / 600.0);
+    let amount = (1.0 - exp(-dist / AIR_CLEAR)) * thin;
+    let cos_t = dot(v, enh.to_sun.xyz);
+    // Forward scattering: much brighter toward the sun (a soft glow), a
+    // little all round.
+    let toward = pow(max(cos_t, 0.0), 6.0);
+    let up = smoothstep(-0.05, 0.15, enh.to_sun.y) * (1.0 - 0.7 * enh.world.w);
+    let sunlit = enh.sun.rgb * (0.18 + 1.1 * toward) * lit * up;
+    let air = enh.fog.rgb * 0.55 + sunlit;
+    return mix(c, air, amount);
+}
+
+fn apply_haze(c0: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
+    var c = c0;
+    if (next_gen()) {
+        c = lit_air(c, world, dist);
+    }
     if (enh.flags.z > 0.5) {
         if (enh.ibl.w > 0.5) {
             return sunlit_air(c, world, dist);

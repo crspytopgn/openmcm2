@@ -40,6 +40,10 @@ const STEP: f32 = 0.85;
 // Where the grass starts to sink into the ground, and where it is gone, ft.
 const FADE: f32 = 90.0;
 const END: f32 = 160.0;
+// The bikes push the grass aside within this many ft of their front
+// (the headlight's place, enh.lamps), for grass this near the eye.
+const PUSH_REACH: f32 = 4.5;
+const PUSH_FROM_EYE: f32 = 80.0;
 
 // 0..1, the same for the same `p`. An integer hash (PCG): the usual
 // fract(sin(..)) one breaks down this far from the origin, where the GPU's
@@ -104,6 +108,17 @@ fn grassy(p: vec3<f32>) -> f32 {
         * smoothstep(0.25, 0.35, sat);
 }
 
+// How much painted colour `p` looks like dry grass or weeds: olive to
+// straw, a little colour, the green not far below the red. Bare dirt is
+// browner (red well over green) and is left alone.
+fn dry_grassy(p: vec3<f32>) -> f32 {
+    let c = pow(p, vec3<f32>(1.0 / 2.2));
+    let hi = max(c.r, max(c.g, c.b));
+    let sat = (hi - min(c.r, min(c.g, c.b))) / max(hi, 0.01);
+    return smoothstep(-0.02, 0.03, c.g - c.r * 0.9) * smoothstep(0.0, 0.05, c.g - c.b)
+        * smoothstep(0.12, 0.22, sat);
+}
+
 struct Out {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -132,6 +147,11 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     let t = vec2<f32>(xz.x, -xz.y) / scale;
     let painted = painted_at(t);
     var density = grassy(painted);
+    // Next-gen: thicker, and on the drier, olive and straw-coloured verges
+    // too, more sparsely (never on the bare brown dirt or grey roads).
+    if (next_gen()) {
+        density = max(min(density * 1.6, 1.0), dry_grassy(painted) * 0.55);
+    }
     // None where the tyres have worn it away.
     if (enh.ruts.w > 0.5) {
         let ruv = (xz - enh.ruts.xy) / enh.ruts.z;
@@ -154,12 +174,40 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     let turn = r1 * 6.2832 + f32(card) * 2.0944;
     let across = vec3<f32>(cos(turn), 0.0, sin(turn));
     // 0.45 to 1.05 ft: short enough to sit round a bike's wheels.
-    let tall = mix(0.45, 1.05, hash(cell + 3.3)) * grow;
+    var tall = mix(0.45, 1.05, hash(cell + 3.3)) * grow;
+    if (next_gen()) {
+        tall = mix(0.6, 1.6, hash(cell + 3.3)) * grow;
+    }
     let wide = 1.3 + 0.3 * r2;
     // Sway in the wind, more at the tips.
     let time = enh.world.x;
     let gust = sin(time * 1.6 + xz.x * 0.21 + xz.y * 0.17) * 0.5 + sin(time * 2.7 + xz.x * 0.5) * 0.25;
-    let bend = vec3<f32>(0.7, 0.0, 0.4) * gust * 0.18 * corner.y * corner.y * tall;
+    var bend = vec3<f32>(0.7, 0.0, 0.4) * gust * 0.18 * corner.y * corner.y * tall;
+    if (next_gen()) {
+        // Gusts rolling across the field as waves (as wind over a meadow),
+        // the blades bowing with them, and a quick flutter on top.
+        let wind = normalize(vec2<f32>(0.87, 0.5));
+        let wave = sin(dot(xz, wind) * 0.09 - time * 1.9) * 0.5 + 0.5;
+        let roll = wave * wave * (0.6 + 0.4 * sin(dot(xz, vec2<f32>(-0.5, 0.87)) * 0.031 + time * 0.4));
+        let flutter = sin(time * 6.3 + r1 * 40.0) * 0.06;
+        let k = (0.12 + 0.55 * roll + flutter) * corner.y * corner.y * tall;
+        bend = vec3<f32>(wind.x, -0.25 * roll * corner.y, wind.y) * k;
+    }
+    // Pushed aside by the bikes riding through: bowed away from each
+    // within a few ft of its wheels, flattest right under them.
+    if (dist < PUSH_FROM_EYE && corner.y > 0.0) {
+        let bikes = min(u32(enh.headlights.z), 64u);
+        for (var b = 0u; b < bikes; b++) {
+            let at = enh.lamps[b].xyz;
+            let away = xz - at.xz;
+            let d = length(away);
+            if (d < PUSH_REACH && abs(at.y - ground) < 8.0) {
+                let k = 1.0 - smoothstep(0.6, PUSH_REACH, d);
+                let dir = away / max(d, 0.05);
+                bend += vec3<f32>(dir.x, -0.55 * corner.y, dir.y) * k * corner.y * tall * 0.9;
+            }
+        }
+    }
     let world = vec3<f32>(xz.x, ground - 0.05, xz.y) + across * (corner.x - 0.5) * wide + vec3<f32>(0.0, corner.y * tall, 0.0) + bend;
     out.clip = globals.view_proj * vec4<f32>(world, 1.0);
     out.uv = corner;
