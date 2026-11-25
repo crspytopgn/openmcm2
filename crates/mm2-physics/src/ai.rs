@@ -365,12 +365,12 @@ fn flat_or_zero(v: Vec3) -> Vec3 {
     Vec3::new(v.x, 0.0, v.z).normalize_or_zero()
 }
 
-/// Another rider or a moving object, for [`scan`]: where it is and
-/// where it is heading.
+/// Another rider or a moving object, for [`scan`]: where it is (its
+/// origin, +0xc) and its velocity (+0x64), ft/s.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Mover {
     pub at: Vec3,
-    pub to: Vec3,
+    pub velocity: Vec3,
 }
 
 /// What the AI's look ahead found in its way (0x416440).
@@ -408,9 +408,11 @@ const SCAN_TREE: f32 = 0.25;
 ///   direction to the obstacle. Here the rays are sampled against
 ///   [`Ground::solid`] every foot.
 /// * Trees count a quarter of the way to their centres.
-/// * A mover whose path crosses the corridor blocks it; one within 10 ft
-///   ahead that does not cross pushes the rider's velocity away from it
-///   by up to 10 ft/s.
+/// * A mover whose next second (its place plus its velocity, 0x47c740
+///   takes a point and a direction) crosses the corridor blocks it, and
+///   the rider's velocity gives up what it closes on the mover faster
+///   than the mover moves away; one within 10 ft ahead that does not
+///   cross pushes the rider's velocity away from it by up to 10 ft/s.
 #[allow(clippy::too_many_arguments)]
 pub fn scan(
     ground: &dyn Ground,
@@ -488,12 +490,11 @@ pub fn scan(
     for m in movers {
         let rel = m.at - from;
         let dir = rel.normalize_or_zero();
-        match crossing(from, to, m.at, m.to) {
+        match crossing(from, to, m.at, m.at + m.velocity) {
             Some(_) => {
                 blocked = true;
-                // The game measures the mover's heading point against the
-                // dodge vector itself, as here.
-                let k = (m.to - steer).dot(dir);
+                // The mover's velocity against the rider's, toward it.
+                let k = (m.velocity - steer).dot(dir);
                 if k < 0.0 {
                     steer += dir * k;
                 }
@@ -844,10 +845,19 @@ mod tests {
         // A rider crossing the corridor blocks it.
         let rider = Mover {
             at: Vec3::new(-5.0, 3.0, 15.0),
-            to: Vec3::new(10.0, 3.0, 15.0),
+            velocity: Vec3::new(15.0, 0.0, 0.0),
         };
         let s = scan(&crate::Flat, from, to, 2.0, 40.0, &[rider], &[], true);
         assert!(s.blocked && s.toward.is_none());
+        // It matches the mover's velocity toward the rider, no more.
+        assert!(s.nudge.length() <= 40.0, "{s:?}");
+        // A rider just beside, going the same way, crossing the corridor
+        // in its next second: no kick forward (the old reading took its
+        // place for a velocity, worth hundreds of ft/s on a real track).
+        let far = Vec3::new(1100.0, 0.0, 800.0);
+        let beside = Mover { at: far + Vec3::new(-2.0, 3.0, 2.0), velocity: Vec3::new(4.0, 0.0, 40.0) };
+        let s = scan(&crate::Flat, far + Vec3::Y * 3.0, far + Vec3::new(0.0, 3.0, 10.0), 2.0, 40.0, &[beside], &[], true);
+        assert!(s.nudge.z <= 1e-3, "{s:?}");
         let clear = scan(&crate::Flat, from, to, 2.0, 40.0, &[], &[], true);
         assert!(!clear.blocked);
         assert_eq!(clear.nudge, Vec3::ZERO);

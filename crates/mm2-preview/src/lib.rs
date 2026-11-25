@@ -422,7 +422,7 @@ impl Sim {
                 .filter(|&j| j != i)
                 .map(|j| Mover {
                     at: going[j].0,
-                    to: going[j].0 + going[j].1 * 0.25,
+                    velocity: going[j].1,
                 })
                 .collect();
             let one = &mut self.riders[i];

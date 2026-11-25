@@ -2376,13 +2376,13 @@ impl Race {
                     None
                 };
                 if ai && first && racing && (ai_dt > 0.0 || wrecked) {
-                    // The other bikes, where they are and will be in a
-                    // quarter second, for the obstacle scan.
+                    // The other bikes, where they are and how fast they
+                    // go, for the obstacle scan.
                     let movers: Vec<mm2_physics::ai::Mover> = (0..places.len())
                         .filter(|&j| j != i)
                         .map(|j| mm2_physics::ai::Mover {
                             at: places[j],
-                            to: places[j] + going[j] * 0.25,
+                            velocity: going[j],
                         })
                         .collect();
                     r.ride(
