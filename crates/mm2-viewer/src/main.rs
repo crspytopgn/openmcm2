@@ -258,6 +258,28 @@ fn main() -> Result<(), BoxError> {
         eprintln!("{to}: {:.1} MB for the original game", env.len() as f32 / 1e6);
         return Ok(());
     }
+    // A Course Builder track baked into an OpenMCM2 track, with no window
+    // (`--bake-course <track.course> <out.env>`; the launcher's shared
+    // tracks, downloaded as the builder's .course).
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(i) = args.iter().position(|a| a == "--bake-course") {
+        let (Some(from), Some(to)) = (args.get(i + 1), args.get(i + 2)) else {
+            return Err("usage: --bake-course <track.course> <out.env>".into());
+        };
+        let bytes = std::fs::read(from).map_err(|e| format!("{from}: {e}"))?;
+        let mut course = mm2_course::Course::from_json(&String::from_utf8_lossy(&bytes))?;
+        if let Some(base) = course.base.clone() {
+            let track = std::fs::read(&base.file).map_err(|e| format!("{}: {e}", base.file))?;
+            mm2_course::copy::attach(&mut course, &track)?;
+        }
+        let env = mm2_course::env::write_with(&course, &fine_ground::builder_pictures()).env;
+        if let Some(dir) = Path::new(to).parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        std::fs::write(to, &env).map_err(|e| format!("{to}: {e}"))?;
+        eprintln!("{to}: {:.1} MB", env.len() as f32 / 1e6);
+        return Ok(());
+    }
     // The enhanced graphics, all of them or less those named after `=`.
     if let Some(arg) = args.iter().find(|a| *a == "--enhanced" || a.starts_with("--enhanced=")) {
         let list = arg.strip_prefix("--enhanced").unwrap().trim_start_matches('=');
