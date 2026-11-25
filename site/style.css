@@ -59,6 +59,7 @@ h1 { font-size: clamp(30px, 3.9vw, 46px); margin: 0 0 18px; }
 .support h2 { margin: 0 0 6px; font-size: 22px; }
 .support p { margin: 0; color: var(--muted); max-width: 680px; }
 .support .btn { flex-shrink: 0; }
+.support-btns { display: flex; flex-wrap: wrap; gap: 10px; flex-shrink: 0; }
 @media (max-width: 720px) { .support { flex-direction: column; align-items: flex-start; } }
 .hero-logo { display: block; width: min(300px, 70%); height: auto; margin: 0 0 20px -4px; }
 .hero-img { margin: 0; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); }

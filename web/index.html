@@ -129,6 +129,8 @@
   label.plainbutton { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost:hover { border-color: var(--accent); }
+  a.button.ghost { background: none; color: var(--fg); border: 1px solid #55524a; margin-left: .4rem; }
+  a.button.ghost:hover { border-color: var(--accent); }
   /* A popular track's picture, while the mouse rests on it (or it's tapped). */
   #popularlist li { position: relative; cursor: default; }
   #popularlist li img { display: none; position: absolute; left: 0; top: 100%; z-index: 5; width: min(360px, 80vw);
@@ -424,7 +426,8 @@
     <p>OpenMCM2 is free and always will be. Making it has real monthly costs,
       though. If you enjoy it, a small donation helps cover them and pays for
       future updates: more fixes, more tracks and more of the original game brought back.</p>
-    <a class="button" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener"><span aria-hidden="true">♥</span> Donate on GitHub Sponsors</a>
+    <a class="button" href="https://ko-fi.com/crspytopgn" target="_blank" rel="noopener"><span aria-hidden="true">♥</span> Buy me a coffee on Ko-fi</a>
+    <a class="button ghost" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener">Sponsor on GitHub</a>
   </div>
 </div></div>
 <div id="loader" hidden role="status" aria-live="polite"><div class="plate">
@@ -479,7 +482,7 @@
 <div id="update" hidden>A new version of OpenMCM2 is out. <button id="reload">Reload to update</button>
   <button id="later" class="plain">Later</button></div>
 <button id="look" hidden title="Switch between the original look and the enhanced one (F3)"></button>
-<a id="heart" href="https://github.com/sponsors/crspytopgn" target="_blank" rel="noopener" hidden><span aria-hidden="true">♥</span> Enjoying it? Support OpenMCM2</a>
+<a id="heart" href="https://ko-fi.com/crspytopgn" target="_blank" rel="noopener" hidden><span aria-hidden="true">♥</span> Enjoying it? Support OpenMCM2</a>
 <script type="module">
 // This build's version: everything below is fetched for it, so a new
 // release never mixes with old files the browser kept.

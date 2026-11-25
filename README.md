@@ -127,7 +127,7 @@ OpenMCM2 is free and always will be. Making it has real monthly costs,
 though. If you enjoy it, a small donation helps cover them and pays for
 future updates.
 
-**[♥ Donate on GitHub Sponsors](https://github.com/sponsors/crspytopgn)**
+**[♥ Buy me a coffee on Ko-fi](https://ko-fi.com/crspytopgn)** · **[Sponsor on GitHub](https://github.com/sponsors/crspytopgn)**
 
 More from me: [OpenSGolf](https://github.com/crspytopgn/opensgolf) · [OpenLinks2003](https://github.com/crspytopgn/openlinks2003) · [Pitwall](https://github.com/crspytopgn/pitwall).
 

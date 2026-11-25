@@ -28,10 +28,11 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// The window icon and the logo at the top (drawn from `assets/icon/*.svg`).
-/// Where the Updates page's Donate button goes.
+/// Where the Updates page's donate buttons go.
+const KOFI_URL: &str = "https://ko-fi.com/crspytopgn";
 const SPONSOR_URL: &str = "https://github.com/sponsors/crspytopgn";
 
+/// The window icon and the logo at the top (drawn from `assets/icon/*.svg`).
 const ICON_PNG: &[u8] = include_bytes!("../../../assets/icon/icon-256.png");
 const LOGO_PNG: &[u8] = include_bytes!("../../../assets/icon/logo-dark.png");
 
@@ -2495,10 +2496,15 @@ impl Launcher {
         });
         look::card(ui, look::icon::ICON_FAVORITE, "Enjoying OpenMCM2?", |ui| {
             ui.add(egui::Label::new("Want more updates? OpenMCM2 is free and always will be. If you enjoy it, a small donation helps keep the updates coming.").wrap());
-            let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_FAVORITE, "Donate on GitHub")).color(look::ON_ACCENT)).fill(look::ACCENT);
-            if ui.add(b).on_hover_text(SPONSOR_URL).clicked() {
-                ui.ctx().open_url(egui::OpenUrl::new_tab(SPONSOR_URL));
-            }
+            ui.horizontal_wrapped(|ui| {
+                let b = egui::Button::new(egui::RichText::new(look::with(look::icon::ICON_FAVORITE, "Buy me a coffee on Ko-fi")).color(look::ON_ACCENT)).fill(look::ACCENT);
+                if ui.add(b).on_hover_text(format!("A one-off tip, no account needed. Opens {KOFI_URL}")).clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(KOFI_URL));
+                }
+                if ui.button("Sponsor on GitHub").on_hover_text(format!("Monthly or one-off, with your GitHub account. Opens {SPONSOR_URL}")).clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(SPONSOR_URL));
+                }
+            });
         });
         look::card(ui, look::icon::ICON_INFO, "Command line", |ui| {
             ui.label(look::weak("What the Play button starts, for a shortcut of your own or to report a problem."));
