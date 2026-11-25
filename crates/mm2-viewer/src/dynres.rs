@@ -94,6 +94,16 @@ const GIVE_BACK: f32 = 45.0;
 const LONGEST_GIVE_BACK: f32 = 600.0;
 /// A step given back and set aside again within this long was too much, s.
 const TOO_SOON: f32 = 20.0;
+/// A frame this long or longer is a hitch (a load, a stall) when on its
+/// own, s; one in a row of them is the drawing being that slow.
+const HITCH: f32 = 0.25;
+/// Frames this long in a row are the drawing, not a hitch.
+const SLOW_ROW: u8 = 3;
+/// A frame longer than this is a pause in the window (dragged, hidden), s.
+const PAUSE: f32 = 2.0;
+/// This late on average is far too much: straight to the smallest size
+/// rather than a step at a time.
+const FAR_LATE: f32 = 2.5;
 
 #[derive(Debug, Clone)]
 pub struct Governor {
@@ -125,6 +135,8 @@ pub struct Governor {
     /// preset's size (crate::graphics::Enhanced::sheds): not for a preset
     /// picked by hand, which only ever draws its own size or smaller.
     pub sheds: bool,
+    /// Frames of [`HITCH`] or longer in a row.
+    slow_row: u8,
 }
 
 impl Default for Governor {
@@ -143,6 +155,7 @@ impl Default for Governor {
             since_given: f32::MAX,
             spare: false,
             sheds: true,
+            slow_row: 0,
         }
     }
 }
@@ -157,10 +170,23 @@ impl Governor {
         while self.step < PRESET && STEPS[self.step] > room * 1.02 {
             self.step += 1;
         }
-        // A load or a pause in the window says nothing of the drawing.
-        if !(real > 0.0 && real < 0.25) || wanted <= 0.0 {
+        // A load or a pause in the window says nothing of the drawing, but
+        // slow frames one after another are the drawing (a few frames a
+        // second): they count, as no more than a hitch's worth each.
+        if !(real > 0.0 && real < PAUSE) || wanted <= 0.0 {
+            self.slow_row = 0;
             return STEPS[self.step];
         }
+        let real = if real >= HITCH {
+            self.slow_row = self.slow_row.saturating_add(1);
+            if self.slow_row < SLOW_ROW {
+                return STEPS[self.step];
+            }
+            real.min(HITCH * 2.0)
+        } else {
+            self.slow_row = 0;
+            real
+        };
         self.since += real;
         self.late += (real / wanted - self.late) * FOLLOW;
         if self.trying && self.since > TRIAL {
@@ -175,7 +201,9 @@ impl Governor {
                 self.wait = (self.wait * 2.0).min(LONGEST_WAIT);
                 self.trying = false;
             }
-            self.step += 1;
+            // Far too slow: the smallest size at once, so effects are set
+            // aside soon if even that is too much.
+            self.step = if self.late > FAR_LATE { STEPS.len() - 1 } else { self.step + 1 };
             self.changed();
         } else if self.since >= self.wait && self.late < ON_TIME && can_grow {
             self.step -= 1;
@@ -428,6 +456,19 @@ mod tests {
             }
         }
         assert_eq!(STEPS[g.step], 1.0);
+    }
+
+    #[test]
+    fn a_few_frames_a_second_sets_effects_aside_soon() {
+        // Four frames a second, every one: the drawing, not hitches.
+        let mut g = Governor::default();
+        let mut t = 0.0;
+        while t < 20.0 && g.shed == 0 {
+            g.frame(0.26, BEAT, 1.0);
+            t += 0.26;
+        }
+        assert!(g.shed >= 1, "nothing set aside in {t} s");
+        assert!(t < 10.0, "took {t} s");
     }
 
     #[test]
