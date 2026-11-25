@@ -124,6 +124,9 @@ pub struct Chase {
     /// The crash was a roll past 110° (crash reason 6, 0x40a950): the
     /// camera follows on as it was until the rider lands (0x4174b0).
     rolled: bool,
+    /// Where the bike was last frame while thrown back off the world's
+    /// edge, for carrying the crash view along with the flight.
+    carried: Option<Vec3>,
     /// The bike's velocity last frame, for a turn rate when the bike
     /// doesn't give one (the computer's and the taped bikes).
     was_velocity: Vec3,
@@ -269,6 +272,9 @@ pub struct Followed {
     /// thrown rider counts as down.
     pub wreck_bail: bool,
     pub wreck_down: bool,
+    /// Thrown back off the world's edge (crash 0xc): 120 ft/s up and on
+    /// toward the middle.
+    pub thrown_back: bool,
 }
 
 impl Chase {
@@ -328,6 +334,7 @@ impl Chase {
             blend: 0.0,
             crash_yaw: (0.0, false),
             was_crashed: false,
+            carried: None,
             rolled: false,
             was_velocity: Vec3::ZERO,
             takeoff: (position, Vec3::ZERO),
@@ -837,6 +844,26 @@ impl Chase {
             self.crash_view = true;
         }
         let mut eye_ease = self.eye_ease.unwrap_or_else(|| eases(eye, rate));
+        // Thrown back off the world's edge the bike flies at 120 ft/s and
+        // more: the crash view's eases, 0.3 s behind, would leave it 35 ft
+        // or more off the top of a view 12 ft away, and the whole flight
+        // goes by with the rider off screen. Not in the original (whose
+        // eases lag the same); here the eye and the look point ride along
+        // with the bike, so the crash view stays framed as it is on the
+        // ground and the flight back is seen.
+        if bike.thrown_back && !following {
+            if let Some(was) = self.carried {
+                let moved = self.lead - was;
+                for e in [&mut eye_ease, &mut self.look_ease] {
+                    e[0].value += moved.x;
+                    e[1].value += moved.y;
+                    e[2].value += moved.z;
+                }
+            }
+            self.carried = Some(self.lead);
+        } else {
+            self.carried = None;
+        }
         let mut target = ease3(&mut self.look_ease, to, dt);
         let mut smoothed = ease3(&mut eye_ease, eye, dt);
         if self.blending {
@@ -1426,6 +1453,53 @@ mod trace {
         }
         let d = Vec3::new(eye.x - at.x, 0.0, eye.z - at.z);
         assert!((d.x.abs().atan2(-d.z).to_degrees() - 120.0).abs() < 1.0, "{eye}");
+    }
+
+    #[test]
+    fn an_edge_throw_is_watched_all_the_way_back() {
+        // Flung back off the world's edge: 120 ft/s up and 60 ft/s on.
+        let terrain = flat();
+        let mut at = Vec3::new(500.0, 0.0, 500.0);
+        let mut c = Chase::new(at, Vec3::Z);
+        let dt = 1.0 / 60.0;
+        let mut bike = Followed {
+            position: at,
+            forward: Vec3::Z,
+            nose: Vec3::Z,
+            up: Vec3::Y,
+            velocity: Vec3::Z * 40.0,
+            speed: 40.0,
+            head: Some(at + Vec3::Y * 5.3),
+            ..Default::default()
+        };
+        for _ in 0..60 {
+            at += bike.velocity * dt;
+            bike.position = at;
+            bike.head = Some(at + Vec3::Y * 5.3);
+            c.follow(&bike, CamKeys::default(), &terrain, dt);
+        }
+        bike.crashed = true;
+        bike.wreck_bail = true;
+        bike.airborne = true;
+        bike.thrown_back = true;
+        let mut v = Vec3::new(-60.0, 120.0, 0.0);
+        let mut worst: f32 = 0.0;
+        while v.y > -120.0 {
+            v.y -= 32.2 * dt;
+            at += v * dt;
+            bike.position = at;
+            bike.velocity = v;
+            let head = at + Vec3::new(2.0, 6.0, 1.0);
+            bike.head = Some(head);
+            let (eye, target) = c.follow(&bike, CamKeys::default(), &terrain, dt);
+            let look = (target - eye).normalize();
+            for p in [at, head] {
+                worst = worst.max((p - eye).normalize().dot(look).acos().to_degrees());
+            }
+        }
+        // Both stay well inside the picture, as they do on the ground
+        // (without the carry: 130° off, behind the eye).
+        assert!(worst < 25.0, "{worst}° off the middle");
     }
 
     #[test]

@@ -736,6 +736,7 @@ impl Bike {
                 Bike::Player(b) => b.wreck.as_ref().is_none_or(|w| w.stage == mm2_physics::wreck::Stage::Down),
                 _ => true,
             },
+            thrown_back: self.launched(),
         }
     }
 
