@@ -1,3 +1,13 @@
+# OpenMCM2 0.8.3
+
+* **The same ride at any frame rate.** At 30 fps a hard turn could end
+  differently than at 60 or 144 fps, because the game read your keys
+  once a frame. Now it reads them at every physics step, so the same
+  ride gives the same result at 30, 60, 144 or 240 fps.
+* **Computer riders get a moment too.** After the start and after a
+  crash, computer riders don't bump into you, other bikes or objects for
+  3 seconds, like the original.
+
 # OpenMCM2 0.8.2
 
 More of the original's riding rules, found by checking the physics
