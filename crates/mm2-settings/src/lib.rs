@@ -96,7 +96,21 @@ pub enum Quality {
     /// Ultra drawn finer for the strongest cards: supersampled, with the
     /// detail reaching further.
     Max,
+    /// A modern game's look, bolder than the others: lit air with sun
+    /// shafts, lusher grass blowing in the wind, firmer ground detail,
+    /// bounce light, the real sky, glossier bikes and trackside props,
+    /// with TAA and FSR. Holds the frame rate by setting effects aside.
+    NextGen,
 }
+
+/// The colour looks (`look=`), with their names: each a gentle grade
+/// over the finished picture. Original is none.
+pub const LOOKS: [(&str, &str); 4] = [
+    ("original", "Original"),
+    ("bold", "Bold"),
+    ("warm", "Warm afternoon"),
+    ("overcast", "Overcast"),
+];
 
 /// The anti-aliasing the launcher offers, one of them: its name, what it
 /// says, and what it tells `--enhanced`. MSAA smooths the models' and
@@ -148,33 +162,33 @@ pub const RESOLUTIONS: [(&str, &str); 6] = [
 ];
 
 impl Quality {
-    pub const ALL: [Quality; 6] = [Quality::Low, Quality::Medium, Quality::High, Quality::RayTraced, Quality::Ultra, Quality::Max];
+    pub const ALL: [Quality; 7] = [Quality::Low, Quality::Medium, Quality::High, Quality::RayTraced, Quality::Ultra, Quality::Max, Quality::NextGen];
     pub fn name(self) -> &'static str {
-        ["low", "medium", "high", "raytraced", "ultra", "max"][self as usize]
+        ["low", "medium", "high", "raytraced", "ultra", "max", "nextgen"][self as usize]
     }
 
     /// What the launcher calls it.
     pub fn label(self) -> &'static str {
-        ["Low", "Medium", "High", "Ray traced", "Ultra", "Max"][self as usize]
+        ["Low", "Medium", "High", "Ray traced", "Ultra", "Max", "Next-gen"][self as usize]
     }
 
     /// The anti-aliasing this preset draws with ([`ANTIALIASING`]).
     pub fn antialiasing(self) -> &'static str {
-        ["off", "taa", "msaa4", "msaa2", "msaa8", "msaa4"][self as usize]
+        ["off", "taa", "msaa4", "msaa2", "msaa8", "msaa4", "taa"][self as usize]
     }
 
     /// The most pixels this preset draws the scene with on Auto, as the
     /// launcher says it.
     pub fn most_pixels(self) -> &'static str {
-        ["up to 1280×720 worth", "up to 1920×1080 worth", "up to 2560×1440 worth", "up to 2560×1440 worth", "the screen's own", "up to 3840×2160 worth, shrunk to the screen"][self as usize]
+        ["up to 1280×720 worth", "up to 1920×1080 worth", "up to 2560×1440 worth", "up to 2560×1440 worth", "the screen's own", "up to 3840×2160 worth, shrunk to the screen", "the screen's own"][self as usize]
     }
 
     /// Whether the upgrade `name` is on with this preset unless changed,
     /// as `--enhanced=quality=` sets it.
     pub fn has(self, name: &str) -> bool {
         let off: &[&str] = match self {
-            Quality::Low => &["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr", "bounce"],
-            Quality::Medium => &["shafts", "smooth", "gtao", "ssr", "bounce"],
+            Quality::Low => &["ao", "shafts", "smooth", "cinematic", "grass", "gtao", "contact", "ssr", "bounce", "litair"],
+            Quality::Medium => &["shafts", "smooth", "gtao", "ssr", "bounce", "litair"],
             _ => &[],
         };
         // On with this preset though off unless asked. The trackside
@@ -183,6 +197,9 @@ impl Quality {
         let on: &[&str] = match self {
             Quality::RayTraced => &["raytracing"],
             Quality::Max => &["supersample", "far"],
+            // Ray tracing only where the card can (the shadow maps
+            // elsewhere).
+            Quality::NextGen => &["raytracing", "far", "bounce", "bloom", "bikes", "scenery"],
             _ => &[],
         };
         if on.contains(&name) {
@@ -250,7 +267,7 @@ pub fn parse_difficulty(text: &str) -> Option<[[u32; 3]; 4]> {
     (n.len() == 12 && n.iter().all(|v| (1..=MOST_STEP).contains(v))).then_some(t)
 }
 
-pub const UPGRADES: [(&str, &str, bool); 31] = [
+pub const UPGRADES: [(&str, &str, bool); 34] = [
     ("lighting", "Per-pixel lighting", true),
     ("shadows", "Sun shadows", true),
     ("distance", "Far draw distance and haze", true),
@@ -289,6 +306,10 @@ pub const UPGRADES: [(&str, &str, bool); 31] = [
     // screen, or with TAA).
     ("bounce", "Bounce light", true),
     ("fsr", "AMD FSR upscaling", true),
+    // From the Next-gen work, the gentle versions on by default.
+    ("closeup", "Sharp dirt up close", true),
+    ("wind", "Wind in the grass and trees", true),
+    ("litair", "Sunlight in the air", true),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -325,6 +346,8 @@ pub struct Settings {
     /// `time=`: none keeps the track's own sky.
     pub time: String,
     pub weather: String,
+    /// The colour look ([`LOOKS`]): `original` for none.
+    pub look: String,
     pub detail: f32,
     /// Each of [`UPGRADES`], on or off.
     pub upgrades: Vec<bool>,
@@ -464,6 +487,10 @@ pub struct More {
     /// Photo mode: in a race, F freezes it with the display hidden, the
     /// camera flies free and Enter saves a picture (`--photo-mode`).
     pub photo_mode: bool,
+    /// The replay editor: in a replay, a free camera, slow motion, In and
+    /// Out marks, camera keys and clips saved as movies
+    /// (`--replay-editor`).
+    pub replay_editor: bool,
     /// With the MM2 demo: its other tracks rebuilt, the original's route
     /// and scenery on new ground (`--demo-tracks`).
     pub demo_tracks: bool,
@@ -509,6 +536,7 @@ impl Default for More {
             online_ghosts: false,
             whistle: true,
             photo_mode: false,
+            replay_editor: false,
             demo_tracks: false,
             free_tracks: false,
         }
@@ -556,6 +584,7 @@ impl More {
             "online_ghosts" => self.online_ghosts = yes,
             "whistle" => self.whistle = yes,
             "photo_mode" => self.photo_mode = yes,
+            "replay_editor" => self.replay_editor = yes,
             "demo_tracks" => self.demo_tracks = yes,
             "free_tracks" => self.free_tracks = yes,
             _ => return false,
@@ -566,7 +595,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfresh_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\ndemo_tracks={}\nfree_tracks={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfresh_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\nreplay_editor={}\ndemo_tracks={}\nfree_tracks={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -590,6 +619,7 @@ impl More {
             b(self.online_ghosts),
             b(self.whistle),
             b(self.photo_mode),
+            b(self.replay_editor),
             b(self.demo_tracks),
             b(self.free_tracks),
         )
@@ -615,6 +645,7 @@ impl More {
             (self.online_ghosts, "--online-ghosts"),
             (!self.whistle, "--no-whistle"),
             (self.photo_mode, "--photo-mode"),
+            (self.replay_editor, "--replay-editor"),
             (self.demo_tracks, "--demo-tracks"),
             (self.free_tracks, "--free-tracks"),
         ] {
@@ -663,6 +694,7 @@ impl More {
             online_ghosts: has("--online-ghosts"),
             whistle: !has("--no-whistle"),
             photo_mode: has("--photo-mode"),
+            replay_editor: has("--replay-editor"),
             demo_tracks: has("--demo-tracks"),
             free_tracks: has("--free-tracks"),
             ..d.clone()
@@ -706,6 +738,7 @@ impl Default for Settings {
             resolution: "auto".into(),
             time: String::new(),
             weather: "clear".into(),
+            look: "original".into(),
             detail: 0.5,
             // The High preset's, as the quality is.
             upgrades: UPGRADES.iter().map(|u| Quality::High.has(u.0)).collect(),
@@ -835,6 +868,7 @@ impl Settings {
                 "resolution" => resolution = parse_resolution(v),
                 "time" => s.time = v.into(),
                 "weather" => s.weather = v.into(),
+                "look" if LOOKS.iter().any(|l| l.0 == v) => s.look = v.into(),
                 "detail" => s.detail = v.parse::<f32>().unwrap_or(0.5).clamp(0.0, 1.0),
                 "fullscreen" => s.fullscreen = yes(v),
                 "screen" => s.screen = parse_size(v).unwrap_or((0, 0)),
@@ -884,6 +918,15 @@ impl Settings {
                     }
                 }
             }
+        }
+        // The colour look: saved since there were several; before, the
+        // grade switch's one bold look.
+        let grade = UPGRADES.iter().position(|u| u.0 == "grade");
+        if let Some(g) = grade {
+            if !text.lines().any(|l| l.trim_start().starts_with("look=")) && s.upgrades[g] {
+                s.look = "bold".into();
+            }
+            s.upgrades[g] = s.look != "original";
         }
         s.antialiasing = if temporal { "taa".into() } else { antialiasing.unwrap_or_else(|| s.quality.antialiasing().into()) };
         s.resolution = resolution.unwrap_or_else(|| "auto".into());
@@ -946,8 +989,10 @@ impl Settings {
             p(&self.menus_pack)
         );
         t += &self.more.text();
+        t += &format!("look={}\n", self.look);
         for (u, on) in UPGRADES.iter().zip(&self.upgrades) {
-            t += &format!("upgrade.{}={}\n", u.0, b(*on));
+            let on = if u.0 == "grade" { self.look != "original" } else { *on };
+            t += &format!("upgrade.{}={}\n", u.0, b(on));
         }
         t
     }
@@ -1007,6 +1052,9 @@ impl Settings {
             if self.weather != "clear" {
                 list.push(format!("weather={}", self.weather));
             }
+            if self.look != "original" {
+                list.push(format!("look={}", self.look));
+            }
             if (self.detail - 0.5).abs() > 1e-3 {
                 list.push(format!("detail={:.2}", self.detail));
             }
@@ -1022,8 +1070,9 @@ impl Settings {
                 list.push(format!("resolution={}", self.resolution));
             }
             // Only what differs from the preset, after it so a switch wins.
+            // The colour grade is the look's (below).
             for (u, on) in UPGRADES.iter().zip(&self.upgrades) {
-                if *on != self.quality.has(u.0) {
+                if u.0 != "grade" && *on != self.quality.has(u.0) {
                     list.push(if *on { u.0.to_string() } else { format!("no-{}", u.0) });
                 }
             }
@@ -1032,6 +1081,9 @@ impl Settings {
             }
             if self.weather != "clear" {
                 list.push(format!("weather={}", self.weather));
+            }
+            if self.look != "original" {
+                list.push(format!("look={}", self.look));
             }
             if (self.detail - 0.5).abs() > 1e-3 {
                 list.push(format!("detail={:.2}", self.detail));
@@ -1109,10 +1161,36 @@ pub mod laps;
 pub mod playtime;
 pub mod races;
 pub mod release;
+pub mod shared;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn colour_looks_and_next_gen() {
+        // An old file's grade switch is the bold look.
+        let s = Settings::parse("enhanced=1\nquality=high\nupgrade.grade=1\n");
+        assert_eq!(s.look, "bold");
+        assert!(s.args().iter().any(|a| a == "--enhanced=quality=high,look=bold"));
+        // A look saved and read back; Original turns the grade off.
+        let mut s = Settings::parse("enhanced=1\nquality=high\n");
+        s.look = "warm".into();
+        let back = Settings::parse(&s.text());
+        assert_eq!(back.look, "warm");
+        s.look = "original".into();
+        let back = Settings::parse(&s.text());
+        assert_eq!(back.look, "original");
+        assert!(back.args().iter().all(|a| !a.contains("look=") && !a.contains("grade")));
+        // Next-gen: its own name, with nothing else to say.
+        let mut s = Settings::parse("enhanced=1\nquality=nextgen\n");
+        assert_eq!(s.quality, Quality::NextGen);
+        s.antialiasing = s.quality.antialiasing().into();
+        for (u, on) in UPGRADES.iter().zip(s.upgrades.iter_mut()) {
+            *on = Quality::NextGen.has(u.0);
+        }
+        assert!(s.args().iter().any(|a| a == "--enhanced=quality=nextgen"));
+    }
+
 
     #[test]
     fn a_broken_difficulty_table_is_the_games() {
@@ -1272,6 +1350,7 @@ mod tests {
             online_ghosts: true,
             whistle: false,
             photo_mode: true,
+            replay_editor: true,
             demo_tracks: true,
             free_tracks: true,
         };

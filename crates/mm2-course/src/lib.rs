@@ -18,6 +18,7 @@ pub mod berm;
 pub mod copy;
 pub mod rebuild;
 pub mod ridecheck;
+pub mod share;
 pub mod env;
 pub mod flight;
 pub mod free;
@@ -926,6 +927,11 @@ impl Course {
 
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).unwrap_or_default()
+    }
+
+    /// As [`Course::to_json`], on one line (to send it).
+    pub fn to_json_compact(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
     }
 
     /// The name as a file stem: letters and digits, at most 8 (the game's
