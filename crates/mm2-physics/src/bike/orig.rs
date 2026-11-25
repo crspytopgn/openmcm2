@@ -727,6 +727,11 @@ impl Bike {
         }
         let torque_scale = 1.0;
         self.place_wheels(ground, &f, &saved, lst);
+        // The spawn protection's countdown (Vehicle 0x52ffb0, after
+        // PlaceWheels).
+        if self.spawn_guard > 0.0 {
+            self.spawn_guard = (self.spawn_guard - h).max(0.0);
+        }
         let wic = self.o.wheels_in_contact;
         let all = wic == 2;
         let any = wic > 0;
@@ -1001,7 +1006,7 @@ impl Bike {
         // The object's contact crashes the bike through the same speed
         // test (the collision's callback sets the crash; 0x52fc60 then
         // ends the frame's steps).
-        if self.crash.is_none() && !crashed_now {
+        if self.crash.is_none() && !crashed_now && self.spawn_guard <= 0.0 {
             if std::env::var_os("MM2_CRASHDBG").is_some() && self.velocity.length() < before - 5.0 {
                 eprintln!("object hit {:.1} -> {:.1} prev {:.1}", before, self.velocity.length(), prev_speed);
             }
@@ -2041,6 +2046,11 @@ impl Bike {
     fn orig_crash(&mut self, ground: &dyn Ground, prev_speed: f32, linear: f32, alignment: f32, saved: &Angles, h: f32) -> Option<Crash> {
         if self.off_the_edge(ground) {
             return Some(Crash::Edge);
+        }
+        // Spawn protected: no crash at all (KrustyBike::EvaluateCrash
+        // returns before Bike's rules while IsSpawnProtected).
+        if self.spawn_guard > 0.0 {
+            return None;
         }
         // The rider's probes (the Wrecker's bones): those under the
         // ground, their middle in the rider's Pelvis frame (the rider

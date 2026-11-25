@@ -2409,8 +2409,12 @@ async fn load_track_steps(
                             .get(&format!("{stem}.col"))
                             .or_else(|| ar.get("honda.col"))
                             .and_then(|d| mm2_formats::col::parse(d).ok());
+                        let shell = |name: &str| ar.get(name).and_then(|d| mm2_formats::col::parse(d).ok());
+                        let (riding, crashed) = (shell("BikeAndRider.col"), shell("Bike.col"));
                         match col {
-                            Some(col) => race::set_hull(mm2_physics::bike::Hull::new(&col)),
+                            Some(col) => race::set_hull(
+                                mm2_physics::bike::Hull::new(&col).with_shells(riding.as_ref(), crashed.as_ref()),
+                            ),
                             // The pack's own bikes have none, and without the
                             // game's files there's no `honda.col` to borrow:
                             // the one every bike of the original shares, so a

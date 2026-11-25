@@ -326,8 +326,8 @@ impl Rider {
         let (mut middle, mut count) = (Vec3::ZERO, 0);
         let mut normals: Vec<Vec3> = Vec::new();
         let mut moving = Vec3::ZERO;
-        let wheels = [0, 1].map(|i| (crate::bike::axle(i, 0.0), &hull.wheels[i]));
-        for (offset, points) in [(Vec3::ZERO, &hull.body)].into_iter().chain(wheels) {
+        let wheels = [0, 1].map(|i| (crate::bike::axle(i, 0.0), &hull.wheels[i][..]));
+        for (offset, points) in [(Vec3::ZERO, hull.body_points(false))].into_iter().chain(wheels) {
             for &p in points {
                 let from = was_at + was_axes * (p + offset);
                 let to = self.position + axes * (p + offset);
