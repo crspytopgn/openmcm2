@@ -1020,6 +1020,11 @@ impl Launcher {
         let working = self.import.is_some() || self.demo_download.is_some() || self.pack_import.is_some() || self.pack_download.is_some();
         if self.can_play() && !self.choosing && !working {
             self.ready_card(ui, busy);
+            // The new look menus with the MM2 graphics and no Free Pack:
+            // just the menus, a small download.
+            if !self.settings.free_graphics && self.settings.new_menus && self.settings.game.is_some() && self.settings.freepack.is_none() {
+                self.menus_card(ui, busy);
+            }
         } else {
             self.mm2_card(ui, busy);
             self.free_row(ui, busy);
@@ -1069,14 +1074,69 @@ impl Launcher {
                 None => String::new(),
             }),
         };
-        let menus = if s.new_menus || s.game.is_none() { "New look menus" } else { "Original menus" };
+        // Both choices right here, one press each: the graphics (and the
+        // sounds and tracks that go with them) and the menus' look.
+        let (has_game, has_pack) = (s.game.is_some(), s.freepack.is_some());
+        let new_menus_here = has_pack || s.menus_pack.is_some();
+        let free = s.free_graphics;
+        // The demo's menus don't go over the free graphics (it lacks some).
+        let original_menus_here = has_game && !(free && is_demo);
+        let menus_new = s.new_menus || !original_menus_here;
+        let mut pick_free = None;
+        let mut pick_menus = None;
         let mut go = false;
         let mut change = false;
         look::card(ui, icon::ICON_PLAY_CIRCLE, title, |ui| {
             look::tag(ui, "Ready");
             ui.add(egui::Label::new(look::weak(why)).wrap());
-            ui.add_space(2.0);
-            ui.horizontal_wrapped(|ui| look::chip(ui, menus));
+            ui.add_space(6.0);
+            let busy_now = busy || self.running.is_some();
+            egui::Grid::new("ready_switches").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+                ui.label(look::weak("Graphics"));
+                let r = ui.add_enabled_ui(!busy_now && has_game && has_pack, |ui| {
+                    look::segmented(
+                        ui,
+                        free,
+                        &[
+                            look::Choice::new(false, if is_demo { "MM2 demo" } else { "MM2" })
+                                .icon(icon::ICON_DISC_FULL)
+                                .hover("The original game's bikes, riders, tracks and sounds, from your MM2 files."),
+                            look::Choice::new(true, "Free version")
+                                .icon(icon::ICON_FOREST)
+                                .hover("The Free Pack's all-new bikes, riders, tracks and sounds, even with your MM2 files here."),
+                        ],
+                    )
+                });
+                r.response.on_disabled_hover_text(if !has_pack {
+                    "Get the free version with Change to switch to it here."
+                } else {
+                    "Set up your MM2 files or the demo with Change to switch to them here."
+                });
+                pick_free = r.inner;
+                ui.end_row();
+                ui.label(look::weak("Menus"));
+                let r = ui.add_enabled_ui(!busy_now && original_menus_here, |ui| {
+                    look::segmented(
+                        ui,
+                        menus_new,
+                        &[
+                            look::Choice::new(false, "Original").icon(icon::ICON_HISTORY).hover("The menus exactly as Motocross Madness 2 had them, from your MM2 files."),
+                            look::Choice::new(true, "New look").icon(icon::ICON_AUTO_AWESOME).hover(if new_menus_here || free {
+                                "The same menus and buttons, redrawn in a new style."
+                            } else {
+                                "The same menus and buttons, redrawn in a new style. With the MM2 graphics, just the menus download (under 100 MB)."
+                            }),
+                        ],
+                    )
+                });
+                r.response.on_disabled_hover_text(if has_game {
+                    "The free version with the demo wears the new look menus."
+                } else {
+                    "The original menus need your MM2 files or the demo."
+                });
+                pick_menus = r.inner;
+                ui.end_row();
+            });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 let ready = !busy && self.running.is_none();
@@ -1097,6 +1157,19 @@ impl Launcher {
                     .clicked();
             });
         });
+        let mut changed = false;
+        if let Some(f) = pick_free.filter(|f| *f != free) {
+            self.settings.free_graphics = f;
+            changed = true;
+        }
+        if let Some(n) = pick_menus.filter(|n| *n != menus_new) {
+            self.settings.new_menus = n;
+            changed = true;
+        }
+        if changed {
+            let _ = self.settings.save();
+            self.saved = self.settings.clone();
+        }
         if go {
             let ctx = ui.ctx().clone();
             self.start(&ctx);
@@ -1320,64 +1393,6 @@ impl Launcher {
                 self.remove_row(ui, busy, what);
             }
         });
-    }
-
-    /// The menus' look, with either graphics. The original's need the
-    /// game's files; the new look needs the Free Pack or the menus alone.
-    fn menus_choice_card(&mut self, ui: &mut egui::Ui, busy: bool) {
-        use look::icon;
-        let (has_game, has_pack, has_menus) = (self.settings.game.is_some(), self.settings.freepack.is_some(), self.settings.menus_pack.is_some());
-        let mut pick_menus = None;
-        look::card(ui, icon::ICON_AUTO_AWESOME, "Menus", |ui| {
-            let gap = 12.0;
-            let w = ((ui.available_width() - gap) / 2.0).max(220.0);
-            let new = self.settings.new_menus || !has_game;
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = gap;
-                let r = ui.add_enabled_ui(has_game, |ui| {
-                    look::pick_tile(
-                        ui,
-                        !new,
-                        icon::ICON_HISTORY,
-                        "Original",
-                        "The menus exactly as Motocross Madness 2 had them, chain and all.",
-                        "The original game's own menus, art and sounds. They come from your MM2 files or the demo.",
-                        w,
-                        |ui| match has_game {
-                            true => look::status(ui, true, "Game data ready"),
-                            false => look::status(ui, false, "Needs your MM2 files"),
-                        },
-                    )
-                });
-                if r.inner && has_game {
-                    pick_menus = Some(false);
-                }
-                if look::pick_tile(
-                    ui,
-                    new,
-                    icon::ICON_AUTO_AWESOME,
-                    "New look",
-                    "Menus redrawn for OpenMCM2: same buttons and screens as the original, in a fresh workshop style.",
-                    "Every menu and button from the original, laid out the same and working the same, drawn in a new style. Works with either graphics. Comes with the Free Pack, or with your MM2 graphics as a small download of just the menus (under 100 MB), no Free Pack needed.",
-                    w,
-                    |ui| match (has_pack, has_menus) {
-                        (true, _) => look::status(ui, true, "Free Pack ready"),
-                        (false, true) => look::status(ui, true, "New look menus ready"),
-                        (false, false) => look::status(ui, false, "Small download (under 100 MB)"),
-                    },
-                ) {
-                    pick_menus = Some(true);
-                }
-            });
-        });
-        if let Some(new) = pick_menus {
-            self.settings.new_menus = new;
-        }
-        // The new menus come with the Free Pack, or on their own as a
-        // small download.
-        if !self.settings.free_graphics && self.settings.new_menus && self.settings.freepack.is_none() {
-            self.menus_card(ui, busy);
-        }
     }
 
     /// The new look menus on their own, for the original graphics without
@@ -1917,7 +1932,7 @@ impl Launcher {
             slider(ui, "Stick steering curve", "How gently a stick steers near the middle. 100% is the original game's: little steering for a small push and a lot near the edge, which can feel all-or-nothing on a short stick like a Steam Deck's. 0% steers in straight proportion.", &mut s.more.pad_curve, 0..=100, 5.0, "%");
             slider(ui, "Gyro steering", "Off (0°) unless you set it. On a pad with motion sensors (Steam Deck, Steam Controller, DualSense, DualShock 4, Switch Pro or Joy-Cons), tip the pad left or right like handlebars and the bike steers that way, on top of the stick. The number is how far you tip it for full lock: 20 to 30° is quick, 45° and more is gentle. Held flat or upright, near level always rides straight. On a Steam Deck or Steam Machine, leave Steam's own gyro setting for this game off, or the two steer together. Off, steering is the original game's.", &mut s.more.gyro_steer, 0..=90, 1.0, "°");
             slider(ui, "Stick smoothing", "Evens out a twitchy stick's steering. 0% is the original game's.", &mut s.more.pad_smoothing, 0..=90, 5.0, "%");
-            tile(ui, &mut s.more.fresh_sounds, "Freshened engine sounds", "On unless you turn it off. The bike engines from your own MM2 or demo files, given a little more life as they load: a fuller tone, a touch more bite and loops with no clicks. Works with the free graphics too, whenever the game or demo is on this computer. Nothing is downloaded; without the game files the free recordings play. Off, the engines sound exactly as in the original.");
+            tile(ui, &mut s.more.fresh_sounds, "Freshened engine sounds", "On unless you turn it off. The bike engines from your own MM2 or demo files, given a little more life as they load: a fuller tone, a touch more bite and loops with no clicks. Nothing is downloaded; the free version keeps its own recordings. Off, the engines sound exactly as in the original.");
             tile(ui, &mut s.more.whistle, "Out-of-bounds whistle", "On unless you turn it off. On the free tracks, a cartoon slide whistle goes up as you ride off the edge of the world and get thrown back in, and comes down as you fall. Off, that throw is silent as in the original.");
             tile(ui, &mut s.mute_in_background, "Mute in the background", "The game goes quiet while its window isn't the one in front.");
             tile(ui, &mut s.more.photo_mode, "Photo mode", "In a race, press F (or click both sticks on a pad) to freeze it and hide the race display. Fly the camera with WASD, Q/E for down and up and Shift for faster, look round with the arrow keys or by holding the right mouse button (on a pad, the left stick flies, the right stick looks, the triggers go down and up). Enter or the pad's A saves a picture to the Screenshots folder beside your saves. F again, Escape or the pad's B carries on the race. Not in network races, where the race can't wait.");
@@ -2188,10 +2203,9 @@ impl Launcher {
 
     // ---- Graphics ----
 
-    fn graphics_page(&mut self, ui: &mut egui::Ui, busy: bool) {
+    fn graphics_page(&mut self, ui: &mut egui::Ui, _busy: bool) {
         use look::{icon, Choice};
         look::page_title(ui, "Graphics", "How the game looks. Pick a look and a quality; the rest waits under Advanced. F3 switches between the original look and the enhanced one while racing.");
-        self.menus_choice_card(ui, busy);
         let s = &mut self.settings;
         // The preset the settings are (another one, if changed to just
         // what it sets, which then stands for them).
@@ -3125,7 +3139,7 @@ mod shots {
             s.auto = name == "graphics_auto" || name == "graphics";
             s.fullscreen = name == "play_full";
             s.free_graphics = name.starts_with("play_free");
-            if name == "play_free" {
+            if name == "play_free" || name == "play" {
                 s.freepack = Some("C:/Users/rider/AppData/Roaming/mm2/FreePack".into());
             }
             s.antialiasing = "taa".into();

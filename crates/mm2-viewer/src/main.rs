@@ -317,7 +317,11 @@ fn main() -> Result<(), BoxError> {
     // With the free pack and no game folder to show menus from, the
     // builder is what opens: the pack has no menus of its own yet.
     // With no game files there are no original menus to pick.
-    let game_menus = path.is_none() && find_game().is_some_and(|g| fs::is_file(g.join("UI").join("MAINMENU.DAT")));
+    // The MM2 files' menus: a game folder named anywhere (the launcher puts
+    // it after the free pack's), or one found here.
+    let has_ui = |g: &Path| fs::is_file(g.join("UI").join("MAINMENU.DAT"));
+    let menus_game = args.iter().filter(|a| !a.starts_with("--")).map(PathBuf::from).find(|g| has_ui(g)).or_else(find_game).filter(|g| has_ui(g));
+    let game_menus = path.is_none() && menus_game.is_some();
     if freepack::chosen() && path.is_none() && !freepack::new_menus() && !game_menus {
         freepack::set_menus(true, None);
     }
@@ -339,9 +343,19 @@ fn main() -> Result<(), BoxError> {
         }
     }
     if !is_track {
-        // The free graphics with no game files: the pack's own menus, with
-        // the pack's folder standing in for the game's.
-        let free_menus = (freepack::chosen() && path.is_none() && freepack::has_menus()).then(freepack::root).flatten();
+        // The free graphics: the pack's folder stands in for the game's,
+        // with the MM2 files here too (`--freepack DIR GAME`), so the
+        // tracks, bikes, riders and sounds are the free ones. The original
+        // menus, when picked, still come from the MM2 files.
+        let free_menus = (freepack::chosen() && freepack::pack_has_menus()).then(freepack::root).flatten();
+        if free_menus.is_some() {
+            if let Some(g) = &menus_game {
+                freepack::set_menus_game(g);
+            } else {
+                // No MM2 menus to show: the new look's.
+                freepack::set_menus(true, None);
+            }
+        }
         let Some(game) = free_menus.or_else(|| {
             path.map(Path::to_path_buf)
                 .or_else(find_game)
