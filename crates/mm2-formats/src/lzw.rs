@@ -19,27 +19,62 @@ const FIRST_FREE: u32 = 0x103;
 
 struct Bits<'a> {
     src: &'a [u8],
+    /// Bit position of the next unread bit.
     pos: usize,
+    /// The next unread bits, most significant first, in the low `n` bits.
+    acc: u64,
+    /// How many bits of `acc` are unread.
+    n: u32,
 }
 
 impl Bits<'_> {
     fn read(&mut self, width: u32) -> Result<u32> {
-        let mut v = 0;
-        for _ in 0..width {
-            let byte = *self.src.get(self.pos >> 3).ok_or(Error::Truncated {
-                what: "LZW stream",
-                offset: self.pos >> 3,
-            })?;
-            v = (v << 1) | u32::from((byte >> (7 - (self.pos & 7))) & 1);
-            self.pos += 1;
+        // Codes stay within 15 bits; anything wider is a corrupt stream.
+        if width > 24 {
+            return Err(Error::Corrupt("LZW code width out of range"));
         }
+        // Fill a word at a time (the stream is big-endian words), then
+        // take the code off the top: the old reader took one bit per
+        // loop, nine to fifteen loops per code.
+        while self.n < width {
+            // The next unread byte is at bit pos + n, always whole.
+            let at = (self.pos + self.n as usize) >> 3;
+            if at + 4 <= self.src.len() {
+                let w = u32::from_be_bytes([
+                    self.src[at],
+                    self.src[at + 1],
+                    self.src[at + 2],
+                    self.src[at + 3],
+                ]);
+                self.acc = (self.acc << 32) | u64::from(w);
+                self.n += 32;
+            } else if at < self.src.len() {
+                self.acc = (self.acc << 8) | u64::from(self.src[at]);
+                self.n += 8;
+            } else {
+                return Err(Error::Truncated {
+                    what: "LZW stream",
+                    offset: self.pos >> 3,
+                });
+            }
+        }
+        let shift = self.n - width;
+        let v = ((self.acc >> shift) & ((1u64 << width) - 1)) as u32;
+        self.n -= width;
+        self.pos += width as usize;
+        self.acc &= (1u64 << self.n) - 1;
         Ok(v)
     }
 }
 
 /// Decompresses `src` into exactly `out_len` bytes.
 pub fn decompress(src: &[u8], out_len: usize) -> Result<Vec<u8>> {
-    let mut bits = Bits { src, pos: 32 };
+    let mut bits = Bits {
+        src,
+        pos: 32,
+        acc: 0,
+        n: 0,
+    };
     let mut out = Vec::with_capacity(out_len);
     // Each dictionary entry is (prefix code, last byte, first byte).
     let mut dict: Vec<(u32, u8, u8)> = Vec::new();
@@ -247,5 +282,27 @@ mod tests {
             assert_eq!(packed.len() % 4, 0);
             assert_eq!(decompress(&packed, len).unwrap(), &data[..len]);
         }
+    }
+
+    #[test]
+    fn decompress_timing() {
+        let mut seed = 1u32;
+        let mut data = Vec::new();
+        for i in 0..300_000u32 {
+            seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+            data.push(if i % 7 < 4 { (i / 97) as u8 } else { (seed >> 24) as u8 });
+        }
+        let packed = compress(&data);
+        let start = std::time::Instant::now();
+        let mut out = Vec::new();
+        for _ in 0..20 {
+            out = decompress(&packed, data.len()).unwrap();
+        }
+        assert_eq!(out, data);
+        eprintln!(
+            "lzw decompress: {:?} for 20x 300KB (packed {} bytes)",
+            start.elapsed(),
+            packed.len()
+        );
     }
 }
