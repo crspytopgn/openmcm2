@@ -14,6 +14,8 @@
 //! file data
 //! ```
 
+use std::collections::HashMap;
+
 use crate::reader::Reader;
 use crate::{Error, Result};
 
@@ -32,6 +34,11 @@ pub struct Entry {
 pub struct Archive<'a> {
     bytes: &'a [u8],
     entries: Vec<Entry>,
+    /// Lower-cased name -> first entry with that name, so `get` is a
+    /// hash lookup instead of a case-insensitive scan of every entry.
+    /// (Was a linear scan per lookup, called thousands of times while a
+    /// track's objects are built.)
+    by_name: HashMap<String, usize>,
 }
 
 impl<'a> Archive<'a> {
@@ -66,7 +73,16 @@ impl<'a> Archive<'a> {
             }
             entries.push(Entry { name, offset, size });
         }
-        Ok(Archive { bytes, entries })
+        let mut by_name = HashMap::with_capacity(entries.len());
+        for (i, e) in entries.iter().enumerate() {
+            // First match wins, as `get`'s old linear scan found.
+            by_name.entry(e.name.to_ascii_lowercase()).or_insert(i);
+        }
+        Ok(Archive {
+            bytes,
+            entries,
+            by_name,
+        })
     }
 
     pub fn entries(&self) -> &[Entry] {
@@ -80,10 +96,9 @@ impl<'a> Archive<'a> {
 
     /// Finds an entry by name, ignoring ASCII case like the game's file APIs.
     pub fn get(&self, name: &str) -> Option<&'a [u8]> {
-        self.entries
-            .iter()
-            .find(|e| e.name.eq_ignore_ascii_case(name))
-            .map(|e| self.data(e))
+        self.by_name
+            .get(&name.to_ascii_lowercase())
+            .map(|&i| self.data(&self.entries[i]))
     }
 }
 
