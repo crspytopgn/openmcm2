@@ -38,10 +38,12 @@ fn sun_side() -> f32 {
 }
 
 // A tile's own uv (0..1) shifted onto its tile in the one map, held
-// inside the tile so a tap at its edge reads the tile's own edge, as a
-// layer of its own would, and never the tile beside it.
+// half a texel inside the tile so a filtered tap at its edge reads only
+// the tile's own edge texels, as a layer of its own would (clamped to
+// its edge), and never the tile beside it.
 fn sun_uv(uv: vec2<f32>, c: u32) -> vec2<f32> {
-    let u = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    let half = 0.5 / sun_side();
+    let u = clamp(uv, vec2<f32>(half), vec2<f32>(1.0 - half));
     return vec2<f32>((u.x + f32(c)) / 3.0, u.y);
 }
 

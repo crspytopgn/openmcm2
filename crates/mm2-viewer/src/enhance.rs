@@ -13,9 +13,21 @@ pub const SHADOW_SIDE: u32 = 2048;
 
 /// Texels a side of each cascade with the upgrades as set: twice
 /// [`SHADOW_SIDE`] on Ultra (crate::graphics::Enhanced::shadow_side).
+/// Never wider than the graphics card allows for the three cascades side
+/// by side in one map ([`Shared::new`] notes the card's limit).
 pub fn shadow_side() -> u32 {
-    crate::graphics::enhanced().map_or(SHADOW_SIDE, |e| e.shadow_side.clamp(512, 8192))
+    let side = crate::graphics::enhanced().map_or(SHADOW_SIDE, |e| e.shadow_side.clamp(512, 8192));
+    fit_side(side, MAX_TEXTURE_SIDE.load(std::sync::atomic::Ordering::Relaxed))
 }
+
+/// A cascade's side, so the three side by side are no wider than `widest`.
+fn fit_side(side: u32, widest: u32) -> u32 {
+    side.min((widest / CASCADES as u32).max(512))
+}
+
+/// The widest texture the graphics card takes, texels: noted when the
+/// enhanced drawing is made, as wide as any until then.
+static MAX_TEXTURE_SIDE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
 pub const CASCADES: usize = 3;
 /// How far each cascade reaches from the camera, ft; past the last the
 /// shadows fade out.
@@ -480,6 +492,7 @@ impl Shared {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        MAX_TEXTURE_SIDE.store(device.limits().max_texture_dimension_2d, std::sync::atomic::Ordering::Relaxed);
         let side = shadow_side();
         // The cascades side by side in one picture, a tile each, so the
         // three are drawn in a single pass (renderer.rs) and cleared
@@ -978,6 +991,15 @@ fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_shadow_map_fits_the_cards_widest_texture() {
+        // Ultra's 4096 a cascade is 12288 across for the three: a card
+        // that takes 8192 gets 2730 a cascade instead of a failed map.
+        assert_eq!(fit_side(2 * SHADOW_SIDE, 8192), 2730);
+        assert_eq!(fit_side(2 * SHADOW_SIDE, 16384), 2 * SHADOW_SIDE);
+        assert_eq!(fit_side(SHADOW_SIDE, 8192), SHADOW_SIDE);
+    }
 
     #[test]
     fn a_bike_nearby_leaves_the_far_cascade_out() {
