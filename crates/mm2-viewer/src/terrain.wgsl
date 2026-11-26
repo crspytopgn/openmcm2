@@ -255,7 +255,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 #include "enhanced.wgsl"
 
 @group(1) @binding(0) var<uniform> enh: Enh;
-@group(1) @binding(1) var sun_map: texture_depth_2d_array;
+@group(1) @binding(1) var sun_map: texture_depth_2d;
 @group(1) @binding(2) var sun_sampler: sampler_comparison;
 // The photo materials (materials.rs): colour and roughness, normal and
 // height; dirt, packed dirt, grass, rock, sand.
@@ -548,13 +548,19 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
         lip = smoothstep(0.06, 0.16, blur) * (1.0 - smoothstep(0.08, 0.18, here)) * close;
         worn = smoothstep(0.0, 0.3, blur) * (0.15 + 0.15 * (1.0 - close)) + mark * 0.2 * (1.0 - rut) + deep * 0.25;
         // The rut's walls, from its shape round about: from the wider ring
-        // of samples, so the light on them rolls smoothly.
-        let ring_x = (textureSampleLevel(rut_map, rut_sampler, ruv + vec2<f32>(2.4 * e, 0.0), 0.0).r + px) * 0.5;
-        let ring_nx = (textureSampleLevel(rut_map, rut_sampler, ruv - vec2<f32>(2.4 * e, 0.0), 0.0).r + nx) * 0.5;
-        let ring_z = (textureSampleLevel(rut_map, rut_sampler, ruv + vec2<f32>(0.0, 2.4 * e), 0.0).r + pz) * 0.5;
-        let ring_nz = (textureSampleLevel(rut_map, rut_sampler, ruv - vec2<f32>(0.0, 2.4 * e), 0.0).r + nz) * 0.5;
-        let hx = (rut_shape(ring_x) - rut_shape(ring_nx)) * 0.75;
-        let hz = (rut_shape(ring_z) - rut_shape(ring_nz)) * 0.75;
+        // of samples, so the light on them rolls smoothly. Only close by:
+        // far off `close` is 0 and the walls show nothing, so the four
+        // taps are left out.
+        var hx = 0.0;
+        var hz = 0.0;
+        if (close > 0.0) {
+            let ring_x = (textureSampleLevel(rut_map, rut_sampler, ruv + vec2<f32>(2.4 * e, 0.0), 0.0).r + px) * 0.5;
+            let ring_nx = (textureSampleLevel(rut_map, rut_sampler, ruv - vec2<f32>(2.4 * e, 0.0), 0.0).r + nx) * 0.5;
+            let ring_z = (textureSampleLevel(rut_map, rut_sampler, ruv + vec2<f32>(0.0, 2.4 * e), 0.0).r + pz) * 0.5;
+            let ring_nz = (textureSampleLevel(rut_map, rut_sampler, ruv - vec2<f32>(0.0, 2.4 * e), 0.0).r + nz) * 0.5;
+            hx = (rut_shape(ring_x) - rut_shape(ring_nx)) * 0.75;
+            hz = (rut_shape(ring_z) - rut_shape(ring_nz)) * 0.75;
+        }
         bent = normalize(bent + vec3<f32>(hx, 0.0, hz) * 0.8 * close * near);
     }
     // Take out the light the painter put in: as the scene's sun would

@@ -22,6 +22,17 @@ if command -v wasm-opt >/dev/null; then
     wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
         web/pkg/mm2-viewer_bg.wasm -o web/pkg/mm2-viewer_bg.wasm
 fi
+# The game's own pictures and sounds ride as files the page fetches
+# (web/index.html), not inside the engine, so the download stays small:
+# the enhanced look's ground pictures (9.5 MB), the vehicle sounds
+# (1.3 MB) and the free riders' motions (1.0 MB). The page fetches them
+# from here, and the browser keeps them once fetched.
+rm -rf web/assets
+mkdir -p web/assets
+cp -R crates/mm2-viewer/assets/ground web/assets/ground
+mkdir -p web/assets/vehicle_sounds
+cp crates/mm2-viewer/src/vehicle_sounds/*.wav web/assets/vehicle_sounds/
+cp crates/mm2-viewer/src/free_motions.bin web/assets/free_motions.bin
 # The page checks this to load a new build fresh and to tell players
 # when one is out while they play. It is a hash of the built engine,
 # not a timestamp, so rebuilding the same source does not bust every

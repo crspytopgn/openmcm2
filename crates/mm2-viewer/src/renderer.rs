@@ -135,6 +135,8 @@ pub struct TerrainRenderer {
     indices: wgpu::Buffer,
     /// The ground's blocks: their bounds (drawing coordinates) and indices.
     blocks: Vec<(Vec3, Vec3, std::ops::Range<u32>)>,
+    /// The ground's heights, to tell what a hill hides (crate::cull).
+    heightfield: crate::cull::Heightfield,
     /// The runs of indices in view this frame.
     runs: Vec<std::ops::Range<u32>>,
     /// The blocks in view by distance, kept between frames for its room.
@@ -690,6 +692,7 @@ impl TerrainRenderer {
             vertices,
             indices,
             blocks,
+            heightfield: crate::cull::Heightfield::new(terrain.heights.clone(), n, terrain.scale),
             runs: Vec::new(),
             nearest: Vec::new(),
             open_runs: Vec::new(),
@@ -1290,10 +1293,13 @@ impl TerrainRenderer {
             })
         };
         self.nearest.clear();
+        // What the ground's hills hide from this camera (crate::cull),
+        // unless left out for testing (MM2_SKIP=occlusion).
+        let occluder = (!crate::gpu_time::skip("occlusion")).then_some(&self.heightfield);
         self.nearest.extend(
             self.blocks
                 .iter()
-                .filter(|b| seen.sees(b.0, b.1))
+                .filter(|b| seen.sees(b.0, b.1) && occluder.is_none_or(|o| !o.hides(eye, b.0, b.1)))
                 .map(|b| (eye.clamp(b.0, b.1).distance_squared(eye), b.2.clone(), under(b.0, b.1))),
         );
         self.nearest.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.start.cmp(&b.1.start)));
@@ -1468,7 +1474,7 @@ impl TerrainRenderer {
                 objects.set_shadowless(device, &self.shadowless.0);
                 self.shadowless.1 = true;
             }
-            objects.cull(0, &seen, camera.position);
+            objects.cull(0, &seen, camera.position, occluder);
             if let Some((casters, ..)) = shadow {
                 if self.shadow_casters != Some(casters) {
                     objects.set_casters(device, &casters);
@@ -1488,7 +1494,17 @@ impl TerrainRenderer {
                     None => crate::enhance::cascade_reach(camera.view(), camera.fovy(aspect), aspect, &cascades, &texels),
                 };
                 for (i, (tight, wide)) in reach.iter().zip(&cascades).enumerate() {
-                    objects.cull_cascade(1 + i, &crate::cull::Frustum::new(*tight), &crate::cull::Frustum::new(*wide), camera.position);
+                    // The cascade's own stretch of ground, from the sun's
+                    // height: none under a stadium's lamps, whose views
+                    // are not bands of distance.
+                    let band = night_lamps.as_ref().map_or_else(
+                        || {
+                            let splits = crate::enhance::splits();
+                            Some((if i == 0 { 0.0 } else { splits[i - 1] }, splits[i], lights.to_sun.y))
+                        },
+                        |_| None,
+                    );
+                    objects.cull_cascade(1 + i, &crate::cull::Frustum::new(*tight), &crate::cull::Frustum::new(*wide), camera.position, band, None);
                 }
             }
         }
@@ -1642,30 +1658,37 @@ impl TerrainRenderer {
             rt.trace(queue, &mut encoder, proj * camera.view(), camera.position, lights.to_sun, mask, camera.fovy(aspect), shafts, indoors, lamps, poles, night, self.gpu_timer.as_mut());
         }
         if let (Some(objects), Some(e), true) = (&self.objects, &self.enhanced, sun_shadows && !traced) {
-            for (cascade, layer) in e.shared.layers.iter().enumerate() {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("sun shadows"),
-                    color_attachments: &[],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: layer,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
+            // The cascades side by side in the one map (enhance.rs), a
+            // tile each, drawn in a single pass: one clear for the three,
+            // and each cascade kept to its own tile by its viewport and
+            // scissor, so nothing it draws spills into the next tile.
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("sun shadows"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &e.shared.shadow_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
                     }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            for cascade in 0..crate::enhance::CASCADES {
+                let x = cascade as f32 * side as f32;
+                pass.set_viewport(x, 0.0, side as f32, side as f32, 0.0, 1.0);
+                pass.set_scissor_rect(cascade as u32 * side, 0, side, side);
                 // Indoors (a stadium, with no sky box) only the moving
                 // models cast.
                 if !crate::gpu_time::skip("cascades") {
                     objects.draw_sun_depth(&mut pass, cascade, self.sky.is_none());
                 }
-                drop(pass);
-                mark!(self.gpu_timer, &mut encoder, ["cascade 0", "cascade 1", "cascade 2", "cascade 3"][cascade.min(3)]);
+                mark_pass!(self.gpu_timer, &mut pass, ["cascade 0", "cascade 1", "cascade 2", "cascade 3"][cascade.min(3)]);
             }
+            drop(pass);
         }
         mark!(self.gpu_timer, &mut encoder, "sun cascades");
         {
@@ -1759,7 +1782,7 @@ impl TerrainRenderer {
             }
             mark_pass!(self.gpu_timer, &mut pass, "scene: smooth hills");
             if let Some((grass, own, group)) = grass.filter(|_| !crate::gpu_time::skip("grass")) {
-                grass.draw(&mut pass, own, group);
+                grass.draw(&mut pass, own, group, &seen, eye);
             }
             mark_pass!(self.gpu_timer, &mut pass, "scene: grass");
             if let Some(objects) = self.objects.as_ref().filter(|_| !crate::gpu_time::skip("objects")) {

@@ -51,6 +51,10 @@ impl Ground for TrackGround<'_> {
         self.world.sphere(centre, radius)
     }
 
+    fn solids_near(&self, centre: Vec3, radius: f32) -> bool {
+        self.world.sphere(centre, radius).is_some()
+    }
+
     fn crossing(&self, from: Vec3, to: Vec3) -> Option<Crossing> {
         self.world.crossing(from, to)
     }

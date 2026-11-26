@@ -316,7 +316,7 @@ fn fs_motion(in: MotionOut) -> @location(0) vec4<f32> {
 #include "enhanced.wgsl"
 
 @group(3) @binding(0) var<uniform> enh: Enh;
-@group(3) @binding(1) var sun_map: texture_depth_2d_array;
+@group(3) @binding(1) var sun_map: texture_depth_2d;
 @group(3) @binding(2) var sun_sampler: sampler_comparison;
 // The photo materials (materials.rs), and the one this draw's texture is
 // mostly made of (its layer, or -1 for none).

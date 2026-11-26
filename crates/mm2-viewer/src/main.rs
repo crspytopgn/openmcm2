@@ -119,6 +119,8 @@ mod pad;
 mod morph;
 mod skin;
 mod movie;
+#[cfg(not(target_arch = "wasm32"))]
+mod own_video;
 mod net;
 mod objects;
 mod particles;
@@ -4017,18 +4019,98 @@ fn read_archive(path: &Path) -> Result<Vec<u8>, BoxError> {
     if freepack::root().is_some_and(|root| path.starts_with(&root)) && !fs::is_file(path) {
         return Ok(rs2::build(&[]));
     }
+    let plain = cached_archive(path)?;
+    // Player-made packs in `RES/ADDONS` add what custom tracks need.
+    Ok(addons::with_addons(path, plain))
+}
+
+/// A file's size and last write, for telling a changed archive from the
+/// cached one. The browser's store has no such stamp, so there the cache
+/// below stays off and every read decodes as before.
+#[cfg(not(target_arch = "wasm32"))]
+fn archive_stamp(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+    crate::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok().map(|t| (m.len(), t)))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn archive_stamp(_path: &Path) -> Option<(u64, std::time::SystemTime)> {
+    None
+}
+
+/// Decoded archive bytes, cached by path and file stamp: one track load
+/// reads the same multi-MB archives a dozen times over (MODELS, OBJECTS,
+/// BIKE, ECO, PROCVUE, COLSEG, SKIES, GLOBAL twice, and more), and every
+/// track switch and race start did it all again. Only the base decode is
+/// cached — the add-ons are joined fresh by `read_archive` on every call,
+/// so a pack added while the game runs is still picked up. The cache
+/// holds at most 128 MB; past that it is cleared rather than grown.
+struct ArchiveCache {
+    entries: std::collections::HashMap<PathBuf, (u64, std::time::SystemTime, Vec<u8>)>,
+    bytes: usize,
+}
+
+impl ArchiveCache {
+    fn new() -> Self {
+        ArchiveCache {
+            entries: std::collections::HashMap::new(),
+            bytes: 0,
+        }
+    }
+}
+
+const ARCHIVE_CACHE_MAX_BYTES: usize = 128 << 20;
+
+thread_local! {
+    static ARCHIVE_CACHE: std::cell::RefCell<ArchiveCache> =
+        std::cell::RefCell::new(ArchiveCache::new());
+}
+
+/// An archive's plain RS2 bytes, from the cache when the file has not
+/// changed since it was decoded, else read and decoded fresh.
+fn cached_archive(path: &Path) -> Result<Vec<u8>, BoxError> {
+    let Some((len, modified)) = archive_stamp(path) else {
+        return decode_archive(path);
+    };
+    let hit = ARCHIVE_CACHE.with(|cache| {
+        cache
+            .borrow()
+            .entries
+            .get(path)
+            .filter(|(l, m, _)| (*l, *m) == (len, modified))
+            .map(|(_, _, bytes)| bytes.clone())
+    });
+    if let Some(bytes) = hit {
+        return Ok(bytes);
+    }
+    let plain = decode_archive(path)?;
+    ARCHIVE_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.bytes + plain.len() > ARCHIVE_CACHE_MAX_BYTES {
+            cache.entries.clear();
+            cache.bytes = 0;
+        }
+        cache.bytes += plain.len();
+        cache
+            .entries
+            .insert(path.to_path_buf(), (len, modified, plain.clone()));
+    });
+    Ok(plain)
+}
+
+/// Reads and decodes one archive file, without the cache.
+fn decode_archive(path: &Path) -> Result<Vec<u8>, BoxError> {
     let raw = crate::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or_default();
-    let plain = match Container::detect(&raw) {
-        Container::Faoe => faoe::decode(&raw, name)?,
-        Container::Rs2 => raw,
-        Container::Unknown => return Err(format!("{}: not an RS2 or FAOE archive", path.display()).into()),
-    };
-    // Player-made packs in `RES/ADDONS` add what custom tracks need.
-    Ok(addons::with_addons(path, plain))
+    match Container::detect(&raw) {
+        Container::Faoe => Ok(faoe::decode(&raw, name)?),
+        Container::Rs2 => Ok(raw),
+        Container::Unknown => Err(format!("{}: not an RS2 or FAOE archive", path.display()).into()),
+    }
 }
 
 async fn gpu(
@@ -4519,6 +4601,12 @@ async fn menu_screenshot(
         }
         if click.trim() == "intro" {
             front.intro();
+            continue;
+        }
+        // Real time passing, for work done off the game's clock (the
+        // player's own intro video decoding).
+        if let Some(t) = click.strip_prefix("sleep:").and_then(|t| t.trim().parse::<f32>().ok()) {
+            std::thread::sleep(std::time::Duration::from_secs_f32(t));
             continue;
         }
         if click.trim() == "esc" {
@@ -7942,7 +8030,14 @@ impl ApplicationHandler for App {
                     self.open_builder(file.as_deref());
                 }
                 let now = Instant::now();
-                let real = (now - self.last).as_secs_f32().min(0.1);
+                // The pacing stays capped at a tenth of a second, so a
+                // stall never jumps the world forward; but dynamic
+                // resolution is told the true gap. A phone at a few frames
+                // a second was capped to 0.1 s here, so its governor took
+                // about 6 s of real time to see 1.5 s of frames and step
+                // the picture down.
+                let elapsed = (now - self.last).as_secs_f32();
+                let real = elapsed.min(0.1);
                 self.last = now;
                 // Waiting for the screen, the world moves on in whole beats
                 // of it, so what moves across it does so evenly.
@@ -7970,10 +8065,10 @@ impl ApplicationHandler for App {
                 #[cfg(target_arch = "wasm32")]
                 if let Some(s) = &self.state {
                     let size = s.window.inner_size();
-                    self.picture.frame(racing, governing, real, wanted, most_drawn(size.width, size.height));
+                    self.picture.frame(racing, governing, elapsed, wanted, most_drawn(size.width, size.height));
                 }
                 if governing {
-                    self.dynres.apply(real, wanted);
+                    self.dynres.apply(elapsed, wanted);
                 } else if self.track.is_none() {
                     self.dynres = dynres::Governor::default();
                     dynres::reset();
@@ -8120,5 +8215,30 @@ mod start_grid_tests {
         let p = gate.slot(Vec3::ZERO, Vec3::Z, 1, 1);
         assert!((p.x.abs() - 0.78).abs() < 0.01, "{p:?}");
         assert!((p.z - 8.0).abs() < 1e-4);
+    }
+}
+
+#[cfg(test)]
+mod archive_cache_tests {
+    use super::read_archive;
+
+    #[test]
+    fn a_changed_archive_is_not_served_stale() {
+        let dir = std::env::temp_dir().join(format!("mm2-archive-cache-test-{}", std::process::id()));
+        let _ = crate::fs::create_dir_all(&dir);
+        let path = dir.join("TEST.RES");
+        let first = mm2_formats::rs2::build(&[("a.txt", b"first")]);
+        let encoded = mm2_formats::faoe::encode(&first, "TEST.RES").unwrap();
+        crate::fs::write(&path, &encoded).unwrap();
+        assert_eq!(read_archive(&path).unwrap(), first);
+        // Same path, read again: the cached decode.
+        assert_eq!(read_archive(&path).unwrap(), first);
+        // Rewritten with other contents: the stamp changed, so the new
+        // bytes come back, not the cached ones.
+        let second = mm2_formats::rs2::build(&[("a.txt", b"second, longer")]);
+        let encoded = mm2_formats::faoe::encode(&second, "TEST.RES").unwrap();
+        crate::fs::write(&path, &encoded).unwrap();
+        assert_eq!(read_archive(&path).unwrap(), second);
+        let _ = crate::fs::remove_dir_all(dir);
     }
 }

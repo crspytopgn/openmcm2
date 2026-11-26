@@ -638,7 +638,7 @@ impl ObjectMesh {
             node_count: 1,
             ..Default::default()
         };
-        let mut cache: HashMap<String, Option<slb::Model>> = HashMap::new();
+        let mut cache: HashMap<String, Option<Arc<slb::Model>>> = HashMap::new();
         // The free pack's stand-ins' own textures, by their `fp:` names.
         let mut stand_in_images: HashMap<String, Image> = HashMap::new();
         let mut load = |name: &str| {
@@ -661,18 +661,18 @@ impl ObjectMesh {
                         return mm2_formats::slt::parse(data)
                             .map_err(|err| eprintln!("{name}: {err}"))
                             .ok()
-                            .map(lift_decals);
+                            .map(|m| Arc::new(lift_decals(m)));
                     }
                     let Some(data) = models.iter().find_map(|m| m.get(&key)) else {
                         // Not in the game's files: the free pack's stand-in.
                         let (model, images) = crate::freepack::model(stem)?;
                         stand_in_images.extend(images);
-                        return Some(model);
+                        return Some(Arc::new(model));
                     };
                     slb::parse(data)
                         .map_err(|err| eprintln!("{name}: {err}"))
                         .ok()
-                        .map(lift_decals)
+                        .map(|m| Arc::new(lift_decals(m)))
                 })
                 .clone()
         };
@@ -749,7 +749,15 @@ impl ObjectMesh {
                 mesh.missing(&mcf.model);
                 continue;
             };
-            let (model, gate_motions) = if gate { crate::freepack::gate_drop(model) } else { (model, Vec::new()) };
+            // The start gate's drop is a change to the model itself, so
+            // it gets its own copy; every other placement shares the
+            // cached one.
+            let (model, gate_motions) = if gate {
+                let (m, g) = crate::freepack::gate_drop((*model).clone());
+                (Arc::new(m), g)
+            } else {
+                (model, Vec::new())
+            };
             let motions: Vec<_> = mcf
                 .motions
                 .iter()
@@ -2315,15 +2323,20 @@ impl ObjectRenderer {
     /// see through `frustum`, for the draws after.
     /// The eco-system's full trees only as far as their billboards' band,
     /// and those only from it on, by how far each block is from `camera`.
-    pub fn cull(&mut self, slot: usize, frustum: &crate::cull::Frustum, camera: Vec3) {
-        self.cull_cascade(slot, frustum, frustum, camera);
+    /// With `occluder`, the ground's hills hide whole blocks too
+    /// (crate::cull).
+    pub fn cull(&mut self, slot: usize, frustum: &crate::cull::Frustum, camera: Vec3, occluder: Option<&crate::cull::Heightfield>) {
+        self.cull_cascade(slot, frustum, frustum, camera, None, occluder);
     }
 
     /// The same for a sun cascade's slot: what it must hold through
     /// `tight` (enhance::cascade_reach), but the far trees' billboards,
     /// whose blocks' bounds hold only their feet, through its own view
-    /// `wide`, as before.
-    pub fn cull_cascade(&mut self, slot: usize, tight: &crate::cull::Frustum, wide: &crate::cull::Frustum, camera: Vec3) {
+    /// `wide`, as before. With `band`, only what can shade the cascade's
+    /// own stretch of ground (enhance::caster_in_cascade); the
+    /// billboards are left out of that, their bounds holding only their
+    /// feet. The hills hide nothing here: the sun sees round them.
+    pub fn cull_cascade(&mut self, slot: usize, tight: &crate::cull::Frustum, wide: &crate::cull::Frustum, camera: Vec3, band: Option<(f32, f32, f32)>, occluder: Option<&crate::cull::Heightfield>) {
         let Some(seen) = self.seen.get_mut(slot) else { return };
         seen.clear();
         let mut runs = Vec::new();
@@ -2334,14 +2347,20 @@ impl ObjectRenderer {
                 let near = camera.clamp(b.0, b.1).distance(camera);
                 let far = (camera - b.0).abs().max((camera - b.1).abs()).length();
                 let t = self.trees;
-                match kind {
-                    1 => near <= t.edge + t.band,
-                    2 => far >= t.edge - t.band && near <= t.reach,
-                    _ => true,
-                }
+                // What can shade this cascade's ground at all.
+                let in_band = kind == 2 || band.map_or(true, |(lo, hi, sun_y)| crate::enhance::caster_in_cascade(near, far, b.1.y - b.0.y, sun_y, lo, hi));
+                // What the ground hides from the camera's own view.
+                let hidden = slot == 0 && occluder.is_some_and(|o| o.hides(camera, b.0, b.1));
+                in_band
+                    && !hidden
+                    && match kind {
+                        1 => near <= t.edge + t.band,
+                        2 => far >= t.edge - t.band && near <= t.reach,
+                        _ => true,
+                    }
             };
             let frustum = if kind == 2 { wide } else { tight };
-            crate::cull::runs(blocks.iter().filter(|b| wanted(b) && frustum.sees(b.0, b.1)).map(|b| b.2.clone()), &mut runs);
+            crate::cull::runs(blocks.iter().filter(|b| frustum.sees(b.0, b.1) && wanted(b)).map(|b| b.2.clone()), &mut runs);
             seen.extend(runs.drain(..).map(|r| (r, d)));
         }
     }

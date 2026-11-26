@@ -17,6 +17,8 @@
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
     font: 16px/1.5 system-ui, sans-serif; overflow: hidden; overscroll-behavior: none; }
   #mm2 { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; touch-action: none; }
+  /* The player's own intro video, over the game. */
+  video.intro { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; background: #000; z-index: 50; cursor: pointer; }
   #setup { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); padding: 16px;
     overflow-y: auto; }
   #setup > div { max-width: 40rem; }
@@ -78,7 +80,7 @@
   summary { cursor: pointer; color: var(--fg); margin-top: .4rem; }
   details.more { margin-top: 1rem; }
   details.more > summary { font-weight: 600; }
-  button.small { padding: .3rem .7rem; font-size: .9rem; }
+  button.small, label.button.small { padding: .3rem .7rem; font-size: .9rem; }
   button:disabled { opacity: .4; cursor: default; }
   #tracklist { list-style: none; padding: 0; margin: .4rem 0; }
   #tracklist li { display: flex; justify-content: space-between; gap: .5rem; color: var(--dim); padding: .15rem 0; }
@@ -128,6 +130,12 @@
   .switches { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: .1rem .8rem; margin: .2rem 0 .6rem; }
   .switches .seg { justify-self: start; }
   .switchname { color: var(--dim); font-size: .9rem; }
+  #fullgame { margin: .9rem 0 0; padding-top: .8rem; border-top: 1px solid #3a3d2c; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; }
+  #fullgame p { margin: 0; flex: 1 1 14rem; }
+  #fullgame label.button { margin: 0; }
+  #readysum { margin: 0 0 .8rem; color: var(--dim); font-size: .9rem; }
+  #ldNote { margin: .4rem 0 0; color: var(--dim); font-size: .9rem; }
+  .way .size { flex: 0 0 auto; font-size: .8rem; }
   .line { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .3rem 0; color: var(--dim); }
   label.plainbutton { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost { background: none; color: var(--fg); border: 1px solid #55524a; }
@@ -251,11 +259,20 @@
           title="The same menus and buttons, redrawn in a new style.">New look</button>
       </div>
     </div>
+    <p id="readysum" aria-live="polite"></p>
     <div class="row">
       <button id="play" class="play" title="Starts the game with your Motocross Madness 2 files.">Play</button>
       <button id="playfree" class="play" hidden title="Starts the free version, fetching any update to the Free Pack first.">Play</button>
       <button type="button" class="plain" id="change"
-        title="Pick another way to play: your own MM2 files, the free MM2 demo or the free version. Nothing kept in this browser is deleted.">Change</button>
+        title="Pick another way to play: your own MM2 files, the free MM2 demo or the free version. Nothing kept in this browser is deleted.">Other ways to play</button>
+    </div>
+    <!-- Playing the demo: the full game is one press away. -->
+    <div id="fullgame" hidden>
+      <p><b>Got the full game?</b> Use your own copy for every original track, bike and rider.</p>
+      <label class="button small" for="folder"
+        title="The folder Motocross Madness 2 is installed in (the one with the UI, RES and TERAFORM folders in it), or the CD's own folder. It takes the demo's place; your saves and own tracks stay.">Choose game folder</label>
+      <label class="button small plainbutton" for="file"
+        title="Your game CD's image (.iso, .bin, .img, .mdf or .nrg), or a .zip of the game folder or of a CD image. It takes the demo's place; your saves and own tracks stay.">CD image or .zip</label>
     </div>
   </section>
 
@@ -282,7 +299,8 @@
         </div>
         <div class="way" id="demorow">
           <b>No copy? Try the demo</b>
-          <span>Microsoft's free Motocross Madness 2 demo from 2000, with the original look. The Free Pack fills in the other tracks, so every event is open.</span>
+          <span>Microsoft's free demo from 2000: the original bikes, sound and menus on two real MM2 tracks. The Free Pack fills in the other events, so everything is open.</span>
+          <span class="size">First time only: the 43 MB demo plus the Free Pack (about 500 MB). After that, Play starts straight away.</span>
           <button type="button" id="getdemo" class="ghost"
             title="Downloads Microsoft's free Motocross Madness 2 demo (43 MB) from the Internet Archive, checks it and keeps it in this browser. It plays with the original graphics on the Voodoo Basin national track and the Donner Pass stunt quarry. The Free Pack (several hundred MB, downloaded once) fills in every other track, bike and screen, so every event, the Pro Circuit and multiplayer are open. Nothing of the demo comes with OpenMCM2 itself.">Play the free demo</button>
         </div>
@@ -455,6 +473,7 @@
   <span class="tag" id="ldTag">Loading</span>
   <h2 id="ldTitle">Getting ready</h2>
   <p id="ldDetail"></p>
+  <p id="ldNote" hidden></p>
   <div class="track busy" id="ldTrack"><div id="ldFill"></div></div>
   <div id="ldSlow" hidden>
     <h3>Not loading?</h3>
@@ -546,6 +565,7 @@ const STEPS = {
   keep: ["Keeping your game in this browser", "So next time, Play starts it straight away. This only happens the first time."],
   files: ["Reading your game files", ""],
   saves: ["Loading your saves and tracks", ""],
+  assets: ["Fetching the ground pictures", "The enhanced look's ground pictures, kept out of the engine download. The original look never fetches them."],
   engine: ["Downloading the game engine", ""],
   compile: ["Getting the engine ready", "Your browser is turning the download into code it can run."],
   start: ["Starting the game", "Reading the menus, sounds and your settings."],
@@ -627,14 +647,22 @@ const loader = {
   painted() {
     return new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => ok())));
   },
+  // A line under the step saying why it's needed, kept while the step's
+  // progress changes; null takes it away.
+  note(text) {
+    $("ldNote").textContent = text ?? "";
+    $("ldNote").hidden = !text;
+  },
   // Back to the start page (a kept CD image unpacked as the page opened).
   hide() {
+    this.note(null);
     this.now = null;
     this.shown = false;
     $("loader").hidden = true;
     $("ldSlow").hidden = true;
   },
   done() {
+    this.note(null);
     this.finish();
     $("ldSlow").hidden = true;
     $("loader").classList.add("gone");
@@ -644,6 +672,7 @@ const loader = {
   // the technical detail tucked away for a bug report.
   fail(title, why, tech, actions = [], tag = "Couldn't start") {
     this.show();
+    this.note(null);
     if (this.now) this.row(this.now).className = "bad";
     if (this.now) this.log.push(`${STEPS[this.now]?.[0] ?? this.now}: failed`);
     this.now = null;
@@ -827,6 +856,20 @@ const s = settings.load();
 if ([...params.keys()].some((k) => k.startsWith("enhanced"))) s.enhanced = true;
 // The look and the rest both wait behind "Settings".
 let look = s.enhanced ? "enhanced" : "original";
+// The player's own intro video (Extras): kept in this browser, played
+// over the game when it asks (mm2page.introPlay).
+let introFile = null;
+settings.setIntroStore({
+  keep: async (f) => {
+    await fs.keepIntro(f);
+    introFile = f;
+  },
+  forget: async () => {
+    await fs.forgetIntro();
+    introFile = null;
+  },
+});
+if (s.intro_video) introFile = await fs.keptIntro().catch(() => null);
 settings.render($("lookbox"), $("settings"), s, () => (look = s.enhanced ? "enhanced" : "original"));
 // The game reads its options from the address: the settings' options,
 // and whatever else the address holds (such as a race to join).
@@ -1062,6 +1105,58 @@ globalThis.mm2page = {
   },
   pickedClear() {
     this.picked = null;
+  },
+  // The player's own intro video, over the whole page, its shape kept; a
+  // click on it, a key or the game's own skip ends it. false if there is
+  // none to play.
+  intro: null,
+  introPlay() {
+    if (!introFile) return false;
+    const v = document.createElement("video");
+    v.className = "intro";
+    v.playsInline = true;
+    v.src = URL.createObjectURL(introFile);
+    const state = { video: v, done: false, failed: false };
+    const end = () => {
+      if (state.done) return;
+      state.done = true;
+      v.pause();
+      v.remove();
+      URL.revokeObjectURL(v.src);
+      removeEventListener("keydown", end, true);
+      $("mm2").focus();
+    };
+    state.end = end;
+    v.addEventListener("ended", end);
+    v.addEventListener("error", () => {
+      // This browser can't play it: the game's own intro instead.
+      console.warn("intro video: this browser can't play it", v.error);
+      state.failed = true;
+      end();
+    });
+    v.addEventListener("pointerdown", end);
+    addEventListener("keydown", end, true);
+    document.body.append(v);
+    v.play().catch((e) => {
+      // Not allowed to start with sound: start without.
+      if (state.done) return;
+      v.muted = true;
+      v.play().catch(() => {
+        state.failed = true;
+        end();
+      });
+    });
+    this.intro = state;
+    return true;
+  },
+  introDone() {
+    return !this.intro || this.intro.done;
+  },
+  introFailed() {
+    return !!this.intro?.failed;
+  },
+  introStop() {
+    this.intro?.end();
   },
   // Photo mode's Enter: the picture just drawn, as a PNG in the
   // downloads. Asked as the frame is shown, before the browser clears it.
@@ -1316,8 +1411,9 @@ function noWebGPU() {
   );
 }
 
-// The engine, with a progress bar: about 12 MB to download, more once
-// the browser unpacks it.
+// The engine, with a progress bar. The pictures, sounds and motions it
+// used to carry ride as files now (below), so it is a much smaller
+// download, more once the browser unpacks it.
 async function fetchEngine(quiet) {
   const say = (share, text) => quiet || loader.progress(share, text);
   const r = await fetch(fresh("./pkg/mm2-viewer_bg.wasm"));
@@ -1368,6 +1464,38 @@ async function checkBrowser() {
   return true;
 }
 
+// The game's own pictures and sounds, kept out of the engine download
+// (about 12 MB all told) and fetched from this site instead, into the
+// game's own store (mm2fs.js). They are the site's own files, so the
+// browser keeps them once fetched and only asks again if they change.
+const GROUND_FILES = ["dirt", "packed", "grass", "rock", "sand", "wood", "metal", "concrete", "straw"].flatMap((m) => [
+  `ground/${m}_albedo.webp`,
+  `ground/${m}_normal.webp`,
+]);
+const SOUND_FILES = ["car", "v8", "diesel", "truck", "tractor", "heli", "prop", "ufo", "skid"].map((m) => `vehicle_sounds/${m}.wav`);
+const MOTION_FILES = ["free_motions.bin"];
+
+// Fetches `files` (under ./assets/) into the game's store under
+// /assets/, saying how far it has got (`say`, or nothing). A file that
+// won't fetch is left out: the game stands in something plain for it
+// rather than not starting.
+async function fetchAssets(files, say) {
+  let got = 0;
+  await Promise.all(
+    files.map(async (name) => {
+      try {
+        const r = await fetch(`./assets/${name}`);
+        if (!r.ok) throw new Error(`answered ${r.status}`);
+        fs.put(`/assets/${name}`, new Uint8Array(await r.arrayBuffer()));
+      } catch (e) {
+        console.warn(`game file not fetched: ${name}`, e);
+      }
+      got++;
+      say?.(got / files.length, `${got} of ${files.length} files`);
+    })
+  );
+}
+
 help.installTip($("installtip"), { touch: touch.wanted() });
 
 let starting = false;
@@ -1379,11 +1507,22 @@ async function start(list) {
   const at = { step: "files" };
   // The engine downloads and gets ready while the files are read (it's
   // usually kept by the browser, and getting it ready takes a phone a
-  // few seconds).
-  const engine = Promise.all([import(fresh("./pkg/mm2-viewer.js")), fetchEngine(true)]).then(([game, bytes]) => [
-    game,
-    WebAssembly.compile(bytes),
-  ]);
+  // few seconds). Streaming compile turns it into code as it arrives,
+  // instead of waiting for all of it first; a server that doesn't serve
+  // it with the type streaming needs falls back to downloading it all
+  // and then compiling it.
+  const engine = (async () => {
+    const game = await import(fresh("./pkg/mm2-viewer.js"));
+    try {
+      const r = await fetch(fresh("./pkg/mm2-viewer_bg.wasm"));
+      if (!r.ok) throw new Error(`the engine download answered ${r.status} ${r.statusText}`);
+      return [game, await WebAssembly.compileStreaming(r)];
+    } catch (e) {
+      console.warn("streaming compile not used, downloading the engine first", e);
+    }
+    const bytes = await fetchEngine(true);
+    return [game, await WebAssembly.compile(bytes)];
+  })();
   engine.catch(() => {});
   try {
     loader.step("files");
@@ -1397,6 +1536,15 @@ async function start(list) {
     navigator.storage?.persist?.().catch(() => {});
     addTracks();
     setLookInAddress();
+    // The enhanced look's ground pictures, before the game starts, so
+    // its first race has them: the original look never fetches them.
+    if (s.enhanced) {
+      at.step = "assets";
+      loader.step("assets");
+      loader.note("Only the ground pictures come down now: the engine no longer carries them.");
+      await fetchAssets(GROUND_FILES, (share, text) => loader.progress(share, text));
+      loader.note(null);
+    }
     at.step = "engine";
     loader.step("engine", "");
     const [game, compiled] = await engine;
@@ -1417,6 +1565,11 @@ async function start(list) {
       setParam("course-builder", null);
       setParam("ride-course", null);
     }
+    // The vehicle sounds and the free riders' motions, behind the game
+    // while the menus are up: the game looks for them again when they
+    // are needed, so driving sounds right and free riders ride properly
+    // once they arrive.
+    fetchAssets([...SOUND_FILES, ...MOTION_FILES]).catch((e) => console.warn("extra game files not fetched", e));
     // The time played goes to the server as the tab is hidden or closed
     // (the game sends it after each race too).
     const flush = () => {
@@ -1856,6 +2009,7 @@ function showMenus() {
     $(o).setAttribute("aria-checked", String(!menusNew()));
     $(o).setAttribute("aria-disabled", String(!oldMenusHere()));
   }
+  readySummary();
 }
 for (const [id, n] of [["picknewmenus", true], ["pickoldmenus", false], ["readynewmenus", true], ["readyoldmenus", false]]) {
   $(id).addEventListener("click", () => {
@@ -2245,7 +2399,11 @@ async function fetchDemo() {
 async function demoPack() {
   if (keptPack) return keptPack;
   try {
+    loader.note(
+      "The demo has two tracks of its own. The Free Pack fills in every other track, bike and screen, so every event is open. Only changes come down after this."
+    );
     const list = await syncPack(true);
+    loader.note(null);
     if (!list) throw new Error("the downloaded pack is missing some files");
     downloaded = true;
     return list;
@@ -2416,6 +2574,20 @@ function showReady() {
   pageReady = true;
   layout();
 }
+// One line under the Ready card's switches saying, in plain words, what
+// Play starts with them as they are.
+function readySummary() {
+  const el = $("readysum");
+  if (!el || !pageReady) return;
+  const demo = isDemo(kept);
+  const freeReady = free && !!(keptPack || downloaded);
+  const menus = menusNew() ? "the new look menus" : "the original menus";
+  el.textContent = freeReady
+    ? `Plays the free version: all-new bikes, tracks and sound, with ${menus}.`
+    : demo
+      ? `Plays the demo with ${menus}: original bikes and sound, the real Voodoo Basin (National) and Donner Pass (Stunt Quarry) tracks, and Free Pack tracks for the other events.`
+      : `Plays your Motocross Madness 2 with ${menus}.`;
+}
 // Ready (one Play button) or the choice, as the files kept and the last
 // pick have it.
 function layout() {
@@ -2432,8 +2604,9 @@ function layout() {
   $("readywhy").textContent = freeReady
     ? "The Free Pack is kept in this browser. Play fetches any update first."
     : demo
-      ? "Kept in this browser, with the Free Pack filling in the other tracks."
+      ? "Microsoft's free demo from 2000, kept in this browser."
       : "Remembered in this browser.";
+  readySummary();
   // In the choice: what's kept already, one press away.
   $("usekept").hidden = !kept || mm2Ready;
   $("usekept").textContent = demo ? "Play the demo kept in this browser" : "Play the game kept in this browser";
@@ -2445,6 +2618,13 @@ function layout() {
   // The graphics switch on the Ready card: both need their files here.
   const both = !!kept && packReady;
   $("readymm2").textContent = demo ? "MM2 demo" : "MM2";
+  $("fullgame").hidden = !(demo && ready);
+  $("readymm2").title = demo
+    ? "The demo's original bikes, riders and sounds. Its two tracks are the real MM2 ones; the Free Pack fills in the rest."
+    : "The original game's bikes, riders, tracks and sounds, from your MM2 files.";
+  $("readyoldmenus").title = demo
+    ? "The menus exactly as Motocross Madness 2 had them, from the demo. Screens the demo lacks come from the Free Pack."
+    : "The menus exactly as Motocross Madness 2 had them, from your MM2 files.";
   $("readymm2").setAttribute("aria-checked", String(!freeReady));
   $("readyfree").setAttribute("aria-checked", String(freeReady));
   for (const id of ["readymm2", "readyfree"]) $(id).setAttribute("aria-disabled", String(!both));
