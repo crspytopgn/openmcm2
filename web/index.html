@@ -78,7 +78,7 @@
   summary { cursor: pointer; color: var(--fg); margin-top: .4rem; }
   details.more { margin-top: 1rem; }
   details.more > summary { font-weight: 600; }
-  button.small { padding: .3rem .7rem; font-size: .9rem; }
+  button.small, label.button.small { padding: .3rem .7rem; font-size: .9rem; }
   button:disabled { opacity: .4; cursor: default; }
   #tracklist { list-style: none; padding: 0; margin: .4rem 0; }
   #tracklist li { display: flex; justify-content: space-between; gap: .5rem; color: var(--dim); padding: .15rem 0; }
@@ -128,6 +128,9 @@
   .switches { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: .1rem .8rem; margin: .2rem 0 .6rem; }
   .switches .seg { justify-self: start; }
   .switchname { color: var(--dim); font-size: .9rem; }
+  #fullgame { margin: .9rem 0 0; padding-top: .8rem; border-top: 1px solid #3a3d2c; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; }
+  #fullgame p { margin: 0; flex: 1 1 14rem; }
+  #fullgame label.button { margin: 0; }
   #readysum { margin: 0 0 .8rem; color: var(--dim); font-size: .9rem; }
   #ldNote { margin: .4rem 0 0; color: var(--dim); font-size: .9rem; }
   .way .size { flex: 0 0 auto; font-size: .8rem; }
@@ -260,6 +263,14 @@
       <button id="playfree" class="play" hidden title="Starts the free version, fetching any update to the Free Pack first.">Play</button>
       <button type="button" class="plain" id="change"
         title="Pick another way to play: your own MM2 files, the free MM2 demo or the free version. Nothing kept in this browser is deleted.">Other ways to play</button>
+    </div>
+    <!-- Playing the demo: the full game is one press away. -->
+    <div id="fullgame" hidden>
+      <p><b>Got the full game?</b> Use your own copy for every original track, bike and rider.</p>
+      <label class="button small" for="folder"
+        title="The folder Motocross Madness 2 is installed in (the one with the UI, RES and TERAFORM folders in it), or the CD's own folder. It takes the demo's place; your saves and own tracks stay.">Choose game folder</label>
+      <label class="button small plainbutton" for="file"
+        title="Your game CD's image (.iso, .bin, .img, .mdf or .nrg), or a .zip of the game folder or of a CD image. It takes the demo's place; your saves and own tracks stay.">CD image or .zip</label>
     </div>
   </section>
 
@@ -2480,6 +2491,7 @@ function layout() {
   // The graphics switch on the Ready card: both need their files here.
   const both = !!kept && packReady;
   $("readymm2").textContent = demo ? "MM2 demo" : "MM2";
+  $("fullgame").hidden = !(demo && ready);
   $("readymm2").title = demo
     ? "The demo's original bikes, riders and sounds. Its two tracks are the real MM2 ones; the Free Pack fills in the rest."
     : "The original game's bikes, riders, tracks and sounds, from your MM2 files.";
