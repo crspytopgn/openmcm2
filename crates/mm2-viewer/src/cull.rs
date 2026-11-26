@@ -58,15 +58,22 @@ pub struct Heightfield {
 }
 
 impl Heightfield {
-    /// From a terrain's heights, row-major with rows along +z in the
-    /// game's coordinates (drawing coordinates: x along a row, z down
-    /// them, so a row is `-z / scale`).
-    pub fn new(heights: Vec<f32>, size: usize, scale: f32) -> Heightfield {
-        Heightfield { heights, size, scale }
+    /// From a terrain's heights (terrain units, row-major with rows
+    /// along +z in the game's coordinates) and its scale, ft per terrain
+    /// unit across and up: drawing coordinates are x along a row and z
+    /// down them, so a row is `-z / scale`, and a height is `h * scale`
+    /// ft, as the ground's blocks are drawn (renderer.rs).
+    pub fn new(heights: &[f32], size: usize, scale: f32) -> Heightfield {
+        Heightfield {
+            heights: heights.iter().map(|h| h * scale).collect(),
+            size,
+            scale,
+        }
     }
 
-    /// The ground's height at `x, z` (drawing coordinates), between
-    /// samples, or none outside the ground.
+    /// The ground's height at `x, z` (drawing coordinates), on the same
+    /// two triangles a cell is drawn and ridden as (ride::ground), or
+    /// none outside the ground.
     pub fn height(&self, x: f32, z: f32) -> Option<f32> {
         if self.size < 2 || self.scale <= 0.0 {
             return None;
@@ -76,13 +83,23 @@ impl Heightfield {
         if !(0.0..=last).contains(&col) || !(0.0..=last).contains(&row) {
             return None;
         }
-        let (c0, r0) = (col.floor() as usize, row.floor() as usize);
-        let (c1, r1) = (c0.min(self.size - 2), r0.min(self.size - 2));
-        let (fx, fz) = (col - c0 as f32, row - r0 as f32);
-        let at = |c: usize, r: usize| self.heights[r * self.size + c];
-        let top = at(c0, r0) * (1.0 - fx) + at(c1 + 1, r0) * fx;
-        let bottom = at(c0, r1 + 1) * (1.0 - fx) + at(c1 + 1, r1 + 1) * fx;
-        Some(top * (1.0 - fz) + bottom * fz)
+        let edge = (self.size - 2) as f32;
+        let (cx, cz) = (col.floor().min(edge), row.floor().min(edge));
+        let (fx, fz) = (col - cx, row - cz);
+        let (cx, cz) = (cx as usize, cz as usize);
+        let at = |dx: usize, dz: usize| self.heights[(cz + dz) * self.size + cx + dx];
+        let (h00, h10, h01, h11) = (at(0, 0), at(1, 0), at(0, 1), at(1, 1));
+        Some(if (cx ^ cz) & 1 == 0 {
+            if fx <= fz {
+                (h11 - h01) * fx + (h00 - h01) * (1.0 - fz) + h01
+            } else {
+                (h10 - h00) * fx + (h11 - h10) * fz + h00
+            }
+        } else if fx + fz >= 1.0 {
+            (h11 - h01) * fx + (h10 - h11) * (1.0 - fz) + h01
+        } else {
+            (h10 - h00) * fx + (h01 - h00) * fz + h00
+        })
     }
 
     /// Whether the ground hides the whole box from `lo` to `hi` as seen
@@ -167,9 +184,28 @@ mod tests {
 
     /// A heightfield `size` samples a side, `scale` ft a cell, with
     /// `height` at each (column, row).
+    /// (`height` in ft; the terrain keeps terrain units, ft / scale.)
     fn field(size: usize, scale: f32, height: impl Fn(usize, usize) -> f32) -> Heightfield {
-        let heights = (0..size * size).map(|i| height(i % size, i / size)).collect();
-        Heightfield::new(heights, size, scale)
+        let heights: Vec<f32> = (0..size * size).map(|i| height(i % size, i / size) / scale).collect();
+        Heightfield::new(&heights, size, scale)
+    }
+
+    #[test]
+    fn heights_are_in_feet_like_the_drawn_ground() {
+        // A shipped track's scale of 3: a sample of 10 terrain units
+        // stands 30 ft, as the ground's blocks are drawn.
+        let f = Heightfield::new(&[10.0; 16], 4, 3.0);
+        assert_eq!(f.height(4.0, -4.0), Some(30.0));
+    }
+
+    #[test]
+    fn heights_follow_the_drawn_triangles() {
+        // One raised corner (column 1, row 0) of an even cell: on the
+        // cell's diagonal from (0, 0) to (1, 1) the ground is flat, as
+        // drawn, where blending all four corners would lift it.
+        let f = Heightfield::new(&[0.0, 8.0, 0.0, 0.0], 2, 1.0);
+        assert_eq!(f.height(0.5, -0.5), Some(0.0));
+        assert_eq!(f.height(0.75, -0.25), Some(4.0));
     }
 
     #[test]

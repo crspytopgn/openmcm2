@@ -692,7 +692,7 @@ impl TerrainRenderer {
             vertices,
             indices,
             blocks,
-            heightfield: crate::cull::Heightfield::new(terrain.heights.clone(), n, terrain.scale),
+            heightfield: crate::cull::Heightfield::new(&terrain.heights, n, terrain.scale),
             runs: Vec::new(),
             nearest: Vec::new(),
             open_runs: Vec::new(),
