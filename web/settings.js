@@ -85,6 +85,8 @@ const LOOKS = [["original", "Original"], ["bold", "Bold"], ["warm", "Warm aftern
 const ABOUT_LOOK = "A gentle colour grade over the finished picture. Original: the colours as drawn. Bold: richer colour, a little more contrast, slightly darker corners. Warm afternoon: sunlit parts a touch golden, the shade lifted a little. Overcast: a little less colour and contrast, a cool tint in the shade.";
 const ABOUT_NEXTGEN = "Next-gen: a modern game's look, much bolder than the others. Sunlit air you can see shafts of light in, thick grass blowing in waves of wind, trees plainly moving, photo dirt sharp right up to your wheels, the real sky with clouds, bounce light, a soft glow round bright light, glossier bikes and trackside props. Heavy: for a strong computer. If frames come late it draws softer and sets effects aside.";
 
+const ABOUT_INTRO = "Plays a video of your own in place of the original intro movie when the game starts, for example a remastered copy of the intro that you have. Pick an MP4 or WebM file your browser can play. It is kept in this browser only and is never uploaded or shared. A click or a key skips it, as with the original, and the game's own Intro Movie option still turns the intro off. If it can't be played, the original intro plays instead (or none with the free version). Off unless you pick one.";
+
 // The extras the original game didn't have, all off unless turned on,
 // by group: the setting, its flag, the label and what it does. A number
 // has its range, step, unit and the original game's value.
@@ -114,6 +116,7 @@ export const EXTRAS = [
     { key: "replay_editor", flag: "replay-editor", label: "Replay editor", about: "In a replay, extra keys on top of the original VCR player. Tab goes from the race camera to a free camera you fly (WASD, Q/E down and up, Shift faster, arrow keys or the right mouse button to look) and on to a camera path. Comma and full stop slow the replay down to 1/2, 1/4, 1/8 or 1/20 speed and back. I and O mark the start and end of a moment, and L loops it. K keeps the camera where it is as a camera key at that time; with two or more keys, the camera path glides between them as the replay plays. Backspace takes away the nearest key, T keeps the free camera aimed at the rider. R records a clip as a movie (30 frames a second, no sound) to your downloads (a WebM or MP4 file, depending on the browser): from In to Out if both are marked, otherwise until R again. H hides the player and the editor's line for a clean picture. On a pad: X changes the camera, Y adds a key, the D-pad's left and right change the speed, A pauses, Back records, and the sticks and triggers fly the free camera. Off, replays are exactly the original's." },
     { key: "no_fresh_sounds", flag: "no-fresh-sounds", label: "Original engine sounds, untouched", keep: true, about: "Unless you tick this, the bike engines from your own MM2 or demo files get a little more life as they load: a fuller tone, a touch more bite and loops with no clicks. Nothing is downloaded; the free version keeps its own recordings. Ticked, the engines sound exactly as in the original." },
     { key: "no_whistle", flag: "no-whistle", label: "No out-of-bounds whistle", keep: true, about: "The free tracks play a cartoon slide whistle as you ride off the edge of the world and get thrown back in, going up, then down as you fall, unless you tick this. Ticked, that throw is silent as in the original." },
+    { key: "intro_video", flag: "intro-video", label: "Your own intro video", file: true, about: ABOUT_INTRO },
     { key: "fxaa", flag: "fxaa", label: "Smoother edges", about: "Smooths stair-stepped edges after the race is drawn, in either look: the outlines of banners, bushes, tree leaves and fences, which Anti-aliasing (MSAA) does not reach. The change is small, so look at a banner edge with it off and on." },
     { key: "sharpen", flag: "sharpen", label: "Sharpening", about: "Makes the race picture crisper, in either look: the grain in the dirt and grass, banners and bikes stand out more. 0% is the original game's picture; 30 to 50% is a gentle lift, 100% is strong.", range: [0, 100, 5, "%"], off: 0 },
   ]],
@@ -134,6 +137,14 @@ export const EXTRAS = [
     { key: "no_list_races", flag: "no-list-races", label: "Keep my races out of the server browser", keep: true, about: "Unless you tick this, a race you host shows in everyone's Host or Join list (Multiplayer) with its name, track and riders, so players anywhere can join with a click. Ticked, only people you send the race code or invite link to can join." },
   ]],
 ];
+
+
+/// Where the own intro video is kept (the page hands over web/mm2fs.js's
+/// keepIntro and forgetIntro).
+let introStore = null;
+export function setIntroStore(store) {
+  introStore = store;
+}
 
 /// Phones and tablets: `touch` shows the light mode's switch, and `phone`
 /// has it on unless turned off (the page sets these from web/touch.js).
@@ -275,6 +286,9 @@ export function args(s) {
     for (const e of list) {
       if (e.range) {
         if (s[e.key] !== e.off) a.push(`${e.flag}=${s[e.key]}`);
+      } else if (e.file) {
+        // The page keeps the file itself; the game asks it to play.
+        if (s[e.key]) a.push(`${e.flag}=browser`);
       } else if (s[e.key]) a.push(e.flag);
     }
   }
@@ -437,6 +451,8 @@ export function render(lookBox, box, s, changed) {
           back.disabled = isOriginal(s);
         }, e.about);
         extras.append(el("label", { className: "range", title: e.about }, e.label + " ", r, out));
+      } else if (e.file) {
+        extras.append(fileRow(e, s, set));
       } else {
         extras.append(checkbox(e.label, e.about, !!s[e.key], (on) => set(e.key, on, true)));
       }
@@ -446,4 +462,35 @@ export function render(lookBox, box, s, changed) {
   extras.append(checkbox("Show frame rate", "The frames a second at the bottom left (F2 too).", s.show_fps, (on) => set("show_fps", on)));
   extras.append(el("p", { className: "hint", textContent: "Thanks to Daniel (github.com/dwolp) for many of these, and for the fixes that came with them." }));
   box.append(extras);
+}
+
+/// A file of the player's own (the intro video): its name, Choose and
+/// Remove. The setting holds the file's name, the page's store the file.
+function fileRow(e, s, set) {
+  const name = el("span", { className: "hint", textContent: s[e.key] ? s[e.key] : "None: the original intro plays." });
+  const choose = el("button", { className: "small", textContent: "Choose video…", title: e.about });
+  const remove = el("button", { className: "small", textContent: "Remove", hidden: !s[e.key], title: "Back to the original intro movie, and the video taken out of this browser." });
+  choose.addEventListener("click", () => {
+    const input = el("input", { type: "file", accept: "video/mp4,video/webm,.mp4,.m4v,.webm" });
+    input.addEventListener("change", async () => {
+      const f = input.files[0];
+      if (!f || !introStore) return;
+      name.textContent = "Keeping it in this browser…";
+      try {
+        await introStore.keep(f);
+        set(e.key, f.name, true);
+      } catch (err) {
+        console.warn("intro video:", err);
+        name.textContent = "Couldn't keep it in this browser (not enough space?).";
+      }
+    });
+    input.click();
+  });
+  remove.addEventListener("click", async () => {
+    try {
+      await introStore?.forget();
+    } catch {}
+    set(e.key, false, true);
+  });
+  return el("div", { className: "check", title: e.about }, e.label + " ", choose, " ", remove, " ", name);
 }

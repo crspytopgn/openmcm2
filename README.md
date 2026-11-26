@@ -371,6 +371,10 @@ MM2_DATA="/path/to/Motocross Madness 2" cargo test
 * The Indeo 5 decoder in `crates/mm2-indeo` is a port of
   [FFmpeg](https://ffmpeg.org)'s, by Maxim Poliakovski, and keeps FFmpeg's
   licence (below).
+* Your own intro video (Extras) is decoded with Cisco's
+  [OpenH264](https://github.com/cisco/openh264) (BSD 2-clause, built from
+  source) and [Symphonia](https://github.com/pdeljanov/Symphonia) (MPL 2.0)
+  for its sound. No video comes with OpenMCM2: it plays a file you pick.
 * Ground materials for `--enhanced` are from [ambientCG](https://ambientcg.com),
   CC0.
 * The Linux build carries [Liberation Sans](https://github.com/liberationfonts)

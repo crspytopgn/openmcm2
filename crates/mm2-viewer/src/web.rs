@@ -86,6 +86,36 @@ extern "C" {
     fn js_picked_bytes(i: u32) -> Result<Vec<u8>, JsValue>;
     #[wasm_bindgen(js_name = pickedClear, catch)]
     fn js_picked_clear() -> Result<(), JsValue>;
+    /// The player's own intro video (kept in this browser): the page plays
+    /// it over the game; false if it has none or can't.
+    #[wasm_bindgen(js_name = introPlay, catch)]
+    fn js_intro_play() -> Result<bool, JsValue>;
+    /// Whether it has ended or been skipped.
+    #[wasm_bindgen(js_name = introDone, catch)]
+    fn js_intro_done() -> Result<bool, JsValue>;
+    /// Whether it ended because the browser couldn't play it.
+    #[wasm_bindgen(js_name = introFailed, catch)]
+    fn js_intro_failed() -> Result<bool, JsValue>;
+    #[wasm_bindgen(js_name = introStop, catch)]
+    fn js_intro_stop() -> Result<(), JsValue>;
+}
+
+/// The page plays the player's own intro video; false if it can't.
+pub fn intro_play() -> bool {
+    js_intro_play().unwrap_or(false)
+}
+
+/// Whether the page's intro video is over (an older page: at once).
+pub fn intro_done() -> bool {
+    js_intro_done().unwrap_or(true)
+}
+
+pub fn intro_failed() -> bool {
+    js_intro_failed().unwrap_or(false)
+}
+
+pub fn intro_stop() {
+    let _ = js_intro_stop();
 }
 
 /// Asks for files; see [`picked`].

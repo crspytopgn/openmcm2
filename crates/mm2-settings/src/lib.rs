@@ -537,6 +537,11 @@ pub struct More {
     /// for an event that has no other track. The Pro Circuit, replays and
     /// a host's race on one still use them either way.
     pub free_tracks: bool,
+    /// The player's own intro video, played in place of the game's intro
+    /// movie: a video file on their computer, none (empty) for the game's
+    /// own (`--intro-video=PATH`). In a browser the page keeps the file
+    /// and passes `browser`.
+    pub intro_video: String,
 }
 
 /// Gyro steering's widest full-lock tilt, degrees.
@@ -577,6 +582,7 @@ impl Default for More {
             replay_editor: false,
             demo_tracks: false,
             free_tracks: false,
+            intro_video: String::new(),
         }
     }
 }
@@ -625,6 +631,7 @@ impl More {
             "replay_editor" => self.replay_editor = yes,
             "demo_tracks" => self.demo_tracks = yes,
             "free_tracks" => self.free_tracks = yes,
+            "intro_video" => self.intro_video = v.trim().to_string(),
             _ => return false,
         }
         true
@@ -633,7 +640,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfresh_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\nreplay_editor={}\ndemo_tracks={}\nfree_tracks={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfresh_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\nreplay_editor={}\ndemo_tracks={}\nfree_tracks={}\nintro_video={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -660,6 +667,7 @@ impl More {
             b(self.replay_editor),
             b(self.demo_tracks),
             b(self.free_tracks),
+            self.intro_video,
         )
     }
 
@@ -705,6 +713,9 @@ impl More {
                 a.push(format!("{flag}={v}"));
             }
         }
+        if !self.intro_video.is_empty() {
+            a.push(format!("--intro-video={}", self.intro_video));
+        }
         if self.leaderboard_url != LEADERBOARD_URL {
             // Empty: kept on this computer only.
             a.push(format!("--leaderboard-url={}", if self.leaderboard_url.is_empty() { "none" } else { &self.leaderboard_url }));
@@ -747,6 +758,7 @@ impl More {
             ("--sharpen", "sharpen"),
             ("--gate-riders", "riders"),
             ("--leaderboard-url", "leaderboard_url"),
+            ("--intro-video", "intro_video"),
         ] {
             if let Some(v) = value(flag) {
                 m.read(key, v);
@@ -1421,6 +1433,7 @@ mod tests {
             replay_editor: true,
             demo_tracks: true,
             free_tracks: true,
+            intro_video: "/videos/My intro (4K).mp4".into(),
         };
         s.free_graphics = true;
         s.freepack = Some("/packs/free".into());

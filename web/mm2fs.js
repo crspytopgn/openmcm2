@@ -147,7 +147,7 @@ export async function keptGame() {
   await open();
   const keys = await request(store("game", "readonly").getAllKeys());
   const values = await request(store("game", "readonly").getAll());
-  const list = keys.map((k, i) => [k, values[i]]).filter(([k]) => k !== PACK);
+  const list = keys.map((k, i) => [k, values[i]]).filter(([k]) => k !== PACK && k !== INTRO);
   return list.length ? list : null;
 }
 
@@ -165,6 +165,25 @@ export async function keepPack(file) {
 export async function forgetPack() {
   await open();
   await request(store("game", "readwrite").delete(PACK));
+}
+
+// The player's own intro video (Extras), kept beside them too.
+const INTRO = "/intro-video";
+
+/// The kept intro video (a File or Blob), if any.
+export async function keptIntro() {
+  await open();
+  return (await request(store("game", "readonly").get(INTRO))) || null;
+}
+
+export async function keepIntro(file) {
+  await open();
+  await request(store("game", "readwrite").put(file, INTRO));
+}
+
+export async function forgetIntro() {
+  await open();
+  await request(store("game", "readwrite").delete(INTRO));
 }
 
 export async function keepGame(list) {
@@ -247,12 +266,12 @@ export async function packDelete(keys) {
   });
 }
 
-/// Forgets the game's files (the Free Pack stays).
+/// Forgets the game's files (the Free Pack and an own intro video stay).
 export async function forgetGame() {
   await open();
   const keys = await request(store("game", "readonly").getAllKeys());
   const s = store("game", "readwrite");
-  for (const k of keys) if (k !== PACK) s.delete(k);
+  for (const k of keys) if (k !== PACK && k !== INTRO) s.delete(k);
   await new Promise((ok, fail) => {
     s.transaction.oncomplete = ok;
     s.transaction.onerror = () => fail(s.transaction.error);
