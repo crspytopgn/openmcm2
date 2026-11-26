@@ -62,15 +62,19 @@ impl Path {
             self.t = 0.0;
             return flat(p[0] - at);
         }
-        // The nearest point (the last one is not counted).
-        let (mut nearest, mut best) = (0, f32::MAX);
+        // The nearest point (the last one is not counted). Squared
+        // distances order the points exactly as the roots do, so the
+        // scan needs no square root per point; one root at the end
+        // gives the distance the segment checks below compare against.
+        let (mut nearest, mut best_sq) = (0, f32::MAX);
         for (i, q) in p[..n - 1].iter().enumerate() {
-            let d = q.distance(at);
-            if d < best {
-                best = d;
+            let d = q.distance_squared(at);
+            if d < best_sq {
+                best_sq = d;
                 nearest = i;
             }
         }
+        let mut best = best_sq.sqrt();
         // On the segment before it or after it, if the rider is beside
         // one. The game compares the signed distance across the segment.
         let (mut segment, mut t) = (nearest, 0.0);
@@ -443,14 +447,23 @@ pub fn scan(
         (right * SCAN_SIDE, false),
     ];
     let length = along.length();
-    let near_line = (0..=length.ceil() as usize).any(|i| {
+    let steps = length.ceil() as usize;
+    let near_line = (0..=steps).any(|i| {
         let t = (i as f32 / length.max(1.0)).min(1.0);
         ground.solid(from + along * t, radius).is_some()
     });
     if near_line {
         for (offset, any) in rays {
-            for i in 0..=length.ceil() as usize {
+            for i in 0..=steps {
                 let t = (i as f32 / length.max(1.0)).min(1.0);
+                // Samples only get further from `from` as i grows (each
+                // ray's offset is square to the corridor), so once a
+                // sample is no nearer than the best hit so far, this ray
+                // cannot beat it, and neither can any later sample of it.
+                // The first hit still ends the ray, as before.
+                if t * length >= nearest {
+                    break;
+                }
                 let p = from + offset + along * t;
                 let Some(hit) = ground.solid(p, 0.5) else {
                     continue;
@@ -861,6 +874,174 @@ mod tests {
         let clear = scan(&crate::Flat, from, to, 2.0, 40.0, &[], &[], true);
         assert!(!clear.blocked);
         assert_eq!(clear.nudge, Vec3::ZERO);
+    }
+
+    /// A wall across z = 20 that counts how often it is probed.
+    struct CountingWall {
+        calls: std::cell::Cell<usize>,
+    }
+    impl Ground for CountingWall {
+        fn terrain(&self, _x: f32, _z: f32) -> (f32, Vec3) {
+            (0.0, Vec3::Y)
+        }
+        fn solid(&self, centre: Vec3, radius: f32) -> Option<crate::collision::Hit> {
+            self.calls.set(self.calls.get() + 1);
+            let depth = radius - (20.0 - centre.z);
+            (depth > 0.0).then(|| crate::collision::Hit {
+                normal: -Vec3::Z,
+                depth,
+                point: Vec3::new(centre.x, centre.y, 20.0),
+            })
+        }
+    }
+
+    #[test]
+    fn scan_probes_the_wall_without_rescanning_it() {
+        let wall = CountingWall {
+            calls: std::cell::Cell::new(0),
+        };
+        let from = Vec3::new(0.0, 3.0, 13.0);
+        let to = Vec3::new(5.0, 3.0, 28.0);
+        let s = scan(&wall, from, to, 2.0, 40.0, &[], &[], true);
+        assert!(s.blocked);
+        assert!(s.nearest < 15.0, "{s:?}");
+        assert!(s.toward.unwrap().z > 0.5, "{s:?}");
+        eprintln!("scan solid probes with a wall ahead: {}", wall.calls.get());
+        // 47 before the ray cap: the near-line pass (7) plus each ray
+        // to its first hit (8 each). The cap stops the last three rays
+        // a sample early, once the centre ray has found a nearer hit.
+        assert!(wall.calls.get() <= 45, "solid probes: {}", wall.calls.get());
+    }
+
+    /// The nearest-point scan as [`Path::direction`] did it before the
+    /// squared-distance change: a square root per point. A reference
+    /// for the new scan, so the two can be compared point for point.
+    fn reference_direction(
+        points: &[Vec3],
+        lookahead: f32,
+        widen: bool,
+        at: Vec3,
+        offset: f32,
+    ) -> (Vec3, usize, f32) {
+        let p = points;
+        let n = p.len();
+        if n == 0 {
+            return (Vec3::Z, 0, 0.0);
+        }
+        if n < 2 {
+            return (flat(p[0] - at), 0, 0.0);
+        }
+        let (mut nearest, mut best) = (0, f32::MAX);
+        for (i, q) in p[..n - 1].iter().enumerate() {
+            let d = q.distance(at);
+            if d < best {
+                best = d;
+                nearest = i;
+            }
+        }
+        let (mut segment, mut t) = (nearest, 0.0);
+        if nearest > 0 {
+            if let Some((ts, s)) = project(p[nearest - 1], p[nearest], at) {
+                if (0.0..=1.0).contains(&ts) && s < best {
+                    best = s;
+                    segment = nearest - 1;
+                    t = ts;
+                }
+            }
+        }
+        let mut across = 0.0;
+        if nearest < n - 1 {
+            if let Some((ts, s)) = project(p[nearest], p[nearest + 1], at) {
+                across = s;
+                if (0.0..=1.0).contains(&ts) && s < best {
+                    segment = nearest;
+                    t = ts;
+                }
+            }
+        }
+        let mut ahead = lookahead;
+        if widen {
+            ahead += across.abs();
+        }
+        let len = |i: usize| {
+            if i + 1 < n {
+                p[i + 1].distance(p[i])
+            } else {
+                0.0
+            }
+        };
+        let mut left = (1.0 - t) * len(segment);
+        while ahead > 0.0 && ahead > left && segment < n - 1 {
+            segment += 1;
+            t = 0.0;
+            ahead -= left;
+            left = len(segment);
+        }
+        let dir = if segment + 1 < n {
+            p[segment + 1] - p[segment]
+        } else {
+            p[segment] - p[segment - 1]
+        };
+        let side = flat(Vec3::new(dir.z, 0.0, -dir.x));
+        let target = if segment < n - 1 {
+            if ahead < left {
+                t += ahead / left;
+            }
+            p[segment] + dir * t
+        } else {
+            t = 0.0;
+            p[segment]
+        };
+        (flat(target + side * offset - at), segment, t)
+    }
+
+    #[test]
+    fn direction_matches_the_sqrt_scan() {
+        // A winding 200-point line, and a rider wandering near it, far
+        // from it, and past its ends.
+        let mut seed = 12345u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let points: Vec<Vec3> = (0..200)
+            .map(|i| Vec3::new((next() - 0.5) * 40.0, 0.0, i as f32 * 20.0))
+            .collect();
+        for widen in [false, true] {
+            for lookahead in [2.0, 30.0, 120.0] {
+                let mut path = Path::new(points.clone(), lookahead);
+                path.widen = widen;
+                for _ in 0..1200 {
+                    let at = Vec3::new((next() - 0.5) * 300.0, 0.0, next() * 4200.0 - 100.0);
+                    let offset = (next() - 0.5) * 20.0;
+                    let (want_d, want_seg, want_t) =
+                        reference_direction(&points, lookahead, widen, at, offset);
+                    let d = path.direction(at, offset);
+                    assert!(d.abs_diff_eq(want_d, 1e-4), "at {at:?} offset {offset}: {d:?} vs {want_d:?}");
+                    assert_eq!(path.segment, want_seg, "at {at:?}");
+                    assert!((path.t - want_t).abs() < 1e-4, "at {at:?}: {} vs {want_t}", path.t);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn direction_timing() {
+        let mut path = Path::new(
+            (0..200)
+                .map(|i| Vec3::new((i as f32 * 0.35).sin() * 60.0, 0.0, i as f32 * 20.0))
+                .collect(),
+            30.0,
+        );
+        let start = std::time::Instant::now();
+        let mut acc = Vec3::ZERO;
+        for i in 0..20_000u32 {
+            acc += path.direction(Vec3::new(10.0, 0.0, (i % 3900) as f32), 0.0);
+        }
+        eprintln!(
+            "direction: {:?} for 20000 calls on a 200-point line (sink {acc:?})",
+            start.elapsed()
+        );
     }
 
     #[test]
