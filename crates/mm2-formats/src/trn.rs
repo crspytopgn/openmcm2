@@ -251,18 +251,37 @@ pub fn parse(bytes: &[u8]) -> Result<Terrain> {
         return Err(Error::Corrupt("fewer texture offsets than textures"));
     }
 
-    let mut cells = Vec::with_capacity(cell_count.min(bytes.len() / 16));
+    let mut raw_cells = Vec::with_capacity(cell_count.min(bytes.len() / 16));
+    let mut packed_work = 0usize;
     for _ in 0..cell_count {
-        block(&mut r, 0x200)?;
-        block(&mut r, 0x244)?;
-        let samples = block(&mut r, CELL_BYTES)?;
-        cells.push((samples, r.u32("cell base height")? as f32));
+        let first = block_raw(&mut r, 0x200)?;
+        let second = block_raw(&mut r, 0x244)?;
+        let samples = block_raw(&mut r, CELL_BYTES)?;
+        packed_work += [&first, &second, &samples]
+            .iter()
+            .filter(|b| b.packed < b.unpacked)
+            .map(|b| b.len)
+            .sum::<usize>();
+        raw_cells.push((first, second, samples, r.u32("cell base height")? as f32));
     }
+    // The three blocks of a cell decode independently of every other
+    // cell; the first two blocks' contents are not used, but they are
+    // still decoded, so a corrupt one fails exactly as before. Packed
+    // blocks are the slow part of a track load, so they are decoded in
+    // parallel when there is enough of that work; raw blocks are a
+    // memcpy, and threading those costs more than it saves.
+    let decode = |&(a, b, samples, base): &(RawBlock<'_>, RawBlock<'_>, RawBlock<'_>, f32)| {
+        block_decode(&a)?;
+        block_decode(&b)?;
+        Ok((block_decode(&samples)?, base))
+    };
+    let cells: Vec<(Vec<u8>, f32)> = if packed_work >= 65_536 {
+        map_parallel(&raw_cells, &decode)?
+    } else {
+        raw_cells.iter().map(decode).collect::<Result<_>>()?
+    };
 
-    let textures = texture_offsets[..texture_count]
-        .iter()
-        .map(|&o| read_texture(&mut Reader::new(bytes, o), palette.as_deref()))
-        .collect::<Result<Vec<_>>>()?;
+    let textures = read_textures(bytes, &texture_offsets[..texture_count], root_offset, palette.as_deref())?;
 
     let mut tree = Tree {
         bytes,
@@ -343,17 +362,117 @@ pub fn parse(bytes: &[u8]) -> Result<Terrain> {
     })
 }
 
-/// Reads a block that is stored raw or LZW-packed with a size prefix pair.
-fn block(r: &mut Reader, len: usize) -> Result<Vec<u8>> {
+/// Decodes independent items in order, in parallel when there are
+/// enough of them and more than one thread, else one by one. The
+/// first error by index is returned, so a corrupt file fails exactly
+/// as the sequential read would. Threads are only spawned when more
+/// than one is available, so targets without threads stay sequential.
+fn map_parallel<'a, I, T, F>(items: &'a [I], f: &'a F) -> Result<Vec<T>>
+where
+    I: Sync,
+    T: Send,
+    F: Fn(&I) -> Result<T> + Sync,
+{
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    if threads <= 1 || items.len() < 8 {
+        return items.iter().map(f).collect();
+    }
+    let chunk = items.len().div_ceil(threads.min(items.len()));
+    let mut parts: Vec<Vec<Result<T>>> = Vec::new();
+    std::thread::scope(|s| {
+        let mut handles = Vec::new();
+        for part in items.chunks(chunk) {
+            handles.push(s.spawn(move || part.iter().map(f).collect::<Vec<_>>()));
+        }
+        for h in handles {
+            parts.push(h.join().unwrap());
+        }
+    });
+    let mut out = Vec::with_capacity(items.len());
+    for part in parts {
+        for r in part {
+            out.push(r?);
+        }
+    }
+    Ok(out)
+}
+
+/// One stored block: its packed bytes as they lie in the file, and the
+/// sizes its header claims, so the decode can run anywhere.
+#[derive(Clone, Copy)]
+struct RawBlock<'a> {
+    data: &'a [u8],
+    packed: usize,
+    unpacked: usize,
+    len: usize,
+}
+
+/// Reads a block's header and bytes, without decoding them.
+fn block_raw<'a>(r: &mut Reader<'a>, len: usize) -> Result<RawBlock<'a>> {
     let packed = r.u32("block packed size")? as usize;
     let unpacked = r.u32("block size")? as usize;
-    if packed < unpacked {
-        lzw::decompress(r.take(packed, "packed block")?, len)
-    } else if unpacked == len {
-        Ok(r.take(len, "block")?.to_vec())
+    if packed >= unpacked && unpacked != len {
+        return Err(Error::Corrupt("block has an unexpected size"));
+    }
+    let data = if packed < unpacked {
+        r.take(packed, "packed block")?
+    } else {
+        r.take(len, "block")?
+    };
+    Ok(RawBlock {
+        data,
+        packed,
+        unpacked,
+        len,
+    })
+}
+
+/// Decodes a block that is stored raw or LZW-packed with a size prefix pair.
+fn block_decode(b: &RawBlock) -> Result<Vec<u8>> {
+    if b.packed < b.unpacked {
+        lzw::decompress(b.data, b.len)
+    } else if b.unpacked == b.len {
+        Ok(b.data.to_vec())
     } else {
         Err(Error::Corrupt("block has an unexpected size"))
     }
+}
+
+/// Reads the textures, in parallel when their offsets run in order:
+/// a texture's bytes run to the next texture's offset, or to the
+/// quadtree for the last one. Any failure there falls back to the
+/// sequential read of the whole file, so an odd layout still loads
+/// exactly as it did.
+fn read_textures(
+    bytes: &[u8],
+    offsets: &[usize],
+    root_offset: usize,
+    palette: Option<&[u8]>,
+) -> Result<Vec<Texture>> {
+    if !offsets.is_empty()
+        && offsets.windows(2).all(|w| w[0] < w[1])
+        && offsets.iter().all(|&o| o < bytes.len())
+    {
+        let ends: Vec<usize> = offsets
+            .iter()
+            .enumerate()
+            .map(|(i, _)| offsets.get(i + 1).copied().unwrap_or(root_offset))
+            .collect();
+        if ends.iter().zip(offsets).all(|(&e, &o)| e > o && e <= bytes.len()) {
+            let items: Vec<(usize, usize)> = offsets.iter().copied().zip(ends).collect();
+            if let Ok(textures) = map_parallel(&items, &|&(start, end)| {
+                read_texture(&mut Reader::new(&bytes[start..end], 0), palette)
+            }) {
+                return Ok(textures);
+            }
+        }
+    }
+    offsets
+        .iter()
+        .map(|&o| read_texture(&mut Reader::new(bytes, o), palette))
+        .collect()
 }
 
 /// The palette block: 256 RGB colours (8 bits each), then two colour
@@ -803,6 +922,160 @@ mod write_tests {
             assert_eq!(t.tiles.len(), tiles.len());
             assert_eq!(t.textures[1].levels[0][0], 0x03e0);
         }
+    }
+
+    #[test]
+    fn parse_timing() {
+        let cells = 20usize;
+        let size = cells * 16 + 1;
+        let heights: Vec<f32> = (0..size * size)
+            .map(|i| ((i % size) as f32 * 0.05).sin() * 20.0 + 30.0 + (i / size) as f32 * 0.1)
+            .collect();
+        let surfaces: Vec<u8> = (0..size * size).map(|i| (i % 3) as u8).collect();
+        let textures = vec![(64u32, vec![0x7c00u16; 64 * 64]), (64, vec![0x03e0; 64 * 64])];
+        let tiles_side = cells.div_ceil(4);
+        let tiles: Vec<Option<u16>> = (0..tiles_side * tiles_side).map(|i| Some((i % 2) as u16)).collect();
+        let bytes = Build {
+            size,
+            heights: &heights,
+            surfaces: &surfaces,
+            scale: 3.0,
+            textures: &textures,
+            tiles: &tiles,
+        }
+        .write()
+        .unwrap();
+        let start = std::time::Instant::now();
+        let mut t = None;
+        for _ in 0..20 {
+            t = Some(parse(&bytes).unwrap());
+        }
+        let t = t.unwrap();
+        assert_eq!(t.size, size);
+        eprintln!(
+            "trn parse: {:?} for 20x {} cells, {} bytes",
+            start.elapsed(),
+            cells * cells,
+            bytes.len()
+        );
+    }
+
+    /// Rewrites a terrain written by [`Build`] with its cells' blocks
+    /// LZW-packed, as the shipped tracks store them, fixing up the
+    /// offset tables and the tree's offset.
+    fn pack_cells(bytes: &[u8]) -> Vec<u8> {
+        let at = |b: &[u8], o: usize| u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
+        let cc = at(bytes, 32) as usize;
+        let tc = at(bytes, 40 + 4 * cc) as usize;
+        let root = at(bytes, 24) as usize;
+        let cell_table = 36;
+        let tex_table = 44 + 4 * cc;
+        let mut out = Vec::new();
+        out.extend_from_slice(&bytes[..28]); // header, root offset unchanged
+        out.extend_from_slice(&bytes[28..36]); // cell counts
+        let new_cell_table = out.len();
+        out.resize(out.len() + 4 * cc, 0);
+        out.extend_from_slice(&bytes[36 + 4 * cc..44 + 4 * cc]); // texture counts
+        let new_tex_table = out.len();
+        out.resize(out.len() + 4 * tc, 0);
+        for i in 0..cc {
+            let o = at(bytes, cell_table + 4 * i) as usize;
+            let here = out.len() as u32;
+            out[new_cell_table + 4 * i..new_cell_table + 4 * i + 4].copy_from_slice(&here.to_le_bytes());
+            let mut pos = o;
+            for _ in 0..3 {
+                let packed = at(bytes, pos) as usize;
+                let unpacked = at(bytes, pos + 4) as usize;
+                let raw = &bytes[pos + 8..pos + 8 + packed];
+                let compressed = crate::lzw::compress(raw);
+                if compressed.len() < unpacked {
+                    out.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+                    out.extend_from_slice(&(unpacked as u32).to_le_bytes());
+                    out.extend_from_slice(&compressed);
+                } else {
+                    out.extend_from_slice(&(packed as u32).to_le_bytes());
+                    out.extend_from_slice(&(unpacked as u32).to_le_bytes());
+                    out.extend_from_slice(raw);
+                }
+                pos += 8 + packed;
+            }
+            out.extend_from_slice(&bytes[pos..pos + 4]); // base height
+        }
+        // Textures move with the cells; their offsets shift. The tree
+        // keeps its own place: its nodes start before the root node
+        // (the root's children are the level-1 nodes, and the first of
+        // them is where the tree begins; at depth 1 the root is itself
+        // a level-1 node), and its nodes hold absolute offsets, so the
+        // packed file is padded back out to the tree's start and the
+        // tree is copied verbatim from there.
+        let old_tex_start = if tc > 0 { at(bytes, tex_table) as usize } else { root };
+        let tree_start = if at(bytes, 20) == 1 {
+            root
+        } else {
+            let extra = at(bytes, root + 88) as usize;
+            let table = at(bytes, root + 93 + extra) as usize;
+            (0..256)
+                .map(|i| at(bytes, table + 4 * i) as usize)
+                .filter(|&o| o != 0)
+                .min()
+                .unwrap_or(root)
+        };
+        let shift = out.len() as i64 - old_tex_start as i64;
+        for j in 0..tc {
+            let o = at(bytes, tex_table + 4 * j) as i64 + shift;
+            out[new_tex_table + 4 * j..new_tex_table + 4 * j + 4]
+                .copy_from_slice(&(o as u32).to_le_bytes());
+        }
+        out.extend_from_slice(&bytes[old_tex_start..tree_start]);
+        out.resize(tree_start, 0);
+        out.extend_from_slice(&bytes[tree_start..]);
+        out
+    }
+
+    #[test]
+    fn packed_cells_parse_the_same() {
+        let cells = 20usize;
+        let size = cells * 16 + 1;
+        let heights: Vec<f32> = (0..size * size)
+            .map(|i| ((i % size) as f32 * 0.05).sin() * 20.0 + 30.0 + (i / size) as f32 * 0.1)
+            .collect();
+        let surfaces: Vec<u8> = (0..size * size).map(|i| (i % 3) as u8).collect();
+        let textures = vec![(64u32, vec![0x7c00u16; 64 * 64]), (64, vec![0x03e0; 64 * 64])];
+        let tiles_side = cells.div_ceil(4);
+        let tiles: Vec<Option<u16>> = (0..tiles_side * tiles_side).map(|i| Some((i % 2) as u16)).collect();
+        let bytes = Build {
+            size,
+            heights: &heights,
+            surfaces: &surfaces,
+            scale: 3.0,
+            textures: &textures,
+            tiles: &tiles,
+        }
+        .write()
+        .unwrap();
+        let plain = parse(&bytes).unwrap();
+        let packed = pack_cells(&bytes);
+        // The packed file is padded back out to the tree's start, so
+        // it is the same length; the cells inside it are smaller.
+        let start = std::time::Instant::now();
+        let mut t = None;
+        for _ in 0..20 {
+            t = Some(parse(&packed).unwrap());
+        }
+        let t = t.unwrap();
+        eprintln!(
+            "trn parse packed: {:?} for 20x {} cells, {} bytes",
+            start.elapsed(),
+            cells * cells,
+            packed.len()
+        );
+        assert_eq!(t.size, plain.size);
+        assert_eq!(t.heights, plain.heights);
+        assert_eq!(t.normals, plain.normals);
+        assert_eq!(t.surfaces, plain.surfaces);
+        assert_eq!(t.tiles, plain.tiles);
+        assert_eq!(t.textures.len(), plain.textures.len());
+        assert_eq!(t.textures[1].levels[0][0], 0x03e0);
     }
 }
 
