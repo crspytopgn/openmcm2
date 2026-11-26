@@ -1322,6 +1322,15 @@ impl RaceSounds {
                 self.engines[i] = e;
                 continue;
             }
+            // The mixer ran out of queued samples and let the voice go: the
+            // game's clock fell behind the sound card's (each frame counts
+            // at most 0.1 s, so a hitch, or a browser tab put in the
+            // background, loses time the sound card doesn't). Start a new
+            // voice where the stream stands, or the engine stays silent
+            // for the rest of the race.
+            if e.voice.is_some_and(|v| !audio.playing(v)) {
+                e.voice = None;
+            }
             if e.sound.is_none() {
                 e.sound = self.pick(e.class, e.state.list());
                 e.then = e.state.next().and_then(|n| self.pick(e.class, n.list()));
