@@ -62,6 +62,19 @@ pub struct Sprites {
     /// Whether the quads drawn now are placed in the 3D view, so only
     /// their place is stretched, not their shape.
     pub in_view: bool,
+    /// The window's size at the last render, pixels.
+    window: (u32, u32),
+}
+
+thread_local! {
+    /// Textures let go of where the sprites aren't to hand (a movie
+    /// closed as its screen goes), freed at the next render.
+    static FREE_LATER: std::cell::RefCell<Vec<TextureId>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Frees `id` at the next render.
+pub fn free_later(id: TextureId) {
+    FREE_LATER.with_borrow_mut(|v| v.push(id));
 }
 
 const SHADER: &str = r#"
@@ -159,6 +172,7 @@ impl Sprites {
             scale: 1.0,
             widescreen: false,
             in_view: false,
+            window: (SCREEN.0 as u32, SCREEN.1 as u32),
         }
     }
 
@@ -295,6 +309,27 @@ impl Sprites {
         self.quads.clear();
     }
 
+    /// A rectangle (in 640x480 units) of width over height `aspect`, as
+    /// big as fits the whole window and centred in it, for a movie of the
+    /// player's own that isn't 4:3. As the window was at the last render.
+    pub fn fit_window(&self, aspect: f32) -> [f32; 4] {
+        let (width, height) = (self.window.0.max(1) as f32, self.window.1.max(1) as f32);
+        let (sx, sy) = if self.stretch {
+            (width / SCREEN.0, height / SCREEN.1)
+        } else {
+            let scale = (width / SCREEN.0).min(height / SCREEN.1);
+            (scale, scale)
+        };
+        let (ox, oy) = ((width - SCREEN.0 * sx) / 2.0, (height - SCREEN.1 * sy) / 2.0);
+        // In window pixels, then back.
+        let (w, h) = match width / height > aspect {
+            true => (height * aspect, height),
+            false => (width, width / aspect),
+        };
+        let (x, y) = ((width - w) / 2.0, (height - h) / 2.0);
+        [(x - ox) / sx, (y - oy) / sy, w / sx, h / sy]
+    }
+
     pub fn size(&self, id: TextureId) -> (u32, u32) {
         self.textures[id.0].as_ref().map_or((1, 1), |t| t.logical)
     }
@@ -356,6 +391,10 @@ impl Sprites {
         (width, height): (u32, u32),
         clear: bool,
     ) {
+        for id in FREE_LATER.with_borrow_mut(std::mem::take) {
+            self.free(id);
+        }
+        self.window = (width, height);
         self.release();
         // Fit 640×480 into the window, centred, or stretch it.
         let (sx, sy) = if self.stretch {

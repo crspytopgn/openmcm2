@@ -1935,6 +1935,7 @@ impl Launcher {
             tile(ui, &mut s.more.fresh_sounds, "Freshened engine sounds", "On unless you turn it off. The bike engines from your own MM2 or demo files, given a little more life as they load: a fuller tone, a touch more bite and loops with no clicks. Nothing is downloaded; the free version keeps its own recordings. Off, the engines sound exactly as in the original.");
             tile(ui, &mut s.more.whistle, "Out-of-bounds whistle", "On unless you turn it off. On the free tracks, a cartoon slide whistle goes up as you ride off the edge of the world and get thrown back in, and comes down as you fall. Off, that throw is silent as in the original.");
             tile(ui, &mut s.mute_in_background, "Mute in the background", "The game goes quiet while its window isn't the one in front.");
+            intro_video(ui, &mut s.more.intro_video);
             tile(ui, &mut s.more.photo_mode, "Photo mode", "In a race, press F (or click both sticks on a pad) to freeze it and hide the race display. Fly the camera with WASD, Q/E for down and up and Shift for faster, look round with the arrow keys or by holding the right mouse button (on a pad, the left stick flies, the right stick looks, the triggers go down and up). Enter or the pad's A saves a picture to the Screenshots folder beside your saves. F again, Escape or the pad's B carries on the race. Not in network races, where the race can't wait.");
             tile(ui, &mut s.more.replay_editor, "Replay editor", "In a replay, extra keys on top of the original VCR player. Tab goes from the race camera to a free camera you fly (WASD, Q/E down and up, Shift faster, arrow keys or the right mouse button to look) and on to a camera path. Comma and full stop slow the replay down to 1/2, 1/4, 1/8 or 1/20 speed and back. I and O mark the start and end of a moment, and L loops it. K keeps the camera where it is as a camera key at that time; with two or more keys, the camera path glides between them as the replay plays. Backspace takes away the nearest key, T keeps the free camera aimed at the rider. R records a clip as a movie (30 frames a second, no sound) into the Clips folder beside your saves: from In to Out if both are marked, otherwise until R again. H hides the player and the editor's line for a clean picture. On a pad: X changes the camera, Y adds a key, the D-pad's left and right change the speed, A pauses, Back records, and the sticks and triggers fly the free camera. Off, replays are exactly the original's.");
             tile(ui, &mut s.screenshot_key, "Screenshot key (Ctrl+P)", "Ctrl+P in a race saves a picture to the Screenshots folder beside your saves.");
@@ -3198,4 +3199,30 @@ mod shots {
             image.save(format!("{dir}/{name}.png")).expect("save");
         }
     }
+}
+
+/// What "Your own intro video" does, for its hover and note.
+const ABOUT_INTRO: &str = "Plays a video of your own in place of the original intro movie when the game starts, for example a remastered copy of the intro that you have. Pick an MP4 file with H.264 video (the most common kind, which most video tools save). It stays on your computer and is never uploaded or shared. A click or a key skips it, as with the original, and the game's own Intro Movie option still turns the intro off. If the file can't be played, the original intro plays instead (or none with the free version). A 4K video needs a fast computer: if yours can't keep up, it skips frames to stay in time with the sound, and a 1440p or 1080p copy plays more smoothly. Off unless you pick one.";
+
+/// The Extras' "Your own intro video": a file picked, or none.
+fn intro_video(ui: &mut egui::Ui, path: &mut String) {
+    use look::icon;
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("Your own intro video").family(look::bold_family())).on_hover_text(ABOUT_INTRO);
+        if ui.button(look::with(icon::ICON_MOVIE, "Choose video…")).on_hover_text(ABOUT_INTRO).clicked() {
+            if let Some(f) = rfd::FileDialog::new().set_title("Your own intro video").add_filter("MP4 video", &["mp4", "m4v", "MP4", "M4V"]).pick_file() {
+                *path = f.display().to_string();
+            }
+        }
+        if !path.is_empty() && ui.button("Remove").on_hover_text("Back to the original intro movie. The video file itself is left where it is.").clicked() {
+            path.clear();
+        }
+    });
+    let shown = match path.is_empty() {
+        true => "None: the original intro plays.".to_string(),
+        false => std::path::Path::new(path.as_str()).file_name().map_or(path.clone(), |n| n.to_string_lossy().into_owned()),
+    };
+    ui.add(egui::Label::new(look::weak(shown)).truncate()).on_hover_text(if path.is_empty() { ABOUT_INTRO } else { path.as_str() });
+    ui.label(look::weak("Plays in place of the original intro: an MP4 (H.264) of yours, kept on your computer. Point here for more."))
+        .on_hover_text(ABOUT_INTRO);
 }

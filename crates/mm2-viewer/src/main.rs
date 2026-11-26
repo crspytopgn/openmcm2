@@ -119,6 +119,8 @@ mod pad;
 mod morph;
 mod skin;
 mod movie;
+#[cfg(not(target_arch = "wasm32"))]
+mod own_video;
 mod net;
 mod objects;
 mod particles;
@@ -4519,6 +4521,12 @@ async fn menu_screenshot(
         }
         if click.trim() == "intro" {
             front.intro();
+            continue;
+        }
+        // Real time passing, for work done off the game's clock (the
+        // player's own intro video decoding).
+        if let Some(t) = click.strip_prefix("sleep:").and_then(|t| t.trim().parse::<f32>().ok()) {
+            std::thread::sleep(std::time::Duration::from_secs_f32(t));
             continue;
         }
         if click.trim() == "esc" {
