@@ -128,6 +128,9 @@
   .switches { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: .1rem .8rem; margin: .2rem 0 .6rem; }
   .switches .seg { justify-self: start; }
   .switchname { color: var(--dim); font-size: .9rem; }
+  #readysum { margin: 0 0 .8rem; color: var(--dim); font-size: .9rem; }
+  #ldNote { margin: .4rem 0 0; color: var(--dim); font-size: .9rem; }
+  .way .size { flex: 0 0 auto; font-size: .8rem; }
   .line { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .3rem 0; color: var(--dim); }
   label.plainbutton { background: none; color: var(--fg); border: 1px solid #55524a; }
   button.ghost { background: none; color: var(--fg); border: 1px solid #55524a; }
@@ -251,11 +254,12 @@
           title="The same menus and buttons, redrawn in a new style.">New look</button>
       </div>
     </div>
+    <p id="readysum" aria-live="polite"></p>
     <div class="row">
       <button id="play" class="play" title="Starts the game with your Motocross Madness 2 files.">Play</button>
       <button id="playfree" class="play" hidden title="Starts the free version, fetching any update to the Free Pack first.">Play</button>
       <button type="button" class="plain" id="change"
-        title="Pick another way to play: your own MM2 files, the free MM2 demo or the free version. Nothing kept in this browser is deleted.">Change</button>
+        title="Pick another way to play: your own MM2 files, the free MM2 demo or the free version. Nothing kept in this browser is deleted.">Other ways to play</button>
     </div>
   </section>
 
@@ -282,7 +286,8 @@
         </div>
         <div class="way" id="demorow">
           <b>No copy? Try the demo</b>
-          <span>Microsoft's free Motocross Madness 2 demo from 2000, with the original look. The Free Pack fills in the other tracks, so every event is open.</span>
+          <span>Microsoft's free demo from 2000: the original bikes, sound and menus on two real MM2 tracks. The Free Pack fills in the other events, so everything is open.</span>
+          <span class="size">First time only: the 43 MB demo plus the Free Pack (about 500 MB). After that, Play starts straight away.</span>
           <button type="button" id="getdemo" class="ghost"
             title="Downloads Microsoft's free Motocross Madness 2 demo (43 MB) from the Internet Archive, checks it and keeps it in this browser. It plays with the original graphics on the Voodoo Basin national track and the Donner Pass stunt quarry. The Free Pack (several hundred MB, downloaded once) fills in every other track, bike and screen, so every event, the Pro Circuit and multiplayer are open. Nothing of the demo comes with OpenMCM2 itself.">Play the free demo</button>
         </div>
@@ -455,6 +460,7 @@
   <span class="tag" id="ldTag">Loading</span>
   <h2 id="ldTitle">Getting ready</h2>
   <p id="ldDetail"></p>
+  <p id="ldNote" hidden></p>
   <div class="track busy" id="ldTrack"><div id="ldFill"></div></div>
   <div id="ldSlow" hidden>
     <h3>Not loading?</h3>
@@ -627,14 +633,22 @@ const loader = {
   painted() {
     return new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => ok())));
   },
+  // A line under the step saying why it's needed, kept while the step's
+  // progress changes; null takes it away.
+  note(text) {
+    $("ldNote").textContent = text ?? "";
+    $("ldNote").hidden = !text;
+  },
   // Back to the start page (a kept CD image unpacked as the page opened).
   hide() {
+    this.note(null);
     this.now = null;
     this.shown = false;
     $("loader").hidden = true;
     $("ldSlow").hidden = true;
   },
   done() {
+    this.note(null);
     this.finish();
     $("ldSlow").hidden = true;
     $("loader").classList.add("gone");
@@ -644,6 +658,7 @@ const loader = {
   // the technical detail tucked away for a bug report.
   fail(title, why, tech, actions = [], tag = "Couldn't start") {
     this.show();
+    this.note(null);
     if (this.now) this.row(this.now).className = "bad";
     if (this.now) this.log.push(`${STEPS[this.now]?.[0] ?? this.now}: failed`);
     this.now = null;
@@ -1856,6 +1871,7 @@ function showMenus() {
     $(o).setAttribute("aria-checked", String(!menusNew()));
     $(o).setAttribute("aria-disabled", String(!oldMenusHere()));
   }
+  readySummary();
 }
 for (const [id, n] of [["picknewmenus", true], ["pickoldmenus", false], ["readynewmenus", true], ["readyoldmenus", false]]) {
   $(id).addEventListener("click", () => {
@@ -2245,7 +2261,11 @@ async function fetchDemo() {
 async function demoPack() {
   if (keptPack) return keptPack;
   try {
+    loader.note(
+      "The demo has two tracks of its own. The Free Pack fills in every other track, bike and screen, so every event is open. Only changes come down after this."
+    );
     const list = await syncPack(true);
+    loader.note(null);
     if (!list) throw new Error("the downloaded pack is missing some files");
     downloaded = true;
     return list;
@@ -2416,6 +2436,20 @@ function showReady() {
   pageReady = true;
   layout();
 }
+// One line under the Ready card's switches saying, in plain words, what
+// Play starts with them as they are.
+function readySummary() {
+  const el = $("readysum");
+  if (!el || !pageReady) return;
+  const demo = isDemo(kept);
+  const freeReady = free && !!(keptPack || downloaded);
+  const menus = menusNew() ? "the new look menus" : "the original menus";
+  el.textContent = freeReady
+    ? `Plays the free version: all-new bikes, tracks and sound, with ${menus}.`
+    : demo
+      ? `Plays the demo with ${menus}: original bikes and sound, the real Voodoo Basin (National) and Donner Pass (Stunt Quarry) tracks, and Free Pack tracks for the other events.`
+      : `Plays your Motocross Madness 2 with ${menus}.`;
+}
 // Ready (one Play button) or the choice, as the files kept and the last
 // pick have it.
 function layout() {
@@ -2432,8 +2466,9 @@ function layout() {
   $("readywhy").textContent = freeReady
     ? "The Free Pack is kept in this browser. Play fetches any update first."
     : demo
-      ? "Kept in this browser, with the Free Pack filling in the other tracks."
+      ? "Microsoft's free demo from 2000, kept in this browser."
       : "Remembered in this browser.";
+  readySummary();
   // In the choice: what's kept already, one press away.
   $("usekept").hidden = !kept || mm2Ready;
   $("usekept").textContent = demo ? "Play the demo kept in this browser" : "Play the game kept in this browser";
@@ -2445,6 +2480,12 @@ function layout() {
   // The graphics switch on the Ready card: both need their files here.
   const both = !!kept && packReady;
   $("readymm2").textContent = demo ? "MM2 demo" : "MM2";
+  $("readymm2").title = demo
+    ? "The demo's original bikes, riders and sounds. Its two tracks are the real MM2 ones; the Free Pack fills in the rest."
+    : "The original game's bikes, riders, tracks and sounds, from your MM2 files.";
+  $("readyoldmenus").title = demo
+    ? "The menus exactly as Motocross Madness 2 had them, from the demo. Screens the demo lacks come from the Free Pack."
+    : "The menus exactly as Motocross Madness 2 had them, from your MM2 files.";
   $("readymm2").setAttribute("aria-checked", String(!freeReady));
   $("readyfree").setAttribute("aria-checked", String(freeReady));
   for (const id of ["readymm2", "readyfree"]) $(id).setAttribute("aria-disabled", String(!both));
