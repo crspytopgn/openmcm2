@@ -456,12 +456,16 @@ pub fn scan(
         for (offset, any) in rays {
             for i in 0..=steps {
                 let t = (i as f32 / length.max(1.0)).min(1.0);
-                // Samples only get further from `from` as i grows (each
-                // ray's offset is square to the corridor), so once a
-                // sample is no nearer than the best hit so far, this ray
-                // cannot beat it, and neither can any later sample of it.
-                // The first hit still ends the ray, as before.
-                if t * length >= nearest {
+                // A sample is at least `t * length - |offset|` from
+                // `from` (the offset need not be square to the corridor:
+                // the up and down rays aren't on a slope), and that only
+                // grows with i. Once it is no nearer than the best hit
+                // so far, neither this sample nor any later one of this
+                // ray could take its place, so the answer is the same as
+                // marching on (a hundredth of a foot to spare for the
+                // rounding of the two sums). The first hit still ends
+                // the ray.
+                if t * length - offset.length() >= nearest + 0.01 {
                     break;
                 }
                 let p = from + offset + along * t;
@@ -907,10 +911,95 @@ mod tests {
         assert!(s.nearest < 15.0, "{s:?}");
         assert!(s.toward.unwrap().z > 0.5, "{s:?}");
         eprintln!("scan solid probes with a wall ahead: {}", wall.calls.get());
-        // 47 before the ray cap: the near-line pass (7) plus each ray
-        // to its first hit (8 each). The cap stops the last three rays
-        // a sample early, once the centre ray has found a nearer hit.
-        assert!(wall.calls.get() <= 45, "solid probes: {}", wall.calls.get());
+        // The near-line pass (7) plus each ray to its first hit (8
+        // each): here every ray's hit comes before the early stop could,
+        // which only saves probes on long corridors past a near hit.
+        assert!(wall.calls.get() <= 47, "solid probes: {}", wall.calls.get());
+    }
+
+    /// A sloped wall: a plane through `at` with normal `n`, solid behind.
+    struct Plane {
+        at: Vec3,
+        n: Vec3,
+    }
+    impl Ground for Plane {
+        fn terrain(&self, _x: f32, _z: f32) -> (f32, Vec3) {
+            (-1000.0, Vec3::Y)
+        }
+        fn solid(&self, centre: Vec3, radius: f32) -> Option<crate::collision::Hit> {
+            let d = (centre - self.at).dot(self.n);
+            (d < radius).then(|| crate::collision::Hit {
+                normal: self.n,
+                depth: radius - d,
+                point: centre - self.n * d,
+            })
+        }
+    }
+
+    /// The solids part of [`scan`] marched to each ray's first hit with
+    /// no early stop, as the game does: the nearest hit and its place.
+    fn reference_rays(ground: &dyn Ground, from: Vec3, to: Vec3, near_only: bool) -> (f32, Option<Vec3>) {
+        let along = to - from;
+        let right = Vec3::new(along.z, 0.0, -along.x).normalize_or_zero();
+        let rays = [
+            (Vec3::Y * SCAN_UP, true),
+            (Vec3::ZERO, false),
+            (-Vec3::Y * SCAN_DOWN, false),
+            (-right * SCAN_SIDE, false),
+            (right * SCAN_SIDE, false),
+        ];
+        let length = along.length();
+        let (mut nearest, mut hit_at) = (1000.0f32, None);
+        for (offset, any) in rays {
+            for i in 0..=length.ceil() as usize {
+                let t = (i as f32 / length.max(1.0)).min(1.0);
+                let p = from + offset + along * t;
+                let Some(hit) = ground.solid(p, 0.5) else {
+                    continue;
+                };
+                if !any && hit.normal.y >= PLAN_COS {
+                    continue;
+                }
+                let d = p.distance(from);
+                if !(near_only && d > SCAN_NEAR) && d < nearest {
+                    nearest = d;
+                    hit_at = Some(p);
+                }
+                break;
+            }
+        }
+        (nearest, hit_at)
+    }
+
+    #[test]
+    fn scan_stops_early_only_where_it_cannot_change_the_answer() {
+        // Steep corridors up and down, walls and slopes of every lean:
+        // the up and down rays are not square to a sloped corridor, so
+        // the early stop must hold for them too.
+        let mut seed = 777u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        for _ in 0..4000 {
+            let from = Vec3::new(0.0, 3.0, 0.0);
+            let reach = 2.0 + next() * 40.0;
+            let climb = (next() - 0.5) * 2.4;
+            let to = from + Vec3::new((next() - 0.5) * 0.6, climb, 1.0).normalize() * reach;
+            let n = Vec3::new((next() - 0.5) * 2.0, (next() - 0.5) * 2.0, -1.0 - next()).normalize();
+            let wall = Plane { at: from + (to - from) * next() * 1.2 + Vec3::new(0.0, (next() - 0.5) * 6.0, 0.0), n };
+            for near_only in [false, true] {
+                let s = scan(&wall, from, to, 2.0, 40.0, &[], &[], near_only);
+                let (want, at) = reference_rays(&wall, from, to, near_only);
+                if !s.blocked {
+                    continue;
+                }
+                assert_eq!(s.nearest, want, "from {from:?} to {to:?} wall {:?} {:?}", wall.at, wall.n);
+                let toward = at.filter(|_| want < SCAN_NEAR || !near_only).map(|p| p - from).unwrap_or(Vec3::ZERO);
+                let toward = (toward.x != 0.0 || toward.z != 0.0).then(|| toward.normalize());
+                assert_eq!(s.toward, toward, "from {from:?} to {to:?}");
+            }
+        }
     }
 
     /// The nearest-point scan as [`Path::direction`] did it before the
