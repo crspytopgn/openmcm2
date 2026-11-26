@@ -41,6 +41,11 @@ cpal = { version = "0.16.0", features = ["wasm-bindgen"], optional = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # The replay editor's clips: Motion JPEG movies (clip.rs).
 jpeg-encoder = "0.6"
+# The player's own intro video (own_video.rs): an MP4's H.264 picture
+# (Cisco's OpenH264, built from source), its boxes and its AAC sound.
+openh264 = "0.9"
+mp4 = "0.14"
+symphonia = { version = "0.5", default-features = false, features = ["aac", "isomp4"] }
 ureq = "3"
 # The Course Builder's pictures and models (pick.rs).
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "wayland"] }

@@ -17,6 +17,8 @@
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
     font: 16px/1.5 system-ui, sans-serif; overflow: hidden; overscroll-behavior: none; }
   #mm2 { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; touch-action: none; }
+  /* The player's own intro video, over the game. */
+  video.intro { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; background: #000; z-index: 50; cursor: pointer; }
   #setup { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); padding: 16px;
     overflow-y: auto; }
   #setup > div { max-width: 40rem; }
@@ -827,6 +829,20 @@ const s = settings.load();
 if ([...params.keys()].some((k) => k.startsWith("enhanced"))) s.enhanced = true;
 // The look and the rest both wait behind "Settings".
 let look = s.enhanced ? "enhanced" : "original";
+// The player's own intro video (Extras): kept in this browser, played
+// over the game when it asks (mm2page.introPlay).
+let introFile = null;
+settings.setIntroStore({
+  keep: async (f) => {
+    await fs.keepIntro(f);
+    introFile = f;
+  },
+  forget: async () => {
+    await fs.forgetIntro();
+    introFile = null;
+  },
+});
+if (s.intro_video) introFile = await fs.keptIntro().catch(() => null);
 settings.render($("lookbox"), $("settings"), s, () => (look = s.enhanced ? "enhanced" : "original"));
 // The game reads its options from the address: the settings' options,
 // and whatever else the address holds (such as a race to join).
@@ -1062,6 +1078,58 @@ globalThis.mm2page = {
   },
   pickedClear() {
     this.picked = null;
+  },
+  // The player's own intro video, over the whole page, its shape kept; a
+  // click on it, a key or the game's own skip ends it. false if there is
+  // none to play.
+  intro: null,
+  introPlay() {
+    if (!introFile) return false;
+    const v = document.createElement("video");
+    v.className = "intro";
+    v.playsInline = true;
+    v.src = URL.createObjectURL(introFile);
+    const state = { video: v, done: false, failed: false };
+    const end = () => {
+      if (state.done) return;
+      state.done = true;
+      v.pause();
+      v.remove();
+      URL.revokeObjectURL(v.src);
+      removeEventListener("keydown", end, true);
+      $("mm2").focus();
+    };
+    state.end = end;
+    v.addEventListener("ended", end);
+    v.addEventListener("error", () => {
+      // This browser can't play it: the game's own intro instead.
+      console.warn("intro video: this browser can't play it", v.error);
+      state.failed = true;
+      end();
+    });
+    v.addEventListener("pointerdown", end);
+    addEventListener("keydown", end, true);
+    document.body.append(v);
+    v.play().catch((e) => {
+      // Not allowed to start with sound: start without.
+      if (state.done) return;
+      v.muted = true;
+      v.play().catch(() => {
+        state.failed = true;
+        end();
+      });
+    });
+    this.intro = state;
+    return true;
+  },
+  introDone() {
+    return !this.intro || this.intro.done;
+  },
+  introFailed() {
+    return !!this.intro?.failed;
+  },
+  introStop() {
+    this.intro?.end();
   },
   // Photo mode's Enter: the picture just drawn, as a PNG in the
   // downloads. Asked as the frame is shown, before the browser clears it.
