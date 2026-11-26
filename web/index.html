@@ -565,7 +565,7 @@ const STEPS = {
   keep: ["Keeping your game in this browser", "So next time, Play starts it straight away. This only happens the first time."],
   files: ["Reading your game files", ""],
   saves: ["Loading your saves and tracks", ""],
-  assets: ["Fetching the ground pictures", "The enhanced look's ground pictures, kept out of the engine download. The original look never fetches them."],
+  assets: ["Fetching the ground pictures", "The enhanced look's ground pictures, kept out of the engine download. The original look fetches them later, behind the game."],
   engine: ["Downloading the game engine", ""],
   compile: ["Getting the engine ready", "Your browser is turning the download into code it can run."],
   start: ["Starting the game", "Reading the menus, sounds and your settings."],
@@ -1568,8 +1568,11 @@ async function start(list) {
     // The vehicle sounds and the free riders' motions, behind the game
     // while the menus are up: the game looks for them again when they
     // are needed, so driving sounds right and free riders ride properly
-    // once they arrive.
-    fetchAssets([...SOUND_FILES, ...MOTION_FILES]).catch((e) => console.warn("extra game files not fetched", e));
+    // once they arrive. With the original look, the enhanced look's
+    // ground pictures come down behind it too, so turning Enhanced on
+    // later has them from the next track on rather than flat ground.
+    const later = [...SOUND_FILES, ...MOTION_FILES, ...(s.enhanced ? [] : GROUND_FILES)];
+    fetchAssets(later).catch((e) => console.warn("extra game files not fetched", e));
     // The time played goes to the server as the tab is hidden or closed
     // (the game sends it after each race too).
     const flush = () => {
