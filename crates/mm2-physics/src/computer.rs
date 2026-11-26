@@ -341,20 +341,28 @@ impl Rider {
         };
         // One sphere for the whole swept hull first, as the player's
         // bike does: when no solid touches it, no point can cross one,
-        // and the 170 probes below are all wasted.
+        // and the 170 probes below are all wasted. Here the points turn
+        // about the rider's place itself (`position + axes * p` below),
+        // not about the centre of mass as the player's bike's do.
         let body = hull.body_points(false);
         let mut extent_sq = 0.0f32;
         for &p in body {
-            extent_sq = extent_sq.max((p - crate::bike::COM).length_squared());
+            extent_sq = extent_sq.max(p.length_squared());
         }
         for i in 0..2 {
             let off = crate::bike::axle(i, 0.0);
             for &p in &hull.wheels[i] {
-                extent_sq = extent_sq.max((p + off - crate::bike::COM).length_squared());
+                extent_sq = extent_sq.max((p + off).length_squared());
             }
         }
+        // The axes are kept square but `look` need not be of unit length:
+        // a point reaches as far as the longest axis stretches it.
+        let stretch = [was_axes, axes]
+            .iter()
+            .flat_map(|m| [m.x_axis.length(), m.y_axis.length(), m.z_axis.length()])
+            .fold(1.0f32, f32::max);
         let centre = (was_at + self.position) * 0.5;
-        let radius = extent_sq.sqrt() + was_at.distance(self.position) * 0.5 + 0.1;
+        let radius = extent_sq.sqrt() * stretch + was_at.distance(self.position) * 0.5 + 0.1;
         if centre.is_finite() && radius.is_finite() && !ground.solids_near(centre, radius) {
             return false;
         }
@@ -809,6 +817,68 @@ mod tests {
         fn solids_near(&self, _centre: Vec3, _radius: f32) -> bool {
             self.near
         }
+    }
+
+    /// A wall across z = `at` facing -z, that says it is near only when
+    /// the sphere asked about really reaches it, with or without that.
+    struct Wall {
+        at: f32,
+        honest: bool,
+    }
+    impl Ground for Wall {
+        fn terrain(&self, _x: f32, _z: f32) -> (f32, Vec3) {
+            (-100.0, Vec3::Y)
+        }
+        fn crossing(&self, from: Vec3, to: Vec3) -> Option<crate::collision::Crossing> {
+            (from.z < self.at && to.z >= self.at).then(|| crate::collision::Crossing {
+                normal: -Vec3::Z,
+                depth: to.z - self.at,
+                point: Vec3::new(to.x, to.y, self.at),
+                along: (self.at - from.z) / (to.z - from.z).max(1e-6),
+                velocity: Vec3::ZERO,
+                object: 1,
+            })
+        }
+        fn solids_near(&self, centre: Vec3, radius: f32) -> bool {
+            !self.honest || (centre.z - self.at).abs() <= radius
+        }
+    }
+
+    #[test]
+    fn the_hull_sphere_holds_every_point_it_sweeps() {
+        // Riders turned every way, moving up to the wall from every
+        // side of it: skipping the sweep when the sphere misses the wall
+        // must never miss a crossing the full sweep finds.
+        let mut seed = 99u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5
+        };
+        let hull = std::sync::Arc::new(crate::bike::Hull::shared());
+        let mut found = 0;
+        for _ in 0..3000 {
+            let look = Vec3::new(next(), next(), next()).normalize_or(Vec3::Z);
+            let up = Vec3::new(next(), next() + 0.6, next()).normalize_or(Vec3::Y);
+            let at = Vec3::new(next() * 4.0, next() * 4.0, next() * 12.0);
+            let step = Vec3::new(next(), next(), next()) * 4.0;
+            let ride = |honest: bool| {
+                let mut r = Rider::new(&Flat, at, Vec3::Z, 0.0, engine_class(250));
+                r.hull = Some(hull.clone());
+                r.spawn_guard = 0.0;
+                r.look = look;
+                r.up = up;
+                r.previous = Some((at, r.axes()));
+                r.position = at + step;
+                let mut out = r.position;
+                let hit = r.hit_objects(&Wall { at: 0.0, honest });
+                out -= r.position;
+                (hit, out)
+            };
+            let (want, out) = ride(false);
+            assert_eq!(ride(true), (want, out), "look {look:?} up {up:?} at {at:?} step {step:?}");
+            found += want as u32;
+        }
+        assert!(found > 100, "only {found} crossings: the test rides too far from the wall");
     }
 
     #[test]
