@@ -227,8 +227,9 @@ pub struct Shared {
     pub layout: wgpu::BindGroupLayout,
     pub buffer: wgpu::Buffer,
     pub group: wgpu::BindGroup,
-    /// Each cascade's layer of the map, to draw the casters into.
-    pub layers: Vec<wgpu::TextureView>,
+    /// The sun's shadow map as one picture, the cascades side by side
+    /// in it, to draw them into in a single pass (one tile each).
+    pub shadow_view: wgpu::TextureView,
     pub material_average: [[f32; 4]; crate::materials::COUNT],
     /// The ruts' map, to draw the tyres into: its view and texels a side.
     pub ruts: (wgpu::TextureView, u32),
@@ -316,7 +317,7 @@ impl Shared {
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
                     count: None,
@@ -480,12 +481,17 @@ impl Shared {
             mapped_at_creation: false,
         });
         let side = shadow_side();
+        // The cascades side by side in one picture, a tile each, so the
+        // three are drawn in a single pass (renderer.rs) and cleared
+        // once, rather than a pass and a clear each: the same texels,
+        // only laid out flat, and the shaders read a tile by its number
+        // (enhanced_fns.wgsl `sun_uv`).
         let map = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("sun shadows"),
             size: wgpu::Extent3d {
-                width: side,
+                width: side * CASCADES as u32,
                 height: side,
-                depth_or_array_layers: CASCADES as u32,
+                depth_or_array_layers: 1,
             },
             mip_level_count: 1,
             sample_count: 1,
@@ -494,16 +500,7 @@ impl Shared {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
-        let layers = (0..CASCADES as u32)
-            .map(|layer| {
-                map.create_view(&wgpu::TextureViewDescriptor {
-                    dimension: Some(wgpu::TextureViewDimension::D2),
-                    base_array_layer: layer,
-                    array_layer_count: Some(1),
-                    ..Default::default()
-                })
-            })
-            .collect();
+        let shadow_view = map.create_view(&Default::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("sun shadows"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -587,10 +584,7 @@ impl Shared {
             env_sampler,
             dust: dust.clone(),
             buffer: buffer.clone(),
-            shadows: map.create_view(&wgpu::TextureViewDescriptor {
-                dimension: Some(wgpu::TextureViewDimension::D2Array),
-                ..Default::default()
-            }),
+            shadows: shadow_view.clone(),
             shadow_sampler: sampler,
             albedo: materials.albedo.clone(),
             normal: materials.normal.clone(),
@@ -606,7 +600,7 @@ impl Shared {
             layout,
             buffer,
             group,
-            layers,
+            shadow_view,
             material_average: materials.average,
             ruts: (rut_view, rut_side),
         }
@@ -705,6 +699,33 @@ pub fn splits() -> [f32; 4] {
     [s[0], s[1], s[2], s[2]]
 }
 
+/// Whether a caster whose nearest and farthest points stand `near` to
+/// `far` ft from the camera, `height` ft tall, can shade anything in a
+/// shadow cascade covering `lo..hi` ft from the camera, lit from a sun
+/// `sun_y` of the way up (the sine of its height above the horizon). A
+/// shadow on the ground reaches as far as the caster's height over the
+/// sun's slope, plus what the ground may fall away beneath it, and the
+/// soft shadows' reach past the cascade's edge; a caster past that
+/// cannot shade the cascade's ground, so it is left out of it. The sun
+/// low reaches far, so then every caster is kept. Only the sun's own
+/// cascades: a stadium's lamps' views are not bands of distance.
+pub fn caster_in_cascade(near: f32, far: f32, height: f32, sun_y: f32, lo: f32, hi: f32) -> bool {
+    // Below about 20 degrees the shadows run too far to bound.
+    let sun_y = sun_y.clamp(0.0, 1.0);
+    if sun_y < 0.34 {
+        return true;
+    }
+    let slope = sun_y / (1.0 - sun_y * sun_y).max(1e-6).sqrt();
+    // How far the ground may fall away under a shadow, ft.
+    let reach = (height + 40.0) / slope;
+    if reach > 2000.0 {
+        return true;
+    }
+    // The soft shadows' reach past the cascade, ft.
+    let margin = 16.0;
+    near - reach <= hi + margin && far + reach >= lo - margin
+}
+
 /// `source` with the enhanced drawing's shared declarations put in where
 /// it asks for them, ray traced (`traced`) or not: what [`shader`] makes.
 pub fn full_source(source: &str, traced: bool) -> String {
@@ -733,7 +754,7 @@ pub fn shader(device: &wgpu::Device, label: &str, source: &str) -> wgpu::ShaderM
 /// group, and `sun_visible` reading them, the maps' own kept as
 /// `sun_mapped`.
 fn ray_traced(source: &str) -> String {
-    let Some(line) = source.lines().find(|l| l.contains("var sun_map: texture_depth_2d_array")) else {
+    let Some(line) = source.lines().find(|l| l.contains("var sun_map: texture_depth_2d;")) else {
         return source.to_string();
     };
     let group = line
@@ -780,7 +801,7 @@ fn ray_traced(source: &str) -> String {
 /// `source` with the light poles' baked light (crate::flood) bound beside
 /// the sun's shadows, for `headlight_at` without ray tracing.
 fn flooded(source: &str) -> String {
-    let Some(line) = source.lines().find(|l| l.contains("var sun_map: texture_depth_2d_array")) else {
+    let Some(line) = source.lines().find(|l| l.contains("var sun_map: texture_depth_2d;")) else {
         return source.to_string();
     };
     let group = line
@@ -800,7 +821,7 @@ fn flooded(source: &str) -> String {
 /// the sun's shadows: the dust's map bound beside them, and `sun_visible`
 /// the sun's own (kept as `sun_solid`) through the dust.
 fn dusty(source: &str) -> String {
-    let Some(line) = source.lines().find(|l| l.contains("var sun_map: texture_depth_2d_array")) else {
+    let Some(line) = source.lines().find(|l| l.contains("var sun_map: texture_depth_2d;")) else {
         return source.to_string();
     };
     let group = line
@@ -952,4 +973,39 @@ const NIGHT_AMBIENT: Vec3 = Vec3::new(0.035, 0.04, 0.065);
 fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
     let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bike_nearby_leaves_the_far_cascade_out() {
+        // A bike 20 ft off, 8 ft tall, sun high: its shadow cannot reach
+        // the ground 140 ft out, so it is needed in the near cascades
+        // only.
+        assert!(caster_in_cascade(20.0, 24.0, 8.0, 0.7, 0.0, 36.0));
+        assert!(caster_in_cascade(20.0, 24.0, 8.0, 0.7, 36.0, 140.0));
+        assert!(!caster_in_cascade(20.0, 24.0, 8.0, 0.7, 140.0, 520.0));
+    }
+
+    #[test]
+    fn a_tree_far_off_leaves_the_near_cascade_out() {
+        // A 60 ft tree 300 ft off cannot shade the ground by the camera,
+        // but its shadow reaches the far ground.
+        assert!(!caster_in_cascade(280.0, 340.0, 60.0, 0.7, 0.0, 36.0));
+        assert!(caster_in_cascade(280.0, 340.0, 60.0, 0.7, 140.0, 520.0));
+    }
+
+    #[test]
+    fn low_sun_keeps_every_caster() {
+        assert!(caster_in_cascade(20.0, 24.0, 8.0, 0.2, 140.0, 520.0));
+        assert!(caster_in_cascade(280.0, 340.0, 60.0, 0.0, 0.0, 36.0));
+    }
+
+    #[test]
+    fn the_sun_overhead_casts_straight_down() {
+        assert!(caster_in_cascade(20.0, 24.0, 8.0, 1.0, 0.0, 36.0));
+        assert!(!caster_in_cascade(20.0, 24.0, 8.0, 1.0, 140.0, 520.0));
+    }
 }
