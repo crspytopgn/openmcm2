@@ -31,9 +31,18 @@ fn soft_clamp(c: vec3<f32>) -> vec3<f32> {
 // its distance from the camera falls in, filtered over 3×3 texels; seen
 // from `lift` ft off the surface, so what lies flat on it (painted ruts,
 // planks) casts nothing.
-// Texels a side of the sun's shadow maps: 2048, or 4096 on Ultra.
+// Texels a side of one cascade's tile: the cascades lie side by side
+// in one map (enhance.rs), three tiles across.
 fn sun_side() -> f32 {
-    return f32(textureDimensions(sun_map).x);
+    return f32(textureDimensions(sun_map).x) / 3.0;
+}
+
+// A tile's own uv (0..1) shifted onto its tile in the one map, held
+// inside the tile so a tap at its edge reads the tile's own edge, as a
+// layer of its own would, and never the tile beside it.
+fn sun_uv(uv: vec2<f32>, c: u32) -> vec2<f32> {
+    let u = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    return vec2<f32>((u.x + f32(c)) / 3.0, u.y);
 }
 
 fn sun_visible(world: vec3<f32>, n: vec3<f32>, dist: f32, lift: f32) -> f32 {
@@ -62,7 +71,7 @@ fn sun_visible(world: vec3<f32>, n: vec3<f32>, dist: f32, lift: f32) -> f32 {
     var sum = 0.0;
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
-            sum += textureSampleCompareLevel(sun_map, sun_sampler, uv + vec2<f32>(f32(x), f32(y)) * step, c, p.z);
+            sum += textureSampleCompareLevel(sun_map, sun_sampler, sun_uv(uv + vec2<f32>(f32(x), f32(y)) * step, c), p.z);
         }
     }
     let seen = sum / 9.0;
@@ -104,7 +113,7 @@ fn soft_sun(uv: vec2<f32>, z: f32, c: u32, texel: f32) -> f32 {
     for (var i = 0; i < 16; i++) {
         let at = uv + turn * POISSON[i] * 6.0 * k / side;
         let t = clamp(vec2<i32>(at * side), vec2<i32>(0), vec2<i32>(i32(side) - 1));
-        let d = textureLoad(sun_map, t, c, 0);
+        let d = textureLoad(sun_map, vec2<i32>(t.x + i32(c) * i32(side), t.y), 0);
         if (d < z) {
             blockers += d;
             count += 1.0;
@@ -118,7 +127,7 @@ fn soft_sun(uv: vec2<f32>, z: f32, c: u32, texel: f32) -> f32 {
     let radius = clamp(gap_ft * 0.022 / texel, 1.0, 8.0 * k);
     var sum = 0.0;
     for (var i = 0; i < 16; i++) {
-        sum += textureSampleCompareLevel(sun_map, sun_sampler, uv + turn * POISSON[i] * radius / side, c, z);
+        sum += textureSampleCompareLevel(sun_map, sun_sampler, sun_uv(uv + turn * POISSON[i] * radius / side, c), z);
     }
     return sum / 16.0;
 }
@@ -207,7 +216,7 @@ fn sun_in_air(p: vec3<f32>) -> f32 {
     if (any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || q.z > 1.0) {
         return 1.0;
     }
-    return textureSampleCompareLevel(sun_map, sun_sampler, uv, c, q.z);
+    return textureSampleCompareLevel(sun_map, sun_sampler, sun_uv(uv, c), q.z);
 }
 
 // How thick the Next-gen air is near the ground: light lost by e every
@@ -227,6 +236,15 @@ fn lit_air(c: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
     let eye = globals.camera.xyz;
     let to = world - eye;
     let v = to / max(length(to), 1e-3);
+    // How much of the colour the air's light can move at all: close by
+    // it is under one step of the 8-bit picture, so the march's ten
+    // shadow taps are left out and the colour stands.
+    // Thinner higher up, by e every 600 ft above the eye.
+    let thin = exp(-max(to.y, 0.0) / 600.0);
+    let amount = (1.0 - exp(-dist * air_light() / AIR_CLEAR)) * thin;
+    if (amount < 0.004) {
+        return c;
+    }
     let reach = min(dist, AIR_REACH);
     // A different start along the ray each pixel, so the steps don't band
     // (temporal anti-aliasing blends them smooth).
@@ -240,9 +258,6 @@ fn lit_air(c: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
     // Past the marched stretch the air is lit as on open ground.
     let marched = reach / max(dist, 1.0);
     let lit = seen * marched + (1.0 - marched);
-    // Thinner higher up, by e every 600 ft above the eye.
-    let thin = exp(-max(to.y, 0.0) / 600.0);
-    let amount = (1.0 - exp(-dist * air_light() / AIR_CLEAR)) * thin;
     let cos_t = dot(v, enh.to_sun.xyz);
     // Forward scattering: much brighter toward the sun (a soft glow), a
     // little all round.
@@ -343,7 +358,7 @@ fn stadium_seen(world: vec3<f32>, n: vec3<f32>, g: u32) -> f32 {
     let radius = clamp(0.4 / texel, 1.0, 4.0 * sun_side() / 2048.0) / sun_side();
     var sum = 0.0;
     for (var i = 0; i < 8; i++) {
-        sum += textureSampleCompareLevel(sun_map, sun_sampler, uv + turn * POISSON[i * 2] * radius, g, q.z);
+        sum += textureSampleCompareLevel(sun_map, sun_sampler, sun_uv(uv + turn * POISSON[i * 2] * radius, g), q.z);
     }
     return sum / 8.0;
 }
