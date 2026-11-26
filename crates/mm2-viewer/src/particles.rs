@@ -294,6 +294,11 @@ pub struct Particles {
     /// The next bike's frame of six for its shadow check (the physics
     /// objects' count, 0 to 5, each new one taking the next).
     phases: u8,
+    /// Scratch kept across frames so `prepare` allocates nothing: the
+    /// far-first order (depth, particle index) and the vertices built
+    /// from it. (Was two fresh Vecs every frame.)
+    order: Vec<(f32, usize)>,
+    scratch: Vec<Vertex>,
 }
 
 struct Gpu {
@@ -315,6 +320,8 @@ impl Particles {
             hide_trail: false,
             hide_chunks: false,
             phases: 0,
+            order: Vec::new(),
+            scratch: Vec::new(),
         }
     }
 
@@ -796,15 +803,21 @@ impl Particles {
         let up = inverse.y_axis.truncate();
         let eye = inverse.w_axis.truncate();
         let back = inverse.z_axis.truncate();
-        let mut order: Vec<(f32, &Particle)> = self
-            .list
-            .iter()
-            .filter(|p| !(self.hide_trail && p.flags & TRAIL != 0) && !(self.hide_chunks && p.flags & CHUNK != 0))
-            .map(|p| ((from_game(p.position) - eye).dot(back), p))
-            .collect();
+        let order = &mut self.order;
+        order.clear();
+        order.extend(
+            self.list
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| !(self.hide_trail && p.flags & TRAIL != 0) && !(self.hide_chunks && p.flags & CHUNK != 0))
+                .map(|(i, p)| ((from_game(p.position) - eye).dot(back), i)),
+        );
         order.sort_by(|a, b| a.0.total_cmp(&b.0).reverse());
-        let mut out = Vec::with_capacity(order.len() * 6);
-        for (_, p) in order {
+        let out = &mut self.scratch;
+        out.clear();
+        out.reserve(order.len() * 6);
+        for &(_, i) in order.iter() {
+            let p = &self.list[i];
             let centre = from_game(p.position + Vec3::Y * 0.5);
             let (corner, side) = cell_uv(p.cell);
             let alpha = if p.flags & FADES != 0 {
@@ -825,7 +838,7 @@ impl Particles {
         }
         gpu.count = out.len() as u32;
         if !out.is_empty() {
-            queue.write_buffer(&gpu.vertices, 0, bytemuck::cast_slice(&out));
+            queue.write_buffer(&gpu.vertices, 0, bytemuck::cast_slice(out));
         }
         let (colour, (start, end)) = fog;
         let globals = Globals {
