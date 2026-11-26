@@ -122,7 +122,7 @@ fn load(dir: Option<&std::path::Path>, name: &str) -> Option<(u32, Vec<u8>)> {
             }
         }
     }
-    let (w, h, mut rgba) = crate::hires::decode_png(crate::materials::albedo(stand_in(name)?)?).ok()?;
+    let (w, h, mut rgba) = crate::hires::decode_png(&crate::materials::albedo(stand_in(name)?)?).ok()?;
     if w != h {
         return None;
     }
