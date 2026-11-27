@@ -514,8 +514,10 @@ pub struct More {
     pub builder_menu: bool,
     /// The engine sounds from the player's own game or demo, freshened as
     /// they load (EQ, a touch of pitch and saturation, seamless loops),
-    /// with the MM2 graphics (the free version keeps its own); on unless turned off
-    /// (`--no-fresh-sounds`).
+    /// with the MM2 sounds (the Free Pack keeps its own); off unless turned
+    /// on (`--fresh-sounds`). Kept as `freshen_sounds`: the older
+    /// `fresh_sounds`, on by default then, is left behind so everyone starts
+    /// with the original's sounds.
     pub fresh_sounds: bool,
     /// Drive the scenery: in Practice and free roam, V gets in the
     /// track's cars, trucks, trains and aircraft (`--drive-vehicles`).
@@ -579,7 +581,7 @@ impl Default for More {
             list_races: true,
             share_playtime: true,
             builder_menu: true,
-            fresh_sounds: true,
+            fresh_sounds: false,
             drive_vehicles: false,
             online_ghosts: false,
             whistle: true,
@@ -625,7 +627,7 @@ impl More {
             "lobby_downloads" => self.lobby_downloads = yes,
             "list_races" => self.list_races = yes,
             "builder_menu" => self.builder_menu = yes,
-            "fresh_sounds" => self.fresh_sounds = yes,
+            "freshen_sounds" => self.fresh_sounds = yes,
             // The old off-by-default Freshen extra (0.7.x): its saved 0 is
             // not a choice, so the new default stands.
             "freshen_engines" => {}
@@ -645,7 +647,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfresh_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\nreplay_editor={}\ndemo_tracks={}\nfree_tracks={}\nintro_video={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfreshen_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\nreplay_editor={}\ndemo_tracks={}\nfree_tracks={}\nintro_video={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -691,7 +693,7 @@ impl More {
             (!self.lobby_downloads, "--no-lobby-downloads"),
             (!self.list_races, "--no-list-races"),
             (!self.builder_menu, "--no-builder-menu"),
-            (!self.fresh_sounds, "--no-fresh-sounds"),
+            (self.fresh_sounds, "--fresh-sounds"),
             (self.drive_vehicles, "--drive-vehicles"),
             (self.online_ghosts, "--online-ghosts"),
             (!self.whistle, "--no-whistle"),
@@ -743,7 +745,7 @@ impl More {
             leaderboards: !has("--no-leaderboards"),
             share_playtime: !has("--no-share-playtime"),
             builder_menu: !has("--no-builder-menu"),
-            fresh_sounds: !has("--no-fresh-sounds"),
+            fresh_sounds: has("--fresh-sounds"),
             drive_vehicles: has("--drive-vehicles"),
             online_ghosts: has("--online-ghosts"),
             whistle: !has("--no-whistle"),
