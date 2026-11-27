@@ -9,7 +9,7 @@
 * **A new Sounds switch** on the Play card (launcher) and the Ready card
   (browser): pick MM2 sounds or the Free Pack's, with either graphics.
 * **The original engine sounds play untouched by default.** Freshened
-  engine sounds are still there in Enhanced if you want them.
+  engine sounds are still in Extras if you want them.
 * **No more crackle at the start gate** in the browser.
 * **Free Pack trees** draw all the way out again instead of popping in
   just ahead of you.
