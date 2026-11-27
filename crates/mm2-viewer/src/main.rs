@@ -4246,8 +4246,10 @@ fn podium_for(track: &Track, stand: &Stand, event: frontend::EventKind, roll: f3
 
 /// A number from 0 to 1 that differs each time.
 fn rand_unit() -> f32 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    // web_time: std's clock stops the game in a browser (the podium
+    // after a top-three finish crashed it there).
+    let nanos = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| d.subsec_nanos());
     (nanos % 1000) as f32 / 1000.0
 }

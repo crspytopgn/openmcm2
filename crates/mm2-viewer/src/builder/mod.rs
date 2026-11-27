@@ -612,7 +612,7 @@ impl Builder {
 
     /// A fresh seed for the one-click helpers.
     fn dice(&mut self) -> u32 {
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u32).unwrap_or(1);
+        let t = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_nanos() as u32).unwrap_or(1);
         t ^ (self.now * 1000.0) as u32
     }
 
