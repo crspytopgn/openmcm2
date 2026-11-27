@@ -2331,6 +2331,7 @@ async fn load_track_steps(
     load_stage(if free_tracks::to_build(path) { "build" } else { "track" }).await;
     // A Free Pack track is built from its recipe the first time.
     free_tracks::ensure(path)?;
+    freepack::set_track(path);
     // A demo track rebuilt the first time (an extra).
     demo_tracks::ensure(path)?;
     let track_bytes = read_archive(path)?;

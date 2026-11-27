@@ -14,9 +14,10 @@
 //! spell; if it comes in late it is undone within half a second, and the
 //! next try waits twice as long.
 //!
-//! Where even the smallest scene comes late for a few seconds, a step of
-//! the costliest effects is set aside (crate::graphics::Enhanced::shed_to),
-//! and given back after a long spell of frames with time to spare. A
+//! Where the scene at 0.84 each way ([`FLOOR`]) still comes late for a few
+//! seconds, a step of the costliest effects is set aside
+//! (crate::graphics::Enhanced::shed_to) before more pixels go: only once
+//! every step is aside does it shrink on down to 0.6. They are given back after a long spell of frames with time to spare. A
 //! browser, and the desktop with Auto, keeps what it learned for the next
 //! time (crate::graphics::remember_shed).
 
@@ -29,6 +30,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 pub const STEPS: [f32; 9] = [1.5, 1.32, 1.15, 1.0, 0.92, 0.84, 0.76, 0.68, 0.6];
 /// The preset's own size in [`STEPS`].
 pub const PRESET: usize = 3;
+/// Where effects may be set aside, the smallest share in [`STEPS`] drawn
+/// while any are still on: 0.84 each way. Below it the picture goes
+/// soft, so the costliest effects go first and only then the pixels.
+pub const FLOOR: usize = 5;
 
 /// The share now in use, as f32 bits (1.0 until the governor says).
 static SCALE: AtomicU32 = AtomicU32::new(0x3f80_0000);
@@ -86,7 +91,8 @@ const FIRST_WAIT: f32 = 6.0;
 const LONGEST_WAIT: f32 = 120.0;
 /// A step up kept this long has held, s.
 const TRIAL: f32 = 4.0;
-/// Late this long at the smallest size sets a step of effects aside, s.
+/// Late this long at the smallest size allowed ([`FLOOR`]) sets a step
+/// of effects aside, s.
 const SHED_AFTER: f32 = 3.0;
 /// Time to spare this long at the preset's size or bigger gives a step
 /// back, s; doubled each time one given back is soon set aside again.
@@ -196,14 +202,15 @@ impl Governor {
         }
         let settle = if self.trying { UNDO } else { SETTLE };
         let can_grow = self.step > 0 && (self.step > PRESET || STEPS[self.step - 1] <= room * 1.02);
-        if self.since >= settle && self.late > LATE && self.step + 1 < STEPS.len() {
+        let bottom = self.bottom();
+        if self.since >= settle && self.late > LATE && self.step < bottom {
             if self.trying {
                 self.wait = (self.wait * 2.0).min(LONGEST_WAIT);
                 self.trying = false;
             }
             // Far too slow: the smallest size at once, so effects are set
             // aside soon if even that is too much.
-            self.step = if self.late > FAR_LATE { STEPS.len() - 1 } else { self.step + 1 };
+            self.step = if self.late > FAR_LATE { bottom } else { self.step + 1 };
             self.changed();
         } else if self.since >= self.wait && self.late < ON_TIME && can_grow {
             self.step -= 1;
@@ -216,12 +223,12 @@ impl Governor {
         STEPS[self.step]
     }
 
-    /// Sets a step of effects aside after [`SHED_AFTER`] late at the
-    /// smallest size, and gives one back after a long spell with time to
+    /// Sets a step of effects aside after [`SHED_AFTER`] late at
+    /// [`FLOOR`], and gives one back after a long spell with time to
     /// spare at the preset's size or bigger.
     fn effects(&mut self, real: f32) {
         self.since_given += real;
-        let smallest = self.step + 1 == STEPS.len();
+        let smallest = self.step >= self.bottom();
         self.starved = if smallest && self.late > LATE { self.starved + real } else { 0.0 };
         self.roomy = if self.step <= PRESET && self.late < ON_TIME { self.roomy + real } else { 0.0 };
         if self.starved >= SHED_AFTER && self.shed < crate::graphics::MOST_SHED {
@@ -245,6 +252,12 @@ impl Governor {
                 self.spare = true;
             }
         }
+    }
+
+    /// The smallest share that may be drawn now: [`FLOOR`] while effects
+    /// can still be set aside, the last of [`STEPS`] once they can't.
+    fn bottom(&self) -> usize {
+        if self.sheds && self.shed < crate::graphics::MOST_SHED { FLOOR } else { STEPS.len() - 1 }
     }
 
     fn changed(&mut self) {
@@ -368,6 +381,36 @@ mod tests {
         (k, late)
     }
 
+    /// A governor with no effects to set aside (a preset picked by hand):
+    /// only the scene's size changes.
+    fn pixels_only() -> Governor {
+        Governor { sheds: false, ..Governor::default() }
+    }
+
+    #[test]
+    fn sets_effects_aside_before_drawing_softer_than_the_floor() {
+        // Far too slow (a laptop's built-in graphics in a browser): it
+        // goes no smaller than 0.84 each way while effects can still be
+        // set aside, and sets them aside there.
+        let mut g = Governor::default();
+        let mut least = 1.0f32;
+        let mut t = 0.0;
+        while t < 6.0 {
+            least = least.min(g.frame(0.4, BEAT, 1.0));
+            t += 0.4;
+        }
+        assert_eq!(least, STEPS[FLOOR]);
+        assert!(g.shed >= 1, "{}", g.shed);
+        // Every step aside and still too slow: then on down to 0.6.
+        let mut k = 1.0;
+        while t < 40.0 {
+            k = g.frame(0.4, BEAT, 1.0);
+            t += 0.4;
+        }
+        assert_eq!(g.shed, crate::graphics::MOST_SHED);
+        assert_eq!(k, 0.6, "{k}");
+    }
+
     #[test]
     fn keeps_the_preset_size_when_the_screen_is_no_bigger() {
         let mut g = Governor::default();
@@ -386,7 +429,7 @@ mod tests {
 
     #[test]
     fn steps_down_till_frames_keep_time_and_stays_there() {
-        let mut g = Governor::default();
+        let mut g = pixels_only();
         // Half again too much to draw at full size: 0.76 each way is 58%.
         let (k, _) = run(&mut g, 20.0, BEAT * 1.5, 1.0);
         assert!((0.68..=0.84).contains(&k), "{k}");
@@ -407,7 +450,7 @@ mod tests {
 
     #[test]
     fn comes_back_up_when_the_load_goes() {
-        let mut g = Governor::default();
+        let mut g = pixels_only();
         run(&mut g, 20.0, BEAT * 2.0, 1.0);
         assert!(STEPS[g.step] < 1.0);
         assert_eq!(run(&mut g, 120.0, BEAT * 0.5, 1.0).0, 1.0);
@@ -497,8 +540,8 @@ mod tests {
         // 0.4 s against a 60th of a second wanted. The governor used
         // to be fed the pacing's capped 0.1 s, so 1.5 s of frames took
         // about 6 s of real time; fed the true gap, it drops to the
-        // smallest size inside 3 s.
-        let mut g = Governor::default();
+        // smallest size inside 3 s (with no effects left to set aside).
+        let mut g = pixels_only();
         let mut k = 1.0;
         let mut t = 0.0;
         while t < 3.0 {

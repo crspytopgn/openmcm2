@@ -130,6 +130,25 @@ pub fn chosen() -> bool {
     GIVEN.get().is_some()
 }
 
+/// Whether the race now loaded wears the pack's own art (its ground,
+/// plants and sky): with the free graphics picked, or on one of the
+/// pack's tracks. The original's tracks keep their own colours even
+/// with a pack beside them (the demo always has one).
+static FREE_ART: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Notes the track a race is loading from ([`free_art`]).
+pub fn set_track(path: &std::path::Path) {
+    let free = chosen()
+        || root().is_some_and(|r| path.starts_with(&r))
+        || path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.to_ascii_uppercase().starts_with("FP"));
+    FREE_ART.store(free, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// See [`set_track`].
+pub fn free_art() -> bool {
+    FREE_ART.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Which menus the player picked: the new look (the pack's art), or the
 /// original's. 0: not said (the new look goes with the free graphics).
 static MENUS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
