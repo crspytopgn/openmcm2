@@ -500,6 +500,12 @@ impl Bike {
         }
     }
 
+    /// How fast the bike moves, ft/s, whichever way: the body's |velocity|
+    /// (SoultreePhysicsBaseObject +0xbc), which the speedometer reads.
+    pub fn linear_speed(&self) -> f32 {
+        self.velocity().length()
+    }
+
     /// How fast each drawn wheel turns, front then rear, rad/s; None for
     /// a wheel off the ground, as a crashed bike's are.
     pub fn wheel_rates(&self) -> [Option<f32>; 2] {
@@ -723,6 +729,10 @@ impl Bike {
             high: match self {
                 Bike::Player(b) => b.rear_depth() < -2.0,
                 _ => airborne,
+            },
+            rear_near: match self {
+                Bike::Player(b) => b.rear_depth() > -0.5,
+                _ => !airborne,
             },
             turn_rate: match self {
                 Bike::Player(b) => Some(b.turn_rate),

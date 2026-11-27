@@ -40,7 +40,7 @@
 //! any part inside it out at 5 × its depth per second. 0x537690 only
 //! throws dirt where the parts slide.
 
-use glam::{Mat3, Mat4, Quat, Vec3};
+use glam::{Mat4, Quat, Vec3};
 
 use crate::Ground;
 
@@ -94,17 +94,42 @@ pub enum Stage {
     Down,
 }
 
+/// The rider body's rigid-body state (PhysicsRigidBody, step 0x4cc630):
+/// the centre of mass's velocity, the turn rate in the model's own axes,
+/// and the two-step Adams-Bashforth integrator's last derivatives
+/// (0x4a1d10: `x += (3·x'ₙ − x'ₙ₋₁)·h/2`), cleared by ResetState (0x4cc500)
+/// when the rider is let go.
+#[derive(Debug, Clone, Copy, Default)]
+struct History {
+    position: Vec3,
+    velocity: Vec3,
+    turn: glam::Vec4,
+    spin: Vec3,
+}
+
 #[derive(Debug, Clone)]
 pub struct Wreck {
     /// The Rider.mcf motion to play now.
     pub motion: &'static str,
     pub stage: Stage,
-    /// The rider body's centre (the pelvis) and its velocity.
+    /// The rider body's centre (the pelvis) and its centre of mass's
+    /// velocity.
     pub position: Vec3,
     pub velocity: Vec3,
-    orientation: Mat3,
-    /// Spin, rad/s, world axes.
+    /// The rigid body's node: the rider model's root (Wrecker::CreateBodies
+    /// sets the body on the character's model node; the pelvis, its
+    /// first child, is posed under it by the motion).
+    root: Vec3,
+    root_turn: Quat,
+    /// Turn rate, rad/s, in the root's axes (PhysicsBody +0x160).
     spin: Vec3,
+    /// The centre of mass and the inertia's diagonal, in the root's
+    /// space, from the posed rider's bounds (Wrecker::UpdateInertia,
+    /// 0x5377c0: half sizes h, I = m/12 · (h_y² + h_z², h_x² + h_z²,
+    /// h_x² + h_y²)).
+    mass_centre: Vec3,
+    inertia: Vec3,
+    history: History,
     time: f32,
     still: f32,
     seed: u32,
@@ -120,23 +145,30 @@ pub struct Wreck {
     /// what touches the ground. Empty until the viewer poses them; then
     /// Rider.col's corners only meet the solid objects.
     probes: Vec<Vec3>,
-    /// The pelvis in model space as the motion has it now; the model is
-    /// drawn round it.
+    /// The pelvis in model space as the motion has it now.
     pelvis: Mat4,
     /// Whether the viewer has said where the motion puts the pelvis.
     posed: bool,
-    /// When the bail lets the rider go, s.
-    bail_time: f32,
+    /// How long the bail motion runs, s, and how many frames it has.
+    bail_frames: f32,
     /// When the motion fading in now is fully in, s.
     faded: f32,
+    /// A fade is running; at its end the root is moved so the pelvis
+    /// stays put (0x535d50's carry of the rider pose, +0xb4).
+    fading: bool,
+    carry: bool,
     /// The landing motion waiting for that (+0xd4).
     queued: Option<&'static str>,
-    /// The body at the last pose, while the bail plays: when, where and
-    /// turned how, for the speed and spin it lets go with.
-    last: Option<(f32, Vec3, Mat3)>,
-    /// The body before the last step, to draw it between steps.
-    previous: Option<(Vec3, Mat3)>,
+    /// The pelvis at the last pose, while the bail plays: when, and its
+    /// world placement, for the speed and spin it lets go with.
+    last: Option<(f32, Mat4)>,
+    /// The root before the last step, to draw it between steps.
+    previous: Option<(Vec3, Quat)>,
 }
+
+/// The default half sizes of the rider's bounds before the viewer poses
+/// the rider, ft [guess: Rider02 at rest].
+const REST_HALF: Vec3 = Vec3::new(1.2, 3.0, 1.5);
 
 impl Wreck {
     /// A wreck starting from a bike placed at `bike` (model to world)
@@ -149,13 +181,19 @@ impl Wreck {
         bail: bool,
         seed: u32,
     ) -> Self {
-        Wreck {
+        let (_, root_turn, root) = bike.to_scale_rotation_translation();
+        let root_turn = root_turn.normalize();
+        let mut w = Wreck {
             motion,
             stage: if bail { Stage::Bail } else { Stage::Tumble },
             position: bike.transform_point3(RIDER_CENTRE),
             velocity,
-            orientation: Mat3::from_mat4(bike),
-            spin,
+            root,
+            root_turn,
+            spin: root_turn.inverse() * spin,
+            mass_centre: RIDER_CENTRE,
+            inertia: Vec3::ZERO,
+            history: History::default(),
             time: 0.0,
             still: 0.0,
             seed,
@@ -164,28 +202,31 @@ impl Wreck {
             probes: Vec::new(),
             pelvis: Mat4::from_translation(RIDER_CENTRE),
             posed: false,
-            bail_time: BAILS
-                .iter()
-                .find(|b| b.0 == motion)
-                .map_or(BAIL_TIME, |b| b.1 / BAIL_FPS / 2.0),
+            bail_frames: BAILS.iter().find(|b| b.0 == motion).map_or(BAIL_TIME * 2.0 * BAIL_FPS, |b| b.1),
             faded: if bail { 0.0 } else { FADE },
+            fading: !bail,
+            carry: false,
             queued: None,
             last: None,
             previous: None,
-        }
+        };
+        w.update_inertia();
+        w
+    }
+
+    fn root_place(&self) -> Mat4 {
+        Mat4::from_rotation_translation(self.root_turn, self.root)
     }
 
     /// The body: the pelvis on the track.
     pub fn body(&self) -> Mat4 {
-        let mut m = Mat4::from_mat3(self.orientation);
-        m.w_axis = self.position.extend(1.0);
-        m
+        self.root_place() * self.pelvis
     }
 
     /// Where to draw the rider: the model origin and axes it shares with
     /// the bike.
     pub fn place(&self) -> Mat4 {
-        self.body() * self.pelvis.inverse()
+        self.root_place()
     }
 
     /// Where to draw the rider `t` (0 to 1) of the way from the step
@@ -193,40 +234,68 @@ impl Wreck {
     /// at the last step's place, the thrown rider jumped on in 50 steps
     /// a second while the bike and the screen ran smoothly).
     pub fn drawn_place(&self, t: f32) -> Mat4 {
-        let Some((position, orientation)) = self.previous else {
+        let Some((root, turn)) = self.previous else {
             return self.place();
         };
-        if position.distance(self.position) > 20.0 {
+        if root.distance(self.root) > 20.0 {
             return self.place();
         }
-        let from = Quat::from_mat3(&orientation);
-        let to = Quat::from_mat3(&self.orientation);
-        let mut m = Mat4::from_quat(from.slerp(to, t));
-        m.w_axis = position.lerp(self.position, t).extend(1.0);
-        m * self.pelvis.inverse()
+        Mat4::from_rotation_translation(turn.slerp(self.root_turn, t), root.lerp(self.root, t))
     }
 
     /// Where the motion playing puts the pelvis (`pelvis`, model space)
     /// and Rider.col's corners (`points`, the pelvis's space), as the
-    /// viewer poses them each frame. The first pose keeps the rider where
-    /// they were drawn.
+    /// viewer poses them each frame. The model's root stays where it is
+    /// and the pelvis moves with the motion, except when a fade has just
+    /// finished: then the root is carried so the pelvis stays put
+    /// (0x535d50).
     pub fn set_pose(&mut self, pelvis: Mat4, points: Vec<Vec3>) {
-        if !self.posed {
-            let at = self.place() * pelvis;
-            self.position = at.w_axis.truncate();
-            self.orientation = orthonormal(Mat3::from_mat4(at));
-            self.posed = true;
-        } else if self.stage == Stage::Bail {
-            self.last = Some((self.time, self.position, self.orientation));
+        let body = self.body();
+        if self.stage == Stage::Bail && self.posed {
+            self.last = Some((self.time, body));
+        }
+        self.posed = true;
+        if self.carry {
+            let place = body * pelvis.inverse();
+            let (_, turn, at) = place.to_scale_rotation_translation();
+            self.root = at;
+            self.root_turn = turn.normalize();
+            self.carry = false;
         }
         self.pelvis = pelvis;
         self.points = points;
+        self.update_inertia();
+        self.position = self.body().w_axis.truncate();
     }
 
     /// Where the motion puts the Wrecker's bone probes now, in the
     /// pelvis's space.
     pub fn set_probes(&mut self, probes: Vec<Vec3>) {
         self.probes = probes;
+        if self.points.is_empty() {
+            self.update_inertia();
+        }
+    }
+
+    /// Wrecker::UpdateInertia (0x5377c0): the centre of mass and the
+    /// inertia from the posed rider's bounds in the model's space (here
+    /// Rider.col's corners, or the bone probes, as the motion has them).
+    fn update_inertia(&mut self) {
+        let corners = if self.points.is_empty() { &self.probes } else { &self.points };
+        let (centre, half) = if corners.is_empty() {
+            (RIDER_CENTRE, REST_HALF)
+        } else {
+            let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+            for p in corners {
+                let m = self.pelvis.transform_point3(*p);
+                lo = lo.min(m);
+                hi = hi.max(m);
+            }
+            ((lo + hi) * 0.5, ((hi - lo) * 0.5).max(Vec3::splat(0.05)))
+        };
+        let h2 = half * half;
+        self.mass_centre = centre;
+        self.inertia = Vec3::new(h2.y + h2.z, h2.x + h2.z, h2.x + h2.y) * (MASS / 12.0);
     }
 
     fn pick<const N: usize>(&mut self, from: [&'static str; N]) -> &'static str {
@@ -236,40 +305,59 @@ impl Wreck {
         from[self.seed as usize % N]
     }
 
+    /// The turn rate in world axes, rad/s.
+    pub fn world_spin(&self) -> Vec3 {
+        self.root_turn * self.spin
+    }
+
+    fn mass_centre_world(&self) -> Vec3 {
+        self.root + self.root_turn * self.mass_centre
+    }
+
     /// One step of `h` seconds. `bike` is where the bike is now, for a
     /// bail. Returns whether the wreck is over.
     pub fn step(&mut self, ground: &dyn Ground, h: f32, bike: Mat4, bike_velocity: Vec3) -> bool {
-        self.previous = Some((self.position, self.orientation));
+        self.previous = Some((self.root, self.root_turn));
         self.time += h;
         if self.stage == Stage::Bail {
-            let at = bike * self.pelvis;
+            let (_, turn, at) = bike.to_scale_rotation_translation();
+            self.root = at;
+            self.root_turn = turn.normalize();
             self.velocity = bike_velocity;
-            self.position = at.w_axis.truncate();
-            self.orientation = orthonormal(Mat3::from_mat4(at));
-            if self.time >= self.bail_time {
-                // Let go with the pelvis's own speed and spin since the
-                // last pose, and fall.
-                if let Some((t, p, o)) = self.last.filter(|l| self.time - l.0 > 1e-3) {
+            let body = self.body();
+            self.position = body.w_axis.truncate();
+            // Let go once less than half a second of the bail motion is
+            // left (0x535d50, state 1: (frames − frame) / fps < 0.5).
+            let frame = (self.time * BAIL_FPS).floor();
+            if (self.bail_frames - frame) / BAIL_FPS < 0.5 {
+                // With the pelvis's own speed and turn since the last pose
+                // (0x537bf0): the turn as the cross of the old and new up
+                // rows, or of the forward rows when up hasn't moved.
+                if let Some((t, was)) = self.last.filter(|l| self.time - l.0 > 1e-3) {
                     let dt = self.time - t;
-                    self.velocity = (self.position - p) / dt;
-                    let (axis, angle) = Quat::from_mat3(&(self.orientation * o.transpose())).to_axis_angle();
-                    self.spin = axis * (angle / dt);
+                    self.velocity = (self.position - was.w_axis.truncate()) / dt;
+                    let (up0, up1) = (was.y_axis.truncate(), body.y_axis.truncate());
+                    let turn = if up0 != up1 {
+                        up0.cross(up1)
+                    } else {
+                        was.z_axis.truncate().cross(body.z_axis.truncate())
+                    };
+                    self.spin = self.root_turn.inverse() * (turn / dt);
+                } else {
+                    self.spin = Vec3::ZERO;
                 }
+                self.history = History::default();
                 self.stage = Stage::Tumble;
                 self.motion = self.pick(FALLS);
                 self.faded = self.time + FADE;
+                self.fading = true;
             }
             return false;
         }
         let was = self.position;
-        self.velocity.y -= GRAVITY * h;
-        self.position += self.velocity * h;
-        self.position += push_off_bike(bike, self.position) * h;
-        let angle = self.spin.length() * h;
-        if angle > 1e-6 {
-            let q = Mat3::from_quat(Quat::from_axis_angle(self.spin.normalize(), angle));
-            self.orientation = q * self.orientation;
-        }
+        self.integrate(h);
+        let push = push_off_bike(bike, self.body().w_axis.truncate()) * h;
+        self.root += push;
         if !self.probes.is_empty() {
             self.touch_probes(ground, h);
         } else if !self.points.is_empty() {
@@ -277,11 +365,14 @@ impl Wreck {
         } else {
             self.touch_sphere(ground, h);
         }
-        self.orientation = orthonormal(self.orientation);
-        if self.time >= self.faded {
+        self.position = self.body().w_axis.truncate();
+        if self.fading && self.time >= self.faded {
+            self.fading = false;
+            self.carry = true;
             if let Some(m) = self.queued.take() {
                 self.motion = m;
                 self.faded = self.time + FADE;
+                self.fading = true;
             }
         }
         // At rest by how far it moves: held on the ground, the body keeps
@@ -294,15 +385,110 @@ impl Wreck {
         self.still >= REST_TIME || self.time >= LONGEST
     }
 
-    /// The deepest posed corner in the ground, answered by 0x43cd50. The
-    /// game's swept collision stops the body at the surface; here it is
-    /// pushed out along the normal [likely]. One contact a step is what
-    /// the original's slides show (2026-10-24 recordings on SX01: speed
-    /// falls by about e each second down, the 0.99 per second of a single
-    /// contact).
+    /// PhysicsRigidBody::Step (0x4cc630) with the gravity model's force
+    /// (SelectiveGravityModel, 32.2 ft/s² × the mass): the centre of mass,
+    /// its velocity, the turn (a quaternion) and the turn rate (Euler's
+    /// equations, I⁻¹(−ω × Iω)) each take an Adams-Bashforth step; the
+    /// root is then put back round the moved centre of mass.
+    fn integrate(&mut self, h: f32) {
+        let centre = self.mass_centre_world();
+        let d_position = self.velocity;
+        let d_velocity = Vec3::new(0.0, -GRAVITY, 0.0);
+        let q = self.root_turn;
+        let w = self.spin;
+        let dq = q * Quat::from_xyzw(w.x, w.y, w.z, 0.0);
+        let d_turn = glam::Vec4::from(dq) * 0.5;
+        let d_spin = if self.inertia.min_element() > 0.0 {
+            -(w.cross(self.inertia * w)) / self.inertia
+        } else {
+            Vec3::ZERO
+        };
+        let k = h * 0.5;
+        let centre = centre + (d_position * 3.0 - self.history.position) * k;
+        self.velocity += (d_velocity * 3.0 - self.history.velocity) * k;
+        let turn = glam::Vec4::from(q) + (d_turn * 3.0 - self.history.turn) * k;
+        self.spin += (d_spin * 3.0 - self.history.spin) * k;
+        self.history = History { position: d_position, velocity: d_velocity, turn: d_turn, spin: d_spin };
+        self.root_turn = Quat::from_vec4(turn).normalize();
+        self.root = centre - self.root_turn * self.mass_centre;
+    }
+
+    /// ConstraintMethodCollisionModel::ApplyContactImpulse (0x43bdb0) for
+    /// a contact at `point` with the ground or an object along `normal`:
+    /// no bounce (+0xb8 = 0), only 5 % of the impulse that would stop the
+    /// point (1 − +0xf4), at most 2000 (+0xf8), through the body's mass
+    /// and inertia, so a contact off the centre of mass turns it; then the
+    /// speed and the turn rate are cut by 0.99 × the step (+0xf0).
+    fn contact_impulse(&mut self, point: Vec3, normal: Vec3, h: f32) {
+        let arm = point - self.mass_centre_world();
+        let world_spin = self.world_spin();
+        let moving = self.velocity + world_spin.cross(arm);
+        let num = -normal.dot(moving);
+        let inverse = self.root_turn.inverse();
+        let (arm_l, normal_l) = (inverse * arm, inverse * normal);
+        let inv_inertia = Vec3::ONE / self.inertia.max(Vec3::splat(1e-6));
+        let turn_term = ((arm_l.cross(normal_l) * inv_inertia).cross(arm_l)).dot(normal_l);
+        let mut j = num / (1.0 / MASS + turn_term) * (1.0 - IMPULSE_DROPPED);
+        if j > IMPULSE_MOST {
+            j = IMPULSE_MOST;
+        }
+        let impulse = normal * j;
+        let keep = 1.0 - h * DAMPING;
+        self.velocity = (self.velocity * MASS + impulse) / MASS * keep;
+        let momentum = self.inertia * self.spin + arm_l.cross(inverse * impulse);
+        self.spin = momentum * inv_inertia * keep;
+    }
+
+    /// The Wrecker's tumble (ConstraintMethodCollisionModel::Step,
+    /// 0x43c8a0): Rider.col's shapes meet the solid objects (the deepest
+    /// touch is answered with a contact impulse, 0x43b800, and the body is
+    /// pushed out by 1.005 × the overlap); then the deepest bone probe
+    /// under the ground takes the contact impulse along the ground's
+    /// normal at its point and the body is pushed out by 1.005 × its
+    /// depth. Only the ground contact counts as touching (+0x58).
+    fn touch_probes(&mut self, ground: &dyn Ground, h: f32) {
+        let place = self.body();
+        let mut out: Option<(f32, Vec3, Vec3)> = None;
+        for p in &self.points {
+            let at = place.transform_point3(*p);
+            if let Some(hit) = ground.solid(at, CORNER_RADIUS) {
+                if hit.depth > out.map_or(0.0, |o| o.0) {
+                    out = Some((hit.depth, hit.normal, at));
+                }
+            }
+        }
+        if let Some((depth, normal, at)) = out {
+            self.contact_impulse(at, normal, h);
+            self.root += normal * depth * 1.005;
+        }
+        let place = self.body();
+        let mut deepest: Option<(f32, Vec3, Vec3)> = None;
+        for p in &self.probes {
+            let at = place.transform_point3(*p);
+            let (height, normal) = ground.terrain(at.x, at.z);
+            if at.y < height && height - at.y > deepest.map_or(0.0, |d| d.0) {
+                deepest = Some((height - at.y, normal.normalize_or(Vec3::Y), at));
+            }
+        }
+        self.touching = deepest.is_some();
+        let Some((depth, normal, at)) = deepest else {
+            return;
+        };
+        // The impulse acts at the surface point less the push-out
+        // (bestPoint + offset), where the probe is.
+        self.contact_impulse(Vec3::new(at.x, at.y + depth, at.z) - normal * depth, normal, h);
+        self.root += normal * depth * 1.005;
+        if self.stage == Stage::Tumble {
+            self.stage = Stage::Down;
+            self.queued = Some(self.pick(HITS));
+        }
+    }
+
+    /// The deepest posed corner in the ground or an object, without the
+    /// bone probes: the same contact, pushed out along the normal.
     fn touch_parts(&mut self, ground: &dyn Ground, h: f32) {
         let place = self.body();
-        let mut deepest: Option<(f32, Vec3)> = None;
+        let mut deepest: Option<(f32, Vec3, Vec3)> = None;
         for p in &self.points {
             let at = place.transform_point3(*p);
             let (height, normal) = ground.terrain(at.x, at.z);
@@ -314,70 +500,15 @@ impl Wreck {
                 }
             }
             if touch.0 > deepest.map_or(0.0, |d| d.0) {
-                deepest = Some(touch);
+                deepest = Some((touch.0, touch.1, at));
             }
         }
         self.touching = deepest.is_some();
-        let Some((depth, normal)) = deepest else {
+        let Some((depth, normal, at)) = deepest else {
             return;
         };
-        self.position += normal * depth;
-        let into = self.velocity.dot(normal);
-        if into < 0.0 {
-            let push = ((1.0 - IMPULSE_DROPPED) * -into * MASS).min(IMPULSE_MOST);
-            self.velocity += normal * (push / MASS);
-        }
-        let keep = 1.0 - h * DAMPING;
-        self.velocity *= keep;
-        self.spin *= keep;
-        if self.stage == Stage::Tumble {
-            self.stage = Stage::Down;
-            self.queued = Some(self.pick(HITS));
-        }
-    }
-
-    /// The Wrecker's tumble (ConstraintMethodCollisionModel::Step,
-    /// 0x43c8a0): Rider.col's shapes are pushed out of the solid objects
-    /// (1.005 × the overlap, no impulse); then the deepest bone probe
-    /// under the ground takes the contact impulse along the ground's
-    /// normal at its point and the body is pushed out by 1.005 × its
-    /// depth. Only the ground contact counts as touching (+0x58).
-    fn touch_probes(&mut self, ground: &dyn Ground, h: f32) {
-        let place = self.body();
-        let mut out: Option<(f32, Vec3)> = None;
-        for p in &self.points {
-            let at = place.transform_point3(*p);
-            if let Some(hit) = ground.solid(at, CORNER_RADIUS) {
-                if hit.depth > out.map_or(0.0, |o| o.0) {
-                    out = Some((hit.depth, hit.normal));
-                }
-            }
-        }
-        if let Some((depth, normal)) = out {
-            self.position += normal * depth * 1.005;
-        }
-        let place = self.body();
-        let mut deepest: Option<(f32, Vec3)> = None;
-        for p in &self.probes {
-            let at = place.transform_point3(*p);
-            let (height, normal) = ground.terrain(at.x, at.z);
-            if at.y < height && height - at.y > deepest.map_or(0.0, |d| d.0) {
-                deepest = Some((height - at.y, normal.normalize_or(Vec3::Y)));
-            }
-        }
-        self.touching = deepest.is_some();
-        let Some((depth, normal)) = deepest else {
-            return;
-        };
-        self.position += normal * depth * 1.005;
-        let into = self.velocity.dot(normal);
-        if into < 0.0 {
-            let push = ((1.0 - IMPULSE_DROPPED) * -into * MASS).min(IMPULSE_MOST);
-            self.velocity += normal * (push / MASS);
-        }
-        let keep = 1.0 - h * DAMPING;
-        self.velocity *= keep;
-        self.spin *= keep;
+        self.contact_impulse(at, normal, h);
+        self.root += normal * depth;
         if self.stage == Stage::Tumble {
             self.stage = Stage::Down;
             self.queued = Some(self.pick(HITS));
@@ -386,10 +517,11 @@ impl Wreck {
 
     /// One sphere round the body's centre, until the parts are known.
     fn touch_sphere(&mut self, ground: &dyn Ground, h: f32) {
-        let (height, normal) = ground.terrain(self.position.x, self.position.z);
+        let centre = self.body().w_axis.truncate();
+        let (height, normal) = ground.terrain(centre.x, centre.z);
         let normal = normal.normalize_or(Vec3::Y);
-        let mut touch = ((height + RADIUS - self.position.y) * normal.y, normal);
-        if let Some(hit) = ground.solid(self.position, RADIUS) {
+        let mut touch = ((height + RADIUS - centre.y) * normal.y, normal);
+        if let Some(hit) = ground.solid(centre, RADIUS) {
             if hit.depth > touch.0 {
                 touch = (hit.depth, hit.normal);
             }
@@ -397,7 +529,7 @@ impl Wreck {
         let (depth, normal) = touch;
         self.touching = depth > 0.0;
         if depth > 0.0 {
-            self.position += normal * depth;
+            self.root += normal * depth;
             let into = self.velocity.dot(normal);
             if into < 0.0 {
                 self.velocity -= normal * into * (1.0 + BOUNCE);
@@ -442,11 +574,6 @@ pub fn fall(seed: u32) -> &'static str {
     FALLS[seed as usize % FALLS.len()]
 }
 
-fn orthonormal(m: Mat3) -> Mat3 {
-    let look = m.z_axis.normalize();
-    let right = m.y_axis.cross(look).normalize();
-    Mat3::from_cols(right, look.cross(right), look)
-}
 
 #[cfg(test)]
 mod tests {
@@ -482,7 +609,9 @@ mod tests {
             assert!(low > -1e-3, "{low}");
         }
         assert!(!rose, "bounced");
-        assert_eq!(w.spin, Vec3::ZERO);
+        // Touching off its centre of mass, the body turns, but no faster
+        // than a tumble.
+        assert!(w.world_spin().length() < 10.0, "{}", w.world_spin());
         assert!(w.velocity.x.abs() < 2.0, "{}", w.velocity);
     }
 
@@ -507,9 +636,10 @@ mod tests {
     }
 
     #[test]
-    fn a_bail_lets_go_at_half_its_motion_with_the_pelvis_speed() {
-        // LeftOver is 10 frames at 15 a second: let go at 1/3 s. The
-        // motion moves the pelvis forward 0.5 ft a frame, 30 ft/s.
+    fn a_bail_lets_go_half_a_second_before_its_motion_ends_with_the_pelvis_speed() {
+        // LeftOver is 10 frames at 15 a second: let go once fewer than
+        // 7.5 frames are left, at frame 3 (0.2 s). The motion moves the
+        // pelvis forward 0.5 ft a frame, 30 ft/s.
         let bike = Mat4::IDENTITY;
         let mut w = Wreck::new(bike, Vec3::ZERO, Vec3::ZERO, "LeftOver", true, 7);
         let h = 1.0 / 60.0;
@@ -517,7 +647,7 @@ mod tests {
             w.set_pose(Mat4::from_translation(RIDER_CENTRE + Vec3::Z * (0.5 * k as f32)), Vec::new());
             w.step(&crate::Flat, h, bike, Vec3::ZERO);
             let t = (k + 1) as f32 * h;
-            if t < 0.33 {
+            if t < 0.199 {
                 assert_eq!(w.stage, Stage::Bail, "{t}");
             } else {
                 assert_ne!(w.stage, Stage::Bail, "{t}");
