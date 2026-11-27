@@ -3954,6 +3954,7 @@ fn replay_setup(game: &Path, tape: &mm2_formats::vcr::Tape) -> Option<frontend::
                 cc: r.cc,
                 four_stroke: false,
                 own: false,
+                sizes: Vec::new(),
             },
             outfit: r.rider_skin.clone(),
             plate: plate_number(i),
@@ -4686,13 +4687,16 @@ async fn menu_screenshot(
     let view = target.create_view(&Default::default());
     sprites.render(&device, &mut encoder, &view, (w, h), true);
     let mut commands = vec![encoder.finish()];
-    // The Bike & Rider page's models, part way round.
+    // The Bike & Rider page's models, part way round (kept until the
+    // frame is in: its buffers go with it).
+    let mut _preview = None;
     if let Some((ride, _)) = front.preview() {
         let res = read_archive(&game.join("RES").join("BIKE.RES"))?;
         let res = rs2::Archive::parse(&res)?;
         if let Some(mut p) = preview::Preview::new(&device, &queue, &res, &ride, format) {
             p.window = front.preview_window();
             commands.push(p.render(&device, &queue, &view, (w, h), 2.0, 1.0, true));
+            _preview = Some(p);
         }
     }
     let last = commands.pop().unwrap();

@@ -827,6 +827,7 @@ impl Item {
             cc: self.cc,
             four_stroke: self.four_stroke,
             own: self.own(),
+            sizes: Vec::new(),
         }
     }
 

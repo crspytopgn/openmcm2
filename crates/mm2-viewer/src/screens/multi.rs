@@ -727,8 +727,8 @@ impl Multi {
     /// The Bike & Rider page.
     fn fill_bike(&mut self, cx: &mut Cx, d: &mut Dlg) {
         let g = &self.game;
-        let bikes = self.roster.bikes.iter().map(|b| b.name.clone()).collect();
-        let outfits = self.roster.outfits.iter().map(|o| o.name.clone()).collect();
+        // The Free Pack's kits named OpenMX beside the game's own.
+        let (bikes, outfits) = self.roster.shown();
         d.set_items("DDLBikes", bikes, g.bike);
         d.set_items("DDLRiders", outfits, g.outfit);
         let engines: Vec<String> = ENGINES.iter().map(|e| e.to_string()).collect();
@@ -741,7 +741,7 @@ impl Multi {
         d.set_items("DDLEngineSize", engines, size);
         // Open for a paint from the BIKES folder, as on the single player
         // page (0x4fdbca).
-        let own = self.roster.bikes.get(g.bike).is_some_and(|b| b.own);
+        let own = self.roster.bikes.get(g.bike).is_some_and(|b| b.own || b.sizes.len() > 1);
         d.enable("DDLEngineSize", own);
         d.enable("TxtEngineSize", own);
         d.enable("ButWrench", false);
@@ -1319,6 +1319,9 @@ impl Multi {
                         if b.own {
                             b.cc = [125, 250, 400, 500, 600][line];
                             b.four_stroke = name.contains("4-stroke");
+                        } else {
+                            // A Free Pack bike, in its size nearest.
+                            b.set_size([125, 250, 400, 500, 600][line]);
                         }
                     }
                     self.page(cx, 1);
