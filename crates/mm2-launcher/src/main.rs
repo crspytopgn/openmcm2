@@ -2126,7 +2126,7 @@ impl Launcher {
                 let asking = self.boards.fetching_races.is_some();
                 if ui
                     .add_enabled(!asking, egui::Button::new(if asking { "Looking…" } else { "Show open races" }))
-                    .on_hover_text("The races open in the server browser now. Join one from Multiplayer in the game.")
+                    .on_hover_text("The races open in the server browser now. To join one, start the game and pick the Multiplayer screen on the main menu, then the MSN Gaming Zone panel (or TCP/IP, Internet). Double-click a race in the list.")
                     .clicked()
                 {
                     self.boards.fetch_races(&url);
@@ -2138,7 +2138,7 @@ impl Launcher {
                     ui.label(look::weak(e));
                 }
                 Some(Ok(races)) if races.is_empty() => {
-                    ui.label(look::weak("No open races just now. Host one from Multiplayer in the game."));
+                    ui.label(look::weak("No open races just now. Host one in the game: Multiplayer, the Gaming Zone panel, then Host."));
                 }
                 Some(Ok(races)) => {
                     egui::Grid::new("open races").striped(true).num_columns(4).show(ui, |ui| {
@@ -2150,7 +2150,7 @@ impl Launcher {
                             ui.end_row();
                         }
                     });
-                    ui.label(look::weak("Join one from Multiplayer in the game: it's in the Host or Join list."));
+                    ui.label(look::weak("To join: start the game, open Multiplayer on the main menu and click the Gaming Zone panel. Double-click a race in the list, or type a race code a friend gave you on its last line."));
                 }
             }
         });
