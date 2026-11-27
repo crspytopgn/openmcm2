@@ -471,6 +471,7 @@ impl Frontend {
         // its own TCP/IP play, and the Gaming Zone's place (long closed)
         // opens the online races: the server browser.
         d.set_tip("ButZone", "Online races: join races and free roam servers from everywhere, or host your own");
+        d.set_tip("ButTCP", "Races on your home network or online, or join a friend by race code");
         for (name, on) in [
             ("ButTCP", true),
             ("ButIPX", false),

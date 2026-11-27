@@ -150,6 +150,8 @@ enum View {
         kind: Option<Box<Dlg>>,
         name: Option<Box<Dlg>>,
         address: bool,
+        /// A word for the player (a join that didn't work), on top.
+        notice: Option<Box<Dlg>>,
     },
     Lobby {
         base: Dlg,
@@ -183,6 +185,15 @@ pub struct Multi {
     /// host's game as last heard.
     share: crate::share::Share,
     heard_game: Option<GameInfo>,
+    /// The race line last clicked and when, for a double-click.
+    last_click: Option<(usize, f32)>,
+    /// A race code or address the player typed, and when: joined as soon
+    /// as it's found.
+    looking_for: Option<(String, f32)>,
+    /// When this player asked to join, until the host lets them in.
+    joining: Option<f32>,
+    /// The game's clock, for the box's waits.
+    now: f32,
 }
 
 /// The Event page's controls a joined player may not change.
@@ -216,36 +227,78 @@ enum Row {
     Ask,
 }
 
+/// How many letters of a race's name fit on its line of the list.
+const NAME_FITS: usize = 24;
+
+/// A race's name cut to fit its line.
+fn fit(name: &str) -> String {
+    let n: Vec<char> = name.trim().chars().collect();
+    if n.len() <= NAME_FITS {
+        return n.into_iter().collect();
+    }
+    let mut cut: String = n[..NAME_FITS - 3].iter().collect::<String>().trim_end().to_string();
+    cut.push_str("...");
+    cut
+}
+
 /// The Host or Join list's lines: the races in groups under headings
 /// (online first if Internet was picked), each saying when it has none,
-/// and last the line to type a race code or address. What each line is.
+/// and last the line to type a race code or address. A race from the
+/// server browser takes two lines, its name and under it where and how
+/// many, so both fit the box; either line picks it. What each line is.
 fn session_rows(found: &[net::Found], online: bool) -> (Vec<String>, Vec<Row>) {
-    let roam = |f: &net::Found| f.line.contains("(Free roam: ");
     let groups: [(&str, &str, Box<dyn Fn(&net::Found) -> bool>); 3] = [
         ("ON YOUR NETWORK", "  None found on your network", Box::new(|f: &net::Found| f.line.is_empty())),
-        ("ONLINE RACES", "  None open yet: Host one!", Box::new(move |f: &net::Found| !f.line.is_empty() && !roam(f))),
-        ("FREE ROAM (join any time)", "  None open right now", Box::new(move |f: &net::Found| roam(f))),
+        ("ONLINE RACES", "  None open yet: Host one!", Box::new(|f: &net::Found| !f.line.is_empty() && !f.roam)),
+        ("FREE ROAM (join any time)", "  None open right now", Box::new(|f: &net::Found| f.roam)),
     ];
     let order: [usize; 3] = if online { [1, 2, 0] } else { [0, 1, 2] };
     let (mut lines, mut rows) = (Vec::new(), Vec::new());
-    for g in order {
+    for (k, g) in order.into_iter().enumerate() {
         let (head, none, wanted) = &groups[g];
+        if k > 0 {
+            lines.push(String::new());
+            rows.push(Row::Note);
+        }
         lines.push(head.to_string());
         rows.push(Row::Note);
         let before = rows.len();
         for (i, f) in found.iter().enumerate().filter(|(_, f)| wanted(f)) {
-            lines.push(format!("  {}", f.shown()));
+            // Under the FREE ROAM heading, "Free Roam" in a server's
+            // name says it twice: "OpenMCM2 (Europe)".
+            let name = if f.roam { f.name.replacen(" Free Roam", "", 1) } else { f.name.clone() };
+            lines.push(format!("  {}", fit(&name)));
             rows.push(Row::Race(i));
+            if !f.line.is_empty() {
+                lines.push(format!("    {}", f.line));
+                rows.push(Row::Race(i));
+            }
         }
         if rows.len() == before {
             lines.push(none.to_string());
             rows.push(Row::Note);
         }
     }
+    lines.push(String::new());
+    rows.push(Row::Note);
     lines.push("> Join by race code or address...".into());
     rows.push(Row::Ask);
     (lines, rows)
 }
+
+/// The Host or Join box's tips, saying what each part does.
+const TIP_HOST: &str = "Start your own race: name it, then pick the event and track. Others join you from their list";
+const TIP_JOIN: &str = "Pick a race in the list first, then Join (or double-click the race)";
+const TIP_LIST: &str = "Open races. Click one, then Join. Got a race code from a friend? Use the last line";
+
+/// Seconds between two clicks on a race that join it.
+const DOUBLE_CLICK: f32 = 0.5;
+
+/// How long to look for a typed race code or address before saying it
+/// wasn't found, and how long a join may take before the lobby says why
+/// it may not be getting through.
+const LOOK_FOR: f32 = 10.0;
+const CONNECT_FOR: f32 = 15.0;
 
 impl Multi {
     /// The Host or Join box (`0x4b2bd0` open): no sessions, so Join is
@@ -259,9 +312,15 @@ impl Multi {
         dlg.set_items("LstSessions", Vec::new(), 0);
         dlg.enable("ButJoin", false);
         dlg.set_color("ButJoin", NOT_READY);
+        dlg.set_tip("ButHost", TIP_HOST);
+        dlg.set_tip("ButJoin", TIP_JOIN);
+        dlg.set_tip("LstSessions", TIP_LIST);
         let (title, prompt) = (cx.ui.lang(5096), cx.ui.lang(5118));
-        let kind =
-            super::MsgBox::ask(cx.ui, &title, &prompt, [5095, 5094, 5084]).map(|b| Box::new(b.dlg));
+        let kind = super::MsgBox::ask(cx.ui, &title, &prompt, [5095, 5094, 5084]).map(|mut b| {
+            b.dlg.set_tip("ButLeft", "Races on your home network first, then online ones. Both show the same list");
+            b.dlg.set_tip("ButMiddle", "Online races and free roam first, then your network's. Join by race code is there too");
+            Box::new(b.dlg)
+        });
         Some(Multi {
             view: View::HostJoin {
                 menu,
@@ -269,6 +328,7 @@ impl Multi {
                 kind,
                 address: false,
                 name: None,
+                notice: None,
             },
             game: Game::default(),
             session: String::new(),
@@ -284,6 +344,10 @@ impl Multi {
             sent: None,
             share: Default::default(),
             heard_game: None,
+            last_click: None,
+            looking_for: None,
+            joining: None,
+            now: cx.now,
         })
     }
 
@@ -965,6 +1029,12 @@ impl Multi {
                         }
                     }
                 }
+                Heard::Lost if self.joining.is_some() => {
+                    net::set(None);
+                    self.joining = None;
+                    self.say(format!("Couldn't get into {}: it may have closed, be full or be racing. Press Back to pick another race.", self.session));
+                    self.fill_players();
+                }
                 Heard::Lost => {
                     net::set(None);
                     // "<session> has disconnected".
@@ -972,6 +1042,16 @@ impl Multi {
                     self.fill_players();
                 }
                 _ => {}
+            }
+        }
+        // A join gets through when the host gives this player a place.
+        if let Some(t) = self.joining {
+            if net::with(|s| s.me != u8::MAX).unwrap_or(false) {
+                self.joining = None;
+                self.say("You're in! Pick your bike on Bike & Rider, then press Ready.".into());
+            } else if cx.now - t > CONNECT_FOR && t.is_finite() {
+                self.joining = Some(f32::INFINITY);
+                self.say("Still connecting... If nothing happens, press Back and try another race.".into());
             }
         }
         // The lobby downloads extra: ask for what's missing, send what's
@@ -1054,18 +1134,69 @@ impl Multi {
         self.rows = rows;
     }
 
+    /// A box with a word for the player and OK, over the Host or Join box.
+    fn tell(&mut self, cx: &mut Cx, title: &str, text: &str) {
+        let b = super::MsgBox::ask(cx.ui, title, text, [0, 5097, 0]);
+        if let (View::HostJoin { notice, name, address, .. }, Some(b)) = (&mut self.view, b) {
+            *notice = Some(Box::new(b.dlg));
+            *name = None;
+            *address = false;
+        }
+    }
+
+    /// Joins the race picked in the list, or says why it can't.
+    fn join_picked(&mut self, cx: &mut Cx) {
+        let found = self
+            .picked
+            .as_ref()
+            .and_then(|a| self.finder.as_ref()?.found.iter().find(|f| f.addr == *a).cloned());
+        let Some(f) = found else {
+            self.tell(cx, "Join a Game", "Click a race in the list first, then Join.");
+            return;
+        };
+        match net::Session::join(f.addr.clone(), self.me(cx)) {
+            Ok(s) => {
+                net::set(Some(s));
+                self.session = f.name.clone();
+                self.finder = None;
+                self.looking_for = None;
+                self.joining = Some(cx.now);
+                self.lobby(cx);
+                self.say(format!("Joining {}...", f.name));
+            }
+            Err(e) => {
+                eprintln!("joining {} at {}: {e}", f.name, f.addr);
+                self.tell(
+                    cx,
+                    "Can't join",
+                    &format!("Couldn't reach {}: {e}. It may have just closed. Pick another race or try again.", f.name),
+                );
+            }
+        }
+    }
+
+    /// Joins the typed race code or address once the list has it.
+    fn join_typed(&mut self, cx: &mut Cx) {
+        let Some((typed, _)) = self.looking_for.clone() else { return };
+        let at = self.finder.as_ref().and_then(|f| f.found.iter().find(|x| net::is_at(&x.addr, &typed))).map(|x| x.addr.clone());
+        if let Some(addr) = at {
+            self.looking_for = None;
+            self.picked = Some(addr);
+            self.join_picked(cx);
+        }
+    }
+
     fn host_join_event(&mut self, cx: &mut Cx, e: Event) -> Go {
-        let View::HostJoin {
-            dlg,
-            name,
-            address,
-            kind,
-            ..
-        } = &mut self.view
-        else {
+        let clicked = |n: &str| matches!(&e, Event::Clicked(c) if c.eq_ignore_ascii_case(n));
+        if let View::HostJoin { notice: notice @ Some(_), .. } = &mut self.view {
+            if clicked("ButMiddle") {
+                *notice = None;
+            }
+            return Go::Stay;
+        }
+        let View::HostJoin { dlg, name, address, kind, .. } = &mut self.view else {
             return Go::Stay;
         };
-        let clicked = |n: &str| matches!(&e, Event::Clicked(c) if c.eq_ignore_ascii_case(n));
         if kind.is_some() {
             // LAN looks on the local network; Internet asks for the host.
             if clicked("ButLeft") {
@@ -1089,11 +1220,16 @@ impl Multi {
                     .get("EditBox")
                     .and_then(|c| c.text.clone())
                     .unwrap_or_default();
-                if let (false, Some(f)) = (host.trim().is_empty(), &mut self.finder) {
-                    f.hosts.push(host.trim().to_string());
-                }
                 *name = None;
                 *address = false;
+                let host = host.trim().to_string();
+                if let (false, Some(f)) = (host.is_empty(), &mut self.finder) {
+                    f.hosts.push(host.clone());
+                    // Joined as soon as it's found (a race code at once).
+                    self.looking_for = Some((host, cx.now));
+                    self.list_sessions();
+                    self.join_typed(cx);
+                }
             } else if done {
                 let session = box_
                     .get("EditBox")
@@ -1102,11 +1238,16 @@ impl Multi {
                 if !session.trim().is_empty() {
                     self.session = session.trim().to_string();
                     match net::Session::host(&self.session, self.me(cx)) {
-                        Ok(s) => net::set(Some(s)),
-                        Err(e) => eprintln!("hosting {}: {e}", self.session),
+                        Ok(s) => {
+                            net::set(Some(s));
+                            self.finder = None;
+                            self.lobby(cx);
+                        }
+                        Err(e) => {
+                            eprintln!("hosting {}: {e}", self.session);
+                            self.tell(cx, "Can't host", &format!("Couldn't start a race on this computer: {e}. Is the game already hosting in another window?"));
+                        }
                     }
-                    self.finder = None;
-                    self.lobby(cx);
                 }
             } else if clicked("CancelButton") {
                 *name = None;
@@ -1121,13 +1262,26 @@ impl Multi {
                 match self.rows.get(*line).copied() {
                     Some(Row::Race(i)) => {
                         self.picked = self.finder.as_ref().and_then(|f| f.found.get(i)).map(|f| f.addr.clone());
+                        // Both of a race's lines pick it: mark its name.
+                        if let Some(top) = self.rows.iter().position(|r| *r == Row::Race(i)) {
+                            dlg.mark("LstSessions", Some(top));
+                        }
+                        let again = self.last_click.is_some_and(|(j, t)| j == i && cx.now - t < DOUBLE_CLICK);
+                        self.last_click = Some((i, cx.now));
+                        if again {
+                            self.join_picked(cx);
+                            return Go::Stay;
+                        }
                     }
                     Some(Row::Ask) => {
                         self.picked = None;
                         *name = Self::address_box(cx).map(Box::new);
                         *address = name.is_some();
                     }
-                    _ => self.picked = None,
+                    _ => {
+                        self.picked = None;
+                        dlg.mark("LstSessions", None);
+                    }
                 }
                 let on = self.picked.is_some();
                 dlg.enable("ButJoin", on);
@@ -1136,21 +1290,7 @@ impl Multi {
             return Go::Stay;
         }
         if clicked("ButJoin") {
-            let found = self
-                .picked
-                .as_ref()
-                .and_then(|a| self.finder.as_ref()?.found.iter().find(|f| f.addr == *a).cloned());
-            if let Some(f) = found {
-                match net::Session::join(f.addr.clone(), self.me(cx)) {
-                    Ok(s) => {
-                        net::set(Some(s));
-                        self.session = f.name;
-                        self.finder = None;
-                        self.lobby(cx);
-                    }
-                    Err(e) => eprintln!("joining {} at {}: {e}", f.name, f.addr),
-                }
-            }
+            self.join_picked(cx);
             return Go::Stay;
         }
         if clicked("ButHost") {
@@ -1361,6 +1501,9 @@ impl Screen for Multi {
                 ..
             } => vec![menu, k],
             View::HostJoin {
+                menu, dlg, notice: Some(n), ..
+            } => vec![menu, dlg, n],
+            View::HostJoin {
                 menu, dlg, name, ..
             } => match name {
                 Some(n) => vec![menu, dlg, n],
@@ -1388,6 +1531,12 @@ impl Screen for Multi {
 
     fn escape(&mut self, cx: &mut Cx) -> Go {
         match &mut self.view {
+            View::HostJoin { notice: Some(_), .. } => {
+                if let View::HostJoin { notice, .. } = &mut self.view {
+                    *notice = None;
+                }
+                Go::Stay
+            }
             View::HostJoin { name: Some(_), .. } => {
                 if let View::HostJoin { name, address, .. } = &mut self.view {
                     *name = None;
@@ -1449,6 +1598,18 @@ impl Screen for Multi {
     }
 
     fn tick(&mut self, cx: &mut Cx) -> Go {
+        self.now = cx.now;
+        if let Some((typed, since)) = self.looking_for.clone() {
+            self.join_typed(cx);
+            if self.looking_for.is_some() && cx.now - since > LOOK_FOR {
+                self.looking_for = None;
+                self.tell(
+                    cx,
+                    "Join a Game",
+                    &format!("No race found at {typed}. Check the race code or address with the host (race codes are 6 letters, shown in the host's lobby chat)."),
+                );
+            }
+        }
         if let (View::HostJoin { dlg, .. }, Some(f)) = (&mut self.view, &mut self.finder) {
             let changed = f.tick();
             if changed || self.rows.is_empty() {

@@ -38,7 +38,7 @@ pub fn parse(text: &str) -> Vec<OpenRace> {
             }
             Some(OpenRace {
                 address: f[0].to_string(),
-                name: crate::laps::clean(f[1]),
+                name: crate::laps::clean_title(f[1]),
                 event: f[2].parse().unwrap_or(0),
                 track: crate::laps::clean(f[3]),
                 players: f[4].parse().unwrap_or(1),

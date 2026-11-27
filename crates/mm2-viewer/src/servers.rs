@@ -142,12 +142,30 @@ impl Browser {
     }
 }
 
-/// A race's line in the Host or Join box's list: its name, then where and
-/// how many.
+/// A free roam server's race: its track says so ("Free roam: <track>").
+pub fn is_roam(r: &OpenRace) -> bool {
+    r.track.starts_with(ROAM)
+}
+const ROAM: &str = "Free roam: ";
+
+/// A race's second line in the Host or Join box's list, under its name:
+/// where, how many, and whether it's racing now. Short, to fit the box.
 pub fn line(r: &OpenRace) -> String {
-    let place = if r.track.is_empty() { races::event_name(r.event).to_string() } else { r.track.clone() };
-    let racing = if r.racing { ", racing" } else { "" };
-    format!("{}  ({place}, {}/{}{racing})", r.name, r.players, crate::net::MAX_PLAYERS)
+    let track = r.track.strip_prefix(ROAM).unwrap_or(&r.track);
+    let place = if track.is_empty() { races::event_name(r.event).to_string() } else { track.to_string() };
+    let most = crate::net::MAX_PLAYERS;
+    let (count, racing) = match (is_roam(r), r.racing) {
+        (true, _) => (format!("{}/{most} riding", r.players), ""),
+        (false, true) => (format!("{}/{most}", r.players), " racing"),
+        (false, false) => (format!("{}/{most}", r.players), ""),
+    };
+    // The place gives way: the count always shows.
+    let room = 26usize.saturating_sub(count.len() + racing.len() + 2);
+    let mut place: String = place.trim().chars().collect();
+    if place.chars().count() > room {
+        place = place.chars().take(room.saturating_sub(2)).collect::<String>().trim_end().to_string() + "..";
+    }
+    format!("{place}  {count}{racing}")
 }
 
 #[cfg(test)]

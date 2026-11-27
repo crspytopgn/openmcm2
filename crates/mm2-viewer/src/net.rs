@@ -1134,15 +1134,36 @@ pub struct Found {
     pub name: String,
     pub addr: Addr,
     /// For a race from the server browser, its list line
-    /// ([`crate::servers::line`]); empty for one found nearby or asked.
+    /// ([`crate::servers::line`]): where and how many; empty for one
+    /// found nearby or asked.
     pub line: String,
+    /// A free roam server's (riders drop in and out any time).
+    pub roam: bool,
 }
 
 impl Found {
     /// Its line in the Host or Join box's list.
     pub fn shown(&self) -> String {
-        if self.line.is_empty() { self.name.clone() } else { self.line.clone() }
+        if self.line.is_empty() { self.name.clone() } else { format!("{}  ({})", self.name, self.line) }
     }
+}
+
+/// Whether a race found is the one at `typed`, a race code or address
+/// as the player typed it (an address with or without its port).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn is_at(addr: &Addr, typed: &str) -> bool {
+    let t = typed.trim();
+    match addr {
+        Addr::Code(c) => c.eq_ignore_ascii_case(t),
+        Addr::Room(u) => u == t,
+        Addr::Ip(a) => {
+            t.parse::<SocketAddr>().is_ok_and(|s| s == *a) || t.parse::<std::net::IpAddr>().is_ok_and(|i| i == a.ip())
+        }
+    }
+}
+#[cfg(target_arch = "wasm32")]
+pub fn is_at(addr: &Addr, typed: &str) -> bool {
+    addr.trim().eq_ignore_ascii_case(typed.trim())
 }
 
 /// Adds the server browser's races to `found`, after those found nearby.
@@ -1161,7 +1182,7 @@ fn add_listed(found: &mut Vec<Found>, browser: &mut crate::servers::Browser) -> 
         #[cfg(target_arch = "wasm32")]
         let addr = r.address.clone();
         if !found.iter().any(|f| f.addr == addr) {
-            found.push(Found { name: r.name.clone(), addr, line: crate::servers::line(r) });
+            found.push(Found { name: r.name.clone(), addr, line: crate::servers::line(r), roam: crate::servers::is_roam(r) });
         }
     }
     true
@@ -1245,7 +1266,7 @@ impl Finder {
             }
             if !self.found.iter().any(|f| f.addr == addr) {
                 let at = self.found.iter().position(|f| !f.line.is_empty()).unwrap_or(self.found.len());
-                self.found.insert(at, Found { name, addr, line: String::new() });
+                self.found.insert(at, Found { name, addr, line: String::new(), roam: false });
                 changed = true;
             }
         }
@@ -1255,7 +1276,7 @@ impl Finder {
                     let Addr::Code(name) = &addr else { continue };
                     let name = format!("Race {name}");
                     let at = self.found.iter().position(|f| !f.line.is_empty()).unwrap_or(self.found.len());
-                    self.found.insert(at, Found { name, addr, line: String::new() });
+                    self.found.insert(at, Found { name, addr, line: String::new(), roam: false });
                     changed = true;
                 }
             }
@@ -1646,7 +1667,7 @@ mod web {
                 }
                 if !self.found.iter().any(|x| x.addr == addr) {
                     let at = self.found.iter().position(|x| !x.line.is_empty()).unwrap_or(self.found.len());
-                    self.found.insert(at, Found { name, addr, line: String::new() });
+                    self.found.insert(at, Found { name, addr, line: String::new(), roam: false });
                     changed = true;
                 }
             }
