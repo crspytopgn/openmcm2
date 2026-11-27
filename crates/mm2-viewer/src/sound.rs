@@ -863,14 +863,13 @@ impl RaceSounds {
             (true, 3..) => 2,
             _ => 1,
         };
-        // With the free graphics picked, the free pack's own recordings for
-        // each class, else the original's samples for the class's section.
-        // With the original's files (the full game, or the demo with the
-        // pack filling in its gaps), the original's samples come first, on
-        // the free tracks too; the pack's only stand in for a class they lack.
-        // The freshened engines are the original's, so they go with the
-        // MM2 graphics: the free version sounds like the free version.
-        let pack_first = crate::freepack::chosen();
+        // With the Free Pack's sounds (the free graphics' unless the MM2
+        // sounds are picked), the pack's own recordings for each class.
+        // With the MM2 sounds (the full game's, or the demo's; the MM2
+        // graphics' unless the Free Pack's are picked), the original's
+        // samples come first, on the free tracks and the free bikes too;
+        // the pack's only stand in when the files have no engine at all.
+        let pack_first = !crate::freepack::mm2_sounds();
         let freshen = crate::freshen::on();
         let engine_res = res;
         let mut banks: [Option<Bank>; 5] = Default::default();
@@ -884,19 +883,17 @@ impl RaceSounds {
                     .or_else(|| options.sixteen_bit.then(|| Bank::load(engine_res, false, class, divisor(c), freshen)).flatten())
             };
             let original = || section(CLASSES[ORIGINAL[c]]);
-            // With the original sounds untouched (the player's pick), a
-            // class the files lack rides another class's original samples
-            // before the pack's: the demo has only the 250's, so every
-            // bike in it sounds like the demo.
+            // With the MM2 sounds, a class the files lack rides another
+            // class's samples before the pack's: the demo has only the
+            // 250's, so every bike sounds like the demo, the Free Pack's
+            // bikes too.
             let borrowed = || {
                 [1, 2, 0].into_iter().filter(|&k| k != ORIGINAL[c]).find_map(|k| section(CLASSES[k]))
             };
             banks[c] = if pack_first {
                 pack().or_else(original)
-            } else if !freshen {
-                original().or_else(borrowed).or_else(pack)
             } else {
-                original().or_else(pack)
+                original().or_else(borrowed).or_else(pack)
             };
             if banks[c].is_none() {
                 eprintln!("no [{}] engine sounds", CLASSES[c]);

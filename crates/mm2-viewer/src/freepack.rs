@@ -77,6 +77,53 @@ pub fn original_res() -> Option<PathBuf> {
     (has("BIKE.RES") || has("ENGINE.RES") || has("AUDIO.RES")).then_some(res)
 }
 
+/// Which sounds the player picked: 0 not said (they go with the
+/// graphics), 1 the MM2 files' (or the demo's), 2 the Free Pack's.
+static SOUNDS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// The folder the picked sounds come from when the graphics don't have
+/// them: the MM2 files' (or the demo's) under the free graphics, the
+/// Free Pack's under the MM2 graphics.
+static SOUNDS_FROM: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Picks the sounds (`--sounds mm2|free`, `--sounds-from DIR`).
+pub fn set_sounds(mm2: bool, from: Option<PathBuf>) {
+    SOUNDS.store(if mm2 { 1 } else { 2 }, std::sync::atomic::Ordering::Relaxed);
+    if let Some(dir) = from {
+        let _ = SOUNDS_FROM.set(dir);
+    }
+}
+
+/// Whether the race plays the MM2 files' sounds (the demo's too), the
+/// pack's only filling in what they lack, rather than the pack's own.
+pub fn mm2_sounds() -> bool {
+    match SOUNDS.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => sound_game().is_some(),
+        2 => false,
+        _ => !chosen(),
+    }
+}
+
+/// The game folder the MM2 sounds come from: the game's own, or under
+/// the free graphics the one `--sounds-from` named (in a browser, the
+/// files kept on the page, at `/game`).
+fn sound_game() -> Option<PathBuf> {
+    let has = |g: &std::path::Path| {
+        let res = g.join("RES");
+        crate::fs::is_file(res.join("ENGINE.RES")) || crate::fs::is_file(res.join("AUDIO.RES"))
+    };
+    if !chosen() {
+        return GAME.get().cloned().filter(|g| has(g));
+    }
+    let given = SOUNDS_FROM.get().cloned().or_else(|| cfg!(target_arch = "wasm32").then(|| PathBuf::from("/game")));
+    given.filter(|g| has(g))
+}
+
+/// The `RES` folder of the MM2 sounds, when they are picked or go with
+/// the graphics.
+pub fn sound_res() -> Option<PathBuf> {
+    mm2_sounds().then(sound_game).flatten().map(|g| g.join("RES"))
+}
+
 /// Whether the player picked the free graphics (`--freepack`), rather
 /// than a pack set up beside the original's files.
 pub fn chosen() -> bool {
@@ -140,13 +187,24 @@ pub fn root() -> Option<PathBuf> {
 
 /// The pack's engine sample folder for one class (`"125"` ... `"600"`).
 pub fn engine_dir(class: &str) -> Option<PathBuf> {
-    let dir = root()?.join("sound").join("engine").join(class);
+    let dir = sound_pack()?.join("sound").join("engine").join(class);
     crate::fs::is_dir(&dir).then_some(dir)
+}
+
+/// The pack the race's sounds come from: the one in use, or the one
+/// `--sounds free --sounds-from DIR` named under the MM2 graphics.
+fn sound_pack() -> Option<PathBuf> {
+    root().or_else(|| {
+        (SOUNDS.load(std::sync::atomic::Ordering::Relaxed) == 2)
+            .then(|| SOUNDS_FROM.get().cloned())
+            .flatten()
+            .filter(|d| crate::fs::is_dir(d))
+    })
 }
 
 /// The pack's race effects folder.
 pub fn fx_dir() -> Option<PathBuf> {
-    let dir = root()?.join("sound").join("fx");
+    let dir = sound_pack()?.join("sound").join("fx");
     crate::fs::is_dir(&dir).then_some(dir)
 }
 

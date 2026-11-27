@@ -209,6 +209,20 @@ fn main() -> Result<(), BoxError> {
     if let Some(dir) = flag("--freepack").map(String::as_str).or_else(|| args.iter().find_map(|a| a.strip_prefix("--freepack="))) {
         freepack::set_root(PathBuf::from(dir));
     }
+    // The sounds, picked against the graphics: `--sounds mm2|free`
+    // (`--sounds=mm2` from a browser page's address), and the folder they
+    // come from, `--sounds-from DIR`.
+    let given = |name: &str| {
+        flag(name).filter(|v| !v.starts_with("--")).cloned().or_else(|| {
+            let eq = format!("{name}=");
+            args.iter().find_map(|a| a.strip_prefix(eq.as_str()).map(String::from))
+        })
+    };
+    match given("--sounds").as_deref() {
+        Some("mm2") => freepack::set_sounds(true, given("--sounds-from").map(PathBuf::from)),
+        Some("free") => freepack::set_sounds(false, given("--sounds-from").map(PathBuf::from)),
+        _ => {}
+    }
     // The pack beside a cut-down game (the demo), filling in what it lacks.
     if let Some(dir) = flag("--fill-from").map(String::as_str).or_else(|| args.iter().find_map(|a| a.strip_prefix("--fill-from="))) {
         freepack::set_fill(PathBuf::from(dir));
@@ -3856,7 +3870,7 @@ fn tag_say(race: &mut Race) {
 /// picked, the game's own `RES` (the full game's or the demo's) gives the
 /// bikes their original sounds there too, and the pack only fills in.
 fn sound_res(track_res: Option<&Path>) -> Option<PathBuf> {
-    freepack::original_res().or_else(|| track_res.map(Path::to_path_buf))
+    freepack::sound_res().or_else(freepack::original_res).or_else(|| track_res.map(Path::to_path_buf))
 }
 
 fn listener(r: &Race, eye: Vec3, target: Vec3) -> sound::Listener {

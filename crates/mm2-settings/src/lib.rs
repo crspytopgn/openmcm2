@@ -364,6 +364,11 @@ pub struct Settings {
     /// layout, `--new-menus`), with either graphics; `menus=original` (the
     /// default) keeps the original game's, which need its files.
     pub new_menus: bool,
+    /// `sounds=mm2` or `sounds=free`: the bikes' engines and the race's
+    /// sounds from the MM2 files (or the demo's), or the Free Pack's own
+    /// recordings, with either graphics (`--sounds mm2|free`). Not said
+    /// (None): they go with the graphics.
+    pub sounds: Option<bool>,
     /// `menus_pack`: a folder with only the new look menus (the Free
     /// Pack's menus part), for the new menus with the original graphics
     /// when the whole Free Pack isn't there. The Free Pack wins if both are.
@@ -777,6 +782,7 @@ impl Default for Settings {
             game: None,
             free_graphics: false,
             new_menus: false,
+            sounds: None,
             freepack: None,
             menus_pack: None,
             hires: None,
@@ -900,6 +906,7 @@ impl Settings {
                 "game" if !v.is_empty() => s.game = Some(v.into()),
                 "graphics" => s.free_graphics = v == "free",
                 "menus" => s.new_menus = v == "new",
+                "sounds" => s.sounds = match v { "mm2" => Some(true), "free" => Some(false), _ => None },
                 "freepack" if !v.is_empty() => s.freepack = Some(v.into()),
                 "menus_pack" if !v.is_empty() => s.menus_pack = Some(v.into()),
                 "hires" if !v.is_empty() => s.hires = Some(v.into()),
@@ -1038,11 +1045,16 @@ impl Settings {
             b(self.forgiving_landings),
         );
         t += &format!(
-            "graphics={}\nfreepack={}\nmenus={}\nmenus_pack={}\n",
+            "graphics={}\nfreepack={}\nmenus={}\nmenus_pack={}\nsounds={}\n",
             if self.free_graphics { "free" } else { "original" },
             p(&self.freepack),
             if self.new_menus { "new" } else { "original" },
-            p(&self.menus_pack)
+            p(&self.menus_pack),
+            match self.sounds {
+                Some(true) => "mm2",
+                Some(false) => "free",
+                None => "",
+            }
         );
         t += &self.more.text();
         t += &format!("look={}\n", self.look);
@@ -1092,6 +1104,24 @@ impl Settings {
                     Some(_) => a.push("--original-menus".into()),
                     None => {}
                 }
+            }
+            _ => {}
+        }
+        // The sounds, when picked against the graphics: the MM2 files'
+        // (the demo's too) over the free graphics, or the Free Pack's over
+        // the MM2 graphics, from that folder.
+        match self.sounds {
+            Some(true) if self.free_graphics && self.game.is_some() => {
+                a.push("--sounds".into());
+                a.push("mm2".into());
+                a.push("--sounds-from".into());
+                a.push(self.game.as_ref().unwrap().display().to_string());
+            }
+            Some(false) if !self.free_graphics && self.freepack.is_some() => {
+                a.push("--sounds".into());
+                a.push("free".into());
+                a.push("--sounds-from".into());
+                a.push(self.freepack.as_ref().unwrap().display().to_string());
             }
             _ => {}
         }
