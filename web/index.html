@@ -258,6 +258,13 @@
         <button type="button" id="readynewmenus" role="radio" aria-checked="false"
           title="The same menus and buttons, redrawn in a new style.">New look</button>
       </div>
+      <span class="switchname" id="soundsname">Sounds</span>
+      <div class="seg" role="radiogroup" aria-label="Sounds" id="soundsseg">
+        <button type="button" id="readyorigsounds" role="radio" aria-checked="false"
+          title="The engines and every other sound exactly as they are in your MM2 or demo files, nothing changed. The demo only has the 250s' engine, so every bike in it sounds like the demo's 250.">Original</button>
+        <button type="button" id="readyfreshsounds" role="radio" aria-checked="true"
+          title="The engines from your MM2 or demo files given a little more life as they load: a fuller tone, a touch more bite and loops with no clicks. Bikes the demo has no engine for use the Free Pack's recordings.">Freshened</button>
+      </div>
     </div>
     <p id="readysum" aria-live="polite"></p>
     <div class="row">
@@ -870,7 +877,30 @@ settings.setIntroStore({
   },
 });
 if (s.intro_video) introFile = await fs.keptIntro().catch(() => null);
-settings.render($("lookbox"), $("settings"), s, () => (look = s.enhanced ? "enhanced" : "original"));
+const renderSettings = () =>
+  settings.render($("lookbox"), $("settings"), s, () => {
+    look = s.enhanced ? "enhanced" : "original";
+    showSounds();
+  });
+// The Ready card's Sounds switch: the original sounds from the player's
+// files untouched, or freshened (the setting "Original engine sounds,
+// untouched" under Settings, the same choice).
+function showSounds() {
+  if (!$("readyorigsounds")) return;
+  $("readyorigsounds").setAttribute("aria-checked", String(!!s.no_fresh_sounds));
+  $("readyfreshsounds").setAttribute("aria-checked", String(!s.no_fresh_sounds));
+}
+for (const [id, original] of [["readyorigsounds", true], ["readyfreshsounds", false]]) {
+  $(id).addEventListener("click", () => {
+    s.no_fresh_sounds = original;
+    settings.save(s);
+    renderSettings();
+    showSounds();
+    readySummary();
+  });
+}
+renderSettings();
+showSounds();
 // The game reads its options from the address: the settings' options,
 // and whatever else the address holds (such as a race to join).
 function setLookInAddress() {
@@ -2585,11 +2615,12 @@ function readySummary() {
   const demo = isDemo(kept);
   const freeReady = free && !!(keptPack || downloaded);
   const menus = menusNew() ? "the new look menus" : "the original menus";
+  const sound = s.no_fresh_sounds ? "original sounds, untouched" : "freshened original sounds";
   el.textContent = freeReady
     ? `Plays the free version: all-new bikes, tracks and sound, with ${menus}.`
     : demo
-      ? `Plays the demo with ${menus}: original bikes and sound, the real Voodoo Basin (National) and Donner Pass (Stunt Quarry) tracks, and Free Pack tracks for the other events.`
-      : `Plays your Motocross Madness 2 with ${menus}.`;
+      ? `Plays the demo with ${menus} and ${sound}: original bikes, the real Voodoo Basin (National) and Donner Pass (Stunt Quarry) tracks, and Free Pack tracks for the other events.`
+      : `Plays your Motocross Madness 2 with ${menus} and ${sound}.`;
 }
 // Ready (one Play button) or the choice, as the files kept and the last
 // pick have it.
@@ -2628,6 +2659,8 @@ function layout() {
   $("readyoldmenus").title = demo
     ? "The menus exactly as Motocross Madness 2 had them, from the demo. Screens the demo lacks come from the Free Pack."
     : "The menus exactly as Motocross Madness 2 had them, from your MM2 files.";
+  // The free version plays its own recordings: no sounds to pick.
+  $("soundsname").hidden = $("soundsseg").hidden = freeReady;
   $("readymm2").setAttribute("aria-checked", String(!freeReady));
   $("readyfree").setAttribute("aria-checked", String(freeReady));
   for (const id of ["readymm2", "readyfree"]) $(id).setAttribute("aria-disabled", String(!both));
