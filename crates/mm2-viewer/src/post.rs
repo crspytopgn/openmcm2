@@ -645,13 +645,14 @@ impl Post {
         let globals = PostGlobals {
             inv_proj: proj.inverse().to_cols_array_2d(),
             size: [w, h, 1.0 / w, 1.0 / h],
-            // z: 1 the neutral tone curve, 2 the film-like one (only for the
-            // free graphics: the original's art keeps its own colours).
+            // z: 1 the neutral tone curve, 2 the film-like one (only on the
+            // free graphics' own tracks: the original's art keeps its own
+            // colours, even with the Free Pack filling in beside it).
             flags: [
                 ao as u32 as f32,
                 bloom as u32 as f32,
                 match showing {
-                    Some(e) if e.filmic && crate::freepack::root().is_some() => 2.0,
+                    Some(e) if e.filmic && crate::freepack::free_art() => 2.0,
                     Some(_) => 1.0,
                     None => 0.0,
                 },
