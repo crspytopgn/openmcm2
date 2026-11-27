@@ -256,6 +256,10 @@ pub struct Followed {
     /// The rear tyre is more than 2 ft off the ground (0x4980a0's
     /// rear depth below −2).
     pub high: bool,
+    /// The rear tyre (the wheel with the engine) is within half a foot of
+    /// the ground: its depth (+0x150) above −0.5, which is when the chase
+    /// camera rises over the ground ahead (0x531b80).
+    pub rear_near: bool,
     /// How fast the tyres turn the bike's way, rad/s (+0x43c); worked out
     /// from the velocity when the bike doesn't say.
     pub turn_rate: Option<f32>,
@@ -553,8 +557,9 @@ impl Chase {
         };
         let mut look = self.lead + direction;
         look.y += offset;
-        // Over rising ground ahead of a bike on the ground.
-        if !bike.airborne {
+        // Over rising ground ahead, while the rear tyre is within half a
+        // foot of the ground (0x531b80; not just on it).
+        if bike.rear_near {
             let reach = self.pitch.abs() * std::f32::consts::FRAC_2_PI * 1.2 + 0.3;
             let ahead = self.lead + direction * reach;
             let floor = ground(terrain, ahead.x, ahead.z);

@@ -428,12 +428,13 @@ impl Hud {
     fn draw_gauges(&mut self, ui: &mut Ui, gfx: &mut Gfx, race: &Race, dt: f32) {
         let bike = &race.racers[race.player].bike;
 
-        // Speedometer.
+        // Speedometer (0x51dfc0): the bike's speed whichever way it goes
+        // (+0xbc, |velocity|), not just along its nose.
         if bike.airborne() {
             // 0.5 mph a frame at the game's 30 frames a second.
             self.shown = (self.shown - 0.5 * dt * 30.0).max(0.0);
         } else {
-            self.shown = bike.speed().abs() * MPH;
+            self.shown = bike.linear_speed() * MPH;
         }
         let c = [SPEEDO.0 + NEEDLE_CENTRE.0, SPEEDO.1 + NEEDLE_CENTRE.1];
         let at = |mph: f32, out: f32| {

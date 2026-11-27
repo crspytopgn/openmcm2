@@ -1991,7 +1991,7 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
     }
     // The first three on the podium after the race; the rest are hidden.
     if let Some(stand) = &track.podium {
-        let shown = race.podium.as_ref().map(|(p, start)| (p, *start, race.standings()));
+        let shown = race.podium.as_ref().map(|(p, start)| (p, *start, race.podium_order.clone().unwrap_or_else(|| race.standings())));
         for (k, &model) in stand.models.iter().enumerate() {
             let place = shown.as_ref().filter(|(p, ..)| p.model() == k).map(|(p, ..)| p.place());
             renderer.set_object_place(model, place.unwrap_or(hidden(Mat4::IDENTITY)));
@@ -3321,6 +3321,9 @@ fn plate_number(rider: usize) -> u32 {
 
 /// Which of them the player rides.
 const PLAYER: usize = 0;
+/// Each racer's place on the next start grid, from 0, when not their
+/// own (a series' grid by points); taken by `start_grid`.
+static GRID_ORDER: std::sync::Mutex<Vec<usize>> = std::sync::Mutex::new(Vec::new());
 /// Riders when the command line starts a race: the player and three.
 const RIDERS: usize = 4;
 /// `--spawn x,z,heading`: where the first bike stands instead, to replay
@@ -3354,6 +3357,7 @@ fn start_grid(
         }
     }
     skins.resize(animations.len(), None);
+    let grid_order = std::mem::take(&mut *GRID_ORDER.lock().unwrap_or_else(|e| e.into_inner()));
     // Without the stock grid's bikes (the demo has two of the game's), the
     // computer's riders ride the game's own bikes it does have, on every
     // track, before the free pack's.
@@ -3415,8 +3419,10 @@ fn start_grid(
             (bike, rider, skin) = (GHOST.0.into(), GHOST.1.into(), None);
         }
         // All in one row, each in its slot (0x422030): the player in the
-        // first, the computer's riders after.
-        let mut at = start.layout.slot(start.position, d, i + 1, riders.max(1));
+        // first, the computer's riders after; in a series after its first
+        // race, by the points (0x45d5a0).
+        let k = grid_order.get(i).copied().unwrap_or(i);
+        let mut at = start.layout.slot(start.position, d, k + 1, riders.max(1));
         let mut look = d;
         if let (0, Some(&(spot, way))) = (i, SPAWN.get()) {
             (at, look) = (spot, way);
@@ -5443,6 +5449,11 @@ impl App {
             rides[1] = setup.ride.clone();
         }
         LOAD_STEPS.store(0, std::sync::atomic::Ordering::Relaxed);
+        let order = match (setup.mode, setup.net, &self.front) {
+            (frontend::SERIES, None, Some(f)) => f.series_grid().unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        *GRID_ORDER.lock().unwrap_or_else(|e| e.into_inner()) = order;
         load_log("begin");
         eprintln!("loading: {} course {course}, {riders} riders", path.display());
         let random = setup.random_gates;
@@ -5713,7 +5724,19 @@ impl App {
         };
         let me = &r.racers[r.player];
         let over = me.finished.is_some() || r.time_left().is_some_and(|t| t <= 0.0);
-        let top = self.net.is_some() || r.position() <= 3;
+        let mut top = self.net.is_some() || r.position() <= 3;
+        // A series has its podium after its last race only, with the
+        // series' top three whatever the player's place (0x45f610).
+        if self.net.is_none() {
+            let names: Vec<String> = match &self.hud {
+                Some((ui, _)) => (0..r.racers.len()).map(|i| rider_name(r, ui, i)).collect(),
+                None => Vec::new(),
+            };
+            if let Some(end) = f.series_end(&r.standings(), &names) {
+                top = end.is_some();
+                r.podium_order = end;
+            }
+        }
         let wanted = f.user().profile.game.podiums && self.replay.is_none();
         let event = self.event.unwrap_or(frontend::EventKind::Nationals);
         match &track.podium {

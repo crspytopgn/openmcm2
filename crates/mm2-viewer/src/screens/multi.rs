@@ -748,7 +748,7 @@ impl Multi {
         d.set_text("LapsLabel", ui.lang(if timed { 2351 } else { 2345 }));
         d.set_items(
             "RacesListBox",
-            ["2", "4", "6"].iter().map(|s| s.to_string()).collect(),
+            ["3", "5", "7"].iter().map(|s| s.to_string()).collect(),
             self.game.races,
         );
         let tracks = self.tracks(ui, event);
