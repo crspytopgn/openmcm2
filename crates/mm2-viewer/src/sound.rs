@@ -879,12 +879,25 @@ impl RaceSounds {
             // two-strokes ride on the 250s' sounds and its big four-strokes
             // on the 400s', as in the game.
             let pack = || crate::freepack::engine_dir(CLASSES[ORIGINAL[c]]).and_then(|dir| Bank::load_dir(&dir, divisor(c)));
-            let original = || {
-                let class = CLASSES[ORIGINAL[c]];
+            let section = |class: &str| {
                 Bank::load(engine_res, options.sixteen_bit, class, divisor(c), freshen)
                     .or_else(|| options.sixteen_bit.then(|| Bank::load(engine_res, false, class, divisor(c), freshen)).flatten())
             };
-            banks[c] = if pack_first { pack().or_else(original) } else { original().or_else(pack) };
+            let original = || section(CLASSES[ORIGINAL[c]]);
+            // With the original sounds untouched (the player's pick), a
+            // class the files lack rides another class's original samples
+            // before the pack's: the demo has only the 250's, so every
+            // bike in it sounds like the demo.
+            let borrowed = || {
+                [1, 2, 0].into_iter().filter(|&k| k != ORIGINAL[c]).find_map(|k| section(CLASSES[k]))
+            };
+            banks[c] = if pack_first {
+                pack().or_else(original)
+            } else if !freshen {
+                original().or_else(borrowed).or_else(pack)
+            } else {
+                original().or_else(pack)
+            };
             if banks[c].is_none() {
                 eprintln!("no [{}] engine sounds", CLASSES[c]);
             }

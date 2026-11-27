@@ -7,7 +7,6 @@ license.workspace = true
 
 [dependencies]
 bytemuck = { version = "1.25.2", features = ["derive"] }
-cpal = { version = "0.16.0", optional = true }
 ab_glyph = "0.2.29"
 gilrs = { version = "0.11", optional = true }
 glam = "0.30"
@@ -33,12 +32,12 @@ console_error_panic_hook = "0.1"
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Document", "Window", "Element", "HtmlCanvasElement", "Location", "Navigator", "console", "Request", "RequestInit", "Response"] }
-# Sound through the browser's Web Audio.
-cpal = { version = "0.16.0", features = ["wasm-bindgen"], optional = true }
+web-sys = { version = "0.3", features = ["Document", "Window", "Element", "HtmlCanvasElement", "Location", "Navigator", "console", "Request", "RequestInit", "Response", "AudioContext", "AudioContextState", "BaseAudioContext", "AudioBuffer", "AudioBufferSourceNode", "AudioScheduledSourceNode", "AudioNode", "AudioDestinationNode"] }
 
-# The leaderboard server (online.rs); a browser uses fetch.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Sound on the desktop (a browser uses Web Audio, see audio.rs).
+cpal = { version = "0.16.0", optional = true }
+# The leaderboard server (online.rs); a browser uses fetch.
 # The replay editor's clips: Motion JPEG movies (clip.rs).
 jpeg-encoder = "0.6"
 # The player's own intro video (own_video.rs): an MP4's H.264 picture

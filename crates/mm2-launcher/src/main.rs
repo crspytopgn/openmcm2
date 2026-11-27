@@ -1084,6 +1084,7 @@ impl Launcher {
         let menus_new = s.new_menus || !original_menus_here;
         let mut pick_free = None;
         let mut pick_menus = None;
+        let mut pick_sounds = None;
         let mut go = false;
         let mut change = false;
         look::card(ui, icon::ICON_PLAY_CIRCLE, title, |ui| {
@@ -1136,6 +1137,29 @@ impl Launcher {
                 });
                 pick_menus = r.inner;
                 ui.end_row();
+                // The sounds from the MM2 files (or the demo's): as they
+                // are, or freshened. The free version plays its own.
+                if !free {
+                    ui.label(look::weak("Sounds"));
+                    let r = ui.add_enabled_ui(!busy_now, |ui| {
+                        look::segmented(
+                            ui,
+                            !s.more.fresh_sounds,
+                            &[
+                                look::Choice::new(true, "Original").icon(icon::ICON_HISTORY).hover(if is_demo {
+                                    "Every sound exactly as it is in the demo, nothing changed. The demo only has the 250s' engine, so every bike sounds like the demo's 250."
+                                } else {
+                                    "The engines and every other sound exactly as they are in your MM2 files, nothing changed."
+                                }),
+                                look::Choice::new(false, "Freshened").icon(icon::ICON_VOLUME_UP).hover(
+                                    "The engines from your MM2 or demo files given a little more life as they load: a fuller tone, a touch more bite and loops with no clicks. Bikes the demo has no engine for use the Free Pack's recordings.",
+                                ),
+                            ],
+                        )
+                    });
+                    pick_sounds = r.inner;
+                    ui.end_row();
+                }
             });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -1164,6 +1188,10 @@ impl Launcher {
         }
         if let Some(n) = pick_menus.filter(|n| *n != menus_new) {
             self.settings.new_menus = n;
+            changed = true;
+        }
+        if let Some(original) = pick_sounds.filter(|o| *o == self.settings.more.fresh_sounds) {
+            self.settings.more.fresh_sounds = !original;
             changed = true;
         }
         if changed {
@@ -1932,7 +1960,7 @@ impl Launcher {
             slider(ui, "Stick steering curve", "How gently a stick steers near the middle. 100% is the original game's: little steering for a small push and a lot near the edge, which can feel all-or-nothing on a short stick like a Steam Deck's. 0% steers in straight proportion.", &mut s.more.pad_curve, 0..=100, 5.0, "%");
             slider(ui, "Gyro steering", "Off (0°) unless you set it. On a pad with motion sensors (Steam Deck, Steam Controller, DualSense, DualShock 4, Switch Pro or Joy-Cons), tip the pad left or right like handlebars and the bike steers that way, on top of the stick. The number is how far you tip it for full lock: 20 to 30° is quick, 45° and more is gentle. Held flat or upright, near level always rides straight. On a Steam Deck or Steam Machine, leave Steam's own gyro setting for this game off, or the two steer together. Off, steering is the original game's.", &mut s.more.gyro_steer, 0..=90, 1.0, "°");
             slider(ui, "Stick smoothing", "Evens out a twitchy stick's steering. 0% is the original game's.", &mut s.more.pad_smoothing, 0..=90, 5.0, "%");
-            tile(ui, &mut s.more.fresh_sounds, "Freshened engine sounds", "On unless you turn it off. The bike engines from your own MM2 or demo files, given a little more life as they load: a fuller tone, a touch more bite and loops with no clicks. Nothing is downloaded; the free version keeps its own recordings. Off, the engines sound exactly as in the original.");
+            tile(ui, &mut s.more.fresh_sounds, "Freshened engine sounds", "On unless you turn it off. The bike engines from your own MM2 or demo files, given a little more life as they load: a fuller tone, a touch more bite and loops with no clicks. Nothing is downloaded; the free version keeps its own recordings. Off, the engines sound exactly as in the original, and bikes the demo has no engine for use its 250s' engine rather than the Free Pack's. The Sounds switch on the Play card is the same choice.");
             tile(ui, &mut s.more.whistle, "Out-of-bounds whistle", "On unless you turn it off. On the free tracks, a cartoon slide whistle goes up as you ride off the edge of the world and get thrown back in, and comes down as you fall. Off, that throw is silent as in the original.");
             tile(ui, &mut s.mute_in_background, "Mute in the background", "The game goes quiet while its window isn't the one in front.");
             intro_video(ui, &mut s.more.intro_video);

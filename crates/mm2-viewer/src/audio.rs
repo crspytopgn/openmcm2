@@ -155,7 +155,7 @@ pub struct Audio {
     mixer: Arc<Mutex<Mixer>>,
     /// Keeps the output stream open.
     #[cfg(feature = "audio")]
-    _stream: Option<cpal::Stream>,
+    _stream: Option<Stream>,
 }
 
 impl Audio {
@@ -335,7 +335,12 @@ impl Default for Audio {
     }
 }
 
-#[cfg(feature = "audio")]
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+type Stream = cpal::Stream;
+#[cfg(all(feature = "audio", target_arch = "wasm32"))]
+use web::{open, Stream};
+
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
 fn open(mixer: Arc<Mutex<Mixer>>) -> Result<cpal::Stream, Box<dyn std::error::Error>> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     let device = cpal::default_host()
@@ -381,6 +386,137 @@ fn open(mixer: Arc<Mutex<Mixer>>) -> Result<cpal::Stream, Box<dyn std::error::Er
     };
     stream.play()?;
     Ok(stream)
+}
+
+/// Sound in a browser, through Web Audio: the mix, a short piece at a
+/// time, queued on the sound card's clock a little ahead of it.
+///
+/// Not cpal's Web Audio output, which keeps two pieces in flight and
+/// queues each where the last ended: when the page stalls for longer
+/// than a piece (a busy start line, a frame that builds shaders or
+/// loads pictures), those times fall behind the card's, and the pieces
+/// then play over each other until it catches up, which crackles.
+/// Here a piece is never queued in the past: after a stall the mix picks
+/// up again at once, and keeps a little more in hand from then on.
+#[cfg(all(feature = "audio", target_arch = "wasm32"))]
+mod web {
+    use super::Mixer;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::sync::{Arc, Mutex};
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::JsCast;
+    use web_sys::{AudioContext, AudioContextState};
+
+    /// Frames in each piece: 21 ms at 48 kHz.
+    const PIECE: usize = 1024;
+    /// Seconds of sound kept queued ahead of the card: at first, and at
+    /// most, as it grows after each stall that ran it dry.
+    const LEAD: (f64, f64) = (0.1, 0.25);
+    /// How often the page tops the queue up, ms. A piece ending tops it
+    /// up too, which goes on in a background tab where timers slow down.
+    const TICK_MS: i32 = 10;
+
+    struct Out {
+        ctx: AudioContext,
+        mixer: Arc<Mutex<Mixer>>,
+        /// The card's time the next piece starts at (0: none queued).
+        cursor: f64,
+        lead: f64,
+        stereo: Vec<f32>,
+        channel: Vec<f32>,
+        /// Tops the queue up as each piece ends.
+        ended: Option<js_sys::Function>,
+    }
+
+    pub struct Stream {
+        out: Rc<RefCell<Out>>,
+        interval: i32,
+        _tick: Closure<dyn FnMut()>,
+    }
+
+    impl Drop for Stream {
+        fn drop(&mut self) {
+            if let Some(w) = web_sys::window() {
+                w.clear_interval_with_handle(self.interval);
+            }
+            let out = self.out.borrow();
+            let _ = out.ctx.close();
+        }
+    }
+
+    fn top_up(out: &mut Out) {
+        // Before the player's first tap or key the card is held, and
+        // its clock with it: nothing is mixed until it runs.
+        if out.ctx.state() != AudioContextState::Running {
+            out.cursor = 0.0;
+            return;
+        }
+        let now = out.ctx.current_time();
+        let rate = out.ctx.sample_rate();
+        if out.cursor < now + 0.002 {
+            if out.cursor > 0.0 {
+                // The queue ran dry: keep more in hand from now on.
+                out.lead = (out.lead + 0.05).min(LEAD.1);
+            }
+            out.cursor = now + 0.01;
+        }
+        let piece = PIECE as f64 / rate as f64;
+        while out.cursor < now + out.lead {
+            out.stereo.resize(PIECE * 2, 0.0);
+            out.mixer.lock().unwrap().mix(&mut out.stereo);
+            let Ok(buffer) = out.ctx.create_buffer(2, PIECE as u32, rate) else {
+                return;
+            };
+            for c in 0..2 {
+                out.channel.clear();
+                out.channel.extend(out.stereo.chunks_exact(2).map(|f| f[c]));
+                let _ = buffer.copy_to_channel(&out.channel, c as i32);
+            }
+            let Ok(source) = out.ctx.create_buffer_source() else {
+                return;
+            };
+            source.set_buffer(Some(&buffer));
+            if source.connect_with_audio_node(&out.ctx.destination()).is_err() {
+                return;
+            }
+            source.set_onended(out.ended.as_ref());
+            if source.start_with_when(out.cursor).is_err() {
+                return;
+            }
+            out.cursor += piece;
+        }
+    }
+
+    pub fn open(mixer: Arc<Mutex<Mixer>>) -> Result<Stream, Box<dyn std::error::Error>> {
+        let ctx = AudioContext::new().map_err(|e| format!("no Web Audio: {e:?}"))?;
+        mixer.lock().unwrap().rate = ctx.sample_rate();
+        let _ = ctx.resume();
+        let out = Rc::new(RefCell::new(Out {
+            ctx,
+            mixer,
+            cursor: 0.0,
+            lead: LEAD.0,
+            stereo: Vec::new(),
+            channel: Vec::new(),
+            ended: None,
+        }));
+        let weak = Rc::downgrade(&out);
+        let tick = Closure::<dyn FnMut()>::new(move || {
+            if let Some(out) = weak.upgrade() {
+                if let Ok(mut out) = out.try_borrow_mut() {
+                    top_up(&mut out);
+                }
+            }
+        });
+        let f: &js_sys::Function = tick.as_ref().unchecked_ref();
+        out.borrow_mut().ended = Some(f.clone());
+        let window = web_sys::window().ok_or("no window")?;
+        let interval = window
+            .set_interval_with_callback_and_timeout_and_arguments_0(f, TICK_MS)
+            .map_err(|e| format!("{e:?}"))?;
+        Ok(Stream { out, interval, _tick: tick })
+    }
 }
 
 #[cfg(test)]
