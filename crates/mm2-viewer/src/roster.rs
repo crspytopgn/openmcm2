@@ -6,7 +6,7 @@ use mm2_formats::{rs2, scn};
 use std::path::Path;
 
 /// One bike of the Bike & Rider page.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct BikeChoice {
     /// "Honda CR250": the maker and the bike (0x450630 shows `%s %s`).
     pub name: String,
@@ -21,6 +21,53 @@ pub struct BikeChoice {
     /// A paint from the game's `BIKES` folder (0x49bcfc, the game's own
     /// `BIKE01.TGA` among them): any engine size, picked on the page.
     pub own: bool,
+    /// A Free Pack bike's engine sizes, picked in the page's engine size
+    /// box (ours): the bike is listed once, and `cc` is the size picked.
+    /// Empty for the game's bikes, which come in their own sizes.
+    pub sizes: Vec<FreeSize>,
+}
+
+/// One engine size of a Free Pack bike.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FreeSize {
+    pub cc: u32,
+    pub four_stroke: bool,
+    /// The name it was listed and saved under ("OpenMX Ridgeback 250"):
+    /// profiles keep it, so the size comes back with the bike.
+    pub name: String,
+}
+
+impl BikeChoice {
+    /// The name a profile keeps for the bike: a Free Pack bike's with its
+    /// engine size.
+    pub fn saved_name(&self) -> &str {
+        self.sizes.iter().find(|s| s.cc == self.cc).map_or(&self.name, |s| &s.name)
+    }
+
+    /// Whether `name` (as a profile keeps it) is this bike, in any size.
+    pub fn named(&self, name: &str) -> bool {
+        self.name == name || self.sizes.iter().any(|s| s.name == name)
+    }
+
+    /// A Free Pack bike in the size nearest `cc`; the game's bikes keep
+    /// their own. Whether the size changed.
+    pub fn set_size(&mut self, cc: u32) -> bool {
+        let Some(s) = self.sizes.iter().min_by_key(|s| s.cc.abs_diff(cc)) else {
+            return false;
+        };
+        let changed = s.cc != self.cc;
+        (self.cc, self.four_stroke) = (s.cc, s.four_stroke);
+        changed
+    }
+}
+
+/// "Ridgeback 250" -> "Ridgeback": a Free Pack bike's name without its
+/// engine size, which the size box shows instead.
+fn without_size(name: &str) -> &str {
+    match name.rsplit_once(' ') {
+        Some((bike, size)) if size.starts_with(|c: char| c.is_ascii_digit()) => bike,
+        _ => name,
+    }
 }
 
 /// One rider outfit.
@@ -42,7 +89,14 @@ pub struct Ride {
 pub struct Roster {
     pub bikes: Vec<BikeChoice>,
     pub outfits: Vec<Outfit>,
+    /// Where the Free Pack's bikes and outfits start in the lists (they
+    /// come after the game's and the player's own): ours.
+    pub free_from: (usize, usize),
 }
+
+/// What the lists add to a Free Pack bike or outfit's name when the
+/// game's own are listed too, so the two can be told apart.
+pub const FREE_LABEL: &str = " (open source)";
 
 /// Shown in the lists: `Availability` 2 and 3. 1 is kept from the player
 /// (the amateurs' kit), and 10 is the award bike, shown once the career is
@@ -119,6 +173,7 @@ impl Roster {
         let mut roster = Roster {
             bikes: text("bikes.pb").map(|t| bikes(&t)).unwrap_or_default(),
             outfits: text("riders.pb").map(|t| outfits(&t)).unwrap_or_default(),
+            ..Roster::default()
         };
         // The demo's lists name the whole game's bikes and outfits, but it
         // has the models and paints of only a few: the rest are left out.
@@ -129,25 +184,59 @@ impl Roster {
                 roster.outfits.retain(|o| has(&o.file));
             }
         }
+        roster.free_from = (roster.bikes.len(), roster.outfits.len());
         Some(roster)
     }
 
-    /// The free pack's bikes and outfits, after the game's.
+    /// The free pack's bikes and outfits, after the game's. Each bike is
+    /// listed once, its engine sizes picked in the size box (the pack lists
+    /// one of each model and size).
     fn add_free(&mut self) {
-        for b in crate::freepack::listed_bikes() {
-            self.bikes.push(BikeChoice {
-                name: format!("{FREE_MAKER} {}", b.name),
-                model: format!("{}.mcf", b.shape),
-                ui_model: format!("ui{}.mcf", b.shape),
-                texture: b.livery.clone(),
-                cc: b.cc,
-                four_stroke: b.four_stroke,
-                own: false,
-            });
-        }
+        self.free_from = (self.bikes.len(), self.outfits.len());
+        self.add_free_bikes(crate::freepack::listed_bikes());
         for o in crate::freepack::outfits() {
             self.outfits.push(Outfit { name: o.name.clone(), file: o.outfit.clone() });
         }
+    }
+
+    /// The pack's bikes, one entry for each model and paint, in the order
+    /// first listed, with the sizes it comes in; the smallest picked.
+    fn add_free_bikes<'a>(&mut self, listed: impl Iterator<Item = &'a crate::freepack::Bike>) {
+        let from = self.bikes.len();
+        for b in listed {
+            let size = FreeSize { cc: b.cc, four_stroke: b.four_stroke, name: format!("{FREE_MAKER} {}", b.name) };
+            let model = format!("{}.mcf", b.shape);
+            let name = format!("{FREE_MAKER} {}", without_size(&b.name));
+            match self.bikes[from..].iter_mut().find(|c| c.model == model && c.texture == b.livery && c.name == name) {
+                Some(c) => c.sizes.push(size),
+                None => self.bikes.push(BikeChoice {
+                    name,
+                    model,
+                    ui_model: format!("ui{}.mcf", b.shape),
+                    texture: b.livery.clone(),
+                    cc: b.cc,
+                    four_stroke: b.four_stroke,
+                    own: false,
+                    sizes: vec![size],
+                }),
+            }
+        }
+        for c in &mut self.bikes[from..] {
+            c.sizes.sort_by_key(|s| s.cc);
+            let first = c.sizes[0].cc;
+            c.set_size(first);
+        }
+    }
+
+    /// The bike a profile kept (by [`BikeChoice::saved_name`]), in the size
+    /// it kept.
+    pub fn find_bike(&mut self, name: &str) -> Option<usize> {
+        let i = self.bikes.iter().position(|b| b.named(name))?;
+        let b = &mut self.bikes[i];
+        if let Some(cc) = b.sizes.iter().find(|s| s.name == name).map(|s| s.cc) {
+            b.set_size(cc);
+        }
+        Some(i)
     }
 
     /// The paints and outfits in the game's `BIKES` and `RIDERS` folders,
@@ -163,11 +252,39 @@ impl Roster {
                 cc: 250,
                 four_stroke: false,
                 own: true,
+                sizes: Vec::new(),
             });
         }
         for (file, name) in own_files(game, "RIDERS") {
             self.outfits.push(Outfit { name, file: own_key("RIDERS", &file) });
         }
+    }
+
+    /// Whether bike `i` is one of the Free Pack's.
+    pub fn free_bike(&self, i: usize) -> bool {
+        i >= self.free_from.0 && i < self.bikes.len()
+    }
+
+    /// Whether outfit `i` is one of the Free Pack's.
+    pub fn free_outfit(&self, i: usize) -> bool {
+        i >= self.free_from.1 && i < self.outfits.len()
+    }
+
+    /// The bikes' and outfits' names as the lists show them: with the
+    /// game's own (or the demo's) listed too, the Free Pack's are marked
+    /// as ours, and the game's keep their names.
+    pub fn shown(&self) -> (Vec<String>, Vec<String>) {
+        let mark = |name: &str, free: bool, mixed: bool| {
+            if free && mixed {
+                format!("{name}{FREE_LABEL}")
+            } else {
+                name.to_string()
+            }
+        };
+        let (b, o) = self.free_from;
+        let bikes = self.bikes.iter().enumerate().map(|(i, c)| mark(&c.name, i >= b, b > 0)).collect();
+        let outfits = self.outfits.iter().enumerate().map(|(i, c)| mark(&c.name, i >= o, o > 0)).collect();
+        (bikes, outfits)
     }
 
     /// The bike and outfit the game starts a new profile on: the first of
@@ -212,6 +329,7 @@ fn bikes(text: &str) -> Vec<BikeChoice> {
                     .unwrap_or(250),
                 four_stroke: key("BikeFourStroke").is_some_and(|v| v.trim() == "1"),
                 own: false,
+                sizes: Vec::new(),
             });
         }
     }
@@ -275,6 +393,78 @@ mod tests {
         assert!(r.bikes.len() > 10, "{}", r.bikes.len());
         assert!(r.outfits.len() > 40, "{}", r.outfits.len());
         assert_eq!(r.bikes[0].name, "Honda CR125");
+    }
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+
+    fn bike(name: &str) -> BikeChoice {
+        BikeChoice {
+            name: name.into(),
+            model: String::new(),
+            ui_model: String::new(),
+            texture: String::new(),
+            cc: 250,
+            four_stroke: false,
+            own: false,
+            sizes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn free_ones_are_marked_beside_the_games() {
+        let outfit = |n: &str| Outfit { name: n.into(), file: String::new() };
+        let mut r = Roster {
+            bikes: vec![bike("Suzuki Kazuyuki 250"), bike("OpenMX Red 250")],
+            outfits: vec![outfit("Jeans & Flannel"), outfit("Red")],
+            free_from: (1, 1),
+        };
+        let (b, o) = r.shown();
+        assert_eq!(b, ["Suzuki Kazuyuki 250", "OpenMX Red 250 (open source)"]);
+        assert_eq!(o, ["Jeans & Flannel", "Red (open source)"]);
+        assert!(!r.free_bike(0) && r.free_bike(1) && r.free_outfit(1));
+        // The free version alone: nothing to tell apart.
+        r.bikes.remove(0);
+        r.outfits.remove(0);
+        r.free_from = (0, 0);
+        assert_eq!(r.shown(), (vec!["OpenMX Red 250".to_string()], vec!["Red".to_string()]));
+    }
+
+    #[test]
+    fn free_bikes_are_listed_once_with_their_sizes() {
+        let pack = |shape: &str, cc: u32, name: &str| crate::freepack::Bike {
+            shape: shape.into(),
+            livery: format!("{shape}_red"),
+            cc,
+            four_stroke: name.ends_with('F'),
+            name: name.into(),
+            listed: true,
+        };
+        let listed = [
+            pack("mx2", 250, "Ridgeback 250"),
+            pack("mx2", 125, "Ridgeback 125"),
+            pack("mx2", 600, "Ridgeback 600F"),
+            pack("two", 250, "Kestrel 250"),
+        ];
+        let mut r = Roster { bikes: vec![bike("Suzuki Kazuyuki 250")], ..Roster::default() };
+        r.add_free_bikes(listed.iter());
+        let names: Vec<&str> = r.bikes.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["Suzuki Kazuyuki 250", "OpenMX Ridgeback", "OpenMX Kestrel"]);
+        let ridgeback = &r.bikes[1];
+        assert_eq!(ridgeback.sizes.iter().map(|s| s.cc).collect::<Vec<_>>(), [125, 250, 600]);
+        assert_eq!((ridgeback.cc, ridgeback.saved_name()), (125, "OpenMX Ridgeback 125"));
+        // A profile's saved size comes back, and the box picks the nearest.
+        assert_eq!(r.find_bike("OpenMX Ridgeback 600F"), Some(1));
+        assert_eq!((r.bikes[1].cc, r.bikes[1].four_stroke), (600, true));
+        assert!(r.bikes[1].set_size(400));
+        assert_eq!(r.bikes[1].cc, 250);
+        assert!(!r.bikes[1].set_size(250));
+        assert_eq!(r.bikes[1].saved_name(), "OpenMX Ridgeback 250");
+        assert_eq!(r.find_bike("OpenMX Ridgeback"), Some(1));
+        assert_eq!(r.find_bike("Suzuki Kazuyuki 250"), Some(0));
+        assert!(!r.bikes[0].set_size(600));
     }
 }
 

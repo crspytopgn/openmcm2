@@ -300,6 +300,10 @@ pub struct Profile {
     /// own. `None`: a profile from before they were kept apart.
     pub free_bike: Option<String>,
     pub free_outfit: Option<String>,
+    /// The game's picks were checked for a Free Pack bike or kit saved
+    /// before the lists marked them (`OriginalFirst=1`, ours): see
+    /// `frontend::originals_first`. New profiles start checked.
+    pub original_first: bool,
     pub plate: u32,
     /// The Kit & Paint page's colours for a high-detail kit and bike, by
     /// name: kit, kit trim, bike, bike trim, helmet (empty: the colourway
@@ -324,6 +328,7 @@ impl Profile {
             outfit: String::new(),
             free_bike: Some(String::new()),
             free_outfit: Some(String::new()),
+            original_first: true,
             plate: 101,
             paint: String::new(),
             keys,
@@ -335,7 +340,9 @@ impl Profile {
     pub fn defaults(&mut self, messages: [String; 10], keys: Controls) {
         let keep = (self.name.clone(), self.bike.clone(), self.outfit.clone(), self.paint.clone());
         let free = (self.free_bike.take(), self.free_outfit.take());
+        let checked = self.original_first;
         *self = Profile::new(&keep.0, messages, keys);
+        self.original_first = checked;
         self.bike = keep.1;
         self.outfit = keep.2;
         self.paint = keep.3;
@@ -357,6 +364,9 @@ impl Profile {
         }
         if let Some(f) = &self.free_outfit {
             let _ = write!(o, "FreeOutfit={f}\r\n");
+        }
+        if self.original_first {
+            o.push_str("OriginalFirst=1\r\n");
         }
         if !self.paint.is_empty() {
             let _ = write!(o, "Paint={}\r\n", self.paint);
@@ -464,6 +474,7 @@ ForceFeedback={}\r\nGasGyro={}\r\nBrakeGyro={}\r\nAnalogAxes={}\r\nDevice={}\r\n
         p.outfit = get("Profile", "Outfit").unwrap_or("").to_string();
         p.free_bike = get("Profile", "FreeBike").map(|v| v.trim().to_string());
         p.free_outfit = get("Profile", "FreeOutfit").map(|v| v.trim().to_string());
+        p.original_first = flag("Profile", "OriginalFirst", false);
         p.plate = num("Profile", "Plate", 101);
         p.paint = get("Profile", "Paint").unwrap_or("").trim().to_string();
         let d = GameOptions::default();
@@ -795,6 +806,8 @@ mod tests {
         assert_eq!((p.free_bike, p.free_outfit), (None, None));
         let q = Profile::parse(&Profile::new("B", messages(), Controls::parse("")).text(), messages(), Controls::parse(""));
         assert_eq!((q.free_bike.as_deref(), q.free_outfit.as_deref()), (Some(""), Some("")));
+        // Older profiles have their game picks checked once; new ones start checked.
+        assert!(!p.original_first && q.original_first);
     }
 
     #[test]

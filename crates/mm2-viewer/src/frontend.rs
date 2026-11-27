@@ -1243,12 +1243,12 @@ impl Frontend {
     /// The Bike & Rider page (`0x44fe50`, `0x450630`): the bike and outfit
     /// lists on the player's picks, the engine size, and the plate number.
     fn fill_bike_page(&mut self) {
-        let bikes: Vec<String> = self.roster.bikes.iter().map(|b| b.name.clone()).collect();
-        let outfits: Vec<String> = self.roster.outfits.iter().map(|o| o.name.clone()).collect();
+        // The Free Pack's marked as ours beside the game's own.
+        let (bikes, outfits) = self.roster.shown();
         let cc = self.roster.bikes.get(self.bike).map_or(250, |b| b.cc);
         // The player's own paint takes any engine size, as the game's
-        // page offers for them.
-        let own = self.roster.bikes.get(self.bike).is_some_and(|b| b.own);
+        // page offers for them, and a Free Pack bike the sizes it comes in.
+        let own = self.roster.bikes.get(self.bike).is_some_and(|b| b.own || b.sizes.len() > 1);
         let size = ENGINE_SIZES
             .iter()
             .position(|e| e.0 >= cc)
@@ -1442,7 +1442,8 @@ impl Frontend {
     /// The profile's bike, outfit and plate on the Bike & Rider page, by
     /// name (`0x44fe50`); a name no longer listed keeps the current pick.
     fn load_ride(&mut self) {
-        if split_looks(&mut self.user.profile) {
+        let split = split_looks(&mut self.user.profile);
+        if originals_first(&mut self.user.profile, &self.roster) || split {
             self.user.save();
         }
         let p = &self.user.profile;
@@ -1452,7 +1453,7 @@ impl Frontend {
         } else {
             (p.bike.as_str(), p.outfit.as_str())
         };
-        if let Some(i) = self.roster.bikes.iter().position(|b| b.name == bike) {
+        if let Some(i) = self.roster.find_bike(&bike.to_string()) {
             self.bike = i;
             self.bike_picked = true;
         }
@@ -1490,7 +1491,7 @@ impl Frontend {
     /// The page's picks into the profile, saved (`0x4513f0`), so the next
     /// time the player signs in they ride the same.
     fn keep_ride(&mut self) {
-        let bike = self.roster.bikes.get(self.bike).filter(|_| self.bike_picked).map(|b| b.name.clone());
+        let bike = self.roster.bikes.get(self.bike).filter(|_| self.bike_picked).map(|b| b.saved_name().to_string());
         let outfit = self.roster.outfits.get(self.outfit).map(|o| o.name.clone());
         let plate = self.plate.parse().ok().filter(|n| (101..=999).contains(n));
         let paint = if self.paint_on {
@@ -1678,6 +1679,10 @@ impl Frontend {
                     if b.own {
                         b.cc = cc;
                         b.four_stroke = name.contains("4-stroke");
+                    } else if b.set_size(cc) {
+                        // A Free Pack bike's size is kept with it.
+                        self.bike_picked = true;
+                        self.keep_ride();
                     }
                 }
                 self.fill_bike_page();
@@ -2324,6 +2329,34 @@ fn enable_seed_box(page: &mut Dlg, on: bool) {
     if !on && page.editing() == Some("EditSeed") {
         page.edit(None);
     }
+}
+
+/// With the game's graphics (the demo's too), a profile starts on the
+/// game's own bike and rider. A Free Pack bike or kit saved in the game's
+/// picks before the lists told the two apart (a tap left of the game's
+/// first lands on the pack's last) goes to the free graphics' picks,
+/// once (`OriginalFirst=1`); one picked after that stays.
+/// Whether the profile changed.
+fn originals_first(p: &mut crate::profile::Profile, roster: &crate::roster::Roster) -> bool {
+    if p.original_first || crate::freepack::chosen() || roster.free_from == (0, 0) {
+        return false;
+    }
+    p.original_first = true;
+    let free_bike = roster.bikes.iter().position(|b| b.named(&p.bike)).is_some_and(|i| roster.free_bike(i));
+    let free_outfit = roster.outfits.iter().position(|o| o.name == p.outfit).is_some_and(|i| roster.free_outfit(i));
+    if free_bike {
+        let b = std::mem::take(&mut p.bike);
+        if p.free_bike.as_deref().is_none_or(str::is_empty) {
+            p.free_bike = Some(b);
+        }
+    }
+    if free_outfit {
+        let o = std::mem::take(&mut p.outfit);
+        if p.free_outfit.as_deref().is_none_or(str::is_empty) {
+            p.free_outfit = Some(o);
+        }
+    }
+    true
 }
 
 /// A profile from before the free graphics kept picks of their own
