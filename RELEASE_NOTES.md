@@ -1,3 +1,17 @@
+# OpenMCM2 0.8.5
+
+* **Faster all round.** Tracks load quicker, frame rates are higher and
+  the browser version is a smaller download that starts sooner. Rides
+  play out exactly as before, and the Original look is unchanged.
+* **Your own intro video** (Extras, off by default): pick a video of your
+  own to play in place of the original intro. A click or key skips it.
+* **Engines no longer go quiet.** After a long stutter, or switching away
+  from the browser tab, bike engines could stay silent for the rest of
+  the race. They now come straight back.
+* **Clearer demo in the browser.** The Play page says what the demo
+  downloads and what it plays with, and the demo card has a "Got the
+  full game?" link.
+
 # OpenMCM2 0.8.4
 
 * **No more rocket starts.** A computer rider next to another bike off
