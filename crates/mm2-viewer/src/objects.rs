@@ -686,11 +686,14 @@ impl ObjectMesh {
             };
             let first = mesh.vertices.len();
             // The eco-system's trees: drawn whole near, as billboards far.
-            let tree = trees.contains(&i);
-            mesh.tag = tree.then_some(NEAR_TAG);
+            // One with no far picture (the free pack's plants have none)
+            // is drawn whole all the way, like any other object: cut at
+            // the billboards' band, it would pop in a few dozen ft away.
+            let billboard = trees.contains(&i).then(|| billboards.get(i - trees.start)).flatten().and_then(Option::as_ref);
+            mesh.tag = billboard.is_some().then_some(NEAR_TAG);
             mesh.add(&model, Some(placement_matrix(p)), 0, None, p.lighting, &mut batches);
             mesh.tag = None;
-            if let Some(Some(b)) = tree.then(|| billboards.get(i - trees.start)).flatten() {
+            if let Some(b) = billboard {
                 mesh.add_billboard(p, b, &mut batches);
             }
             mesh.placed += 1;
