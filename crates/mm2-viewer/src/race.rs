@@ -2144,6 +2144,9 @@ pub struct Race {
     pub flag_girl: crate::finish::FlagGirl,
     /// The podium once the race is over, and the clock when it went up.
     pub podium: Option<(crate::podium::Podium, f32)>,
+    /// Who the podium shows, best first, when not the race's standings:
+    /// a series' last race shows the series' top three (`0x45f610`).
+    pub podium_order: Option<Vec<usize>>,
     /// Moto-Tag's rules, in a tag game.
     pub tag: Option<crate::tag::Tag>,
     /// The computer riders' smoothed air lean, one for all of them
@@ -2276,6 +2279,7 @@ impl Race {
             practice: false,
             flag_girl: Default::default(),
             podium: None,
+            podium_order: None,
             tag: None,
             air_lean: 0.0,
         };

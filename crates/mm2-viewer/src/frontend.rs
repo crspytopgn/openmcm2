@@ -206,6 +206,48 @@ enum Screen {
 /// level, 0 to 2.
 const LEVELS: [&str; 3] = ["RadLODEasy", "RadLODMedium", "RadLODHard"];
 
+/// Race mode 2: a series of races on one track for points.
+pub const SERIES: u32 = 2;
+
+/// A series' points for 1st to 10th (`0x45d670`); 11th scores none.
+const SERIES_POINTS: [u32; 10] = [20, 17, 15, 12, 10, 8, 6, 5, 3, 1];
+
+/// A series of races (race mode 2): the Races box's choice, the races
+/// run and each racer's points. Under way from its first race until the
+/// last one's results, leaving the mode or the main menu (`0x45d670`).
+#[derive(Debug, Clone, Default)]
+struct Series {
+    /// The Races box's data: 2, 4 or 6 for 3, 5 or 7 races (+0x2d7c).
+    races: u32,
+    /// Races run so far (championship +0x48).
+    run: u32,
+    /// Each racer's points, the player first.
+    points: Vec<u32>,
+    /// Under way (+0x1664).
+    on: bool,
+}
+
+impl Series {
+    /// The racers best first: most points, then by name (`0x45d540`).
+    fn ranked(points: &[u32], names: &[String]) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..points.len()).collect();
+        order.sort_by(|&a, &b| points[b].cmp(&points[a]).then_with(|| names.get(a).cmp(&names.get(b))));
+        order
+    }
+
+    /// The points after a race whose finishing order is `standings`.
+    fn with_race(&self, standings: &[usize]) -> Vec<u32> {
+        let mut points = self.points.clone();
+        for (place, &racer) in standings.iter().enumerate() {
+            if racer >= points.len() {
+                points.resize(racer + 1, 0);
+            }
+            points[racer] += SERIES_POINTS.get(place).copied().unwrap_or(0);
+        }
+        points
+    }
+}
+
 pub struct Frontend {
     ui: Ui,
     screen: Screen,
@@ -222,6 +264,10 @@ pub struct Frontend {
     track_source: usize,
     /// The last race's results, for the Race Info page.
     results: RaceResults,
+    /// The series under way (race mode 2), and the Race Info page's
+    /// title for its last race.
+    series: Series,
+    series_title: Option<String>,
     /// The bikes and outfits on offer, and the player's picks.
     roster: Roster,
     bike: usize,
@@ -425,6 +471,8 @@ impl Frontend {
             tracks: HashMap::new(),
             track_source: 0,
             results: RaceResults::default(),
+            series: Series { races: 2, ..Series::default() },
+            series_title: None,
             roster: Roster::load(game),
             bike: 0,
             bike_picked: false,
@@ -545,6 +593,7 @@ impl Frontend {
     /// was started from.
     pub fn main_menu(&mut self) {
         self.beneath = None;
+        self.series.on = false;
         if self.unpark(None) {
             return;
         }
@@ -1113,9 +1162,89 @@ impl Frontend {
         if self.unpark(Some(&results)) {
             return;
         }
+        let mut results = results;
+        self.series_title = None;
+        if self.mode == SERIES && self.series.on {
+            self.series_race(&mut results);
+        }
         self.results = results;
         self.open_single();
         self.show_tab("raceinfotab");
+    }
+
+    /// A series race's results (`0x45d670`, `0x4521b0`): each racer's
+    /// points for the place, then the lines in the series' order, with
+    /// that place and the points so far; the title counts the races, and
+    /// after the last one the series is over.
+    fn series_race(&mut self, results: &mut RaceResults) {
+        let mut line_of = vec![usize::MAX; results.placings.len()];
+        let mut standings: Vec<(usize, usize)> = Vec::new();
+        for (racer, p) in results.placings.iter().enumerate() {
+            if p.place >= 1 && p.place <= results.lines.len() {
+                line_of[racer] = p.place - 1;
+                standings.push((p.place, racer));
+            }
+        }
+        standings.sort();
+        let standings: Vec<usize> = standings.into_iter().map(|s| s.1).collect();
+        let s = &mut self.series;
+        s.points = s.with_race(&standings);
+        s.run += 1;
+        let names: Vec<String> = (0..s.points.len())
+            .map(|r| line_of.get(r).and_then(|&l| results.lines.get(l)).map_or(String::new(), |l| l[0].clone()))
+            .collect();
+        let order = Series::ranked(&s.points, &names);
+        let mut lines = Vec::new();
+        for (rank, &racer) in order.iter().enumerate() {
+            let Some(mut line) = line_of.get(racer).and_then(|&l| results.lines.get(l)).cloned() else {
+                continue;
+            };
+            if !results.stunt {
+                line[1] = (rank + 1).to_string();
+            }
+            line[3] = s.points[racer].to_string();
+            lines.push(line);
+            if let Some(p) = results.placings.get_mut(racer) {
+                p.place = lines.len();
+            }
+        }
+        results.lines = lines;
+        let (run, races) = (s.run, s.races);
+        self.series_title = Some(if races < run {
+            self.series.on = false;
+            self.ui.lang(2362)
+        } else {
+            format!("{} ({run}/{})", self.ui.lang(2363), races + 1)
+        });
+    }
+
+    /// In a series past its first race, each racer's place on the start
+    /// grid, from 0: the most points first, ties as they stand
+    /// (`0x45d5a0`).
+    pub fn series_grid(&self) -> Option<Vec<usize>> {
+        let s = &self.series;
+        if self.mode != SERIES || !s.on || s.run == 0 {
+            return None;
+        }
+        // A stable sort, as the game's bubble sort.
+        let mut order: Vec<usize> = (0..s.points.len()).collect();
+        order.sort_by(|&a, &b| s.points[b].cmp(&s.points[a]));
+        let mut slot = vec![0; order.len()];
+        for (k, &racer) in order.iter().enumerate() {
+            slot[racer] = k;
+        }
+        Some(slot)
+    }
+
+    /// Whether a series is under way, and, when the race just run whose
+    /// finishing order is `standings` is its last, the series' order for
+    /// the podium (`0x45f610`).
+    pub fn series_end(&self, standings: &[usize], names: &[String]) -> Option<Option<Vec<usize>>> {
+        let s = &self.series;
+        if self.mode != SERIES || !s.on {
+            return None;
+        }
+        Some((s.races < s.run + 1).then(|| Series::ranked(&s.with_race(standings), names)))
     }
 
     /// Switches the single player screen's page.
@@ -1542,6 +1671,11 @@ impl Frontend {
         for (i, head) in heads.into_iter().enumerate() {
             page.set_text(&format!("ButStats{}", i + 1), head);
         }
+        // A series' results: the race count in the title, and the points.
+        if let Some(title) = &self.series_title {
+            page.set_text("TitleText", title.clone());
+            page.set_text("ButStats4", self.ui.lang(2360));
+        }
         for column in 0..4 {
             let items = self
                 .results
@@ -1737,6 +1871,14 @@ impl Frontend {
         if let Some(l) = LEVELS.iter().position(|n| page.get(n).is_some_and(|c| c.on)) {
             self.level = l;
         }
+        // The Races box is the series' count until it is under way; any
+        // other mode ends it (0x44fb90).
+        if self.mode != SERIES {
+            self.series.on = false;
+        }
+        if !self.series.on && page.get("RacesListBox").is_some_and(|c| c.items.len() == 3) {
+            self.series.races = page.selected("RacesListBox").min(2) as u32 * 2 + 2;
+        }
         self.track = page.selected("DDLTextBox");
         self.ghost = page.selected("DDLGhostRaces");
         if page.index("ChkRandomGates").is_some() {
@@ -1853,11 +1995,24 @@ impl Frontend {
             (self.laps - from) as usize,
         );
         page.set_text("LapsLabel", laps_label);
-        page.set_items(
-            "RacesListBox",
-            [2, 4, 6].iter().map(|n| n.to_string()).collect(),
-            0,
-        );
+        // 3, 5 or 7 races (0x44eea0); while a series is under way, the race
+        // it is on, with the opponents and the count held.
+        let series = &self.series;
+        let held = self.mode == SERIES && series.on;
+        if held {
+            page.set_items("RacesListBox", vec![format!("{}/{}", series.run + 1, series.races + 1)], 0);
+        } else {
+            page.set_items(
+                "RacesListBox",
+                [3, 5, 7].iter().map(|n| n.to_string()).collect(),
+                (series.races / 2).saturating_sub(1).min(2) as usize,
+            );
+        }
+        for arrow in ["RacesLeftArrow", "RacesRightArrow", "OpponentsLeftArrow", "OpponentsRightArrow"] {
+            page.show(arrow, !held);
+        }
+        page.enable("OpponentsListBox", !held);
+        page.set_text("RacesLabel", self.ui.lang(if held { 2347 } else { 2346 }));
         self.track = self.track.min(tracks.len().saturating_sub(1));
         page.set_items(
             "DDLTextBox",
@@ -1955,6 +2110,13 @@ impl Frontend {
         let Some(entry) = self.shown_tracks(event).get(track).cloned() else {
             return Next::Stay;
         };
+        // A series' first race starts it with no points (0x45e490).
+        if self.mode == SERIES && !self.series.on {
+            let s = &mut self.series;
+            s.on = true;
+            s.run = 0;
+            s.points = vec![0; self.opponents.min(10) as usize + 1];
+        }
         if let Some(d) = Dlg::open(&mut self.ui, self.event.loading(), (0.0, 0.0)) {
             self.screen = Screen::Loading(d);
         }
@@ -1965,7 +2127,7 @@ impl Frontend {
             laps: if self.mode == 0 { 99 } else { self.laps },
             opponents: if self.mode == GHOST {
                 0
-            } else if self.mode == 2 {
+            } else if self.mode == SERIES {
                 self.opponents.min(10)
             } else {
                 self.opponents
@@ -2373,4 +2535,24 @@ fn split_looks(p: &mut crate::profile::Profile) -> bool {
     p.free_bike = Some(if free_bike { std::mem::take(&mut p.bike) } else { String::new() });
     p.free_outfit = Some(if free_outfit { std::mem::take(&mut p.outfit) } else { String::new() });
     true
+}
+
+#[cfg(test)]
+mod series_tests {
+    use super::Series;
+
+    #[test]
+    fn a_series_scores_the_top_ten_and_ranks_by_points_then_name() {
+        let s = Series { races: 2, run: 0, points: vec![0; 12], on: true };
+        // Racers 10 and 11 came 11th and 12th: no points.
+        let standings = [3, 0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11];
+        let p = s.with_race(&standings);
+        assert_eq!(p[3], 20);
+        assert_eq!(p[0], 17);
+        assert_eq!(p[9], 1);
+        assert_eq!(p[10], 0);
+        assert_eq!(p[11], 0);
+        let names: Vec<String> = ["b", "a"].iter().map(|n| n.to_string()).collect();
+        assert_eq!(Series::ranked(&[5, 5], &names), vec![1, 0]);
+    }
 }
