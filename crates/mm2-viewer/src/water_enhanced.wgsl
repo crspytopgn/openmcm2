@@ -6,7 +6,7 @@
 #include "enhanced.wgsl"
 
 @group(1) @binding(0) var<uniform> enh: Enh;
-@group(1) @binding(1) var sun_map: texture_depth_2d_array;
+@group(1) @binding(1) var sun_map: texture_depth_2d;
 @group(1) @binding(2) var sun_sampler: sampler_comparison;
 @group(1) @binding(6) var rut_map: texture_2d<f32>;
 @group(1) @binding(7) var rut_sampler: sampler;

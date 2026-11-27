@@ -492,6 +492,51 @@ mod tests {
     }
 
     #[test]
+    fn a_very_slow_phone_steps_down_within_a_couple_of_seconds() {
+        // A phone at two or three frames a second: each frame takes
+        // 0.4 s against a 60th of a second wanted. The governor used
+        // to be fed the pacing's capped 0.1 s, so 1.5 s of frames took
+        // about 6 s of real time; fed the true gap, it drops to the
+        // smallest size inside 3 s.
+        let mut g = Governor::default();
+        let mut k = 1.0;
+        let mut t = 0.0;
+        while t < 3.0 {
+            k = g.frame(0.4, BEAT, 1.0);
+            t += 0.4;
+        }
+        assert_eq!(k, 0.6, "{k}");
+    }
+
+    #[test]
+    fn the_capped_frame_time_it_used_to_see_took_four_times_as_long() {
+        // The same phone, but with each frame reported as the pacing's
+        // capped 0.1 s: 1.5 s of frames is 15 frames, 6 s of real time
+        // at 0.4 s a frame.
+        let mut g = Governor::default();
+        let mut k = 1.0;
+        let mut frames = 0;
+        while k == 1.0 {
+            k = g.frame(0.1, BEAT, 1.0);
+            frames += 1;
+        }
+        assert_eq!(frames, 15, "{frames} frames to the first step down");
+    }
+
+    #[test]
+    fn a_very_slow_browser_picture_steps_down_within_a_couple_of_seconds() {
+        let mut p = Picture::default();
+        let window = (1920, 1080);
+        let mut k = 1.0;
+        let mut t = 0.0;
+        while t < 3.0 {
+            k = p.frame(true, false, 0.4, BEAT, window);
+            t += 0.4;
+        }
+        assert_eq!(k, 0.6, "{k}");
+    }
+
+    #[test]
     fn a_slow_browser_picture_steps_down_but_not_too_far() {
         let mut p = Picture::default();
         let window = (1920, 1080);

@@ -24,7 +24,7 @@ struct Globals {
 #include "enhanced.wgsl"
 
 @group(1) @binding(0) var<uniform> enh: Enh;
-@group(1) @binding(1) var sun_map: texture_depth_2d_array;
+@group(1) @binding(1) var sun_map: texture_depth_2d;
 @group(1) @binding(2) var sun_sampler: sampler_comparison;
 @group(1) @binding(6) var rut_map: texture_2d<f32>;
 @group(1) @binding(7) var rut_sampler: sampler;
@@ -37,6 +37,10 @@ struct Globals {
 // Tufts a side of the grid, and ft between them.
 const SIDE: u32 = 384u;
 const STEP: f32 = 0.85;
+// Tufts a side of one tile (grass.rs): the instances of one tile follow
+// each other, so the tiles a camera sees are a few joined draws.
+const TILE: u32 = 32u;
+const TILES: u32 = SIDE / TILE;
 // Where the grass starts to sink into the ground, and where it is gone, ft.
 const FADE: f32 = 90.0;
 const END: f32 = 160.0;
@@ -134,8 +138,12 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     out.clip = vec4<f32>(0.0, 0.0, 2.0, 1.0);
     let scale = globals.grid.y;
     // The tuft's place: its grid cell round the camera, moved a little.
+    // Tile-major, so one tile's tufts follow each other (grass.rs).
     let centre = floor(globals.camera.xz / STEP);
-    let cell = centre + vec2<f32>(f32(ii % SIDE), f32(ii / SIDE)) - f32(SIDE / 2u);
+    let tile = ii / (TILE * TILE);
+    let within = ii % (TILE * TILE);
+    let at = vec2<f32>(f32(tile % TILES) * f32(TILE) + f32(within % TILE), f32(tile / TILES) * f32(TILE) + f32(within / TILE));
+    let cell = centre + at - f32(SIDE / 2u);
     let r1 = hash(cell);
     let r2 = hash(cell + 17.31);
     let r3 = hash(cell + 41.7);
@@ -178,6 +186,17 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     if (next_gen()) {
         tall = mix(0.6, 1.6, hash(cell + 3.3)) * grow;
     }
+    // Further off, a card at a time sinks away, so a tuft costs fewer
+    // fragments the smaller it is on screen: the third card over 30 to
+    // 45 ft, the second over 55 to 80 ft, each shrinking smoothly, so
+    // none ever pops off at a boundary.
+    var card_fade = 1.0;
+    if (card == 1u) {
+        card_fade = 1.0 - smoothstep(55.0, 80.0, dist);
+    } else if (card == 2u) {
+        card_fade = 1.0 - smoothstep(30.0, 45.0, dist);
+    }
+    tall *= card_fade;
     let wide = 1.3 + 0.3 * r2;
     // Sway in the wind, more at the tips.
     let time = enh.world.x;
@@ -224,9 +243,15 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
 
 @fragment
 fn fs_main(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
-    // Ten blades on the card, each narrowing to its tip.
+    // Ten blades on the card, each narrowing to its tip. Far off a tuft
+    // is a few pixels tall, so half the blades draw the same few pixels.
+    let dist = length(in.world - globals.camera.xyz);
     var cover = 0.0;
+    let blades = select(10, 5, dist > 100.0);
     for (var k = 0; k < 10; k++) {
+        if (k >= blades) {
+            break;
+        }
         let s = in.seed * 13.0 + f32(k) * 1.618;
         let x = fract(s * 0.73) * 0.84 + 0.08;
         let h = 0.55 + fract(s * 1.37) * 0.45;
@@ -238,7 +263,6 @@ fn fs_main(in: Out, @builtin(front_facing) front: bool) -> @location(0) vec4<f32
     if (cover < 0.05) {
         discard;
     }
-    let dist = length(in.world - globals.camera.xyz);
     var n = normalize(in.normal);
     if (!front) {
         n = -n;

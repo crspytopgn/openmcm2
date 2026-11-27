@@ -3,8 +3,7 @@
 //! truck, a tractor, a propeller, a helicopter's rotor, a UFO's hum),
 //! pitched up with its revs and louder on the gas, and its tyres
 //! squealing when a car slides. The loops are cut from public-domain
-//! recordings (`tools/make_vehicle_sounds.py`) and built in, so the game
-//! and the free pack both have them.
+//! recordings (`tools/make_vehicle_sounds.py`).
 
 use crate::audio::{Audio, Voice};
 use crate::drive::{Drive, Kind};
@@ -12,18 +11,45 @@ use crate::sound::Listener;
 use mm2_formats::wav::Sound;
 use std::sync::Arc;
 
-/// The loops, by name.
-const LOOPS: [(&str, &[u8]); 9] = [
-    ("car", include_bytes!("vehicle_sounds/car.wav")),
-    ("v8", include_bytes!("vehicle_sounds/v8.wav")),
-    ("diesel", include_bytes!("vehicle_sounds/diesel.wav")),
-    ("truck", include_bytes!("vehicle_sounds/truck.wav")),
-    ("tractor", include_bytes!("vehicle_sounds/tractor.wav")),
-    ("heli", include_bytes!("vehicle_sounds/heli.wav")),
-    ("prop", include_bytes!("vehicle_sounds/prop.wav")),
-    ("ufo", include_bytes!("vehicle_sounds/ufo.wav")),
-    ("skid", include_bytes!("vehicle_sounds/skid.wav")),
-];
+/// The loops, by name: built into the desktop game, but in a browser
+/// read from the page's store (`web/index.html` fetches them while the
+/// menus are up, so the browser build doesn't carry their 1.3 MB).
+const NAMES: [&str; 9] = ["car", "v8", "diesel", "truck", "tractor", "heli", "prop", "ufo", "skid"];
+
+#[cfg(not(target_arch = "wasm32"))]
+fn loop_bytes(name: &str) -> Option<std::borrow::Cow<'static, [u8]>> {
+    use std::borrow::Cow;
+    Some(Cow::Borrowed(match name {
+        "car" => include_bytes!("vehicle_sounds/car.wav"),
+        "v8" => include_bytes!("vehicle_sounds/v8.wav"),
+        "diesel" => include_bytes!("vehicle_sounds/diesel.wav"),
+        "truck" => include_bytes!("vehicle_sounds/truck.wav"),
+        "tractor" => include_bytes!("vehicle_sounds/tractor.wav"),
+        "heli" => include_bytes!("vehicle_sounds/heli.wav"),
+        "prop" => include_bytes!("vehicle_sounds/prop.wav"),
+        "ufo" => include_bytes!("vehicle_sounds/ufo.wav"),
+        "skid" => include_bytes!("vehicle_sounds/skid.wav"),
+        _ => return None,
+    }))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn loop_bytes(name: &str) -> Option<std::borrow::Cow<'static, [u8]>> {
+    crate::fs::read(format!("/assets/vehicle_sounds/{name}.wav")).ok().map(std::borrow::Cow::Owned)
+}
+
+/// The loops that are there to play: a loop the page hasn't fetched yet
+/// is left out, and looked for again the next time a vehicle is driven,
+/// so driving is silent only until they arrive.
+fn load_loops() -> Vec<(&'static str, Arc<Sound>)> {
+    NAMES
+        .iter()
+        .filter_map(|name| {
+            let bytes = loop_bytes(name)?;
+            Some((*name, Arc::new(mm2_formats::wav::parse(&bytes).ok()?)))
+        })
+        .collect()
+}
 
 /// Heard this far round, ft: full up to the first, nothing past the second.
 const RANGE: (f32, f32) = (40.0, 1500.0);
@@ -61,11 +87,7 @@ pub struct DriveSound {
 
 impl DriveSound {
     pub fn new() -> DriveSound {
-        let loops = LOOPS
-            .iter()
-            .filter_map(|(name, bytes)| Some((*name, Arc::new(mm2_formats::wav::parse(bytes).ok()?))))
-            .collect();
-        DriveSound { loops, engine: None, skid: None, revs: 0.0 }
+        DriveSound { loops: load_loops(), engine: None, skid: None, revs: 0.0 }
     }
 
     fn sound(&self, name: &str) -> Option<&Arc<Sound>> {
@@ -79,6 +101,11 @@ impl DriveSound {
             self.stop(audio);
             return;
         };
+        // The page fetches the loops while the menus are up: if they
+        // weren't there when this was built, look again now.
+        if self.loops.is_empty() {
+            self.loops = load_loops();
+        }
         let (name, base) = d.voice;
         if self.engine.is_some_and(|(v, n)| n != name || !audio.playing(v)) {
             if let Some((v, _)) = self.engine.take() {

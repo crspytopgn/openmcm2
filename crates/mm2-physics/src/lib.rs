@@ -47,6 +47,16 @@ pub trait Ground {
         None
     }
 
+    /// Whether any solid object could touch a sphere at `centre` with
+    /// `radius`: false only when no solid is anywhere near it. The
+    /// default says yes, so a ground without a solid world keeps the
+    /// old behaviour; a world-backed ground answers from its solids,
+    /// which lets the bikes skip sweeping every hull point when they
+    /// are out on open track with nothing near them.
+    fn solids_near(&self, _centre: Vec3, _radius: f32) -> bool {
+        true
+    }
+
     /// The tyres' braking, side and cornering grip on the surface at a
     /// point (`[TerrainZoneN] SurfaceFriction`, tyre+0x144).
     fn friction(&self, _at: Vec3) -> f32 {

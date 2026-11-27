@@ -53,3 +53,17 @@ jobs:
           CARGO_PROFILE_RELEASE_LTO: "false"
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
         run: cargo test --release --workspace
+
+  # The web build is only exercised by the Pages deploy on push to main,
+  # so a wasm-only breakage (e.g. an ungated native dependency) used to
+  # land before anyone noticed. Check both feature sets here.
+  wasm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --target wasm32-unknown-unknown -p mm2-viewer
+      - run: cargo check --target wasm32-unknown-unknown -p mm2-viewer --no-default-features

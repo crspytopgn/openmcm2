@@ -4,21 +4,57 @@
 //! roughness and a normal map with its height. The shaders lay only their
 //! detail over the game's own painted colours.
 
-/// Each material's colour (RGB) and roughness (A), and its normal (RGB)
-/// and height (A).
-const MATERIALS: [(&[u8], &[u8]); COUNT] = [
-    (include_bytes!("../assets/ground/dirt_albedo.webp"), include_bytes!("../assets/ground/dirt_normal.webp")),
-    (include_bytes!("../assets/ground/packed_albedo.webp"), include_bytes!("../assets/ground/packed_normal.webp")),
-    (include_bytes!("../assets/ground/grass_albedo.webp"), include_bytes!("../assets/ground/grass_normal.webp")),
-    (include_bytes!("../assets/ground/rock_albedo.webp"), include_bytes!("../assets/ground/rock_normal.webp")),
-    (include_bytes!("../assets/ground/sand_albedo.webp"), include_bytes!("../assets/ground/sand_normal.webp")),
-    (include_bytes!("../assets/ground/wood_albedo.webp"), include_bytes!("../assets/ground/wood_normal.webp")),
-    (include_bytes!("../assets/ground/metal_albedo.webp"), include_bytes!("../assets/ground/metal_normal.webp")),
-    (include_bytes!("../assets/ground/concrete_albedo.webp"), include_bytes!("../assets/ground/concrete_normal.webp")),
-    (include_bytes!("../assets/ground/straw_albedo.webp"), include_bytes!("../assets/ground/straw_normal.webp")),
+/// Each material's colour and normal files, under `assets/ground`.
+const FILES: [(&str, &str); COUNT] = [
+    ("dirt_albedo.webp", "dirt_normal.webp"),
+    ("packed_albedo.webp", "packed_normal.webp"),
+    ("grass_albedo.webp", "grass_normal.webp"),
+    ("rock_albedo.webp", "rock_normal.webp"),
+    ("sand_albedo.webp", "sand_normal.webp"),
+    ("wood_albedo.webp", "wood_normal.webp"),
+    ("metal_albedo.webp", "metal_normal.webp"),
+    ("concrete_albedo.webp", "concrete_normal.webp"),
+    ("straw_albedo.webp", "straw_normal.webp"),
 ];
 pub const COUNT: usize = 9;
 const SIDE: u32 = 512;
+
+/// One material file's bytes: built into the desktop game, but in a
+/// browser read from the page's store (`web/index.html` puts the ground
+/// pictures there before the game starts, and only for the enhanced look),
+/// so the browser build doesn't carry their 9.5 MB. The classic look
+/// never fetches them at all.
+fn file_bytes(name: &str) -> Option<std::borrow::Cow<'static, [u8]>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::borrow::Cow;
+        Some(Cow::Borrowed(match name {
+            "dirt_albedo.webp" => include_bytes!("../assets/ground/dirt_albedo.webp"),
+            "dirt_normal.webp" => include_bytes!("../assets/ground/dirt_normal.webp"),
+            "packed_albedo.webp" => include_bytes!("../assets/ground/packed_albedo.webp"),
+            "packed_normal.webp" => include_bytes!("../assets/ground/packed_normal.webp"),
+            "grass_albedo.webp" => include_bytes!("../assets/ground/grass_albedo.webp"),
+            "grass_normal.webp" => include_bytes!("../assets/ground/grass_normal.webp"),
+            "rock_albedo.webp" => include_bytes!("../assets/ground/rock_albedo.webp"),
+            "rock_normal.webp" => include_bytes!("../assets/ground/rock_normal.webp"),
+            "sand_albedo.webp" => include_bytes!("../assets/ground/sand_albedo.webp"),
+            "sand_normal.webp" => include_bytes!("../assets/ground/sand_normal.webp"),
+            "wood_albedo.webp" => include_bytes!("../assets/ground/wood_albedo.webp"),
+            "wood_normal.webp" => include_bytes!("../assets/ground/wood_normal.webp"),
+            "metal_albedo.webp" => include_bytes!("../assets/ground/metal_albedo.webp"),
+            "metal_normal.webp" => include_bytes!("../assets/ground/metal_normal.webp"),
+            "concrete_albedo.webp" => include_bytes!("../assets/ground/concrete_albedo.webp"),
+            "concrete_normal.webp" => include_bytes!("../assets/ground/concrete_normal.webp"),
+            "straw_albedo.webp" => include_bytes!("../assets/ground/straw_albedo.webp"),
+            "straw_normal.webp" => include_bytes!("../assets/ground/straw_normal.webp"),
+            _ => return None,
+        }))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::fs::read(format!("/assets/ground/{name}")).ok().map(std::borrow::Cow::Owned)
+    }
+}
 
 /// The objects' materials' layers.
 const WOOD: u32 = 5;
@@ -86,26 +122,40 @@ pub struct Materials {
     pub average: [[f32; 4]; COUNT],
 }
 
-fn decode(webp: &[u8]) -> Vec<u8> {
+/// A material's picture decoded to RGBA8, or None when its file is
+/// missing or won't decode (in a browser, when the page didn't fetch it):
+/// the caller then stands in a flat picture, so the game still runs.
+fn decode(webp: &[u8]) -> Option<Vec<u8>> {
     // Lossless WebP: the same pixels as the PNGs they were, in 16% less.
-    let mut decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(webp)).expect("built-in material");
-    assert_eq!(decoder.dimensions(), (SIDE, SIDE));
-    let mut buf = vec![0; decoder.output_buffer_size().expect("built-in material")];
-    decoder.read_image(&mut buf).expect("built-in material");
+    let mut decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(webp)).ok()?;
+    if decoder.dimensions() != (SIDE, SIDE) {
+        return None;
+    }
+    let mut buf = vec![0; decoder.output_buffer_size()?];
+    decoder.read_image(&mut buf).ok()?;
     if decoder.has_alpha() {
-        return buf;
+        return Some(buf);
     }
     // Stored without the alpha it had, all opaque.
-    buf.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect()
+    Some(buf.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect())
+}
+
+/// A flat picture standing in for a missing material: mid-grey and
+/// middling rough for a colour picture, flat and pointing up for a
+/// normal map. Only its detail is laid over the painted colour, so the
+/// ground still looks like the game painted it.
+fn flat(albedo: bool) -> Vec<u8> {
+    let px: [u8; 4] = if albedo { [128, 128, 128, 128] } else { [128, 128, 255, 128] };
+    px.repeat((SIDE * SIDE) as usize)
 }
 
 /// Halves an RGBA8 image `side` texels square, linear in sRGB colour for
 /// `srgb` (only RGB; alpha is always linear).
 /// A ground material's colour picture (RGB, roughness in A), by name:
 /// dirt, packed, grass, rock or sand.
-pub(crate) fn albedo(name: &str) -> Option<&'static [u8]> {
+pub(crate) fn albedo(name: &str) -> Option<std::borrow::Cow<'static, [u8]>> {
     let i = ["dirt", "packed", "grass", "rock", "sand"].iter().position(|n| *n == name)?;
-    Some(MATERIALS[i].0)
+    file_bytes(FILES[i].0)
 }
 
 pub(crate) fn halve(level: &[u8], side: u32, srgb: bool) -> Vec<u8> {
@@ -192,8 +242,17 @@ fn array(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, layers: &[Vec<
 
 impl Materials {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Materials {
-        let albedo: Vec<Vec<u8>> = MATERIALS.iter().map(|m| decode(m.0)).collect();
-        let normal: Vec<Vec<u8>> = MATERIALS.iter().map(|m| decode(m.1)).collect();
+        // A file the page didn't fetch (or that won't decode) stands in
+        // flat, rather than stopping the game: its detail only is laid
+        // over the painted colour.
+        let load = |name: &str, albedo: bool| {
+            file_bytes(name).and_then(|b| decode(&b)).unwrap_or_else(|| {
+                eprintln!("ground material {name}: missing, standing in flat");
+                flat(albedo)
+            })
+        };
+        let albedo: Vec<Vec<u8>> = FILES.iter().map(|m| load(m.0, true)).collect();
+        let normal: Vec<Vec<u8>> = FILES.iter().map(|m| load(m.1, false)).collect();
         let average = std::array::from_fn(|i| {
             let mut sum = [0.0f64; 3];
             for p in albedo[i].chunks_exact(4) {
@@ -218,10 +277,20 @@ mod tests {
 
     #[test]
     fn every_material_decodes_to_rgba() {
-        for (albedo, normal) in MATERIALS {
+        for (albedo, normal) in FILES {
             for m in [albedo, normal] {
-                assert_eq!(decode(m).len(), (SIDE * SIDE * 4) as usize);
+                let bytes = file_bytes(m).expect("built-in material");
+                assert_eq!(decode(&bytes).expect("built-in material").len(), (SIDE * SIDE * 4) as usize);
             }
         }
+    }
+
+    #[test]
+    fn a_flat_picture_stands_in_for_a_missing_material() {
+        assert_eq!(flat(true).len(), (SIDE * SIDE * 4) as usize);
+        assert_eq!(flat(false).len(), (SIDE * SIDE * 4) as usize);
+        // Flat normal points up, flat colour is mid-grey.
+        assert_eq!(&flat(false)[..4], &[128, 128, 255, 128]);
+        assert_eq!(decode(&[]), None);
     }
 }

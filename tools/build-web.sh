@@ -8,7 +8,11 @@
 #   python3 -m http.server -d web 8000     # then open http://localhost:8000
 set -e
 cd "$(dirname "$0")/.."
-cargo build --release --target wasm32-unknown-unknown -p mm2-viewer
+# Optimised for speed like the native build (laptops and Macs need every
+# frame), with panic=abort for a smaller download (no unwinding tables;
+# nothing in the tree uses catch_unwind).
+cargo build --release --target wasm32-unknown-unknown -p mm2-viewer \
+    --config 'profile.release.panic="abort"'
 wasm-bindgen --target web --no-typescript --out-dir web/pkg \
     target/wasm32-unknown-unknown/release/mm2-viewer.wasm
 # Smaller and faster, when binaryen's wasm-opt is installed.
@@ -16,9 +20,22 @@ if command -v wasm-opt >/dev/null; then
     wasm-opt -O3 --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
         web/pkg/mm2-viewer_bg.wasm -o web/pkg/mm2-viewer_bg.wasm
 fi
+# The game's own pictures and sounds ride as files the page fetches
+# (web/index.html), not inside the engine, so the download stays small:
+# the enhanced look's ground pictures (9.5 MB), the vehicle sounds
+# (1.3 MB) and the free riders' motions (1.0 MB). The page fetches them
+# from here, and the browser keeps them once fetched.
+rm -rf web/assets
+mkdir -p web/assets
+cp -R crates/mm2-viewer/assets/ground web/assets/ground
+mkdir -p web/assets/vehicle_sounds
+cp crates/mm2-viewer/src/vehicle_sounds/*.wav web/assets/vehicle_sounds/
+cp crates/mm2-viewer/src/free_motions.bin web/assets/free_motions.bin
 # The page checks this to load a new build fresh and to tell players
-# when one is out while they play.
-version="$(git rev-parse --short HEAD 2>/dev/null || echo dev)-$(date -u +%Y%m%d%H%M%S)"
+# when one is out while they play. It is a hash of the built engine,
+# not a timestamp, so rebuilding the same source does not bust every
+# player's cached build for nothing.
+version="$(git rev-parse --short HEAD 2>/dev/null || echo dev)-$(sha256sum web/pkg/mm2-viewer_bg.wasm | cut -c1-12)"
 # The engine's size, and about what it takes to download compressed, for
 # the loading screen's progress bar.
 engine="$(wc -c < web/pkg/mm2-viewer_bg.wasm | tr -d ' ')"

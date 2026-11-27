@@ -31,6 +31,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      # Cache the registry and the build, so the wasm-bindgen install and
+      # the rebuilds below are not redone from scratch on every deploy.
+      - uses: Swatinem/rust-cache@v2
+      # wasm-opt: the build script only runs it when it is installed, and
+      # without it the deployed wasm ships unoptimised.
+      - name: Install binaryen
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq binaryen
       - name: Build the browser version
         run: |
           version=$(grep -A1 'name = "wasm-bindgen"$' Cargo.lock | sed -n 's/version = "\(.*\)"/\1/p')

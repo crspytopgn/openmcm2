@@ -58,6 +58,49 @@ pub struct Crossing {
     pub object: u64,
 }
 
+/// A triangle-tree traversal stack that lives on the caller's stack: a
+/// `.col` tree is only a few levels deep, so the common case allocates
+/// nothing at all. A heap spill holds the rest for a pathologically deep
+/// tree, so the traversal stays correct whatever the shape. (Was
+/// `vec![0usize]` per `sphere`/`crossing` call — a heap allocation per
+/// solid tested, per query, in the hottest path of the game.)
+struct Stack {
+    inline: [usize; 64],
+    len: usize,
+    spill: Vec<usize>,
+}
+
+impl Stack {
+    fn new() -> Self {
+        Stack {
+            inline: [0; 64],
+            len: 0,
+            spill: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, i: usize) {
+        if self.len < self.inline.len() {
+            self.inline[self.len] = i;
+            self.len += 1;
+        } else {
+            self.spill.push(i);
+        }
+    }
+
+    fn pop(&mut self) -> Option<usize> {
+        if let Some(i) = self.spill.pop() {
+            return Some(i);
+        }
+        if self.len > 0 {
+            self.len -= 1;
+            Some(self.inline[self.len])
+        } else {
+            None
+        }
+    }
+}
+
 impl Solid {
     /// Places `body` with `rotation` and `position`, after the body's own
     /// matrix.
@@ -114,7 +157,8 @@ impl Solid {
         }
         let local = self.rotation.transpose() * (centre - self.position);
         let mut best: Option<(Hit, bool)> = None;
-        let mut stack = vec![0usize];
+        let mut stack = Stack::new();
+        stack.push(0);
         while let Some(i) = stack.pop() {
             match self.nodes[i] {
                 Node::Inner { bounds, right } => {
@@ -209,7 +253,8 @@ impl Solid {
         let b = back * (to - self.position);
         let (lo, hi) = (a.min(b), a.max(b));
         let mut best: Option<Crossing> = None;
-        let mut stack = vec![0usize];
+        let mut stack = Stack::new();
+        stack.push(0);
         while let Some(i) = stack.pop() {
             match self.nodes[i] {
                 Node::Inner { bounds, right } => {
@@ -606,6 +651,18 @@ fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 mod tests {
     use super::*;
     use mm2_formats::col::{Body, Bounds, Triangle};
+
+    #[test]
+    fn traversal_stack_is_lifo_past_the_inline_capacity() {
+        let mut s = Stack::new();
+        for i in 0..200 {
+            s.push(i);
+        }
+        for i in (0..200).rev() {
+            assert_eq!(s.pop(), Some(i));
+        }
+        assert_eq!(s.pop(), None);
+    }
 
     #[test]
     fn a_trunk_pushes_out_sideways() {

@@ -622,18 +622,40 @@ struct OwnMotion {
     motion: mm2_formats::anim::Motion,
 }
 
-/// The pack's own motions, read once from `free_motions.bin` (made by
-/// `tools/freepack/free_motions.py`; see there for the layout).
+/// The pack's own motions, read from `free_motions.bin` (made by
+/// `tools/freepack/free_motions.py`; see there for the layout). Built
+/// into the desktop game, but in a browser read from the page's store
+/// (`web/index.html` fetches it while the menus are up, so the browser
+/// build doesn't carry its 1.0 MB). An empty table is tried again on the
+/// next call, so the free riders ride properly once it arrives.
 fn own_table() -> &'static [OwnMotion] {
-    static TABLE: std::sync::OnceLock<Vec<OwnMotion>> = std::sync::OnceLock::new();
-    TABLE.get_or_init(|| {
-        // `MM2_FREE_MOTIONS=FILE`: try a freshly made table without a rebuild.
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(t) = std::env::var_os("MM2_FREE_MOTIONS").and_then(|p| std::fs::read(p).ok()).and_then(|d| read_own(&d)) {
-            return t;
+    static TABLE: std::sync::Mutex<Option<&'static [OwnMotion]>> = std::sync::Mutex::new(None);
+    let mut table = TABLE.lock().unwrap_or_else(|e| e.into_inner());
+    if table.as_ref().map_or(true, |t| t.is_empty()) {
+        let found = load_own_table();
+        if !found.is_empty() {
+            *table = Some(Box::leak(found.into_boxed_slice()));
+        } else if table.is_none() {
+            *table = Some(&[]);
         }
-        read_own(include_bytes!("free_motions.bin")).unwrap_or_default()
-    })
+    }
+    match *table {
+        Some(t) => t,
+        None => &[],
+    }
+}
+
+/// Reads the table from wherever it lives for this build.
+fn load_own_table() -> Vec<OwnMotion> {
+    // `MM2_FREE_MOTIONS=FILE`: try a freshly made table without a rebuild.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(t) = std::env::var_os("MM2_FREE_MOTIONS").and_then(|p| std::fs::read(p).ok()).and_then(|d| read_own(&d)) {
+        return t;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    return read_own(include_bytes!("free_motions.bin")).unwrap_or_default();
+    #[cfg(target_arch = "wasm32")]
+    return crate::fs::read("/assets/free_motions.bin").ok().and_then(|d| read_own(&d)).unwrap_or_default();
 }
 
 fn read_own(data: &[u8]) -> Option<Vec<OwnMotion>> {

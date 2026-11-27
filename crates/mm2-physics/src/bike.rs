@@ -2360,6 +2360,30 @@ impl Bike {
         };
         let place = |at: Vec3, turned: Mat3, p: Vec3| at + turned * (p - COM);
         let mut out = Vec3::ZERO;
+        // One sphere for the whole swept hull first: each point runs
+        // from where the bike was to where it is, no further from the
+        // middle of the two places than its distance from the centre of
+        // mass plus half the move, so when no solid touches that sphere
+        // no point can cross one, and the 170 probes below are all
+        // wasted. The contact re-check below is skipped with them: its
+        // only lasting output is which tyres stand on an object, and
+        // with no solid near, none can.
+        let body = hull.body_points(self.crash.is_some());
+        let mut extent_sq = 0.0f32;
+        for &p in body {
+            extent_sq = extent_sq.max((p - COM).length_squared());
+        }
+        for i in 0..2 {
+            let off = axle(i, self.tyres[i].squeeze);
+            for &p in &hull.wheels[i] {
+                extent_sq = extent_sq.max((p + off - COM).length_squared());
+            }
+        }
+        let centre = (was_at + self.position) * 0.5;
+        let radius = extent_sq.sqrt() + was_at.distance(self.position) * 0.5 + 0.1;
+        if centre.is_finite() && radius.is_finite() && !ground.solids_near(centre, radius) {
+            return;
+        }
         // Per object hit: its crossings, by the bike's part (hull, front
         // wheel, rear wheel), and its distinct face normals.
         struct ObjectHit {
@@ -2395,7 +2419,6 @@ impl Bike {
                 if on_object[i] { &none } else { &hull.wheels[i] },
             )
         });
-        let body = hull.body_points(self.crash.is_some());
         let wheels = wheels.map(|(o, w)| (o, &w[..]));
         for (part, (offset, points)) in [(Vec3::ZERO, body)].into_iter().chain(wheels).enumerate() {
             for &p in points {
@@ -2773,6 +2796,51 @@ mod tests {
         assert!(top(hull.body_points(false)) > 6.0, "rider's helmet");
         assert!(top(hull.body_points(true)) < 4.5, "bare bike");
         assert!(Hull::default().body_points(false).is_empty());
+    }
+
+    /// Flat ground that counts every crossing probe, and says whether
+    /// any solid is near.
+    struct CountingGround {
+        crossings: std::cell::Cell<usize>,
+        near: bool,
+    }
+    impl Ground for CountingGround {
+        fn terrain(&self, _x: f32, _z: f32) -> (f32, Vec3) {
+            (0.0, Vec3::Y)
+        }
+        fn crossing(&self, _from: Vec3, _to: Vec3) -> Option<crate::collision::Crossing> {
+            self.crossings.set(self.crossings.get() + 1);
+            None
+        }
+        fn solids_near(&self, _centre: Vec3, _radius: f32) -> bool {
+            self.near
+        }
+    }
+
+    #[test]
+    fn hit_objects_sweeps_170_points_a_tick() {
+        // 130 riding points plus 20 a wheel: the sweep as it stands.
+        let mut bike = Bike::new(&Flat, Vec3::ZERO, Vec3::Z);
+        bike.hull = Some(std::sync::Arc::new(Hull::shared()));
+        bike.previous = Some((bike.position, bike.orientation, bike.velocity));
+        let ground = CountingGround {
+            crossings: std::cell::Cell::new(0),
+            near: true,
+        };
+        bike.hit_objects(&ground, 220.0, 0.3);
+        let swept = ground.crossings.get();
+        eprintln!("hit_objects crossing probes with solids near: {swept}");
+        // Two tyre probes from the contact re-check, then one per point.
+        assert_eq!(swept, 172, "crossing probes");
+        assert!(bike.hit.is_none());
+        let ground = CountingGround {
+            crossings: std::cell::Cell::new(0),
+            near: false,
+        };
+        bike.hit_objects(&ground, 220.0, 0.3);
+        eprintln!("hit_objects crossing probes with nothing near: {}", ground.crossings.get());
+        assert_eq!(ground.crossings.get(), 0, "the sweep is skipped with nothing near");
+        assert!(bike.hit.is_none());
     }
 
     #[test]

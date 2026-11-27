@@ -175,6 +175,12 @@ pub struct DustRenderer {
     atlas_group: wgpu::BindGroup,
     count: u32,
     cloud: Cloud,
+    /// Scratch kept across frames so `prepare` allocates nothing: the
+    /// far-first order (distance, puff index — indices, not references,
+    /// so the scratch can live in the struct) and the instances built
+    /// from it. (Was two fresh Vecs every frame.)
+    order: Vec<(f32, usize)>,
+    scratch: Vec<Instance>,
 }
 
 /// What is in the air: the puffs, drops, grit and clods, and what each
@@ -759,6 +765,8 @@ impl DustRenderer {
             atlas_group,
             count: 0,
             cloud: Cloud::new(),
+            order: Vec::new(),
+            scratch: Vec::new(),
         }
     }
 
@@ -772,63 +780,66 @@ impl DustRenderer {
     /// Puts the puffs in the buffer, furthest first, for the eye at `eye`:
     /// only the dust, only the dirt, or both.
     pub fn prepare(&mut self, queue: &wgpu::Queue, eye: Vec3, dust: bool, roost: bool) {
-        let mut order: Vec<(f32, &Puff)> = self
-            .cloud
-            .puffs
-            .iter()
-            .filter(|p| if p.roost || matches!(p.kind, Kind::Clod | Kind::Grain) { roost } else { dust })
-            .map(|p| (p.at.distance_squared(eye), p))
-            .collect();
+        let order = &mut self.order;
+        order.clear();
+        order.extend(
+            self.cloud
+                .puffs
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| if p.roost || matches!(p.kind, Kind::Clod | Kind::Grain) { roost } else { dust })
+                .map(|(i, p)| (p.at.distance_squared(eye), i)),
+        );
         order.sort_by(|a, b| b.0.total_cmp(&a.0));
-        let instances: Vec<Instance> = order
-            .iter()
-            .map(|(_, p)| {
-                let t = p.age / p.life;
-                match p.kind {
-                    Kind::Drop => {
-                        let size = 0.04 + 0.07 * p.seed;
-                        return Instance {
-                            place: [p.at.x, p.at.y, p.at.z, size],
-                            look: [p.thick * (1.0 - t * t), p.velocity.x, p.velocity.y, p.velocity.z],
-                            home: [p.home.x, p.home.z, 1.0, 0.0],
-                        };
+        let instances = &mut self.scratch;
+        instances.clear();
+        for &(_, i) in order.iter() {
+            let p = &self.cloud.puffs[i];
+            let t = p.age / p.life;
+            let inst = match p.kind {
+                Kind::Drop => {
+                    let size = 0.04 + 0.07 * p.seed;
+                    Instance {
+                        place: [p.at.x, p.at.y, p.at.z, size],
+                        look: [p.thick * (1.0 - t * t), p.velocity.x, p.velocity.y, p.velocity.z],
+                        home: [p.home.x, p.home.z, 1.0, 0.0],
                     }
-                    Kind::Clod => {
-                        // Tumbling: a picture of its own and a turn that
-                        // goes on as it flies.
-                        let picture = (p.seed * LAYERS as f32).floor().min(LAYERS as f32 - 1.0);
-                        let turn = (p.seed * 13.7 + p.age * (1.5 + 3.0 * p.seed)).fract();
-                        return Instance {
-                            place: [p.at.x, p.at.y, p.at.z, p.size],
-                            look: [p.thick * (1.0 - (t * 4.0 - 3.0).max(0.0)), p.velocity.x, p.velocity.y, p.velocity.z],
-                            home: [p.home.x, p.home.z, 2.0, picture + turn.min(0.999)],
-                        };
-                    }
-                    Kind::Grain => {
-                        return Instance {
-                            place: [p.at.x, p.at.y, p.at.z, p.size],
-                            look: [p.thick * (1.0 - (t * 3.0 - 2.0).max(0.0)), p.velocity.x, p.velocity.y, p.velocity.z],
-                            home: [p.home.x, p.home.z, 3.0, 0.0],
-                        };
-                    }
-                    Kind::Puff => {}
                 }
-                // Swells fast then slowly; fades in quickly and out slowly,
-                // thinning as it spreads.
-                let size = p.size + p.swell * (1.0 - (-p.age * 1.3).exp()) + p.age * 0.25;
-                let thick = p.thick * (t / 0.05).min(1.0) * (1.0 - t).powf(1.6);
-                // Raised by about half its size, so it billows up off the
-                // ground rather than being cut off flat by it.
-                Instance {
-                    place: [p.at.x, p.at.y + size * 0.45, p.at.z, size],
-                    look: [thick, p.seed, p.age, size],
-                    home: [p.home.x, p.home.z, 0.0, 0.0],
+                Kind::Clod => {
+                    // Tumbling: a picture of its own and a turn that
+                    // goes on as it flies.
+                    let picture = (p.seed * LAYERS as f32).floor().min(LAYERS as f32 - 1.0);
+                    let turn = (p.seed * 13.7 + p.age * (1.5 + 3.0 * p.seed)).fract();
+                    Instance {
+                        place: [p.at.x, p.at.y, p.at.z, p.size],
+                        look: [p.thick * (1.0 - (t * 4.0 - 3.0).max(0.0)), p.velocity.x, p.velocity.y, p.velocity.z],
+                        home: [p.home.x, p.home.z, 2.0, picture + turn.min(0.999)],
+                    }
                 }
-            })
-            .collect();
+                Kind::Grain => Instance {
+                    place: [p.at.x, p.at.y, p.at.z, p.size],
+                    look: [p.thick * (1.0 - (t * 3.0 - 2.0).max(0.0)), p.velocity.x, p.velocity.y, p.velocity.z],
+                    home: [p.home.x, p.home.z, 3.0, 0.0],
+                },
+                Kind::Puff => {
+                    // Swells fast then slowly; fades in quickly and out slowly,
+                    // thinning as it spreads.
+                    let size = p.size + p.swell * (1.0 - (-p.age * 1.3).exp()) + p.age * 0.25;
+                    let thick = p.thick * (t / 0.05).min(1.0) * (1.0 - t).powf(1.6);
+                    // Raised by about half its size, so it billows up off the
+                    // ground rather than being cut off flat by it.
+                    Instance {
+                        place: [p.at.x, p.at.y + size * 0.45, p.at.z, size],
+                        look: [thick, p.seed, p.age, size],
+                        home: [p.home.x, p.home.z, 0.0, 0.0],
+                    }
+                }
+            };
+            instances.push(inst);
+        }
         self.count = instances.len() as u32;
         if !instances.is_empty() {
-            queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&instances));
+            queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(instances));
         }
     }
 

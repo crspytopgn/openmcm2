@@ -565,6 +565,7 @@ const STEPS = {
   keep: ["Keeping your game in this browser", "So next time, Play starts it straight away. This only happens the first time."],
   files: ["Reading your game files", ""],
   saves: ["Loading your saves and tracks", ""],
+  assets: ["Fetching the ground pictures", "The enhanced look's ground pictures, kept out of the engine download. The original look fetches them later, behind the game."],
   engine: ["Downloading the game engine", ""],
   compile: ["Getting the engine ready", "Your browser is turning the download into code it can run."],
   start: ["Starting the game", "Reading the menus, sounds and your settings."],
@@ -1410,8 +1411,9 @@ function noWebGPU() {
   );
 }
 
-// The engine, with a progress bar: about 12 MB to download, more once
-// the browser unpacks it.
+// The engine, with a progress bar. The pictures, sounds and motions it
+// used to carry ride as files now (below), so it is a much smaller
+// download, more once the browser unpacks it.
 async function fetchEngine(quiet) {
   const say = (share, text) => quiet || loader.progress(share, text);
   const r = await fetch(fresh("./pkg/mm2-viewer_bg.wasm"));
@@ -1462,6 +1464,38 @@ async function checkBrowser() {
   return true;
 }
 
+// The game's own pictures and sounds, kept out of the engine download
+// (about 12 MB all told) and fetched from this site instead, into the
+// game's own store (mm2fs.js). They are the site's own files, so the
+// browser keeps them once fetched and only asks again if they change.
+const GROUND_FILES = ["dirt", "packed", "grass", "rock", "sand", "wood", "metal", "concrete", "straw"].flatMap((m) => [
+  `ground/${m}_albedo.webp`,
+  `ground/${m}_normal.webp`,
+]);
+const SOUND_FILES = ["car", "v8", "diesel", "truck", "tractor", "heli", "prop", "ufo", "skid"].map((m) => `vehicle_sounds/${m}.wav`);
+const MOTION_FILES = ["free_motions.bin"];
+
+// Fetches `files` (under ./assets/) into the game's store under
+// /assets/, saying how far it has got (`say`, or nothing). A file that
+// won't fetch is left out: the game stands in something plain for it
+// rather than not starting.
+async function fetchAssets(files, say) {
+  let got = 0;
+  await Promise.all(
+    files.map(async (name) => {
+      try {
+        const r = await fetch(`./assets/${name}`);
+        if (!r.ok) throw new Error(`answered ${r.status}`);
+        fs.put(`/assets/${name}`, new Uint8Array(await r.arrayBuffer()));
+      } catch (e) {
+        console.warn(`game file not fetched: ${name}`, e);
+      }
+      got++;
+      say?.(got / files.length, `${got} of ${files.length} files`);
+    })
+  );
+}
+
 help.installTip($("installtip"), { touch: touch.wanted() });
 
 let starting = false;
@@ -1473,11 +1507,22 @@ async function start(list) {
   const at = { step: "files" };
   // The engine downloads and gets ready while the files are read (it's
   // usually kept by the browser, and getting it ready takes a phone a
-  // few seconds).
-  const engine = Promise.all([import(fresh("./pkg/mm2-viewer.js")), fetchEngine(true)]).then(([game, bytes]) => [
-    game,
-    WebAssembly.compile(bytes),
-  ]);
+  // few seconds). Streaming compile turns it into code as it arrives,
+  // instead of waiting for all of it first; a server that doesn't serve
+  // it with the type streaming needs falls back to downloading it all
+  // and then compiling it.
+  const engine = (async () => {
+    const game = await import(fresh("./pkg/mm2-viewer.js"));
+    try {
+      const r = await fetch(fresh("./pkg/mm2-viewer_bg.wasm"));
+      if (!r.ok) throw new Error(`the engine download answered ${r.status} ${r.statusText}`);
+      return [game, await WebAssembly.compileStreaming(r)];
+    } catch (e) {
+      console.warn("streaming compile not used, downloading the engine first", e);
+    }
+    const bytes = await fetchEngine(true);
+    return [game, await WebAssembly.compile(bytes)];
+  })();
   engine.catch(() => {});
   try {
     loader.step("files");
@@ -1491,6 +1536,15 @@ async function start(list) {
     navigator.storage?.persist?.().catch(() => {});
     addTracks();
     setLookInAddress();
+    // The enhanced look's ground pictures, before the game starts, so
+    // its first race has them: the original look never fetches them.
+    if (s.enhanced) {
+      at.step = "assets";
+      loader.step("assets");
+      loader.note("Only the ground pictures come down now: the engine no longer carries them.");
+      await fetchAssets(GROUND_FILES, (share, text) => loader.progress(share, text));
+      loader.note(null);
+    }
     at.step = "engine";
     loader.step("engine", "");
     const [game, compiled] = await engine;
@@ -1511,6 +1565,14 @@ async function start(list) {
       setParam("course-builder", null);
       setParam("ride-course", null);
     }
+    // The vehicle sounds and the free riders' motions, behind the game
+    // while the menus are up: the game looks for them again when they
+    // are needed, so driving sounds right and free riders ride properly
+    // once they arrive. With the original look, the enhanced look's
+    // ground pictures come down behind it too, so turning Enhanced on
+    // later has them from the next track on rather than flat ground.
+    const later = [...SOUND_FILES, ...MOTION_FILES, ...(s.enhanced ? [] : GROUND_FILES)];
+    fetchAssets(later).catch((e) => console.warn("extra game files not fetched", e));
     // The time played goes to the server as the tab is hidden or closed
     // (the game sends it after each race too).
     const flush = () => {
