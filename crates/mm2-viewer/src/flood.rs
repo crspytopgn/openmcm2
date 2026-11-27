@@ -168,7 +168,7 @@ impl FloodMap {
     /// Bakes the map with `pipeline` (flood.wgsl's `bake`) and its `group`,
     /// [`ROWS`] rows at a time, waiting for each; then marks it baked.
     pub fn run(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, pipeline: &wgpu::ComputePipeline, group: &wgpu::BindGroup) {
-        let start = std::time::Instant::now();
+        let start = web_time::Instant::now();
         let mut first = 0;
         while first < self.size.1 {
             let rows = ROWS.min(self.size.1 - first);
