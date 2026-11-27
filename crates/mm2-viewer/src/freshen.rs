@@ -12,7 +12,7 @@
 //!   their start cross-faded with what follows their end; the others fade
 //!   out over their last 5 ms.
 //!
-//! On unless turned off (`--no-fresh-sounds`).
+//! Off unless turned on (`--fresh-sounds`).
 
 use mm2_formats::wav::Sound;
 

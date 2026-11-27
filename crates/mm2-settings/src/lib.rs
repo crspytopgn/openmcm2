@@ -364,6 +364,11 @@ pub struct Settings {
     /// layout, `--new-menus`), with either graphics; `menus=original` (the
     /// default) keeps the original game's, which need its files.
     pub new_menus: bool,
+    /// `sounds=mm2` or `sounds=free`: the bikes' engines and the race's
+    /// sounds from the MM2 files (or the demo's), or the Free Pack's own
+    /// recordings, with either graphics (`--sounds mm2|free`). Not said
+    /// (None): they go with the graphics.
+    pub sounds: Option<bool>,
     /// `menus_pack`: a folder with only the new look menus (the Free
     /// Pack's menus part), for the new menus with the original graphics
     /// when the whole Free Pack isn't there. The Free Pack wins if both are.
@@ -509,8 +514,10 @@ pub struct More {
     pub builder_menu: bool,
     /// The engine sounds from the player's own game or demo, freshened as
     /// they load (EQ, a touch of pitch and saturation, seamless loops),
-    /// with the MM2 graphics (the free version keeps its own); on unless turned off
-    /// (`--no-fresh-sounds`).
+    /// with the MM2 sounds (the Free Pack keeps its own); off unless turned
+    /// on (`--fresh-sounds`). Kept as `freshen_sounds`: the older
+    /// `fresh_sounds`, on by default then, is left behind so everyone starts
+    /// with the original's sounds.
     pub fresh_sounds: bool,
     /// Drive the scenery: in Practice and free roam, V gets in the
     /// track's cars, trucks, trains and aircraft (`--drive-vehicles`).
@@ -574,7 +581,7 @@ impl Default for More {
             list_races: true,
             share_playtime: true,
             builder_menu: true,
-            fresh_sounds: true,
+            fresh_sounds: false,
             drive_vehicles: false,
             online_ghosts: false,
             whistle: true,
@@ -620,7 +627,7 @@ impl More {
             "lobby_downloads" => self.lobby_downloads = yes,
             "list_races" => self.list_races = yes,
             "builder_menu" => self.builder_menu = yes,
-            "fresh_sounds" => self.fresh_sounds = yes,
+            "freshen_sounds" => self.fresh_sounds = yes,
             // The old off-by-default Freshen extra (0.7.x): its saved 0 is
             // not a choice, so the new default stands.
             "freshen_engines" => {}
@@ -640,7 +647,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfresh_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\nreplay_editor={}\ndemo_tracks={}\nfree_tracks={}\nintro_video={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfreshen_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\nreplay_editor={}\ndemo_tracks={}\nfree_tracks={}\nintro_video={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -686,7 +693,7 @@ impl More {
             (!self.lobby_downloads, "--no-lobby-downloads"),
             (!self.list_races, "--no-list-races"),
             (!self.builder_menu, "--no-builder-menu"),
-            (!self.fresh_sounds, "--no-fresh-sounds"),
+            (self.fresh_sounds, "--fresh-sounds"),
             (self.drive_vehicles, "--drive-vehicles"),
             (self.online_ghosts, "--online-ghosts"),
             (!self.whistle, "--no-whistle"),
@@ -738,7 +745,7 @@ impl More {
             leaderboards: !has("--no-leaderboards"),
             share_playtime: !has("--no-share-playtime"),
             builder_menu: !has("--no-builder-menu"),
-            fresh_sounds: !has("--no-fresh-sounds"),
+            fresh_sounds: has("--fresh-sounds"),
             drive_vehicles: has("--drive-vehicles"),
             online_ghosts: has("--online-ghosts"),
             whistle: !has("--no-whistle"),
@@ -777,6 +784,7 @@ impl Default for Settings {
             game: None,
             free_graphics: false,
             new_menus: false,
+            sounds: None,
             freepack: None,
             menus_pack: None,
             hires: None,
@@ -900,6 +908,7 @@ impl Settings {
                 "game" if !v.is_empty() => s.game = Some(v.into()),
                 "graphics" => s.free_graphics = v == "free",
                 "menus" => s.new_menus = v == "new",
+                "sounds" => s.sounds = match v { "mm2" => Some(true), "free" => Some(false), _ => None },
                 "freepack" if !v.is_empty() => s.freepack = Some(v.into()),
                 "menus_pack" if !v.is_empty() => s.menus_pack = Some(v.into()),
                 "hires" if !v.is_empty() => s.hires = Some(v.into()),
@@ -1038,11 +1047,16 @@ impl Settings {
             b(self.forgiving_landings),
         );
         t += &format!(
-            "graphics={}\nfreepack={}\nmenus={}\nmenus_pack={}\n",
+            "graphics={}\nfreepack={}\nmenus={}\nmenus_pack={}\nsounds={}\n",
             if self.free_graphics { "free" } else { "original" },
             p(&self.freepack),
             if self.new_menus { "new" } else { "original" },
-            p(&self.menus_pack)
+            p(&self.menus_pack),
+            match self.sounds {
+                Some(true) => "mm2",
+                Some(false) => "free",
+                None => "",
+            }
         );
         t += &self.more.text();
         t += &format!("look={}\n", self.look);
@@ -1092,6 +1106,24 @@ impl Settings {
                     Some(_) => a.push("--original-menus".into()),
                     None => {}
                 }
+            }
+            _ => {}
+        }
+        // The sounds, when picked against the graphics: the MM2 files'
+        // (the demo's too) over the free graphics, or the Free Pack's over
+        // the MM2 graphics, from that folder.
+        match self.sounds {
+            Some(true) if self.free_graphics && self.game.is_some() => {
+                a.push("--sounds".into());
+                a.push("mm2".into());
+                a.push("--sounds-from".into());
+                a.push(self.game.as_ref().unwrap().display().to_string());
+            }
+            Some(false) if !self.free_graphics && self.freepack.is_some() => {
+                a.push("--sounds".into());
+                a.push("free".into());
+                a.push("--sounds-from".into());
+                a.push(self.freepack.as_ref().unwrap().display().to_string());
             }
             _ => {}
         }
