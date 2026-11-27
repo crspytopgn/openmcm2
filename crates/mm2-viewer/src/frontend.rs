@@ -1243,7 +1243,7 @@ impl Frontend {
     /// The Bike & Rider page (`0x44fe50`, `0x450630`): the bike and outfit
     /// lists on the player's picks, the engine size, and the plate number.
     fn fill_bike_page(&mut self) {
-        // The Free Pack's marked as ours beside the game's own.
+        // The Free Pack's kits named OpenMX beside the game's own.
         let (bikes, outfits) = self.roster.shown();
         let cc = self.roster.bikes.get(self.bike).map_or(250, |b| b.cc);
         // The player's own paint takes any engine size, as the game's

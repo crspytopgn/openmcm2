@@ -727,7 +727,7 @@ impl Multi {
     /// The Bike & Rider page.
     fn fill_bike(&mut self, cx: &mut Cx, d: &mut Dlg) {
         let g = &self.game;
-        // The Free Pack's marked as ours beside the game's own.
+        // The Free Pack's kits named OpenMX beside the game's own.
         let (bikes, outfits) = self.roster.shown();
         d.set_items("DDLBikes", bikes, g.bike);
         d.set_items("DDLRiders", outfits, g.outfit);

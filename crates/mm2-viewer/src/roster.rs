@@ -94,9 +94,7 @@ pub struct Roster {
     pub free_from: (usize, usize),
 }
 
-/// What the lists add to a Free Pack bike or outfit's name when the
-/// game's own are listed too, so the two can be told apart.
-pub const FREE_LABEL: &str = " (open source)";
+
 
 /// Shown in the lists: `Availability` 2 and 3. 1 is kept from the player
 /// (the amateurs' kit), and 10 is the award bike, shown once the career is
@@ -270,20 +268,19 @@ impl Roster {
         i >= self.free_from.1 && i < self.outfits.len()
     }
 
-    /// The bikes' and outfits' names as the lists show them: with the
-    /// game's own (or the demo's) listed too, the Free Pack's are marked
-    /// as ours, and the game's keep their names.
+    /// The bikes' and outfits' names as the lists show them. The Free
+    /// Pack's bikes go by their maker, OpenMX; with the game's own (or the
+    /// demo's) outfits listed too, the pack's go by it as well ("OpenMX
+    /// Yellow"), so they aren't taken for the game's.
     pub fn shown(&self) -> (Vec<String>, Vec<String>) {
-        let mark = |name: &str, free: bool, mixed: bool| {
-            if free && mixed {
-                format!("{name}{FREE_LABEL}")
-            } else {
-                name.to_string()
-            }
-        };
-        let (b, o) = self.free_from;
-        let bikes = self.bikes.iter().enumerate().map(|(i, c)| mark(&c.name, i >= b, b > 0)).collect();
-        let outfits = self.outfits.iter().enumerate().map(|(i, c)| mark(&c.name, i >= o, o > 0)).collect();
+        let bikes = self.bikes.iter().map(|c| c.name.clone()).collect();
+        let o = self.free_from.1;
+        let outfits = self
+            .outfits
+            .iter()
+            .enumerate()
+            .map(|(i, c)| if i >= o && o > 0 { format!("{FREE_MAKER} {}", c.name) } else { c.name.clone() })
+            .collect();
         (bikes, outfits)
     }
 
@@ -422,8 +419,8 @@ mod label_tests {
             free_from: (1, 1),
         };
         let (b, o) = r.shown();
-        assert_eq!(b, ["Suzuki Kazuyuki 250", "OpenMX Red 250 (open source)"]);
-        assert_eq!(o, ["Jeans & Flannel", "Red (open source)"]);
+        assert_eq!(b, ["Suzuki Kazuyuki 250", "OpenMX Red 250"]);
+        assert_eq!(o, ["Jeans & Flannel", "OpenMX Red"]);
         assert!(!r.free_bike(0) && r.free_bike(1) && r.free_outfit(1));
         // The free version alone: nothing to tell apart.
         r.bikes.remove(0);
