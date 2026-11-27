@@ -1,3 +1,19 @@
+# OpenMCM2 0.8.6
+
+* **The original bike and rider come first.** On the Bike & Rider page
+  the game's own bike and rider are the default again. A profile that
+  had picked up a free bike or kit goes back to the original once.
+* **Free bikes and kits are easy to spot.** Free kits listed next to the
+  game's own are called "OpenMX Yellow" and so on. Free bikes are picked
+  by model, then by engine size with the Custom Engine Size box.
+* **A new Sounds switch** on the Play card (launcher) and the Ready card
+  (browser): pick MM2 sounds or the Free Pack's, with either graphics.
+* **The original engine sounds play untouched by default.** Freshened
+  engine sounds are still there in Enhanced if you want them.
+* **No more crackle at the start gate** in the browser.
+* **Free Pack trees** draw all the way out again instead of popping in
+  just ahead of you.
+
 # OpenMCM2 0.8.5
 
 * **Faster all round.** Tracks load quicker, frame rates are higher and
