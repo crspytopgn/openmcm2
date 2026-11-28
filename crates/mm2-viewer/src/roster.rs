@@ -153,6 +153,11 @@ impl Roster {
         let mut roster = Roster::default();
         if let Some(originals) = Roster::originals(game) {
             roster = originals;
+            // The cut content extra's paints, for the player's lists only
+            // (the computer riders keep the game's).
+            if crate::tweaks::more().cut_content {
+                add_cut(&mut roster, crate::demo::bike_files(game).unwrap_or_default());
+            }
             roster.add_own(game);
         }
         roster.add_free();
@@ -295,6 +300,47 @@ impl Roster {
     }
 }
 
+/// Paints in `RES/BIKE.RES` that `bikes.pb` and `riders.pb` never name, so
+/// the original never offers them: the cut content extra lists them.
+/// Each bike goes after the last of its maker's, on that maker's model
+/// (the paints are laid out for it); the suit after the game's outfits.
+/// (maker, bike name, paint, cc, four-stroke)
+pub const CUT_BIKES: [(&str, &str, &str, u32, bool); 2] = [
+    // KTM's enduro, with its own black and white flame graphics.
+    ("KTM", "520EXC", "KTM520EXC_08.tga", 520, true),
+    // The YZ426F's paint as it was for the 1999 YZ400F.
+    ("Yamaha", "YZ400F", "YamahaYZ400F_08.tga", 400, true),
+];
+
+/// The rider suit no list names (yellow and blue, a red skull and
+/// crossbones): (shown name, paint).
+pub const CUT_OUTFITS: [(&str, &str); 1] = [("MPR", "MPR_08.tga")];
+
+/// Adds the cut bikes and outfits whose paints `have` (the lowercase names
+/// in `BIKE.RES`) holds.
+fn add_cut(roster: &mut Roster, have: std::collections::HashSet<String>) {
+    let has = |f: &str| have.contains(&f.to_ascii_lowercase());
+    for (maker, bike, paint, cc, four_stroke) in CUT_BIKES {
+        let prefix = format!("{maker} ");
+        let Some(last) = roster.bikes.iter().rposition(|b| b.name.starts_with(&prefix) && !b.own) else {
+            continue;
+        };
+        if !has(paint) || roster.bikes.iter().any(|b| b.texture.eq_ignore_ascii_case(paint)) {
+            continue;
+        }
+        let like = roster.bikes[last].clone();
+        roster.bikes.insert(
+            last + 1,
+            BikeChoice { name: format!("{prefix}{bike}"), texture: paint.into(), cc, four_stroke, ..like },
+        );
+    }
+    for (name, paint) in CUT_OUTFITS {
+        if has(paint) && !roster.outfits.iter().any(|o| o.file.eq_ignore_ascii_case(paint)) {
+            roster.outfits.push(Outfit { name: name.into(), file: paint.into() });
+        }
+    }
+}
+
 fn int(s: &scn::Section, key: &str) -> Option<i32> {
     s.get(key)?.trim().parse().ok()
 }
@@ -390,6 +436,45 @@ mod tests {
         assert!(r.bikes.len() > 10, "{}", r.bikes.len());
         assert!(r.outfits.len() > 40, "{}", r.outfits.len());
         assert_eq!(r.bikes[0].name, "Honda CR125");
+    }
+
+    /// The cut paints go in beside their makers' bikes, once each, and
+    /// only when the game's files hold them.
+    #[test]
+    fn cut_paints_join_the_lists() {
+        let b = |name: &str, model: &str, paint: &str| BikeChoice {
+            name: name.into(),
+            model: model.into(),
+            ui_model: format!("ui{model}"),
+            texture: paint.into(),
+            cc: 250,
+            four_stroke: false,
+            own: false,
+            sizes: Vec::new(),
+        };
+        let mut r = Roster {
+            bikes: vec![
+                b("Yamaha YZ426F", "yamaha.mcf", "YamahaYZ426F_08.tga"),
+                b("KTM 520SX", "ktm.mcf", "KTM520SX_08.tga"),
+                b("Generic 125", "yamaha.mcf", "x.tga"),
+            ],
+            outfits: vec![Outfit { name: "A".into(), file: "A.tga".into() }],
+            free_from: (0, 0),
+        };
+        let have: std::collections::HashSet<String> =
+            ["ktm520exc_08.tga", "yamahayz400f_08.tga", "mpr_08.tga"].map(String::from).into();
+        add_cut(&mut r, have.clone());
+        add_cut(&mut r, have);
+        let names: Vec<_> = r.bikes.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["Yamaha YZ426F", "Yamaha YZ400F", "KTM 520SX", "KTM 520EXC", "Generic 125"]);
+        assert_eq!((r.bikes[3].model.as_str(), r.bikes[3].cc, r.bikes[3].four_stroke), ("ktm.mcf", 520, true));
+        assert_eq!(r.outfits.len(), 2);
+        assert_eq!(r.outfits[1].file, "MPR_08.tga");
+        // Without the paints, nothing.
+        let mut r2 = Roster { bikes: vec![b("KTM 520SX", "ktm.mcf", "KTM520SX_08.tga")], ..Roster::default() };
+        add_cut(&mut r2, Default::default());
+        assert_eq!(r2.bikes.len(), 1);
+        assert!(r2.outfits.is_empty());
     }
 }
 
