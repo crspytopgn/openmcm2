@@ -315,6 +315,12 @@ struct Tracks {
     pictures: std::collections::HashMap<String, Picture>,
     /// Players' shared Course Builder tracks.
     shared: shared::SharedTracks,
+    /// The classic tracks (2000 to 2005), read the first time the page
+    /// shows, and the year (0 is 2000), event and search picked.
+    classics: Option<Vec<tracks::Classic>>,
+    classic_year: u16,
+    classic_kind: usize,
+    classic_search: String,
 }
 
 /// A track's picture: on its way, there, or not to be had.
@@ -2595,6 +2601,7 @@ impl Launcher {
         let mut add = None;
         let mut remove = None;
         popular_card(ui, t, &game, &mut remove);
+        classics_card(ui, t, &game, &mut add, &mut remove);
         shared::card(ui, &mut t.shared, &server, &homes, viewer, args);
         look::card(ui, look::icon::ICON_SEARCH, &format!("Browse {}", site.name), |ui| {
             let kinds: Vec<_> = site.kinds.iter().enumerate().map(|(i, k)| look::Choice::new(Some(i), k.label)).collect();
@@ -2700,6 +2707,124 @@ impl Launcher {
             t.added = tracks::Added::load();
         }
     }
+}
+
+/// Who made the Harmonic Cycle tracks, as the classics list names him.
+const HARMONIC: &str = "Mike McCue (Harmonic Cycle)";
+
+/// The Tracks page's card for the classic tracks: the ones players made
+/// from 2000 to 2005, by year and event, from MDX Racing.
+fn classics_card(ui: &mut egui::Ui, t: &mut Tracks, game: &std::path::Path, add: &mut Option<tracks::Track>, remove: &mut Option<Vec<String>>) {
+    let all = t.classics.get_or_insert_with(tracks::classics).clone();
+    if all.is_empty() {
+        return;
+    }
+    look::card(ui, look::icon::ICON_HISTORY, "Classic tracks (2000 to 2005)", |ui| {
+        let gb = all.iter().map(|c| c.track.size).sum::<u64>() as f64 / 1e9;
+        ui.label(format!(
+            "{},{:03} tracks players made while MM2 was new, dated from their own files ({gb:.0} GB in all). They come from MDX Racing, a few megabytes each, and each belongs to the player who made it.",
+            all.len() / 1000,
+            all.len() % 1000
+        ));
+        let mb = |l: &[tracks::Track]| (l.iter().map(|x| x.size).sum::<u64>() >> 20).max(1);
+        let working = t.queued > 0;
+        let missing = |l: Vec<tracks::Track>, t: &Tracks| -> Vec<tracks::Track> { l.into_iter().filter(|x| !t.added.has(game, &x.url) && !t.jobs.contains_key(&x.url)).collect() };
+        // Mike McCue's tracks from his Harmonic Cycle site, 2000 to 2003.
+        let harmonic: Vec<tracks::Track> = all.iter().filter(|c| c.track.author == HARMONIC).map(|c| c.track.clone()).collect();
+        if !harmonic.is_empty() && !working {
+            let get = missing(harmonic.clone(), t);
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                if !get.is_empty() {
+                    let label = format!("Get the Harmonic Cycle tracks ({}, {} MB)", get.len(), mb(&get));
+                    if ui
+                        .button(look::with(look::icon::ICON_DOWNLOAD, &label))
+                        .on_hover_text("Mike McCue's Nationals from 2000 to 2003, made for his Harmonic Cycle site and the Twisted Dirt team: Chattahoochee Bluff, Micousoukee Maze, the Kolomoki and Starwatch Staircase tracks, the Quick 60 and Sketch Out series and more.")
+                        .clicked()
+                    {
+                        t.queued = get.len();
+                        t.queue.extend(get);
+                    }
+                } else {
+                    ui.label(egui::RichText::new(look::with(look::icon::ICON_CHECK_CIRCLE, &format!("The {} Harmonic Cycle tracks are added", harmonic.len()))).color(look::GOOD));
+                }
+            });
+        }
+        ui.add_space(6.0);
+        let years: Vec<_> = (0..6u16).map(|i| look::Choice::new(i, ["2000", "2001", "2002", "2003", "2004", "2005"][i as usize])).collect();
+        if let Some(y) = look::segmented(ui, t.classic_year, &years) {
+            t.classic_year = y;
+        }
+        let year = 2000 + t.classic_year;
+        let kinds = tracks::SITES[0].kinds;
+        let of_year: Vec<&tracks::Classic> = all.iter().filter(|c| c.year == year).collect();
+        let shown: Vec<(usize, &tracks::Kind)> = kinds.iter().enumerate().filter(|(_, k)| of_year.iter().any(|c| c.track.folder == k.folder)).collect();
+        if !shown.iter().any(|(i, _)| *i == t.classic_kind) {
+            t.classic_kind = shown.first().map_or(0, |s| s.0);
+        }
+        let choices: Vec<_> = shown
+            .iter()
+            .map(|(i, k)| look::Choice::new(*i, format!("{} ({})", k.label, of_year.iter().filter(|c| c.track.folder == k.folder).count())))
+            .collect();
+        if let Some(k) = look::segmented(ui, t.classic_kind, &choices) {
+            t.classic_kind = k;
+        }
+        let folder = kinds[t.classic_kind].folder;
+        ui.add(egui::TextEdit::singleline(&mut t.classic_search).hint_text("Search these by name or maker").desired_width(ui.available_width()));
+        let words = t.classic_search.trim().to_lowercase();
+        let list: Vec<tracks::Track> = of_year
+            .iter()
+            .filter(|c| c.track.folder == folder)
+            .filter(|c| words.is_empty() || c.track.name.to_lowercase().contains(&words) || c.track.author.to_lowercase().contains(&words))
+            .map(|c| c.track.clone())
+            .collect();
+        let have = list.iter().filter(|x| t.added.has(game, &x.url)).count();
+        let get = missing(list.clone(), t);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(look::weak(format!("{} track{}, {} MB", list.len(), if list.len() == 1 { "" } else { "s" }, mb(&list))));
+            if working {
+                let left = t.queue.len() + t.jobs.len();
+                let done = t.queued.saturating_sub(left);
+                ui.add(egui::ProgressBar::new(done as f32 / t.queued.max(1) as f32).desired_width(180.0).text(format!("{done} of {}", t.queued)));
+                if ui.button("Stop").clicked() {
+                    t.queue.clear();
+                    for j in t.jobs.values() {
+                        j.cancel.store(true, Ordering::Relaxed);
+                    }
+                }
+            } else if !get.is_empty() {
+                let label = if have == 0 { format!("Get all {} ({} MB)", get.len(), mb(&get)) } else { format!("Get the other {} ({} MB)", get.len(), mb(&get)) };
+                if ui.button(look::with(look::icon::ICON_DOWNLOAD, &label)).on_hover_text("Downloads each of these from MDX Racing and adds it to the track list for its event.").clicked() {
+                    t.queued = get.len();
+                    t.queue.extend(get);
+                }
+            }
+            if have > 0 && !working && ui.button(look::with(look::icon::ICON_DELETE, &format!("Remove these {have}"))).on_hover_text("Takes these tracks out of the game again.").clicked() {
+                *remove = Some(list.iter().filter(|x| t.added.has(game, &x.url)).map(|x| x.url.clone()).collect());
+            }
+        });
+        egui::ScrollArea::vertical().id_salt("classics-list").max_height(260.0).show(ui, |ui| {
+            for x in &list {
+                ui.horizontal(|ui| {
+                    let by = if x.author.is_empty() { String::from("maker not named") } else { format!("by {}", x.author) };
+                    ui.label(format!("{} ", x.name));
+                    ui.label(look::weak(format!("{by} · {} MB", (x.size >> 20).max(1))));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if t.jobs.contains_key(&x.url) {
+                            ui.spinner();
+                        } else if t.added.has(game, &x.url) {
+                            ui.label(egui::RichText::new(look::with(look::icon::ICON_CHECK_CIRCLE, "")).color(look::GOOD)).on_hover_text("Added");
+                        } else if ui.small_button("Get").on_hover_text("Downloads it from MDX Racing and adds it to the game.").clicked() {
+                            *add = Some(x.clone());
+                        }
+                    });
+                });
+                if let Some(e) = t.failed.get(&x.url) {
+                    look::status(ui, false, &format!("Couldn't add it: {e}"));
+                }
+            }
+        });
+    });
 }
 
 /// The Tracks page's card for the most raced tracks: all of them in one
@@ -3180,6 +3305,33 @@ mod shots {
         let image = h.render().expect("render");
         let image = image::imageops::crop_imm(&image, 8, 8, width as u32, height as u32).to_image();
         image.save(format!("{dir}/tracks_hover.png")).expect("save");
+    }
+
+    /// The Tracks page's classic tracks card, on 2000's Nationals, drawn
+    /// into `MM2_SHOTS`.
+    #[test]
+    #[ignore]
+    fn classics_shot() {
+        let dir = std::env::var("MM2_SHOTS").expect("MM2_SHOTS: where to draw it");
+        let mut s = Settings::default();
+        s.game = Some("C:/Games/Motocross Madness 2/GAME".into());
+        let mut l = Launcher::with(s, Err("built from source".into()));
+        l.page = Page::Tracks;
+        l.tracks.error = Some("(not fetched in this picture)".into());
+        l.tracks.popular_error = Some("(not fetched in this picture)".into());
+        l.tracks.classic_search = "chatta".into();
+        let (width, height) = (1200.0, 1100.0);
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([width + 16.0, height + 16.0])
+            .with_theme(egui::Theme::Light)
+            .with_context_setup(|ctx| look::apply(ctx))
+            .build_ui_state(|ui, l: &mut Launcher| l.draw(ui), l);
+        for _ in 0..10 {
+            h.step();
+        }
+        let image = h.render().expect("render");
+        let image = image::imageops::crop_imm(&image, 8, 8, width as u32, height as u32).to_image();
+        image.save(format!("{dir}/tracks_classics.png")).expect("save");
     }
 
     /// The Play page's starter set card for a Free Pack player, from the
