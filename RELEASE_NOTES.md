@@ -1,3 +1,20 @@
+# OpenMCM2 0.8.10
+
+* **Original MM2 players can race online.** Players on the original
+  Motocross Madness 2 can now join OpenMCM2 races over the internet.
+  On the launcher's Network races card, type a race code (or pick Let my
+  MM2 join beside an open race) and your original game joins it just
+  like a game on your local network. Each original player gets a place
+  of their own in the race.
+* **Typed addresses find original games too.** An address typed in the
+  Join box now also finds a game hosted by the original.
+* **Easier hosting.** When you host or join, OpenMCM2 asks your router to
+  open the ports original players need, and the host's lobby shows the
+  address players elsewhere should type.
+* **Free Pack: a tidier OpenMX rider and bikes** (Free Pack 2026.11.28.2).
+  The rider suit's back and seams look neater, and the free bikes' paint
+  no longer shows dark edges at the seams.
+
 # OpenMCM2 0.8.9
 
 * **Race with the original MM2 on your local network.** OpenMCM2 can now
@@ -25,9 +42,6 @@
   now take less graphics memory, and look the same.
 * **Next-gen is now called Enhanced+.** Same look, a clearer name: it's
   Enhanced turned up. Your saved choice stays as it was.
-* **Free Pack: a tidier OpenMX rider and bikes.** The rider suit's back
-  and seams look neater, and the free bikes' paint no longer shows dark
-  edges at the seams.
 
 # OpenMCM2 0.8.8
 
