@@ -4167,14 +4167,14 @@ async fn gpu_from(
     let specific = adapter.features() & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
     // Ray queries for the ray-traced shadows, only when they are asked
     // for and the GPU has them: wgpu still calls them experimental.
-    // Next-gen traces rays only where they're quick: wgpu's ray tracing
+    // Enhanced+ traces rays only where they're quick: wgpu's ray tracing
     // on Metal took an M4 from 26 to 70 ms a frame at 1080p, so on a Mac
-    // Next-gen keeps the shadow maps (the Ray traced preset still traces).
+    // Enhanced+ keeps the shadow maps (the Ray traced preset still traces).
     let slow_rays = adapter.get_info().backend == wgpu::Backend::Metal && graphics::enhanced().is_some_and(|e| e.nextgen);
     let rays = graphics::wants_ray_tracing() && !slow_rays && adapter.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY);
     graphics::set_ray_queries(rays);
     if slow_rays && graphics::wants_ray_tracing() {
-        eprintln!("ray tracing: Next-gen draws the shadow maps on Metal, where tracing rays is slow");
+        eprintln!("ray tracing: Enhanced+ draws the shadow maps on Metal, where tracing rays is slow");
     } else if graphics::wants_ray_tracing() && !rays {
         eprintln!("ray tracing: this GPU cannot trace rays, so the shadow maps are drawn and nothing is reflected");
     }

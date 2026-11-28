@@ -272,7 +272,7 @@
       <div class="seg lookseg" role="radiogroup" aria-label="Look">
         <button type="button" data-look="original" role="radio" aria-checked="true">Original</button>
         <button type="button" data-look="enhanced" role="radio" aria-checked="false">Enhanced</button>
-        <button type="button" data-look="nextgen" role="radio" aria-checked="false">Next-gen</button>
+        <button type="button" data-look="nextgen" role="radio" aria-checked="false">Enhanced+</button>
       </div>
         <button type="button" class="plain small lookmore" hidden
           title="Settings: the quality for your computer, the colour look and every effect on its own.">Quality and effects</button>
@@ -354,7 +354,7 @@
         <div class="seg lookseg" role="radiogroup" aria-label="Look">
         <button type="button" data-look="original" role="radio" aria-checked="true">Original</button>
         <button type="button" data-look="enhanced" role="radio" aria-checked="false">Enhanced</button>
-        <button type="button" data-look="nextgen" role="radio" aria-checked="false">Next-gen</button>
+        <button type="button" data-look="nextgen" role="radio" aria-checked="false">Enhanced+</button>
       </div>
       </div>
     </section>
@@ -2707,7 +2707,7 @@ function readySummary() {
   const menus = menusNew() ? "the new look menus" : "the original menus";
   const mm2 = mm2Sounds() && !!kept;
   const sound = mm2 ? (demo ? "the demo's sounds" : "the MM2 sounds") : "the Free Pack's sounds";
-  const lookName = { original: "the original look", enhanced: "the Enhanced look", nextgen: "the Next-gen look" }[settings.lookOf(s)];
+  const lookName = { original: "the original look", enhanced: "the Enhanced look", nextgen: "the Enhanced+ look" }[settings.lookOf(s)];
   el.textContent = (freeReady
     ? `Plays the free version: all-new bikes and tracks, with ${menus} and ${sound}.`
     : demo
