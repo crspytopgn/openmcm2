@@ -169,11 +169,11 @@ fn outward(h: RayIntersection) -> vec3<f32> {
     let w = vec3<f32>(1.0 - h.barycentrics.x - h.barycentrics.y, h.barycentrics.x, h.barycentrics.y);
     var n = vec3<f32>(0.0);
     for (var k = 0u; k < 3u; k++) {
-        let i = tri[k] * 10u;
-        n += vec3<f32>(bitcast<f32>(vertices[i + 3u]), bitcast<f32>(vertices[i + 4u]), bitcast<f32>(vertices[i + 5u])) * w[k];
+        let i = tri[k] * 9u;
+        n += vec3<f32>(unpack2x16float(vertices[i + 3u]), unpack2x16float(vertices[i + 4u]).x) * w[k];
     }
     if (h.instance_index == hits[1].w) {
-        n = (nodes[vertices[tri.x * 10u + 9u] & 0x3fffffffu] * vec4<f32>(n, 0.0)).xyz;
+        n = (nodes[vertices[tri.x * 9u + 8u] & 0x3fffffffu] * vec4<f32>(n, 0.0)).xyz;
     }
     return n;
 }

@@ -20,13 +20,30 @@ use wgpu::util::DeviceExt;
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct Vertex {
     position: [f32; 3],
-    normal: [f32; 3],
+    /// Half floats, the fourth unused: 4 bytes a vertex less than full
+    /// ones, which keeps the biggest tracks' objects inside what older
+    /// Intel graphics on OpenGL can take (openmcm2 #192). (A far tree's
+    /// billboard keeps its corner's offset here, in ft.)
+    normal: [u16; 4],
     uv: [f32; 2],
     color: [u8; 4],
     /// Which transform in the node buffer moves this vertex; 0 is the
     /// identity used by static objects. The top two bits say how it is
     /// lit: [`UNLIT`] or [`PLANT`].
     node: u32,
+}
+
+/// A vertex normal as [`Vertex`] keeps it.
+fn pack_normal(n: [f32; 3]) -> [u16; 4] {
+    let h = |x: f32| half::f16::from_f32(x).to_bits();
+    [h(n[0]), h(n[1]), h(n[2]), 0]
+}
+
+impl Vertex {
+    fn normal(&self) -> Vec3 {
+        let f = |b: u16| half::f16::from_bits(b).to_f32();
+        Vec3::new(f(self.normal[0]), f(self.normal[1]), f(self.normal[2]))
+    }
 }
 
 /// A vertex's extras for the enhanced drawing only, in a buffer of their
@@ -1101,7 +1118,7 @@ impl ObjectMesh {
         for (x, y, u, v) in [(-left, 0.0, u0, v_base), (right, 0.0, u1, v_base), (right, b.height, u1, v_top), (-left, b.height, u0, v_top)] {
             self.vertices.push(Vertex {
                 position: (foot + Vec3::new(x, y, 0.0)).into(),
-                normal: [x, y, 0.0],
+                normal: pack_normal([x, y, 0.0]),
                 uv: [u, v],
                 color: [255; 4],
                 node: PLANT,
@@ -1131,7 +1148,7 @@ impl ObjectMesh {
         let names: Vec<String> = model.frames.iter().map(|f| f.name.clone()).collect();
         let vertices = &self.vertices[first_vertex..];
         let positions: Vec<Vec3> = vertices.iter().map(|v| Vec3::from(v.position)).collect();
-        let normals: Vec<Vec3> = vertices.iter().map(|v| Vec3::from(v.normal)).collect();
+        let normals: Vec<Vec3> = vertices.iter().map(Vertex::normal).collect();
         let owners: Vec<usize> = vertices
             .iter()
             .map(|v| ((v.node & NODE).saturating_sub(first_node) as usize).min(frames.len().saturating_sub(1)))
@@ -1233,7 +1250,7 @@ impl ObjectMesh {
                 };
                 self.vertices.push(Vertex {
                     position: position.into(),
-                    normal: normal.normalize_or_zero().into(),
+                    normal: pack_normal(normal.normalize_or_zero().into()),
                     // The front plate shows the numbers smaller, in the
                     // middle (0x418470).
                     uv: if numbered && !board && pos[2] >= -0.5 {
@@ -1297,7 +1314,7 @@ fn smooth_normals(vertices: &[Vertex], extras: &mut [Extra]) {
     for (i, v) in vertices.iter().enumerate() {
         at.entry(key(v)).or_default().push(i);
     }
-    let normals: Vec<Vec3> = vertices.iter().map(|v| Vec3::from(v.normal)).collect();
+    let normals: Vec<Vec3> = vertices.iter().map(Vertex::normal).collect();
     for (i, (v, e)) in vertices.iter().zip(extras.iter_mut()).enumerate() {
         let n = normals[i];
         let sum: Vec3 = at[&key(v)].iter().map(|&j| normals[j]).filter(|m| m.dot(n) > 0.17).sum();
@@ -1611,7 +1628,7 @@ impl ObjectRenderer {
             array_stride: std::mem::size_of::<Vertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &wgpu::vertex_attr_array![
-                0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Unorm8x4,
+                0 => Float32x3, 1 => Float16x4, 2 => Float32x2, 3 => Unorm8x4,
                 4 => Uint32
             ],
         })];
@@ -2272,7 +2289,7 @@ impl ObjectRenderer {
                     if let (Some(span), Some(&at)) = (skin.spans.get(k), starts.get(k)) {
                         if let Some(m) = moved.get_mut(at + (v - span.start) as usize) {
                             m.position = p.into();
-                            m.normal = n.into();
+                            m.normal = pack_normal(n.into());
                         }
                     }
                 });
