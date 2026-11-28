@@ -19,8 +19,12 @@ pub const BEST: &str = "laps.txt";
 /// The laps not yet sent.
 pub const PENDING: &str = "laps-pending.txt";
 /// A lap with more than this ridden off the course (seconds, not counting
-/// time down in a crash) doesn't count, in Nationals and Supercross.
-pub const MOST_OFF_COURSE: f32 = 2.0;
+/// time down in a crash) doesn't count, in Nationals and Supercross. The
+/// race tracker's course edges sit inside the ridden track at some bends:
+/// the computer's own line on Voodoo Basin is "off" 2.4 to 4 s a clean
+/// lap, so the limit is 6 s, the game's own put-back time (0x492ac0),
+/// which leaves room for a wider line than the computer's.
+pub const MOST_OFF_COURSE: f32 = 6.0;
 
 /// Whether a lap in `event` must keep to the course ([`MOST_OFF_COURSE`]):
 /// Nationals and Supercross. Baja and Enduro go between checkpoints.
