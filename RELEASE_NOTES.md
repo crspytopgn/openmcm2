@@ -1,3 +1,22 @@
+# OpenMCM2 0.8.7
+
+* **Series mode is back.** Single player now has the original Series:
+  pick 3, 5 or 7 races, score 20-17-15-12-10-8-6-5-3-1 points, and
+  start each race from the grid in points order. The podium comes after
+  the last race, with the top three of the whole series.
+* **Closer to the original on the bike.** The speedometer, the way the
+  chase camera lifts over bumps, and how the rider gets thrown in a crash
+  now match the original game.
+* **Joining multiplayer games is clearer.** Races fit the Host or Join
+  list on two lines, every button has a tip, double-click joins a race,
+  and a typed race code joins as soon as it's found. If joining or
+  hosting doesn't work, a box tells you why instead of nothing happening.
+* **No more browser crash at the podium.** Finishing in the top three in
+  the browser version no longer stops the game.
+* **Enhanced looks right on laptops.** Enhanced keeps MM2's own colours
+  when the Free Pack is installed, and on slower computers it turns
+  effects down before letting the picture go soft.
+
 # OpenMCM2 0.8.6
 
 * **The original bike and rider come first.** On the Bike & Rider page
