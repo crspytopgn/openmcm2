@@ -1,0 +1,8 @@
+[package]
+name = "mm2-dplay"
+description = "DirectPlay 4 over TCP/IP, as Motocross Madness 2 speaks it, so OpenMCM2 can play with the original game"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

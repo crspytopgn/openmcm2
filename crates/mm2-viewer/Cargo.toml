@@ -35,6 +35,8 @@ wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["Document", "Window", "Element", "HtmlCanvasElement", "Location", "Navigator", "console", "Request", "RequestInit", "Response", "AudioContext", "AudioContextState", "BaseAudioContext", "AudioBuffer", "AudioBufferSourceNode", "AudioScheduledSourceNode", "AudioNode", "AudioDestinationNode"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Racing with the original game (DirectPlay, net/orig.rs).
+mm2-dplay = { path = "../mm2-dplay" }
 # Sound on the desktop (a browser uses Web Audio, see audio.rs).
 cpal = { version = "0.16.0", optional = true }
 # The leaderboard server (online.rs); a browser uses fetch.

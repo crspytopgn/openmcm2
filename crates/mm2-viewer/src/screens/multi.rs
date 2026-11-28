@@ -305,6 +305,9 @@ impl Multi {
     /// greyed. First, over the menu with its Multiplayer pull-down still
     /// down, the box asking LAN or Internet (lang 5096, 5118).
     pub fn open(cx: &mut Cx) -> Option<Multi> {
+        // The original game's players check the track's file.
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::net::orig::set_game_dir(cx.game());
         let mut menu = Dlg::open(cx.ui, "MAINMENU", (0.0, 0.0))?;
         super::profiles::fill(cx, &mut menu);
         menu.pull("MenuMultiAnimation", true, cx.now - 10.0, true);

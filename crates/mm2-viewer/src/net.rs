@@ -409,6 +409,9 @@ pub enum Addr {
     Code(String),
     /// An always-open free roam room's WebSocket address (`wss://…`).
     Room(String),
+    /// A game the original Motocross Madness 2 hosts: its DirectPlay
+    /// address.
+    Orig(std::net::SocketAddrV4),
 }
 #[cfg(target_arch = "wasm32")]
 pub type Addr = String;
@@ -420,6 +423,7 @@ impl std::fmt::Display for Addr {
             Addr::Ip(a) => write!(f, "{a}"),
             Addr::Code(c) => write!(f, "race {c}"),
             Addr::Room(_) => write!(f, "the free roam room"),
+            Addr::Orig(a) => write!(f, "{}", a.ip()),
         }
     }
 }
@@ -444,12 +448,18 @@ impl std::str::FromStr for Addr {
 #[cfg(not(target_arch = "wasm32"))]
 mod rtc;
 
+/// Racing with the original game on the local network.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod orig;
+
 /// One connection: to a player, or to the host. A desktop's is a TCP one
 /// (the original's way, on the local network) or a data channel.
 #[cfg(not(target_arch = "wasm32"))]
 enum Link {
     Tcp(TcpStream),
     Rtc(rtc::Channel),
+    /// An original game's player, or the original game's host.
+    Orig(orig::Peer),
 }
 #[cfg(target_arch = "wasm32")]
 use web::Link;
@@ -466,6 +476,7 @@ fn send(link: &mut Link, m: &Msg) -> io::Result<()> {
             stream.write_all(&frame)
         }
         Link::Rtc(ch) => ch.send(body),
+        Link::Orig(p) => p.send(m),
     }
 }
 
@@ -636,6 +647,10 @@ impl Session {
             });
         }
         answer_finders(name.to_string(), port, stop.clone());
+        // The original game's players find and join it too.
+        if !cfg!(test) || std::env::var_os("MM2_ORIG_LIVE").is_some() {
+            orig::host(name, (!me.name.is_empty()).then_some(&Player { id: 0, ..me.clone() }), tx.clone(), next.clone(), stop.clone());
+        }
         // Browsers and players elsewhere come by the race code (not in the
         // tests, unless they have a matchmaking server of their own).
         let rtc = (!cfg!(test) || std::env::var_os("MM2_PEER_SERVER").is_some())
@@ -692,6 +707,7 @@ impl Session {
             }
             Addr::Code(code) => (Link::Rtc(rtc::join(code, tx)), 0),
             Addr::Room(url) => (Link::Rtc(rtc::room(url, tx)), 0),
+            Addr::Orig(at) => (orig::join(*at, &me, tx)?, 0),
         };
         send(
             &mut link,
@@ -1156,6 +1172,7 @@ pub fn is_at(addr: &Addr, typed: &str) -> bool {
     match addr {
         Addr::Code(c) => c.eq_ignore_ascii_case(t),
         Addr::Room(u) => u == t,
+        Addr::Orig(a) => t.parse::<std::net::Ipv4Addr>().is_ok_and(|i| i == *a.ip()),
         Addr::Ip(a) => {
             t.parse::<SocketAddr>().is_ok_and(|s| s == *a) || t.parse::<std::net::IpAddr>().is_ok_and(|i| i == a.ip())
         }
@@ -1199,6 +1216,8 @@ pub struct Finder {
     /// `MM2_JOIN`'s and the TCP/IP box's.
     pub hosts: Vec<String>,
     browser: crate::servers::Browser,
+    /// The original game's games on the local network.
+    orig: Option<orig::Looker>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1209,25 +1228,27 @@ impl Finder {
             let _ = s.set_broadcast(true);
             let _ = s.set_nonblocking(true);
         }
-        let hosts = std::env::var("MM2_JOIN")
+        let hosts: Vec<String> = std::env::var("MM2_JOIN")
             .unwrap_or_default()
             .split(',')
             .map(|a| a.trim().to_string())
             .filter(|a| !a.is_empty())
             .collect();
+        let ips = hosts.iter().filter_map(|h: &String| h.split(':').next()?.parse().ok()).collect();
         Finder {
             sock,
             asked: None,
             found: Vec::new(),
             hosts,
             browser: Default::default(),
+            orig: orig::Looker::new(ips),
         }
     }
 
     /// Asks again if a second has passed, and takes the answers. Whether
     /// the list changed.
     pub fn tick(&mut self) -> bool {
-        let listed = add_listed(&mut self.found, &mut self.browser);
+        let listed = add_listed(&mut self.found, &mut self.browser) | self.add_orig();
         let Some(sock) = &self.sock else {
             return listed;
         };
@@ -1282,6 +1303,28 @@ impl Finder {
             }
         }
         changed || listed
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Finder {
+    /// The original game's games, after those found nearby: a line
+    /// each, gone when the game is.
+    fn add_orig(&mut self) -> bool {
+        let Some(l) = &self.orig else { return false };
+        let now: Vec<(String, std::net::SocketAddrV4)> = l.found.lock().map(|f| f.clone()).unwrap_or_default();
+        let before = self.found.len();
+        self.found.retain(|f| !matches!(&f.addr, Addr::Orig(a) if !now.iter().any(|(_, h)| h == a)));
+        let mut changed = before != self.found.len();
+        for (name, host) in now {
+            let addr = Addr::Orig(host);
+            if !self.found.iter().any(|f| f.addr == addr) {
+                let at = self.found.iter().position(|f| !f.line.is_empty()).unwrap_or(self.found.len());
+                self.found.insert(at, Found { name: format!("{name} (original MM2)"), addr, line: String::new(), roam: false });
+                changed = true;
+            }
+        }
+        changed
     }
 }
 
@@ -1375,6 +1418,118 @@ mod tests {
     /// A host and a player on this machine: the player joins, both see
     /// each other, chat goes round and a bike packet is passed on.
     #[test]
+    /// With the original game (`MM2_ORIG_LIVE=1`, its demo running on
+    /// this network): hosts Quarry01's stunt event for it, waits for an
+    /// original player to press Ready, starts, and rides a bike there.
+    #[test]
+    #[ignore]
+    fn live_original_joins() {
+        if std::env::var_os("MM2_ORIG_LIVE").is_none() {
+            return;
+        }
+        if let Some(dir) = std::env::var_os("MM2_ORIG_GAME") {
+            orig::set_game_dir(std::path::Path::new(&dir));
+        }
+        let ride = RideInfo { model: "suzuki.mcf".into(), texture: "Kazuyuki250_08.tga".into(), outfit: "Rainbow01_08.tga".into(), cc: 250, plate: 7 };
+        let mut host = Session::host("OpenRace", Player { name: "OpenHost".into(), ride, ..Player::default() }).unwrap();
+        let game = GameInfo { event: 0, mode: 1, laps: 2, track: "Quarry01".into(), level: 2, collisions: true, ..Default::default() };
+        host.say(Msg::Game(game.clone()));
+        let bike = std::env::var("MM2_ORIG_BIKE").ok().map(|h| (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect::<Vec<u8>>());
+        let start = Instant::now();
+        let mut started: Option<Instant> = None;
+        let (mut bikes, mut last) = (0, String::new());
+        while start.elapsed() < Duration::from_secs(400) {
+            for h in host.poll() {
+                match h {
+                    Heard::Bike { racer, kind, data, .. } => {
+                        bikes += 1;
+                        if bikes % 40 == 1 {
+                            let st = mm2_formats::vcr::State::full(&data);
+                            eprintln!("bike {racer} kind {kind} {:?}", st.map(|s| s.position));
+                        }
+                    }
+                    h => eprintln!("heard {h:?}"),
+                }
+            }
+            let now = format!("{:?}", host.players.iter().map(|p| (p.id, p.name.clone(), p.ready)).collect::<Vec<_>>());
+            if now != last {
+                eprintln!("players {now}");
+                last = now;
+            }
+            let others_ready = host.players.len() > 1 && host.players.iter().filter(|p| p.id != 0).all(|p| p.ready);
+            if started.is_none() && others_ready {
+                host.say(Msg::Ready(true));
+                std::thread::sleep(Duration::from_millis(500));
+                host.say(Msg::Start { game: game.clone(), players: host.players.clone() });
+                started = Some(Instant::now());
+                eprintln!("started");
+            }
+            if let (Some(t), Some(b)) = (started, &bike) {
+                if let Some(mut st) = mm2_formats::vcr::State::full(b) {
+                    st.clock = (t.elapsed().as_millis() as u32).max(1);
+                    st.index = 0;
+                    host.say(Msg::Bike { racer: 0, time: t.elapsed().as_secs_f32(), kind: mm2_formats::vcr::FULL, data: st.write_full() });
+                }
+            }
+            if started.is_some_and(|t| t.elapsed() > Duration::from_secs(150)) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        eprintln!("heard {bikes} bikes");
+    }
+
+    /// With the original game hosting on this network (`MM2_ORIG_LIVE=1`,
+    /// `MM2_ORIG_AT=ip:port`): joins, presses Ready, and rides when it
+    /// starts.
+    #[test]
+    #[ignore]
+    fn live_join_original() {
+        let Ok(at) = std::env::var("MM2_ORIG_AT") else { return };
+        let at: std::net::SocketAddrV4 = at.parse().unwrap();
+        let ride = RideInfo { model: "suzuki.mcf".into(), texture: "Kazuyuki250_08.tga".into(), outfit: "Rainbow01_08.tga".into(), cc: 250, plate: 9 };
+        let mut s = Session::join(Addr::Orig(at), Player { name: "OpenJoin".into(), ride, ..Player::default() }).unwrap();
+        let bike = std::env::var("MM2_ORIG_BIKE").ok().map(|h| (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect::<Vec<u8>>());
+        let start = Instant::now();
+        let mut race: Option<(Instant, usize)> = None;
+        let mut bikes = 0;
+        let mut readied = false;
+        while start.elapsed() < Duration::from_secs(400) {
+            for h in s.poll() {
+                match h {
+                    Heard::Bike { racer, kind, data, .. } => {
+                        bikes += 1;
+                        if bikes % 40 == 1 {
+                            eprintln!("bike {racer} kind {kind} {:?}", mm2_formats::vcr::State::full(&data).map(|s| s.position));
+                        }
+                    }
+                    Heard::Start { players, game } => {
+                        let me = players.iter().position(|p| p.id == s.me).unwrap_or(0);
+                        eprintln!("start {game:?} me {me} {:?}", players.iter().map(|p| &p.name).collect::<Vec<_>>());
+                        race = Some((Instant::now(), me));
+                    }
+                    h => eprintln!("heard {h:?}"),
+                }
+            }
+            if !readied && s.me != u8::MAX && start.elapsed() > Duration::from_secs(3) {
+                s.say(Msg::Ready(true));
+                s.say(Msg::Chat("OpenJoin: hello from OpenMCM2".into()));
+                readied = true;
+            }
+            if let (Some((t, me)), Some(b)) = (race, &bike) {
+                if let Some(mut st) = mm2_formats::vcr::State::full(b) {
+                    st.clock = (t.elapsed().as_millis() as u32).max(1);
+                    s.say(Msg::Bike { racer: me as u8, time: t.elapsed().as_secs_f32(), kind: mm2_formats::vcr::FULL, data: st.write_full() });
+                }
+            }
+            if race.is_some_and(|(t, _)| t.elapsed() > Duration::from_secs(150)) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        eprintln!("heard {bikes} bikes");
+    }
+
     fn a_session_on_this_machine() {
         let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
         let me = |name: &str| Player {
