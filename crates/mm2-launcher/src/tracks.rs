@@ -142,6 +142,53 @@ pub(crate) fn parse_popular(text: &str, from: &str) -> Result<Vec<Track>, String
         .collect())
 }
 
+/// A classic track: one players made while MM2 was new.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Classic {
+    pub track: Track,
+    /// The year its track file was made, 2000 to 2005.
+    pub year: u16,
+}
+
+/// The classic tracks: every track on MDX Racing whose track file was
+/// made from 2000 to 2005, oldest first, built into the launcher
+/// (`tools/classics`). Each comes from MDX Racing when it's picked.
+pub fn classics() -> Vec<Classic> {
+    parse_classics(include_str!("../../../tools/classics/classics.json"))
+}
+
+pub(crate) fn parse_classics(text: &str) -> Vec<Classic> {
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else { return Vec::new() };
+    let kinds = SITES[0].kinds;
+    let s = |t: &serde_json::Value, k: &str| t.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    json.get("tracks")
+        .and_then(|t| t.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|t| {
+            let event = s(t, "event");
+            let folder = kinds.iter().find(|k| k.folder.eq_ignore_ascii_case(&event))?.folder;
+            let path = s(t, "path");
+            let year = s(t, "made").get(..4)?.parse().ok()?;
+            (!path.is_empty()).then(|| Classic {
+                track: Track {
+                    name: s(t, "name"),
+                    author: s(t, "author"),
+                    url: format!("https://mdxracing.com/{}", encode(&path, true)),
+                    picture: None,
+                    folder,
+                    mirror: None,
+                    sha256: None,
+                    laps: 0,
+                    size: t.get("size").and_then(|v| v.as_u64()).unwrap_or(0),
+                    starter: false,
+                },
+                year,
+            })
+        })
+        .collect()
+}
+
 /// A popular track's picture (a PNG), ready to show; `None` when it
 /// can't be had.
 pub fn picture(url: &str) -> Option<eframe::egui::ColorImage> {
@@ -553,6 +600,23 @@ mod tests {
         assert_eq!(l.tracks[1].name, "Stunt Park");
         assert_eq!(l.tracks[1].folder, "QUARRIES");
         assert!(!l.tracks[1].can_add());
+    }
+
+    #[test]
+    fn reads_the_classics() {
+        let text = r#"{"tracks":[
+            {"name":"Micousoukee Maze","author":"Mike McCue (Harmonic Cycle)","event":"NATIONAL","path":"mcm2/Tracks/National_Tracks/micousoukee maze.zip","made":"2000-12-07","size":6165053},
+            {"name":"Odd","event":"TAG","path":"x.zip","made":"2001-01-01"},
+            {"name":"No date","event":"SX","path":"y.zip"}]}"#;
+        let l = parse_classics(text);
+        assert_eq!(l.len(), 1);
+        assert_eq!(l[0].year, 2000);
+        assert_eq!(l[0].track.url, "https://mdxracing.com/mcm2/Tracks/National_Tracks/micousoukee%20maze.zip");
+        assert_eq!(l[0].track.size, 6165053);
+        // The built-in list reads whole, every year and event in it.
+        let all = classics();
+        assert!(all.len() > 5000);
+        assert!(all.iter().all(|c| (2000..=2005).contains(&c.year) && c.track.can_add()));
     }
 
     #[test]
