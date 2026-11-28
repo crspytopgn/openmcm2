@@ -532,6 +532,9 @@ pub struct More {
     /// Photo mode: in a race, F freezes it with the display hidden, the
     /// camera flies free and Enter saves a picture (`--photo-mode`).
     pub photo_mode: bool,
+    /// Big Head: every rider's head grown, an old-school cheat; laps
+    /// don't go on the leaderboards with it on (`--big-head`).
+    pub big_head: bool,
     /// The replay editor: in a replay, a free camera, slow motion, In and
     /// Out marks, camera keys and clips saved as movies
     /// (`--replay-editor`).
@@ -586,6 +589,7 @@ impl Default for More {
             online_ghosts: false,
             whistle: true,
             photo_mode: false,
+            big_head: false,
             replay_editor: false,
             demo_tracks: false,
             free_tracks: false,
@@ -635,6 +639,7 @@ impl More {
             "online_ghosts" => self.online_ghosts = yes,
             "whistle" => self.whistle = yes,
             "photo_mode" => self.photo_mode = yes,
+            "big_head" => self.big_head = yes,
             "replay_editor" => self.replay_editor = yes,
             "demo_tracks" => self.demo_tracks = yes,
             "free_tracks" => self.free_tracks = yes,
@@ -647,7 +652,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfreshen_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\nreplay_editor={}\ndemo_tracks={}\nfree_tracks={}\nintro_video={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfreshen_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\nbig_head={}\nreplay_editor={}\ndemo_tracks={}\nfree_tracks={}\nintro_video={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -671,6 +676,7 @@ impl More {
             b(self.online_ghosts),
             b(self.whistle),
             b(self.photo_mode),
+            b(self.big_head),
             b(self.replay_editor),
             b(self.demo_tracks),
             b(self.free_tracks),
@@ -698,6 +704,7 @@ impl More {
             (self.online_ghosts, "--online-ghosts"),
             (!self.whistle, "--no-whistle"),
             (self.photo_mode, "--photo-mode"),
+            (self.big_head, "--big-head"),
             (self.replay_editor, "--replay-editor"),
             (self.demo_tracks, "--demo-tracks"),
             (self.free_tracks, "--free-tracks"),
@@ -750,6 +757,7 @@ impl More {
             online_ghosts: has("--online-ghosts"),
             whistle: !has("--no-whistle"),
             photo_mode: has("--photo-mode"),
+            big_head: has("--big-head"),
             replay_editor: has("--replay-editor"),
             demo_tracks: has("--demo-tracks"),
             free_tracks: has("--free-tracks"),
@@ -1462,6 +1470,7 @@ mod tests {
             online_ghosts: true,
             whistle: false,
             photo_mode: true,
+            big_head: true,
             replay_editor: true,
             demo_tracks: true,
             free_tracks: true,

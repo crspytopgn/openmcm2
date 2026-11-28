@@ -212,6 +212,9 @@ pub struct AnimatedModel {
     /// Frames slid along their parent's axes, after the motion (a fork's
     /// `Shocks` sliding up its stroke).
     slides: Vec<(usize, Vec3)>,
+    /// Frames grown or shrunk about their own origin, after the motion and
+    /// any fade, with all that hangs on them (the Big Head extra's head).
+    scales: Vec<(usize, f32)>,
     /// The model it draws (the `.slt` name).
     pub model: String,
     /// Its root frame held in this turn at the place, the motion moving
@@ -422,6 +425,12 @@ impl AnimatedModel {
                     let mix = |a: Vec4, b: Vec4| b.lerp(a, t.max(0.0)).truncate().into();
                     *m = orientation(mix(m.z_axis, o.z_axis), mix(m.y_axis, o.y_axis), Vec3::ONE, mix(m.w_axis, o.w_axis));
                 }
+            }
+        }
+        // After the fade, which mixes turns at full size.
+        for &(f, by) in &self.scales {
+            if let Some(m) = local.get_mut(f) {
+                *m *= Mat4::from_scale(Vec3::splat(by));
             }
         }
         let mut world: Vec<Option<Mat4>> = vec![None; local.len()];
@@ -856,6 +865,7 @@ impl ObjectMesh {
                 morph,
                 skin,
                 spins: Vec::new(),
+                scales: Vec::new(),
                 turns: Vec::new(),
                 slides: Vec::new(),
                 model: mcf.model.clone(),
@@ -901,6 +911,7 @@ impl ObjectMesh {
                 morph: None,
                 skin: None,
                 spins: Vec::new(),
+                scales: Vec::new(),
                 turns: Vec::new(),
                 slides: Vec::new(),
                 model: p.model.clone(),
@@ -2193,6 +2204,17 @@ impl ObjectRenderer {
         match a.spins.iter_mut().find(|s| s.0 == frame) {
             Some(s) => s.1 = angle,
             None => a.spins.push((frame, angle)),
+        }
+    }
+
+    /// Grows animated model `index`'s frame `name` by `by` about its own
+    /// origin, with all that hangs on it; 1 is its own size.
+    pub fn set_scale(&mut self, index: usize, name: &str, by: f32) {
+        let Some(a) = self.animated.get_mut(index) else { return };
+        let Some(frame) = a.frame_named(name) else { return };
+        a.scales.retain(|s| s.0 != frame);
+        if by != 1.0 {
+            a.scales.push((frame, by));
         }
     }
 

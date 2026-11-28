@@ -29,6 +29,7 @@
 //! mm2-viewer ... --mute-in-background      // quiet while the window is in the background
 //! mm2-viewer ... --screenshot-key          // Ctrl+P saves a screenshot
 //! mm2-viewer ... --photo-mode              // F in a race: hold it still, fly the camera, Enter saves a picture
+//! mm2-viewer ... --big-head                // every rider's head grown, an old-school cheat (no leaderboard laps)
 //! mm2-viewer ... --lap-gap                 // live gap to the best lap under the race panel
 //! mm2-viewer ... --steady-camera           // the chase camera turns and rises more gently
 //! mm2-viewer ... --fov=N                   // the Chase Cam's field of view (the game's 85)
@@ -1946,6 +1947,9 @@ fn show(race: &Race, track: &Track, renderer: &mut TerrainRenderer, eye: Vec3, v
         let (fork, swing) = r.bike.suspension_frames();
         renderer.set_slide(r.object, "Shocks", fork);
         renderer.set_spin(r.object, "SwingArm", swing);
+        // The Big Head extra: every rider's head (and helmet) grown about
+        // the neck. Only the picture; the riding is the game's.
+        renderer.set_scale(r.object + 1, "Head", if tweaks::more().big_head { BIG_HEAD } else { 1.0 });
         // In a crash the rider is thrown off and plays the fall.
         let wreck = r.bike.wreck();
         let (rider, motion) = wreck.unwrap_or((place, RIDING));
@@ -2231,6 +2235,8 @@ const GHOST: (&str, &str) = ("Ghost.mcf", "GhostRider.mcf");
 
 /// The rider's motion on the bike, and the bike's.
 const RIDING: &str = race::RIDING;
+/// How much the Big Head extra grows a rider's head.
+const BIG_HEAD: f32 = 2.4;
 const BIKE_RIDING: &str = race::BIKE_RIDING;
 
 /// The player's bike from the game's `UI/UIRES.RES`: the Honda CR250,
@@ -5667,7 +5673,9 @@ impl App {
                     && setup.random_gates.is_none()
                     && setup.net.is_none_or(|n| !n.tag_ball && !n.tag_stunts);
                 let t = tweaks::get();
-                let fair = t.air_steer == 0 && t.air_brake == 0 && !t.quick_get_up && !t.forgiving_landings;
+                // Big Head changes only the picture, but it is a cheat: no
+                // leaderboard laps with it on either.
+                let fair = t.air_steer == 0 && t.air_brake == 0 && !t.quick_get_up && !t.forgiving_landings && !tweaks::more().big_head;
                 let lap_event = matches!(setup.event, frontend::EventKind::Baja | frontend::EventKind::Nationals | frontend::EventKind::Supercross | frontend::EventKind::Enduro);
                 playclock::race_began(self.tape.is_none().then(|| {
                     let cc = setup.ride.as_ref().map_or(250, |r| r.bike.cc);
