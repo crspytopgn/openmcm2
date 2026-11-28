@@ -172,7 +172,7 @@ fn sunlit_air(c: vec3<f32>, world: vec3<f32>, dist: f32) -> vec3<f32> {
     return mix(c, air, amount);
 }
 
-// The Next-gen preset's stronger look is on (renderer: enh.terrain.z).
+// The Enhanced+ preset's stronger look is on (renderer: enh.terrain.z).
 fn next_gen() -> bool {
     return enh.terrain.z > 0.5;
 }
@@ -190,7 +190,7 @@ fn windy_day() -> bool {
 }
 
 // How strongly the air near the ground is lit (renderer: enh.traced.z),
-// 0 for none: a hint on the usual presets, plainly there on Next-gen.
+// 0 for none: a hint on the usual presets, plainly there on Enhanced+.
 fn air_light() -> f32 {
     return enh.traced.z;
 }
@@ -221,7 +221,7 @@ fn sun_in_air(p: vec3<f32>) -> f32 {
     return textureSampleCompareLevel(sun_map, sun_sampler, sun_uv(uv, c), q.z);
 }
 
-// How thick the Next-gen air is near the ground: light lost by e every
+// How thick the Enhanced+ air is near the ground: light lost by e every
 // this many ft.
 const AIR_CLEAR: f32 = 2600.0;
 // How far out the air's light is marched through the shadows, ft, and in
@@ -229,7 +229,7 @@ const AIR_CLEAR: f32 = 2600.0;
 const AIR_REACH: f32 = 320.0;
 const AIR_STEPS: i32 = 10;
 
-// Next-gen's lit air (volumetric light, as Unreal's and Frostbite's
+// Enhanced+'s lit air (volumetric light, as Unreal's and Frostbite's
 // height fog, marched through the sun's shadow cascades): a thin air from
 // the eye out, lit by the sun where the sun reaches it, so the shade of
 // hills, trees and riders shows as darker shafts in it, the light

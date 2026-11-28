@@ -1172,7 +1172,7 @@ impl TerrainRenderer {
         let haze = (showing.is_some_and(|e| e.distance) && self.fog_range != NO_FOG).then(|| {
             let span = (end - start).max(1.0);
             let far = (start + 7.0 * span).clamp(end, 20_000.0);
-            // Next-gen: the haze begins nearer and is thicker, so the air
+            // Enhanced+: the haze begins nearer and is thicker, so the air
             // between the rider and the hills shows (the far plane stays).
             if showing.is_some_and(|e| e.nextgen) {
                 (start * 0.5, std::f32::consts::LN_2 / span * 1.5, far)
@@ -1402,7 +1402,7 @@ impl TerrainRenderer {
                 traced: [flag(traced), flag(e.grime.is_some()), if on.lit_air { if on.nextgen { 1.0 } else { LIT_AIR_SUBTLE } } else { 0.0 }, flag(on.wind)],
                 view_proj: (proj * camera.view()).to_cols_array_2d(),
                 ambient: lights.globals().0,
-                // z: the Next-gen preset's stronger look (enhanced_fns.wgsl
+                // z: the Enhanced+ preset's stronger look (enhanced_fns.wgsl
                 // `next_gen`): lusher grass, firmer ground detail; w the photo
                 // dirt up close (`close_up`).
                 terrain: [self.grid[1], self.grid[2] * self.grid[3], flag(on.nextgen), flag(on.close_up)],
@@ -2268,7 +2268,7 @@ const FLOODLIGHTS_ABOVE: f32 = 300.0;
 /// against the day's ambient, and the haze against the day's.
 const NIGHT_BOUNCE: f32 = 0.3;
 const NIGHT_HAZE: f32 = 0.12;
-/// How thick the lit air is on the usual presets, of Next-gen's: a hint of
+/// How thick the lit air is on the usual presets, of Enhanced+'s: a hint of
 /// light and shade in the air, not a haze.
 const LIT_AIR_SUBTLE: f32 = 0.5;
 const NIGHT_SKY: wgpu::Color = wgpu::Color { r: 0.006, g: 0.008, b: 0.016, a: 1.0 };

@@ -40,7 +40,7 @@ const FSR_TAA_SHARPNESS_STOPS: f32 = 0.35;
 /// How far the bounced light reaches (ft), and how strongly it shows.
 const BOUNCE_REACH: f32 = 8.0;
 const BOUNCE_STRENGTH: f32 = 1.2;
-/// The Next-gen preset's bounce light, and its sun shafts, this many times
+/// The Enhanced+ preset's bounce light, and its sun shafts, this many times
 /// as strong: plainly there rather than a hint.
 const NEXTGEN_BOUNCE: f32 = 1.6;
 const NEXTGEN_SHAFTS: f32 = 1.5;
@@ -660,7 +660,7 @@ impl Post {
             ],
             // A 3 ft reach, its strength, the bloom's, and how many pixels a foot
             // spans 1 ft away.
-            // Next-gen's bloom is softer than the bold look's: a glow
+            // Enhanced+'s bloom is softer than the bold look's: a glow
             // round the sun and bright sky, not a haze over everything.
             params: [
                 3.0,

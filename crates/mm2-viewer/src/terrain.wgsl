@@ -181,7 +181,7 @@ fn ground(in: VertexOut) -> vec3<f32> {
 }
 
 // The painted ground, its texture read `soft` times blurrier (a coarser
-// mip): Next-gen softens the painted streaks near the eye, where the photo
+// mip): Enhanced+ softens the painted streaks near the eye, where the photo
 // materials' own grain takes over.
 fn ground_soft(in: VertexOut, soft: f32) -> vec3<f32> {
     // Continuous coordinates in tiles, so mip selection has no seams.
@@ -457,9 +457,9 @@ fn new_ground(in: VertexOut, painted: vec3<f32>, n: vec3<f32>, dist: f32) -> vec
     // The detail fades with distance, where the painted colour suffices;
     // mostly its light and dark, a little of its own colour.
     // `detail=` (enh.haze.w, 0 to 1) sets how strongly, and how far.
-    // Close up (and more so on Next-gen): the photo dirt laid on firmly
+    // Close up (and more so on Enhanced+): the photo dirt laid on firmly
     // near the eye, so it reads as real dirt (clods, stones, grain) at the
-    // wheels; Next-gen also keeps more of the photo's own colour.
+    // wheels; Enhanced+ also keeps more of the photo's own colour.
     let ng = next_gen();
     let firm = close_up();
     colour = mix(vec3<f32>(luminance(colour)), colour, select(0.35, 0.6, ng));
@@ -669,7 +669,7 @@ fn fs_smooth(in: VertexOut) -> @location(0) vec4<f32> {
 
 fn enhanced_ground(in: VertexOut) -> vec4<f32> {
     let dist = length(in.world - globals.camera.xyz);
-    // Next-gen, with the new ground: near the eye the painted texture's
+    // Enhanced+, with the new ground: near the eye the painted texture's
     // smears give way to the photo dirt's grain (new_ground).
     let soft = select(1.0, mix(select(6.0, 12.0, next_gen()), 1.0, smoothstep(30.0, 160.0, dist)), close_up() && enh.more.x > 0.5);
     let colour = ground_soft(in, soft);

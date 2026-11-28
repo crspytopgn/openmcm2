@@ -155,7 +155,7 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     let t = vec2<f32>(xz.x, -xz.y) / scale;
     let painted = painted_at(t);
     var density = grassy(painted);
-    // Next-gen: thicker, and on the drier, olive and straw-coloured verges
+    // Enhanced+: thicker, and on the drier, olive and straw-coloured verges
     // too, more sparsely (never on the bare brown dirt or grey roads).
     if (next_gen()) {
         density = max(min(density * 1.6, 1.0), dry_grassy(painted) * 0.55);

@@ -33,7 +33,7 @@ pub struct Enhanced {
     /// The colour grade (`look=`): none (the colours as drawn), the
     /// bolder look, a warm afternoon or a soft overcast day.
     pub look: Look,
-    /// The Next-gen preset's stronger light (`quality=nextgen`): the
+    /// The Enhanced+ preset's stronger light (`quality=nextgen`): the
     /// bounce light, the sun's shafts and a soft bloom turned up, for a
     /// modern game's look; Michael's subtle presets leave it off.
     pub nextgen: bool,
@@ -44,7 +44,7 @@ pub struct Enhanced {
     pub wind: bool,
     /// Sunlight in the air near the ground, marched through the sun's
     /// shadows so shafts of light and shade show in it (enhanced_fns.wgsl
-    /// `lit_air`): faint on the usual presets, plain on Next-gen.
+    /// `lit_air`): faint on the usual presets, plain on Enhanced+.
     pub lit_air: bool,
     /// The ground re-made from photo materials and lit by the sun.
     pub ground: bool,
@@ -886,7 +886,7 @@ impl Enhanced {
             self.scale = None;
             self.pixels = Some(((FULL_HD as f32) * k * k) as u32);
         }
-        // Next-gen keeps its sun shafts (the frame rate is held by setting
+        // Enhanced+ keeps its sun shafts (the frame rate is held by setting
         // effects aside, Enhanced::sheds); elsewhere they're too heavy here.
         if !self.nextgen {
             self.shafts = false;
@@ -970,7 +970,7 @@ impl Enhanced {
     /// least seen first: 1 the soft shadow edges, smooth hills, horizon
     /// occlusion, reflections, light shafts and bounce light (about Medium);
     /// 2 also the grass, occlusion, contact shadows and flying dirt (about
-    /// Low, and Next-gen's lit air back to the plain haze); 3 also the sun's shadows and the dust clouds (with fewer puffs
+    /// Low, and Enhanced+'s lit air back to the plain haze); 3 also the sun's shadows and the dust clouds (with fewer puffs
     /// from step 2). Only turned off, never on, so nothing
     /// is needed that was not made when the race loaded; and the
     /// anti-aliasing and the scene's size are left to dynamic resolution.
@@ -992,7 +992,7 @@ impl Enhanced {
             self.ao = false;
             self.contact = false;
             self.roost = false;
-            // Next-gen's lit air and lusher grass: the old look's.
+            // Enhanced+'s lit air and lusher grass: the old look's.
             self.nextgen = false;
         }
         if n >= 3 {

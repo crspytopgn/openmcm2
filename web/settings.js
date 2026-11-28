@@ -16,7 +16,7 @@ export const UPGRADES = [
   ["bloom", "HDR bloom", false, "Bright lights and the sun glow softly."],
   ["ao", "Ambient occlusion", true, "Corners and contacts darkened, as ambient light is."],
   ["ground", "Detailed ground", true, "The ground re-made from photo materials."],
-  ["grass", "3D grass", true, "Grass growing on the grassy ground near you, swaying in the wind and pushed aside as bikes ride through it. With Next-gen it grows thicker and taller and the wind rolls across it in waves."],
+  ["grass", "3D grass", true, "Grass growing on the grassy ground near you, swaying in the wind and pushed aside as bikes ride through it. With Enhanced+ it grows thicker and taller and the wind rolls across it in waves."],
   ["smooth", "Smooth hills", true, "The hills round you smoothed, not faceted."],
   ["dust", "Dust clouds", true, "Soft clouds of dust the colour of the ground behind the bikes: thicker when you pull hard or spin, a ring of it when you land, and on a dry track a thin haze that hangs on the wind. Fewer, bigger puffs on Low and Medium, so it stays light."],
   ["mud", "Mud and spray", true, "Mud and spray caking bikes and riders."],
@@ -38,7 +38,7 @@ export const UPGRADES = [
   ["bounce", "Bounce light", true, "Sunlight bouncing off the ground and walls: sunlit dirt throws a soft warm light into the shaded side of the bike and rider, and pale corners don't go as dark. Subtle. Costs a little on a slower computer."],
   ["closeup", "Sharp dirt up close", true, "Near your wheels the ground is real photo dirt, with clods, stones and grain, instead of the painted texture smeared up close. Needs Detailed ground on. Costs next to nothing."],
   ["wind", "Wind in the grass and trees", true, "A breezy day: gusts roll across the 3D grass in waves and the trees sway a little more. Costs next to nothing."],
-  ["litair", "Sunlight in the air", true, "Sunlight in the air near the ground, with darker streaks where trees and hills shade it, so beams of light show. Faint, plain on Next-gen. Not in a browser except with Next-gen: too heavy."],
+  ["litair", "Sunlight in the air", true, "Sunlight in the air near the ground, with darker streaks where trees and hills shade it, so beams of light show. Faint, plain on Enhanced+. Not in a browser except with Enhanced+: too heavy."],
   ["fsr", "AMD FSR upscaling", true, "AMD FidelityFX Super Resolution: on a big screen the 3D scene is drawn smaller to stay smooth; FSR stretches it back up along its edges and gently sharpens it, so it looks close to full sharpness instead of soft. With TAA it rebuilds the picture from several frames, as FSR 2 does. A big help on laptops."],
   ["grime", "Dirt builds up on bikes and riders", true, "Dirt builds up very slowly on the bikes and riders through a race, the colour of the track you ride: a light dust on the wheels and lower bike first, creeping up the boots and legs lap by lap. Riding in another rider's roost spatters your front, a crash scuffs dirt up your side, and wet tracks cake on mud much faster. Takes the place of the quicker mud caking. Looks only, light on frame rate."],
 ];
@@ -46,9 +46,9 @@ export const UPGRADES = [
 // In a browser, Ultra draws as High does (the game caps both: see
 // graphics::Enhanced::for_browser), so it isn't offered. Medium is the
 // default: High has stalled a whole Mac in Safari.
-// Next-gen is offered: the game keeps its look but holds the frame rate
+// Enhanced+ is offered: the game keeps its look but holds the frame rate
 // by setting effects aside when frames come late.
-// Next-gen is a look of its own (beside Original and Enhanced), so the
+// Enhanced+ is a look of its own (beside Original and Enhanced), so the
 // quality row offers the rest.
 const QUALITIES = [["auto", "Auto (picks for your computer)"], ["low", "Low"], ["medium", "Medium"], ["high", "High (a fast computer)"]];
 // The effects under Advanced, in groups, by their names in UPGRADES (the
@@ -83,7 +83,7 @@ const WEATHERS = [["clear", "Clear"], ["overcast", "Overcast"], ["rain", "Rain"]
 // The colour looks (mm2_settings::LOOKS), a gentle grade over the picture.
 const LOOKS = [["original", "Original"], ["bold", "Bold"], ["warm", "Warm afternoon"], ["overcast", "Overcast"]];
 const ABOUT_LOOK = "A gentle colour grade over the finished picture. Original: the colours as drawn. Bold: richer colour, a little more contrast, slightly darker corners. Warm afternoon: sunlit parts a touch golden, the shade lifted a little. Overcast: a little less colour and contrast, a cool tint in the shade.";
-const ABOUT_NEXTGEN = "Next-gen: a modern game's look, much bolder than the others. Sunlit air you can see shafts of light in, thick grass blowing in waves of wind, trees plainly moving, photo dirt sharp right up to your wheels, the real sky with clouds, bounce light, a soft glow round bright light, glossier bikes and trackside props. Heavy: for a strong computer. If frames come late it draws softer and sets effects aside.";
+const ABOUT_NEXTGEN = "Enhanced+: Enhanced turned up, bolder than the rest. Sunlit air you can see shafts of light in, thick grass blowing in waves of wind, trees plainly moving, photo dirt sharp right up to your wheels, the real sky with clouds, bounce light, a soft glow round bright light, glossier bikes and trackside props. Heavy: for a strong computer. If frames come late it draws softer and sets effects aside.";
 
 const ABOUT_INTRO = "Plays a video of your own in place of the original intro movie when the game starts, for example a remastered copy of the intro that you have. Pick an MP4 or WebM file your browser can play. It is kept in this browser only and is never uploaded or shared. A click or a key skips it, as with the original, and the game's own Intro Movie option still turns the intro off. If it can't be played, the original intro plays instead (or none with the free version). Off unless you pick one.";
 
@@ -198,7 +198,7 @@ export function lookOf(s) {
   return !s.enhanced ? "original" : s.quality === "nextgen" ? "nextgen" : "enhanced";
 }
 
-/// Picks a look (and saves it). Back from Next-gen, Auto picks the
+/// Picks a look (and saves it). Back from Enhanced+, Auto picks the
 /// quality for the computer.
 export function setLook(s, v) {
   const was = lookOf(s);
@@ -372,14 +372,14 @@ export function render(lookBox, box, s, changed) {
   box.replaceChildren();
   lookBox.replaceChildren();
 
-  // The look: Original, Enhanced or Next-gen.
+  // The look: Original, Enhanced or Enhanced+.
   const look = el("fieldset", {}, el("legend", { textContent: "Look" }));
   const nextgen = s.enhanced && s.quality === "nextgen";
   const current = !s.enhanced ? "original" : nextgen ? "nextgen" : "enhanced";
   for (const [v, b, text, about] of [
     ["original", "Original", ": the game as it looked in 2000", LOOK_ABOUT.original],
     ["enhanced", "Enhanced", ": modern light, kept subtle", LOOK_ABOUT.enhanced],
-    ["nextgen", "Next-gen", ": a bold modern look", ABOUT_NEXTGEN],
+    ["nextgen", "Enhanced+", ": Enhanced, turned up", ABOUT_NEXTGEN],
   ]) {
     const r = el("input", { type: "radio", name: "look", checked: current === v });
     r.addEventListener("change", () => {
@@ -408,7 +408,7 @@ export function render(lookBox, box, s, changed) {
       select(LOOKS, s.look || "original", (v) => set("look", v), ABOUT_LOOK),
     );
     look.append(grid);
-    if (nextgen) look.append(el("p", { className: "hint", textContent: "Next-gen picks its own quality: it draws a little softer and sets effects aside when frames come late." }));
+    if (nextgen) look.append(el("p", { className: "hint", textContent: "Enhanced+ picks its own quality: it draws a little softer and sets effects aside when frames come late." }));
 
     // Everything else, closed unless opened.
     const adv = el("details", {}, el("summary", { textContent: "Advanced", title: "Time of day, weather, ground detail and each effect on its own. The quality sets them all; point at one to see what it does." }));

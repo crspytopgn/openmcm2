@@ -131,7 +131,7 @@ pub enum Quality {
     /// Ultra drawn finer for the strongest cards: supersampled, with the
     /// detail reaching further.
     Max,
-    /// A modern game's look, bolder than the others: lit air with sun
+    /// Enhanced turned up, bolder than the others: lit air with sun
     /// shafts, lusher grass blowing in the wind, firmer ground detail,
     /// bounce light, the real sky, glossier bikes and trackside props,
     /// with TAA and FSR. Holds the frame rate by setting effects aside.
@@ -204,7 +204,7 @@ impl Quality {
 
     /// What the launcher calls it.
     pub fn label(self) -> &'static str {
-        ["Low", "Medium", "High", "Ray traced", "Ultra", "Max", "Next-gen"][self as usize]
+        ["Low", "Medium", "High", "Ray traced", "Ultra", "Max", "Enhanced+"][self as usize]
     }
 
     /// The anti-aliasing this preset draws with ([`ANTIALIASING`]).
@@ -341,7 +341,7 @@ pub const UPGRADES: [(&str, &str, bool); 35] = [
     // screen, or with TAA).
     ("bounce", "Bounce light", true),
     ("fsr", "AMD FSR upscaling", true),
-    // From the Next-gen work, the gentle versions on by default.
+    // From the Enhanced+ work, the gentle versions on by default.
     ("closeup", "Sharp dirt up close", true),
     ("wind", "Wind in the grass and trees", true),
     ("litair", "Sunlight in the air", true),
@@ -1270,7 +1270,7 @@ mod tests {
         let back = Settings::parse(&s.text());
         assert_eq!(back.look, "original");
         assert!(back.args().iter().all(|a| !a.contains("look=") && !a.contains("grade")));
-        // Next-gen: its own name, with nothing else to say.
+        // Enhanced+: its own name, with nothing else to say.
         let mut s = Settings::parse("enhanced=1\nquality=nextgen\n");
         assert_eq!(s.quality, Quality::NextGen);
         s.antialiasing = s.quality.antialiasing().into();
