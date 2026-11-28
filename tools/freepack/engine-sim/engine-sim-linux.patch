@@ -1,0 +1,294 @@
+diff --git a/dependencies/submodules/piranha b/dependencies/submodules/piranha
+--- a/dependencies/submodules/piranha
++++ b/dependencies/submodules/piranha
+@@ -1 +1 @@
+-Subproject commit 432f0b122bb1663b686c553c7e7269300afac3bc
++Subproject commit 432f0b122bb1663b686c553c7e7269300afac3bc-dirty
+diff --git a/dependencies/submodules/simple-2d-constraint-solver b/dependencies/submodules/simple-2d-constraint-solver
+--- a/dependencies/submodules/simple-2d-constraint-solver
++++ b/dependencies/submodules/simple-2d-constraint-solver
+@@ -1 +1 @@
+-Subproject commit e009f4ff1c9c4c5874e865e893cdb62e208fb2b3
++Subproject commit e009f4ff1c9c4c5874e865e893cdb62e208fb2b3-dirty
+diff --git a/include/constants.h b/include/constants.h
+index 8b39b44..0c81b9f 100644
+--- a/include/constants.h
++++ b/include/constants.h
+@@ -3,10 +3,10 @@
+ 
+ namespace constants {
+ 
+-    extern constexpr double pi = 3.14159265359;
+-    extern constexpr double R = 8.31446261815324;
+-    extern constexpr double root_2 = 1.41421356237309504880168872420969807856967187537694807317667973799;
+-    extern constexpr double e = 2.71828182845904523536028747135266249775724709369995;
++    inline constexpr double pi = 3.14159265359;
++    inline constexpr double R = 8.31446261815324;
++    inline constexpr double root_2 = 1.41421356237309504880168872420969807856967187537694807317667973799;
++    inline constexpr double e = 2.71828182845904523536028747135266249775724709369995;
+ 
+ } /* namespace Constants */
+ 
+diff --git a/include/gas_system.h b/include/gas_system.h
+index 29f674d..ac1510a 100644
+--- a/include/gas_system.h
++++ b/include/gas_system.h
+@@ -7,13 +7,15 @@
+ #include <cfloat>
+ #include <cmath>
+ 
++struct GasSystemMix {
++    double p_fuel = 0.0;
++    double p_inert = 1.0;
++    double p_o2 = 0.0;
++};
++
+ class GasSystem {
+     public:
+-        struct Mix {
+-            double p_fuel = 0.0;
+-            double p_inert = 1.0;
+-            double p_o2 = 0.0;
+-        };
++        using Mix = GasSystemMix;
+ 
+         struct State {
+             double n_mol = 0.0;
+diff --git a/include/ring_buffer.h b/include/ring_buffer.h
+index f2a5f60..1f45af9 100644
+--- a/include/ring_buffer.h
++++ b/include/ring_buffer.h
+@@ -46,7 +46,7 @@ public:
+     }
+ 
+     inline void overwrite(T_Data data, size_t index) {
+-        if (start + index < m_capacity) {
++        if (m_start + index < m_capacity) {
+             m_buffer[m_start + index] = data;
+         }
+         else {
+diff --git a/include/units.h b/include/units.h
+index 291e3ca..6b35182 100644
+--- a/include/units.h
++++ b/include/units.h
+@@ -5,93 +5,93 @@
+ 
+ namespace units {
+     // Force
+-    extern constexpr double N = 1.0;
++    inline constexpr double N = 1.0;
+ 
+-    extern constexpr double lbf = N * 4.44822;
++    inline constexpr double lbf = N * 4.44822;
+ 
+     // Mass
+-    extern constexpr double kg = 1.0;
+-    extern constexpr double g = kg / 1000.0;
++    inline constexpr double kg = 1.0;
++    inline constexpr double g = kg / 1000.0;
+ 
+-    extern constexpr double lb = 0.45359237 * kg;
++    inline constexpr double lb = 0.45359237 * kg;
+ 
+     // Distance
+-    extern constexpr double m = 1.0;
+-    extern constexpr double cm = m / 100.0;
+-    extern constexpr double mm = m / 1000.0;
+-    extern constexpr double km = m * 1000.0;
++    inline constexpr double m = 1.0;
++    inline constexpr double cm = m / 100.0;
++    inline constexpr double mm = m / 1000.0;
++    inline constexpr double km = m * 1000.0;
+ 
+-    extern constexpr double inch = cm * 2.54;
+-    extern constexpr double foot = inch * 12.0;
+-    extern constexpr double thou = inch / 1000.0;
+-    extern constexpr double mile = m * 1609.344;
++    inline constexpr double inch = cm * 2.54;
++    inline constexpr double foot = inch * 12.0;
++    inline constexpr double thou = inch / 1000.0;
++    inline constexpr double mile = m * 1609.344;
+ 
+     // Time
+-    extern constexpr double sec = 1.0;
+-    extern constexpr double minute = 60 * sec;
+-    extern constexpr double hour = 60 * minute;
++    inline constexpr double sec = 1.0;
++    inline constexpr double minute = 60 * sec;
++    inline constexpr double hour = 60 * minute;
+ 
+     // Torque
+-    extern constexpr double Nm = N * m;
+-    extern constexpr double ft_lb = foot * lbf;
++    inline constexpr double Nm = N * m;
++    inline constexpr double ft_lb = foot * lbf;
+ 
+     // Power
+-    extern constexpr double W = Nm / sec;
+-    extern constexpr double kW = W * 1000.0;
+-    extern constexpr double hp = 745.699872 * W;
++    inline constexpr double W = Nm / sec;
++    inline constexpr double kW = W * 1000.0;
++    inline constexpr double hp = 745.699872 * W;
+ 
+     // Volume
+-    extern constexpr double m3 = 1.0;
+-    extern constexpr double cc = cm * cm * cm;
+-    extern constexpr double mL = cc;
+-    extern constexpr double L = mL * 1000.0;
+-    extern constexpr double cubic_feet = foot * foot * foot;
+-    extern constexpr double cubic_inches = inch * inch * inch;
+-    extern constexpr double gal = 3.785411784 * L;
++    inline constexpr double m3 = 1.0;
++    inline constexpr double cc = cm * cm * cm;
++    inline constexpr double mL = cc;
++    inline constexpr double L = mL * 1000.0;
++    inline constexpr double cubic_feet = foot * foot * foot;
++    inline constexpr double cubic_inches = inch * inch * inch;
++    inline constexpr double gal = 3.785411784 * L;
+ 
+     // Molecular
+-    extern constexpr double mol = 1.0;
+-    extern constexpr double kmol = mol / 1000.0;
+-    extern constexpr double mmol = mol / 1000000.0;
+-    extern constexpr double lbmol = mol * 453.59237;
++    inline constexpr double mol = 1.0;
++    inline constexpr double kmol = mol / 1000.0;
++    inline constexpr double mmol = mol / 1000000.0;
++    inline constexpr double lbmol = mol * 453.59237;
+ 
+     // Flow-rate (moles)
+-    extern constexpr double mol_per_sec = mol / sec;
+-    extern constexpr double scfm = 0.002641 * lbmol / minute;
++    inline constexpr double mol_per_sec = mol / sec;
++    inline constexpr double scfm = 0.002641 * lbmol / minute;
+ 
+     // Area
+-    extern constexpr double m2 = 1.0;
+-    extern constexpr double cm2 = cm * cm;
++    inline constexpr double m2 = 1.0;
++    inline constexpr double cm2 = cm * cm;
+ 
+     // Pressure
+-    extern constexpr double Pa = 1.0;
+-    extern constexpr double kPa = Pa * 1000.0;
+-    extern constexpr double MPa = Pa * 1000000.0;
+-    extern constexpr double atm = 101.325 * kPa;
++    inline constexpr double Pa = 1.0;
++    inline constexpr double kPa = Pa * 1000.0;
++    inline constexpr double MPa = Pa * 1000000.0;
++    inline constexpr double atm = 101.325 * kPa;
+ 
+-    extern constexpr double mbar = Pa * 100.0;
+-    extern constexpr double bar = mbar * 1000.0;
++    inline constexpr double mbar = Pa * 100.0;
++    inline constexpr double bar = mbar * 1000.0;
+ 
+-    extern constexpr double psi = lbf / (inch * inch);
+-    extern constexpr double psig = psi;
+-    extern constexpr double inHg = Pa * 3386.3886666666713;
+-    extern constexpr double inH2O = inHg * 0.0734824;
++    inline constexpr double psi = lbf / (inch * inch);
++    inline constexpr double psig = psi;
++    inline constexpr double inHg = Pa * 3386.3886666666713;
++    inline constexpr double inH2O = inHg * 0.0734824;
+ 
+     // Temperature
+-    extern constexpr double K = 1.0;
+-    extern constexpr double K0 = 273.15;
+-    extern constexpr double C = K;
+-    extern constexpr double F = (5.0 / 9.0) * K;
+-    extern constexpr double F0 = -459.67;
++    inline constexpr double K = 1.0;
++    inline constexpr double K0 = 273.15;
++    inline constexpr double C = K;
++    inline constexpr double F = (5.0 / 9.0) * K;
++    inline constexpr double F0 = -459.67;
+ 
+     // Energy
+-    extern constexpr double J = 1.0;
+-    extern constexpr double kJ = J * 1000;
+-    extern constexpr double MJ = J * 1000000;
++    inline constexpr double J = 1.0;
++    inline constexpr double kJ = J * 1000;
++    inline constexpr double MJ = J * 1000000;
+ 
+     // Angles
+-    extern constexpr double rad = 1.0;
+-    extern constexpr double deg = rad * (constants::pi / 180);
++    inline constexpr double rad = 1.0;
++    inline constexpr double deg = rad * (constants::pi / 180);
+ 
+     // Conversions
+     inline constexpr double distance(double v, double unit) {
+diff --git a/scripting/include/object_reference_node.h b/scripting/include/object_reference_node.h
+index 800d912..3f51de0 100644
+--- a/scripting/include/object_reference_node.h
++++ b/scripting/include/object_reference_node.h
+@@ -18,9 +18,9 @@ namespace es_script {
+             /* void */
+         }
+ 
+-        template <typename Type>
++        template <typename OType>
+         void overrideType() {
+-            m_output.overrideType(LookupChannelType<Type>());
++            m_output.overrideType(LookupChannelType<OType>());
+         }
+ 
+     protected:
+diff --git a/src/connecting_rod.cpp b/src/connecting_rod.cpp
+index 7474bcd..2a8102c 100644
+--- a/src/connecting_rod.cpp
++++ b/src/connecting_rod.cpp
+@@ -1,4 +1,4 @@
+-#include "..\include\connecting_rod.h"
++#include "../include/connecting_rod.h"
+ #include "../include/connecting_rod.h"
+ 
+ #include <cmath>
+diff --git a/src/engine.cpp b/src/engine.cpp
+index 15e326d..f19e3fd 100644
+--- a/src/engine.cpp
++++ b/src/engine.cpp
+@@ -1,4 +1,4 @@
+-#include "..\include\engine.h"
++#include "../include/engine.h"
+ #include "../include/engine.h"
+ 
+ #include "../include/constants.h"
+diff --git a/include/memory_management.h b/include/memory_management.h
+index 7550061..69c5924 100644
+--- a/include/memory_management.h
++++ b/include/memory_management.h
+@@ -5,13 +5,13 @@
+ 
+ namespace piranha {
+ 
+-    typedef unsigned __int64 mem_size;
++    typedef unsigned long long mem_size;
+ 
+     constexpr mem_size KB = 1000;
+     constexpr mem_size MB = 1000 * KB;
+     constexpr mem_size GB = 1000 * MB;
+ 
+-#define CHECK_ALIGNMENT(pointer, required) assert((((unsigned __int64)((char *)(pointer))) % (required)) == 0)
++#define CHECK_ALIGNMENT(pointer, required) assert((((unsigned long long)((char *)(pointer))) % (required)) == 0)
+ 
+ } /* namespace piranha */
+ 
+diff --git a/include/sparse_matrix.h b/include/sparse_matrix.h
+index c8875c6..cc9d1c0 100644
+--- a/include/sparse_matrix.h
++++ b/include/sparse_matrix.h
+@@ -6,7 +6,9 @@
+ #include <string.h>
+ 
+ namespace atg_scs {
+-    class Matrix;
++} 
++#include "matrix.h"
++namespace atg_scs {
+ 
+     template <int T_Stride = 3, int T_Entries = 2>
+     class SparseMatrix {
