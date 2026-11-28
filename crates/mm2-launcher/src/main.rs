@@ -2195,6 +2195,13 @@ impl Launcher {
                 "On unless you turn it off. A race you host shows in everyone's Host or Join list (Multiplayer, in the game and the browser version) with its name, track and riders, so players anywhere can join. It's listed by its race code, so no port forwarding is needed. Turn this off to keep your races to people you give the race code to.",
                 w,
             );
+            look::switch_tile(
+                ui,
+                &mut m.original_lan,
+                "Race with the original MM2 on your network",
+                "On unless you turn it off. Players of the original Motocross Madness 2 from 2000 (the full game or the demo) on your local network see your races in their own Multiplayer list and can join them, and their games show in your Join list. Everyone rides the same track, which both games need to have.",
+                w,
+            );
             let url = m.leaderboard_url.trim().to_string();
             if url.is_empty() {
                 ui.label(look::weak("The server browser uses the leaderboard server, and its address is cleared (Lap leaderboards)."));

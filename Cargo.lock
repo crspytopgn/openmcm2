@@ -2455,6 +2455,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mm2-dplay"
+version = "0.6.1"
+
+[[package]]
 name = "mm2-formats"
 version = "0.6.1"
 dependencies = [
@@ -2541,6 +2545,7 @@ dependencies = [
  "jpeg-encoder",
  "js-sys",
  "mm2-course",
+ "mm2-dplay",
  "mm2-formats",
  "mm2-indeo",
  "mm2-physics",

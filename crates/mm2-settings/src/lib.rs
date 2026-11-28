@@ -506,6 +506,10 @@ pub struct More {
     /// leaderboard server's open races); on unless turned off
     /// (`--no-list-races`).
     pub list_races: bool,
+    /// Players of the original Motocross Madness 2 (2000) on the local
+    /// network can join this player's races, and the original's games
+    /// show in the Join list; on unless turned off (`--no-original-lan`).
+    pub original_lan: bool,
     /// The playtime tracker sends anonymous totals (no name) to the
     /// leaderboard server; on unless turned off (`--no-share-playtime`).
     pub share_playtime: bool,
@@ -586,6 +590,7 @@ impl Default for More {
             leaderboard_url: LEADERBOARD_URL.into(),
             lobby_downloads: true,
             list_races: true,
+            original_lan: true,
             share_playtime: true,
             builder_menu: true,
             fresh_sounds: false,
@@ -635,6 +640,7 @@ impl More {
             "share_playtime" => self.share_playtime = yes,
             "lobby_downloads" => self.lobby_downloads = yes,
             "list_races" => self.list_races = yes,
+            "original_lan" => self.original_lan = yes,
             "builder_menu" => self.builder_menu = yes,
             "freshen_sounds" => self.fresh_sounds = yes,
             // The old off-by-default Freshen extra (0.7.x): its saved 0 is
@@ -658,7 +664,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfreshen_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\nbig_head={}\nreplay_editor={}\ncut_content={}\ndemo_tracks={}\nfree_tracks={}\nintro_video={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\noriginal_lan={}\nshare_playtime={}\nbuilder_menu={}\nfreshen_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\nbig_head={}\nreplay_editor={}\ncut_content={}\ndemo_tracks={}\nfree_tracks={}\nintro_video={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -675,6 +681,7 @@ impl More {
             if self.leaderboard_url.is_empty() { "none" } else { &self.leaderboard_url },
             b(self.lobby_downloads),
             b(self.list_races),
+            b(self.original_lan),
             b(self.share_playtime),
             b(self.builder_menu),
             b(self.fresh_sounds),
@@ -705,6 +712,7 @@ impl More {
             (!self.share_playtime, "--no-share-playtime"),
             (!self.lobby_downloads, "--no-lobby-downloads"),
             (!self.list_races, "--no-list-races"),
+            (!self.original_lan, "--no-original-lan"),
             (!self.builder_menu, "--no-builder-menu"),
             (self.fresh_sounds, "--fresh-sounds"),
             (self.drive_vehicles, "--drive-vehicles"),
@@ -757,6 +765,7 @@ impl More {
             fxaa: has("--fxaa"),
             lobby_downloads: !has("--no-lobby-downloads"),
             list_races: !has("--no-list-races"),
+            original_lan: !has("--no-original-lan"),
             leaderboards: !has("--no-leaderboards"),
             share_playtime: !has("--no-share-playtime"),
             builder_menu: !has("--no-builder-menu"),
@@ -893,6 +902,7 @@ impl Settings {
             share_playtime: m.share_playtime,
             lobby_downloads: m.lobby_downloads,
             list_races: m.list_races,
+            original_lan: m.original_lan,
             builder_menu: m.builder_menu,
             whistle: m.whistle,
             ..More::default()
@@ -1472,6 +1482,7 @@ mod tests {
             leaderboard_url: "https://example.org/mm2".into(),
             lobby_downloads: false,
             list_races: false,
+            original_lan: false,
             share_playtime: false,
             builder_menu: false,
             fresh_sounds: false,
@@ -1519,7 +1530,7 @@ mod tests {
         assert!(!s.more.share_playtime && !s.more.leaderboards, "not extras: kept");
         assert!(!s.more.lobby_downloads && !s.more.list_races, "not extras: kept");
         let d = More::default();
-        assert!(d.share_playtime && d.leaderboards && d.lobby_downloads && d.list_races, "on unless turned off");
+        assert!(d.share_playtime && d.leaderboards && d.lobby_downloads && d.list_races && d.original_lan, "on unless turned off");
         // Files from before 0.5.3 saved lobby downloads off, the old default.
         assert!(Settings::parse("version=3\nlobby_downloads=0\n").more.lobby_downloads);
         assert!(!Settings::parse("version=4\nlobby_downloads=0\n").more.lobby_downloads);
