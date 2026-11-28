@@ -5504,7 +5504,14 @@ impl App {
                     length: setup.laps,
                 });
                 // Laps go on the leaderboards in the lap races, only as
-                // the original rides: with the riding extras off.
+                // the original rides: with the riding extras off. Unlike
+                // the records they count in Practice, Ghost and
+                // multiplayer races too (not free roam or Moto-Tag), where
+                // most laps are ridden: the lap rules (from lap 2, kept
+                // on the course) keep them fair.
+                let on_board = self.tape.is_none()
+                    && setup.random_gates.is_none()
+                    && setup.net.is_none_or(|n| !n.roam && !n.tag_ball && !n.tag_stunts);
                 let t = tweaks::get();
                 let fair = t.air_steer == 0 && t.air_brake == 0 && !t.quick_get_up && !t.forgiving_landings;
                 let lap_event = matches!(setup.event, frontend::EventKind::Baja | frontend::EventKind::Nationals | frontend::EventKind::Supercross | frontend::EventKind::Enduro);
@@ -5512,7 +5519,7 @@ impl App {
                     let cc = setup.ride.as_ref().map_or(250, |r| r.bike.cc);
                     mm2_settings::playtime::race_keys(setup.event as u32, &setup.track, cc)
                 }));
-                self.lap_board = (counts && fair && lap_event && tweaks::more().leaderboards).then(|| {
+                self.lap_board = (on_board && fair && lap_event && tweaks::more().leaderboards).then(|| {
                     let cc = setup.ride.as_ref().map_or(250, |r| r.bike.cc);
                     (mm2_settings::laps::Board::new(&setup.track, setup.event as u32, setup.course as u32, cc), setup.name.clone())
                 });

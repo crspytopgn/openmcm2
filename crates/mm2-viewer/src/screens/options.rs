@@ -271,7 +271,7 @@ const TWEAK_CHECKS: [Check; 7] = [
         name: "ChkQuickGetUp",
         text: "Quick get-up",
         rect: [24, 152, 329, 20],
-        about: "After a crash, G on the keyboard or Back on a pad puts you straight back on the bike instead of waiting for the crash to play out. Not in network races.",
+        about: "After a crash, G on the keyboard or Back on a pad puts you straight back on the bike instead of waiting for the crash to play out. Not in network races. Laps don't go on the leaderboards while it's on.",
         field: |t| &mut t.quick_get_up,
     },
     Check {
@@ -351,14 +351,14 @@ const AIR_SLIDERS: [AirSlider; 2] = [
         name: "SldAirSteer",
         text: "Air steering",
         at: [43, 70],
-        about: "How much steering in the air bends your flight, and turns the bike with it so you land in line. The middle is this version's own; far left is the original, where it only turns the bike slightly.",
+        about: "How much steering in the air bends your flight, and turns the bike with it so you land in line. The middle is this version's own; far left is the original, where it only turns the bike slightly. Laps go on the leaderboards only at far left.",
         field: |t| &mut t.air_steer,
     },
     AirSlider {
         name: "SldAirBrake",
         text: "Air braking",
         at: [43, 110],
-        about: "How much holding the brake in the air takes off your speed, so you can come up short of a landing. The middle is this version's own; far left is the original, where it changes nothing about the flight. The brake still tips the nose down if Brake Gyro is on.",
+        about: "How much holding the brake in the air takes off your speed, so you can come up short of a landing. The middle is this version's own; far left is the original, where it changes nothing about the flight. The brake still tips the nose down if Brake Gyro is on. Laps go on the leaderboards only at far left.",
         field: |t| &mut t.air_brake,
     },
 ];

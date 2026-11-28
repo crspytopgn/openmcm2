@@ -92,12 +92,12 @@ const ABOUT_INTRO = "Plays a video of your own in place of the original intro mo
 // has its range, step, unit and the original game's value.
 export const EXTRAS = [
   ["Riding", [
-    { key: "quick_get_up", flag: "quick-get-up", label: "Quick get-up", about: "After a crash, G or a pad's Back puts you straight back on the bike. Not in network races." },
-    { key: "air_steer", flag: "air-steer", label: "Air steering", about: "How much steering in the air bends your flight. 0% is the original game.", range: [0, 200, 10, "%"], off: 0 },
-    { key: "air_brake", flag: "air-brake", label: "Air braking", about: "How much braking in the air shortens your flight. 0% is the original game.", range: [0, 200, 10, "%"], off: 0 },
+    { key: "quick_get_up", flag: "quick-get-up", label: "Quick get-up", about: "After a crash, G or a pad's Back puts you straight back on the bike. Not in network races. Laps don't go on the leaderboards while it's on." },
+    { key: "air_steer", flag: "air-steer", label: "Air steering", about: "How much steering in the air bends your flight. 0% is the original game. Laps go on the leaderboards only at 0%.", range: [0, 200, 10, "%"], off: 0 },
+    { key: "air_brake", flag: "air-brake", label: "Air braking", about: "How much braking in the air shortens your flight. 0% is the original game. Laps go on the leaderboards only at 0%.", range: [0, 200, 10, "%"], off: 0 },
     { key: "clean_starts", flag: "clean-starts", label: "Cleaner starts", about: "The computer riders keep their order across the gate off the start, so fewer pile into each other." },
-    { key: "forgiving_landings", flag: "forgiving-landings", label: "Forgiving landings", about: "Fewer crashes from landing a little crooked. The original game is strict." },
-    { key: "one_lap", flag: "one-lap", label: "One-lap races", about: "National and Supercross races can be 1 lap long (the original starts at 2)." },
+    { key: "forgiving_landings", flag: "forgiving-landings", label: "Forgiving landings", about: "Fewer crashes from landing a little crooked. The original game is strict. Laps don't go on the leaderboards while it's on." },
+    { key: "one_lap", flag: "one-lap", label: "One-lap races", about: "National and Supercross races can be 1 lap long (the original starts at 2). A 1-lap race sends no leaderboard lap, as laps count from lap 2." },
   ]],
   ["Race display and camera", [
     { key: "sharp_display", flag: "modern-hud", label: "Modernised HUD", about: "Crisp see-through race panel, radar and speedometer at your screen's resolution." },
