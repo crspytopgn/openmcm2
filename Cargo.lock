@@ -2536,6 +2536,7 @@ dependencies = [
  "futures-util",
  "gilrs",
  "glam",
+ "half",
  "image-webp",
  "jpeg-encoder",
  "js-sys",

@@ -15,9 +15,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     if (i >= arrayLength(&sources)) {
         return;
     }
-    let s = sources[i] * 10u;
+    let s = sources[i] * 9u;
     let p = vec3<f32>(bitcast<f32>(vertices[s]), bitcast<f32>(vertices[s + 1u]), bitcast<f32>(vertices[s + 2u]));
-    let m = nodes[vertices[s + 9u] & 0x3fffffffu];
+    let m = nodes[vertices[s + 8u] & 0x3fffffffu];
     let w = (m * vec4<f32>(p, 1.0)).xyz;
     posed[i * 3u] = w.x;
     posed[i * 3u + 1u] = w.y;

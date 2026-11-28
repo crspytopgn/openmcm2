@@ -63,7 +63,7 @@ fn sun_visible(world: vec3<f32>, n: vec3<f32>, dist: f32, lift: f32) -> f32 {
 const RT_REACH: f32 = 6000.0;
 // The object vertex words (objects.rs Vertex): position, normal, uv,
 // colour, node.
-const RT_WORDS: u32 = 10u;
+const RT_WORDS: u32 = 9u;
 const RT_NO_COLOUR: u32 = 0xffffffffu;
 
 // Whether a cut-out triangle the ray meets is solid where it meets it.
@@ -144,11 +144,11 @@ fn reflection(origin: vec3<f32>, dir: vec3<f32>, sky: vec3<f32>) -> vec3<f32> {
         var tint = vec4<f32>(0.0);
         for (var k = 0u; k < 3u; k++) {
             let i = tri[k];
-            n += vec3<f32>(rt_word(i, 3u), rt_word(i, 4u), rt_word(i, 5u)) * weights[k];
-            uv += vec2<f32>(rt_word(i, 6u), rt_word(i, 7u)) * weights[k];
-            tint += unpack4x8unorm(rt_vertices[i * RT_WORDS + 8u]) * weights[k];
+            n += vec3<f32>(unpack2x16float(rt_vertices[i * RT_WORDS + 3u]), unpack2x16float(rt_vertices[i * RT_WORDS + 4u]).x) * weights[k];
+            uv += vec2<f32>(rt_word(i, 5u), rt_word(i, 6u)) * weights[k];
+            tint += unpack4x8unorm(rt_vertices[i * RT_WORDS + 7u]) * weights[k];
         }
-        let node = rt_vertices[tri.x * RT_WORDS + 9u];
+        let node = rt_vertices[tri.x * RT_WORDS + 8u];
         if (hit.instance_index == rt_hits[1].w) {
             n = (rt_nodes[node & 0x3fffffffu] * vec4<f32>(n, 0.0)).xyz;
         }
