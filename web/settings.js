@@ -193,6 +193,31 @@ export function setQuality(s, q) {
   for (const [n] of UPGRADES) s.upgrades[n] = presetHas(q, n);
 }
 
+/// The look: "original", "enhanced" or "nextgen".
+export function lookOf(s) {
+  return !s.enhanced ? "original" : s.quality === "nextgen" ? "nextgen" : "enhanced";
+}
+
+/// Picks a look (and saves it). Back from Next-gen, Auto picks the
+/// quality for the computer.
+export function setLook(s, v) {
+  const was = lookOf(s);
+  if (v === "original") s.enhanced = false;
+  else {
+    s.enhanced = true;
+    if (v === "nextgen") setQuality(s, "nextgen");
+    else if (was === "nextgen") setQuality(s, "auto");
+  }
+  save(s);
+}
+
+/// What each look is, for its hover (the launcher's words too).
+export const LOOK_ABOUT = {
+  original: "As the game drew it in 2000, pixel for pixel. The lightest on your computer, and how it starts unless you pick another.",
+  enhanced: "The same game with modern light: per-pixel lighting, real shadows, haze, dust, 3D grass and more, kept subtle so it still looks like MM2. Auto fits the effects to your computer; Settings has the quality and every effect. F3 (or the button at the top left) flips back to the original look while racing to compare. The riding is the same.",
+  nextgen: ABOUT_NEXTGEN,
+};
+
 export function defaults() {
   const s = {
     enhanced: false,
@@ -352,17 +377,14 @@ export function render(lookBox, box, s, changed) {
   const nextgen = s.enhanced && s.quality === "nextgen";
   const current = !s.enhanced ? "original" : nextgen ? "nextgen" : "enhanced";
   for (const [v, b, text, about] of [
-    ["original", "Original", ": the game as it looked in 2000", "The game drawn as it was in 2000. The lightest on your computer."],
-    ["enhanced", "Enhanced", ": modern light, kept subtle", "The original game with modern light: per-pixel lighting, real shadows, haze, dust, 3D grass and more, kept subtle so it still looks like MM2. Pick a quality for your computer."],
+    ["original", "Original", ": the game as it looked in 2000", LOOK_ABOUT.original],
+    ["enhanced", "Enhanced", ": modern light, kept subtle", LOOK_ABOUT.enhanced],
     ["nextgen", "Next-gen", ": a bold modern look", ABOUT_NEXTGEN],
   ]) {
     const r = el("input", { type: "radio", name: "look", checked: current === v });
     r.addEventListener("change", () => {
-      if (v === "original") return set("enhanced", false, true);
-      s.enhanced = true;
-      if (v === "nextgen") setQuality(s, "nextgen");
-      else if (nextgen) setQuality(s, "auto");
-      set("quality", s.quality, true);
+      setLook(s, v);
+      set("enhanced", s.enhanced, true);
     });
     look.append(el("label", { title: about }, r, " ", el("b", { textContent: b }), text));
   }

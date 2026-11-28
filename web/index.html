@@ -130,6 +130,8 @@
   .switches { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: .1rem .8rem; margin: .2rem 0 .6rem; }
   .switches .seg { justify-self: start; }
   .switchname { color: var(--dim); font-size: .9rem; }
+  .lookline { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .7rem; }
+  #lookrow .seg { margin: 0; }
   #fullgame { margin: .9rem 0 0; padding-top: .8rem; border-top: 1px solid #3a3d2c; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; }
   #fullgame p { margin: 0; flex: 1 1 14rem; }
   #fullgame label.button { margin: 0; }
@@ -265,7 +267,16 @@
         <button type="button" id="readyfreesounds" role="radio" aria-checked="false"
           title="The Free Pack's own recordings of real bikes and race sounds, with either graphics.">Free Pack</button>
       </div>
-    </div>
+      <span class="switchname">Look</span>
+      <div class="lookline">
+      <div class="seg lookseg" role="radiogroup" aria-label="Look">
+        <button type="button" data-look="original" role="radio" aria-checked="true">Original</button>
+        <button type="button" data-look="enhanced" role="radio" aria-checked="false">Enhanced</button>
+        <button type="button" data-look="nextgen" role="radio" aria-checked="false">Next-gen</button>
+      </div>
+        <button type="button" class="plain small lookmore" hidden
+          title="Settings: the quality for your computer, the colour look and every effect on its own.">Quality and effects</button>
+      </div>
     </div>
     <p id="readysum" aria-live="polite"></p>
     <div class="row">
@@ -333,6 +344,18 @@
           <input id="packfile" type="file" accept=".zip,application/zip">
         </div>
         <label class="keep"><input id="keeppack" type="checkbox" checked title="Keeps a picked .zip in this browser, so next time Play starts it straight away."> Remember a picked .zip in this browser</label>
+      </div>
+    </section>
+    <!-- The look, right under the ways to play: Original unless picked. -->
+    <section class="freerow" id="lookrow">
+      <div class="freehead">
+        <div><b>How it looks</b>
+          <p>Original is the game as it looked in 2000. Enhanced adds modern light and shadow, kept subtle. Switch any time, even mid-race with F3.</p></div>
+        <div class="seg lookseg" role="radiogroup" aria-label="Look">
+        <button type="button" data-look="original" role="radio" aria-checked="true">Original</button>
+        <button type="button" data-look="enhanced" role="radio" aria-checked="false">Enhanced</button>
+        <button type="button" data-look="nextgen" role="radio" aria-checked="false">Next-gen</button>
+      </div>
       </div>
     </section>
     <p id="backrow" hidden><button type="button" class="plain" id="back" title="Keeps what you had picked.">Back</button></p>
@@ -878,7 +901,13 @@ settings.setIntroStore({
   },
 });
 if (s.intro_video) introFile = await fs.keptIntro().catch(() => null);
-const renderSettings = () => settings.render($("lookbox"), $("settings"), s, () => (look = s.enhanced ? "enhanced" : "original"));
+const renderSettings = () => {
+  settings.render($("lookbox"), $("settings"), s, () => {
+    look = s.enhanced ? "enhanced" : "original";
+    showLook();
+  });
+  showLook();
+};
 // The Ready card's Sounds switch: the MM2 files' sounds (the demo's
 // too) or the Free Pack's, with either graphics. Not picked, they go with
 // the graphics.
@@ -905,6 +934,33 @@ for (const [id, mm2] of [["readymm2sounds", true], ["readyfreesounds", false]]) 
     } catch {}
     showSounds();
     readySummary();
+  });
+}
+// The look switches (Ready card and under the ways to play), as the
+// Settings' Look has it.
+function showLook() {
+  const now = settings.lookOf(s);
+  for (const b of document.querySelectorAll(".lookseg button")) {
+    b.setAttribute("aria-checked", String(b.dataset.look === now));
+    b.title = settings.LOOK_ABOUT[b.dataset.look];
+  }
+  for (const m of document.querySelectorAll(".lookmore")) m.hidden = !s.enhanced;
+  // Before the page has set itself up, there's no summary yet.
+  try {
+    readySummary();
+  } catch {}
+}
+for (const b of document.querySelectorAll(".lookseg button")) {
+  b.addEventListener("click", () => {
+    settings.setLook(s, b.dataset.look);
+    look = s.enhanced ? "enhanced" : "original";
+    renderSettings();
+  });
+}
+for (const m of document.querySelectorAll(".lookmore")) {
+  m.addEventListener("click", () => {
+    $("setbox").open = true;
+    $("lookbox").scrollIntoView({ behavior: "smooth", block: "start" });
   });
 }
 renderSettings();
@@ -2637,11 +2693,12 @@ function readySummary() {
   const menus = menusNew() ? "the new look menus" : "the original menus";
   const mm2 = mm2Sounds() && !!kept;
   const sound = mm2 ? (demo ? "the demo's sounds" : "the MM2 sounds") : "the Free Pack's sounds";
-  el.textContent = freeReady
+  const lookName = { original: "the original look", enhanced: "the Enhanced look", nextgen: "the Next-gen look" }[settings.lookOf(s)];
+  el.textContent = (freeReady
     ? `Plays the free version: all-new bikes and tracks, with ${menus} and ${sound}.`
     : demo
       ? `Plays the demo with ${menus} and ${sound}: original bikes, the real Voodoo Basin (National) and Donner Pass (Stunt Quarry) tracks, and Free Pack tracks for the other events.`
-      : `Plays your Motocross Madness 2 with ${menus} and ${sound}.`;
+      : `Plays your Motocross Madness 2 with ${menus} and ${sound}.`) + ` Drawn in ${lookName}.`;
 }
 // Ready (one Play button) or the choice, as the files kept and the last
 // pick have it.

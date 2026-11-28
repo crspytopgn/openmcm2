@@ -1018,7 +1018,8 @@ impl Launcher {
         // first time (or after Change, or while something is coming in):
         // the MM2 way first, the free version below it.
         let working = self.import.is_some() || self.demo_download.is_some() || self.pack_import.is_some() || self.pack_download.is_some();
-        if self.can_play() && !self.choosing && !working {
+        let ready = self.can_play() && !self.choosing && !working;
+        if ready {
             self.ready_card(ui, busy);
             // The new look menus with the MM2 graphics and no Free Pack:
             // just the menus, a small download.
@@ -1028,6 +1029,9 @@ impl Launcher {
         } else {
             self.mm2_card(ui, busy);
             self.free_row(ui, busy);
+            // The look, right under the ways to play: Original unless
+            // Enhanced is picked here.
+            self.summary_card(ui, true);
             if self.choosing && self.can_play() && !working {
                 if ui.button("Back").on_hover_text("Keeps what you had picked.").clicked() {
                     self.choosing = false;
@@ -1037,7 +1041,9 @@ impl Launcher {
         }
         self.starter_card(ui, busy);
         self.make_card(ui, busy);
-        self.summary_card(ui);
+        if ready {
+            self.summary_card(ui, false);
+        }
         self.playtime_card(ui);
         self.display_card(ui);
         self.kept_card(ui, busy);
@@ -1085,6 +1091,8 @@ impl Launcher {
         let mut pick_free = None;
         let mut pick_menus = None;
         let mut pick_sounds = None;
+        let mut pick_look: Option<Settings> = None;
+        let mut to_graphics = false;
         let mm2_sounds = s.sounds.unwrap_or(!free);
         let mut go = false;
         let mut change = false;
@@ -1161,6 +1169,24 @@ impl Launcher {
                     pick_sounds = r.inner;
                     ui.end_row();
                 }
+                // The look: the original, or the enhanced one (off unless
+                // picked), right beside the rest.
+                ui.label(look::weak("Look"));
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_enabled_ui(!busy_now, |ui| {
+                        let mut t = s.clone();
+                        if look_switch(ui, &mut t) {
+                            pick_look = Some(t);
+                        }
+                    });
+                    if s.enhanced {
+                        to_graphics = ui
+                            .small_button("Quality and effects")
+                            .on_hover_text("The Graphics page: the quality for your computer, the colour look and every effect on its own.")
+                            .clicked();
+                    }
+                });
+                ui.end_row();
             });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -1183,6 +1209,13 @@ impl Launcher {
             });
         });
         let mut changed = false;
+        if let Some(l) = pick_look {
+            self.settings = l;
+            changed = true;
+        }
+        if to_graphics {
+            self.page = Page::Graphics;
+        }
         if let Some(f) = pick_free.filter(|f| *f != free) {
             self.settings.free_graphics = f;
             changed = true;
@@ -1740,10 +1773,20 @@ impl Launcher {
     }
 
     /// The graphics as set, at a glance, and a way to change them.
-    fn summary_card(&mut self, ui: &mut egui::Ui) {
+    /// With `switch`, the Original / Enhanced / Next-gen choice too (when
+    /// the Ready card, which has it, isn't showing).
+    fn summary_card(&mut self, ui: &mut egui::Ui, switch: bool) {
+        let mut picked: Option<Settings> = None;
         let s = &self.settings;
         let mut go = false;
-        look::card(ui, look::icon::ICON_PALETTE, "Look", |ui| {
+        look::card(ui, look::icon::ICON_PALETTE, if switch { "Look" } else { "Graphics" }, |ui| {
+            if switch {
+                let mut t = s.clone();
+                if look_switch(ui, &mut t) {
+                    picked = Some(t);
+                }
+                ui.add_space(4.0);
+            }
             let mut parts: Vec<String> = Vec::new();
             if s.enhanced && s.auto {
                 parts.push(match auto_last() {
@@ -1762,7 +1805,7 @@ impl Launcher {
                 }
                 parts.push(if s.resolution == "auto" { "Auto resolution".into() } else { format!("{} resolution", s.resolution) });
             } else {
-                parts.push("The original look, as the game drew it".into());
+                parts.push(if switch { "Original: as the game drew it in 2000".into() } else { "The original look, as the game drew it".into() });
             }
             ui.horizontal_wrapped(|ui| {
                 for p in &parts {
@@ -1770,8 +1813,16 @@ impl Launcher {
                 }
             });
             ui.add_space(4.0);
-            go = ui.button(look::with(look::icon::ICON_TUNE, "Change graphics")).clicked();
+            go = ui
+                .button(look::with(look::icon::ICON_TUNE, "Change graphics"))
+                .on_hover_text("The Graphics page: the look, the quality for your computer, the colour look and every effect on its own.")
+                .clicked();
         });
+        if let Some(l) = picked {
+            self.settings = l;
+            let _ = self.settings.save();
+            self.saved = self.settings.clone();
+        }
         if go {
             self.page = Page::Graphics;
         }
@@ -2242,34 +2293,8 @@ impl Launcher {
         if let Some(q) = preset_of(s) {
             s.quality = q;
         }
-        let next_gen = s.enhanced && !s.auto && s.quality == Quality::NextGen;
         look::card(ui, icon::ICON_PALETTE, "Look", |ui| {
-            // 0 Original, 1 Enhanced, 2 Next-gen.
-            let current = if !s.enhanced { 0 } else if next_gen { 2 } else { 1 };
-            let choices = [
-                Choice::new(0, "Original").icon(icon::ICON_HISTORY).hover("As the game drew it in 2000. The lightest on your computer."),
-                Choice::new(1, "Enhanced").icon(icon::ICON_AUTO_AWESOME).hover(
-                    "The original game with modern light: per-pixel lighting, real shadows, haze, dust, 3D grass and more, kept subtle so it still looks like MM2. Pick a quality below for your computer.",
-                ),
-                Choice::new(2, "Next-gen").icon(icon::ICON_BOLT).hover(NEXT_GEN_TEXT),
-            ];
-            match look::segmented(ui, current, &choices) {
-                Some(0) => s.enhanced = false,
-                Some(1) => {
-                    s.enhanced = true;
-                    if next_gen {
-                        // Back from Next-gen: Auto picks for the computer.
-                        set_preset(s, Quality::High);
-                        s.auto = true;
-                    }
-                }
-                Some(2) => {
-                    s.enhanced = true;
-                    s.auto = false;
-                    set_preset(s, Quality::NextGen);
-                }
-                _ => {}
-            }
+            look_switch(ui, s);
             ui.label(look::weak("The riding is the same with every look."));
         });
         if s.enhanced {
@@ -2789,6 +2814,41 @@ fn tier_line(q: Quality) -> &'static str {
         _ => "Ultra: for a strong graphics card, the finest edges and the whole screen's pixels. Supersampling, far detail and ray tracing are under Advanced",
     }
 }
+
+/// The look, one press: Original, Enhanced or Next-gen. On the Play page
+/// (Ready card, or the Look card while choosing) and the Graphics page.
+/// True when it changed.
+fn look_switch(ui: &mut egui::Ui, s: &mut Settings) -> bool {
+    use look::{icon, Choice};
+    let next_gen = s.enhanced && !s.auto && s.quality == Quality::NextGen;
+    let current = if !s.enhanced { 0 } else if next_gen { 2 } else { 1 };
+    let choices = [
+        Choice::new(0, "Original").icon(icon::ICON_HISTORY).hover("As the game drew it in 2000, pixel for pixel. The lightest on your computer, and how it starts unless you pick another."),
+        Choice::new(1, "Enhanced").icon(icon::ICON_AUTO_AWESOME).hover(ENHANCED_TEXT),
+        Choice::new(2, "Next-gen").icon(icon::ICON_BOLT).hover(NEXT_GEN_TEXT),
+    ];
+    match look::segmented(ui, current, &choices) {
+        Some(0) if current != 0 => s.enhanced = false,
+        Some(1) if current != 1 => {
+            s.enhanced = true;
+            if next_gen {
+                // Back from Next-gen: Auto picks for the computer.
+                set_preset(s, Quality::High);
+                s.auto = true;
+            }
+        }
+        Some(2) if current != 2 => {
+            s.enhanced = true;
+            s.auto = false;
+            set_preset(s, Quality::NextGen);
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// What Enhanced is, for its hover.
+const ENHANCED_TEXT: &str = "The same game with modern light: per-pixel lighting, real shadows, haze, dust, 3D grass and more, kept subtle so it still looks like MM2. Auto fits the effects to your computer; the Graphics page has the quality and every effect. F3 flips back to the original look while racing to compare. The riding is the same.";
 
 /// What Next-gen is, for its hover.
 const NEXT_GEN_TEXT: &str = "A modern game's look, much bolder than Enhanced: sunlit air you can see shafts of light in, thick grass blowing in waves of wind, trees plainly moving, photo dirt sharp right up to your wheels, the real sky with clouds, bounce light, a soft glow round bright light, glossier bikes and trackside props. Heavy: for a strong graphics card. If frames come late it draws softer and sets effects aside, so a laptop gets what it can.";
