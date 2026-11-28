@@ -1935,12 +1935,12 @@ impl Launcher {
             ui.label(look::weak(about));
         };
         look::card(ui, icon::ICON_SPORTS_MOTORSPORTS, "Riding", |ui| {
-            tile(ui, &mut s.quick_get_up, "Quick get-up", "After a crash, G or a pad's Back puts you straight back on the bike. Not in network races.");
-            tile(ui, &mut s.forgiving_landings, "Forgiving landings", "Fewer crashes from landing a little crooked. The original game is strict.");
-            slider(ui, "Air steering", "How much steering in the air bends your flight. 0% is the original game.", &mut s.air_steer, 0..=mm2_settings::AIR_MOST, 10.0, "%");
-            slider(ui, "Air braking", "How much braking in the air shortens your flight. 0% is the original game.", &mut s.air_brake, 0..=mm2_settings::AIR_MOST, 10.0, "%");
+            tile(ui, &mut s.quick_get_up, "Quick get-up", "After a crash, G or a pad's Back puts you straight back on the bike. Not in network races. Laps don't go on the leaderboards while it's on.");
+            tile(ui, &mut s.forgiving_landings, "Forgiving landings", "Fewer crashes from landing a little crooked. The original game is strict. Laps don't go on the leaderboards while it's on.");
+            slider(ui, "Air steering", "How much steering in the air bends your flight. 0% is the original game. Laps go on the leaderboards only at 0%.", &mut s.air_steer, 0..=mm2_settings::AIR_MOST, 10.0, "%");
+            slider(ui, "Air braking", "How much braking in the air shortens your flight. 0% is the original game. Laps go on the leaderboards only at 0%.", &mut s.air_brake, 0..=mm2_settings::AIR_MOST, 10.0, "%");
             tile(ui, &mut s.clean_starts, "Cleaner starts", "The computer riders keep their order across the gate off the start, so fewer pile into each other.");
-            tile(ui, &mut s.one_lap, "One-lap races", "National and Supercross races can be 1 lap long (the original starts at 2).");
+            tile(ui, &mut s.one_lap, "One-lap races", "National and Supercross races can be 1 lap long (the original starts at 2). A 1-lap race sends no leaderboard lap, as laps count from lap 2.");
             ui.label(look::weak("The difficulty table is in the game: Options, Tweaks..., Difficulty..."));
         });
         look::card(ui, icon::ICON_SPEED, "Race display and camera", |ui| {
@@ -2165,7 +2165,7 @@ impl Launcher {
                 ui,
                 &mut m.leaderboards,
                 "Lap leaderboards",
-                "On unless you turn it off. Sends your best lap in each race from lap 2 on, with the riding extras off, under your rider name. In Nationals and Supercross, a lap with more than 2 seconds riding off the course doesn't count (time down in a crash is fine). In the game: High Scores, Online.",
+                "On unless you turn it off. Sends your best lap in each race (Practice, Ghost and multiplayer races too, not free roam) from lap 2 on, with the riding extras off, under your rider name. In Nationals and Supercross, a lap with more than 2 seconds riding off the course doesn't count (time down in a crash is fine). In the game: High Scores, Online.",
                 ui.available_width(),
             );
             if !m.leaderboards {
