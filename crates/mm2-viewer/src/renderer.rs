@@ -966,6 +966,14 @@ impl TerrainRenderer {
         }
     }
 
+    /// Grows frame `name` of animated object `index` by `by` about its own
+    /// origin, with what hangs on it (the Big Head extra).
+    pub fn set_scale(&mut self, index: usize, name: &str, by: f32) {
+        if let Some(o) = &mut self.objects {
+            o.set_scale(index, name, by);
+        }
+    }
+
     /// Turns frame `name` of animated object `index` by `angle` about its
     /// own `axis` (a propeller or rotor, crate::drive).
     pub fn set_turn(&mut self, index: usize, name: &str, axis: Vec3, angle: f32) {
