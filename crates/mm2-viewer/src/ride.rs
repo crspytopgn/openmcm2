@@ -729,10 +729,17 @@ impl Chase {
         if self.held != Some(Held::Reverse) && !self.was_wide && wide {
             self.blending = true;
         }
-        // The bike's place, led along its velocity (0x52ca10).
+        // The bike's place, led along its velocity (0x52ca10). The game
+        // leads by the whole frame, but it eases a whole frame's step
+        // (min(dt, r) / r, FollowCameraEase) and works the camera out from
+        // the bike's place before the frame's step, so on screen the eye
+        // sits v (r - dt) behind. The exact ease here lags half a frame
+        // more, so leading half the frame puts the eye where the game's is
+        // at any frame rate (the original's memory watches: 0.24 ft rms
+        // against 0.78 with the whole frame).
         self.lead = bike.position;
         if !crashed && !matches!(self.held, Some(Held::Thrill(_))) {
-            self.lead += bike.velocity * dt.min(0.2);
+            self.lead += bike.velocity * dt.min(0.2) * 0.5;
         }
         if let Some(eye) = self.frozen {
             let d = eye - self.lead;
@@ -1282,36 +1289,38 @@ mod tests {
 mod trace {
     use super::*;
 
-    /// The original's chase camera on a straight run from rest
-    /// (/mnt/project-files/camera_vs_speed_noframes.txt): time, speed,
-    /// eye behind the bike, ft, and the look's pitch down, degrees.
+    /// The original's chase camera on a straight run from rest, each eye
+    /// read paired with its frame by the game clock
+    /// (/mnt/project-files/camera_vs_speed_clock.txt, at about 48 fps):
+    /// time, speed, eye behind the bike, ft, and the look's pitch down,
+    /// degrees.
     const ORIGINAL: [(f32, f32, f32, f32); 26] = [
-        (0.0, 0.0, 5.87, 28.44),
-        (0.2, 7.8, 6.60, 27.60),
-        (0.4, 17.2, 8.31, 24.75),
-        (0.7, 28.3, 10.58, 21.50),
-        (0.9, 40.8, 13.41, 18.40),
-        (1.1, 43.9, 15.93, 16.40),
-        (1.3, 49.2, 17.43, 15.17),
-        (1.5, 53.8, 19.80, 14.20),
-        (1.7, 57.6, 21.08, 13.47),
-        (1.9, 60.9, 21.49, 12.90),
-        (2.1, 64.3, 23.00, 12.42),
-        (2.4, 67.3, 23.56, 12.01),
-        (2.6, 70.3, 25.52, 11.66),
-        (2.8, 73.0, 26.17, 11.35),
-        (3.0, 75.4, 26.44, 11.08),
-        (3.2, 77.8, 27.41, 10.83),
-        (3.4, 80.1, 28.44, 10.61),
-        (3.6, 82.1, 28.19, 10.41),
-        (3.8, 84.2, 28.66, 10.22),
-        (4.0, 86.2, 30.10, 10.05),
-        (4.2, 87.9, 30.11, 9.89),
-        (4.4, 90.0, 31.10, 9.74),
-        (4.6, 90.8, 31.33, 9.60),
-        (4.9, 89.6, 31.86, 9.56),
-        (5.1, 88.5, 30.95, 9.58),
-        (5.3, 87.3, 31.83, 9.59),
+        (0.02, 0.9, 5.90, 28.44),
+        (0.19, 8.9, 6.73, 27.12),
+        (0.37, 16.6, 8.08, 24.75),
+        (0.72, 36.1, 12.12, 19.60),
+        (0.89, 41.4, 14.40, 17.42),
+        (1.06, 43.7, 15.96, 16.13),
+        (1.32, 51.0, 18.04, 14.74),
+        (1.51, 54.7, 19.36, 13.96),
+        (1.68, 57.7, 20.39, 13.41),
+        (1.87, 60.9, 21.43, 12.90),
+        (2.13, 64.8, 23.94, 12.37),
+        (2.38, 68.4, 23.80, 11.86),
+        (2.63, 71.7, 24.82, 11.47),
+        (2.82, 74.1, 25.53, 11.21),
+        (2.99, 76.0, 26.14, 11.00),
+        (3.17, 77.9, 26.51, 10.78),
+        (3.41, 80.6, 27.33, 10.53),
+        (3.60, 82.8, 28.11, 10.35),
+        (3.77, 84.4, 28.63, 10.20),
+        (4.03, 86.7, 29.32, 9.99),
+        (4.23, 88.6, 31.56, 9.85),
+        (4.41, 90.3, 30.46, 9.71),
+        (4.58, 90.8, 30.78, 9.60),
+        (4.95, 88.7, 30.94, 9.57),
+        (5.12, 87.9, 30.78, 9.60),
+        (5.29, 86.9, 30.61, 9.49),
     ];
 
     fn speed_at(t: f32) -> f32 {
@@ -1541,12 +1550,12 @@ mod trace {
 
     #[test]
     fn chase_cam_trails_as_the_original_does() {
-        // The game leads the look by a frame's travel, so at 30 fps it
-        // trails 2.5 ft nearer than recorded; 60 and up match.
-        for fps in [60.0, 144.0] {
+        // Recorded at about 48 fps; the eye's distance moves by half a
+        // frame's travel with the frame rate, as the game's does.
+        for fps in [47.6, 60.0, 144.0] {
             let (b, p) = ride(fps, std::env::var_os("MM2_SHOW").is_some());
             eprintln!("{fps} fps: behind rms {b:.2} ft, pitch rms {p:.2}°");
-            assert!(b < 1.2 && p < 0.5, "{fps} fps: behind {b}, pitch {p}");
+            assert!(b < if fps < 50.0 { 0.5 } else { 0.9 } && p < 0.5, "{fps} fps: behind {b}, pitch {p}");
         }
     }
 }
