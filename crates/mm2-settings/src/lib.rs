@@ -536,6 +536,10 @@ pub struct More {
     /// Out marks, camera keys and clips saved as movies
     /// (`--replay-editor`).
     pub replay_editor: bool,
+    /// Cut content: what the original's files hold but the game never
+    /// offers (two bike liveries and a rider suit) and its hidden
+    /// registry switch for the full replay controls (`--cut-content`).
+    pub cut_content: bool,
     /// With the MM2 demo: its other tracks rebuilt, the original's route
     /// and scenery on new ground (`--demo-tracks`).
     pub demo_tracks: bool,
@@ -587,6 +591,7 @@ impl Default for More {
             whistle: true,
             photo_mode: false,
             replay_editor: false,
+            cut_content: false,
             demo_tracks: false,
             free_tracks: false,
             intro_video: String::new(),
@@ -636,6 +641,7 @@ impl More {
             "whistle" => self.whistle = yes,
             "photo_mode" => self.photo_mode = yes,
             "replay_editor" => self.replay_editor = yes,
+            "cut_content" => self.cut_content = yes,
             "demo_tracks" => self.demo_tracks = yes,
             "free_tracks" => self.free_tracks = yes,
             "intro_video" => self.intro_video = v.trim().to_string(),
@@ -647,7 +653,7 @@ impl More {
     fn text(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         format!(
-            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfreshen_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\nreplay_editor={}\ndemo_tracks={}\nfree_tracks={}\nintro_video={}\n",
+            "own_skins={}\nall_gear={}\ntrack_filter={}\npad_dead_zone={}\npad_sensitivity={}\npad_smoothing={}\npad_curve={}\ngyro_steer={}\nfps_cap={}\nfxaa={}\nsharpen={}\nriders={}\nleaderboards={}\nleaderboard_url={}\nlobby_downloads={}\nlist_races={}\nshare_playtime={}\nbuilder_menu={}\nfreshen_sounds={}\ndrive_vehicles={}\nonline_ghosts={}\nwhistle={}\nphoto_mode={}\nreplay_editor={}\ncut_content={}\ndemo_tracks={}\nfree_tracks={}\nintro_video={}\n",
             b(self.own_skins),
             b(self.all_gear),
             b(self.track_filter),
@@ -672,6 +678,7 @@ impl More {
             b(self.whistle),
             b(self.photo_mode),
             b(self.replay_editor),
+            b(self.cut_content),
             b(self.demo_tracks),
             b(self.free_tracks),
             self.intro_video,
@@ -699,6 +706,7 @@ impl More {
             (!self.whistle, "--no-whistle"),
             (self.photo_mode, "--photo-mode"),
             (self.replay_editor, "--replay-editor"),
+            (self.cut_content, "--cut-content"),
             (self.demo_tracks, "--demo-tracks"),
             (self.free_tracks, "--free-tracks"),
         ] {
@@ -751,6 +759,7 @@ impl More {
             whistle: !has("--no-whistle"),
             photo_mode: has("--photo-mode"),
             replay_editor: has("--replay-editor"),
+            cut_content: has("--cut-content"),
             demo_tracks: has("--demo-tracks"),
             free_tracks: has("--free-tracks"),
             ..d.clone()
@@ -1463,6 +1472,7 @@ mod tests {
             whistle: false,
             photo_mode: true,
             replay_editor: true,
+            cut_content: true,
             demo_tracks: true,
             free_tracks: true,
             intro_video: "/videos/My intro (4K).mp4".into(),

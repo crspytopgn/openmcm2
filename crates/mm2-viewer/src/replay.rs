@@ -538,6 +538,18 @@ const FF: f32 = 2.0;
 const FFF: f32 = 8.0;
 const TO_END: f32 = 30.0;
 
+/// The panel's buttons that only the original's hidden `AllowVCRControls`
+/// registry value shows (0x489c20).
+const WINDING: [&str; 6] = ["TogFF", "TogFFF", "TogReverse", "ButBeginning", "ButEnd", "ButFrame"];
+
+/// Whether the panel has its full controls, as the original's hidden
+/// `AllowVCRControls` gives them: with the cut content extra, or the replay
+/// editor, which works with them.
+pub fn full_controls() -> bool {
+    let m = crate::tweaks::more();
+    m.cut_content || m.replay_editor
+}
+
 /// Where the player's panel sits: across the bottom, centred (our pick).
 const PANEL: (f32, f32) = (117.0, 408.0);
 
@@ -630,6 +642,19 @@ impl Replay {
     fn panel(&mut self, ui: &mut Ui) -> Option<&mut Dlg> {
         if self.panel.is_none() {
             self.panel = Dlg::open(ui, "VCR", PANEL);
+            if let Some(p) = &mut self.panel {
+                if !full_controls() {
+                    // As the game opens the panel (0x489c20, message 5):
+                    // without its hidden "AllowVCRControls" registry value
+                    // the winding buttons are put away and the slider only
+                    // shows where the tape is.
+                    for name in WINDING {
+                        p.show(name, false);
+                        p.enable(name, false);
+                    }
+                    p.enable("SliderTime", false);
+                }
+            }
         }
         self.panel.as_mut()
     }
