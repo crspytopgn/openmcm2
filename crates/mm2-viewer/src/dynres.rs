@@ -91,6 +91,13 @@ const FIRST_WAIT: f32 = 6.0;
 const LONGEST_WAIT: f32 = 120.0;
 /// A step up kept this long has held, s.
 const TRIAL: f32 = 4.0;
+/// A size tried and found too slow is not tried again for this long, s,
+/// doubled each time it fails again: without it, each passing load (the
+/// helicopter flying past on Voodoo Basin) brought the picture down a
+/// step, and once back, every few seconds it tried the size that had
+/// already failed, about six changes of size a minute on a laptop.
+const CEILING_WAIT: f32 = 30.0;
+const LONGEST_CEILING_WAIT: f32 = 300.0;
 /// Late this long at the smallest size allowed ([`FLOOR`]) sets a step
 /// of effects aside, s.
 const SHED_AFTER: f32 = 3.0;
@@ -123,6 +130,11 @@ pub struct Governor {
     wait: f32,
     /// Stepped up and not yet held for [`TRIAL`].
     trying: bool,
+    /// The biggest size (index in [`STEPS`]) last found too slow and how
+    /// long before it may be tried again, s; and how long the next one
+    /// found too slow waits.
+    ceiling: Option<(usize, f32)>,
+    ceiling_wait: f32,
     /// Steps of effects set aside now, and the fewest (those the race
     /// was loaded without, which cannot come back).
     pub shed: u8,
@@ -153,6 +165,8 @@ impl Default for Governor {
             since: 0.0,
             wait: FIRST_WAIT,
             trying: false,
+            ceiling: None,
+            ceiling_wait: CEILING_WAIT,
             shed: 0,
             least_shed: 0,
             starved: 0.0,
@@ -195,18 +209,29 @@ impl Governor {
         };
         self.since += real;
         self.late += (real / wanted - self.late) * FOLLOW;
+        if let Some((_, left)) = &mut self.ceiling {
+            *left -= real;
+            if *left <= 0.0 {
+                self.ceiling = None;
+            }
+        }
         if self.trying && self.since > TRIAL {
             // The step up held: the next may come as soon as the first.
             self.trying = false;
             self.wait = FIRST_WAIT;
         }
         let settle = if self.trying { UNDO } else { SETTLE };
-        let can_grow = self.step > 0 && (self.step > PRESET || STEPS[self.step - 1] <= room * 1.02);
+        let can_grow = self.step > 0
+            && (self.step > PRESET || STEPS[self.step - 1] <= room * 1.02)
+            && self.ceiling.is_none_or(|(c, _)| self.step - 1 > c);
         let bottom = self.bottom();
         if self.since >= settle && self.late > LATE && self.step < bottom {
             if self.trying {
                 self.wait = (self.wait * 2.0).min(LONGEST_WAIT);
                 self.trying = false;
+                // Not this size again for a while.
+                self.ceiling = Some((self.step, self.ceiling_wait));
+                self.ceiling_wait = (self.ceiling_wait * 2.0).min(LONGEST_CEILING_WAIT);
             }
             // Far too slow: the smallest size at once, so effects are set
             // aside soon if even that is too much.
@@ -236,6 +261,8 @@ impl Governor {
                 self.give_back = (self.give_back * 2.0).min(LONGEST_GIVE_BACK);
             }
             self.shed += 1;
+            // Every size costs less now.
+            self.ceiling = None;
             self.starved = 0.0;
             self.roomy = 0.0;
             // The effects cost more than the pixels: back to the preset's
@@ -246,6 +273,7 @@ impl Governor {
             self.roomy = 0.0;
             if self.shed > self.least_shed {
                 self.shed -= 1;
+                self.ceiling = None;
                 self.since_given = 0.0;
                 self.changed();
             } else if self.least_shed > 0 {
@@ -591,5 +619,37 @@ mod tests {
         assert_eq!(k, 0.6);
         // The menus are drawn sharp again.
         assert_eq!(p.frame(false, false, BEAT * 2.0, BEAT, window), 1.0);
+    }
+
+    /// Changes of size over ten minutes of frames costing `base` × the
+    /// pixels, with 8 s of a quarter more work each minute (the helicopter
+    /// flying past on Voodoo Basin).
+    fn changes_with_a_passing_load(mut g: Governor, base: f32, room: f32) -> usize {
+        let (mut t, mut k) = (0.0f32, STEPS[g.step]);
+        let mut changes = 0;
+        while t < 600.0 {
+            let busy = if (t % 60.0) > 40.0 && (t % 60.0) < 48.0 { 1.25 } else { 1.0 };
+            let real = (base * busy * k * k / BEAT).ceil().max(1.0) * BEAT;
+            let was = k;
+            k = g.frame(real, BEAT, room);
+            changes += (k != was) as usize;
+            t += real;
+        }
+        changes
+    }
+
+    #[test]
+    fn a_passing_load_does_not_keep_the_size_changing() {
+        // A laptop just short of the bigger sizes: each pass of the load
+        // steps it down and back, but a size found too slow is not tried
+        // every few seconds after (60 to 78 changes before, 16 to 30 now).
+        for base in [0.016, 0.018, 0.02] {
+            let n = changes_with_a_passing_load(pixels_only(), base, 1.0 / 0.84);
+            assert!(n <= 32, "{base}: {n} changes");
+        }
+        // And it still grows back when the size holds.
+        let mut g = pixels_only();
+        let (k, _) = run(&mut g, 60.0, 0.010, 1.0 / 0.84);
+        assert!(k > 1.0, "{k}");
     }
 }
