@@ -134,8 +134,23 @@ async function addLaps(request, env) {
     const title = mask((f[6] ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 40).trim());
     if (title) titles.set(key, title);
   }
+  if (byBoard.size) await allRaces(env).saveLaps([...byBoard], [...titles]);
+  return text(`ok ${byBoard.size}\n`);
+}
+
+const allRaces = (env) => env.RACES.get(env.RACES.idFromName("all"));
+
+// The boards, their index, the ghosts' list and the playtime are each one
+// KV value that a send reads, changes and writes back. KV keeps the last
+// write and its reads lag up to a minute away from where it was written,
+// so two sends near together (from two players, or two ends of the world)
+// lost one's change. They are changed only in the Races object, one at a
+// time (Races.locked), from its own copy of each value (Races.json), and
+// KV gets the new value for the reads.
+async function putLaps(store, byBoard, titles) {
+  const named = new Map(titles);
   for (const [key, laps] of byBoard) {
-    const rows = (await env.LAPS.get(key, "json")) ?? [];
+    const rows = (await store.get(key)) ?? [];
     for (const [rider, ms] of laps) {
       const i = rows.findIndex((r) => r[0].toLowerCase() === rider.toLowerCase());
       if (i < 0) rows.push([rider, ms]);
@@ -143,22 +158,21 @@ async function addLaps(request, env) {
     }
     rows.sort((a, b) => a[1] - b[1]);
     const kept = rows.slice(0, KEEP);
-    await env.LAPS.put(key, JSON.stringify(kept));
-    await addToIndex(env, key, kept.length, titles.get(key));
+    await store.put(key, kept);
+    await addToIndex(store, key, kept.length, named.get(key));
   }
-  return text(`ok ${byBoard.size}\n`);
 }
 
 // Each event's index ("i:<event>"): for each track and course, its name
 // and how many riders each class's board has.
-async function addToIndex(env, key, riders, title) {
+async function addToIndex(store, key, riders, title) {
   const [track, event, course, cls] = key.slice(2).split("|");
   const at = `i:${event}`;
-  const index = (await env.LAPS.get(at, "json")) ?? {};
+  const index = (await store.get(at)) ?? {};
   const entry = (index[`${track}|${course}`] ??= { title: "", classes: {} });
   entry.classes[cls] = riders;
   if (title) entry.title = title;
-  await env.LAPS.put(at, JSON.stringify(index));
+  await store.put(at, index);
 }
 
 // The online ghosts: one tape for each track and course ("g:" and the
@@ -184,19 +198,23 @@ async function addGhost(request, env) {
   const data = tape.trim();
   if (!key || !at || !rider || !(ms >= SHORTEST && ms <= LONGEST)) return text("which lap?\n", 400);
   if (data.length < 64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) return text("not a ghost\n", 400);
-  // Only the rider's own lap on its board: the one POST /laps put there.
-  const rows = (await env.LAPS.get(key, "json")) ?? [];
-  const mine = rows.find((r) => r[0].toLowerCase() === rider.toLowerCase());
-  if (!mine || mine[1] > ms) return text("wait\n");
-  if (mine[1] < ms) return text("slower\n");
-  const list = (await env.LAPS.get("ghosts", "json")) ?? {};
-  const had = list[at.slice(2)];
-  if (had && had.ms <= ms) return text("slower\n");
   const title = mask((f[6] ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 40).trim());
+  return text(`${await allRaces(env).saveGhost(key, at, rider, ms, Number.parseInt(f[3], 10), title, data)}\n`);
+}
+
+async function putGhost(store, env, key, at, rider, ms, cls, title, data) {
+  // Only the rider's own lap on its board: the one POST /laps put there.
+  const rows = (await store.get(key)) ?? [];
+  const mine = rows.find((r) => r[0].toLowerCase() === rider.toLowerCase());
+  if (!mine || mine[1] > ms) return "wait";
+  if (mine[1] < ms) return "slower";
+  const list = (await store.get("ghosts")) ?? {};
+  const had = list[at.slice(2)];
+  if (had && had.ms <= ms) return "slower";
   await env.LAPS.put(at, data);
-  list[at.slice(2)] = { cls: Number.parseInt(f[3], 10), rider: mine[0], ms, title: title || (had?.title ?? "") };
-  await env.LAPS.put("ghosts", JSON.stringify(list));
-  return text("ok\n");
+  list[at.slice(2)] = { cls, rider: mine[0], ms, title: title || (had?.title ?? "") };
+  await store.put("ghosts", list);
+  return "ok";
 }
 
 async function ghosts(env) {
@@ -258,19 +276,22 @@ const MOST_PLAY = 7 * 24 * 3600;
 async function addPlaytime(request, env) {
   const body = await request.text();
   if (body.length > 16 * 1024) return text("too much\n", 413);
-  const totals = (await env.LAPS.get("playtime", "json")) ?? {};
-  let added = 0;
+  const adds = [];
   for (const line of body.split("\n").slice(0, MOST_LINES)) {
     const [k, v] = line.replace(/\r$/, "").split("\t");
     const key = clean(k).toLowerCase();
     const n = Number.parseInt(v, 10);
     if (!PLAY_KEY.test(key) || !(n > 0)) continue;
-    const most = key === "players" ? 1 : MOST_PLAY;
-    totals[key] = (totals[key] ?? 0) + Math.min(n, most);
-    added++;
+    adds.push([key, Math.min(n, key === "players" ? 1 : MOST_PLAY)]);
   }
-  if (added) await env.LAPS.put("playtime", JSON.stringify(totals));
-  return text(`ok ${added}\n`);
+  if (adds.length) await allRaces(env).savePlaytime(adds);
+  return text(`ok ${adds.length}\n`);
+}
+
+async function putPlaytime(store, adds) {
+  const totals = (await store.get("playtime")) ?? {};
+  for (const [key, n] of adds) totals[key] = (totals[key] ?? 0) + n;
+  await store.put("playtime", totals);
 }
 
 async function playtime(env) {
@@ -398,6 +419,38 @@ export class Races extends DurableObject {
   // One send from `who` (a hashed address): false, and not counted, when
   // it has made `minute` of this kind in the last minute or `day` in the
   // last day.
+  // The KV values sends change (see putLaps), as this object last wrote
+  // them: from its own storage, else (the first time) from KV.
+  store() {
+    return {
+      get: async (key) => (await this.ctx.storage.get(`kv:${key}`)) ?? (await this.env.LAPS.get(key, "json")),
+      put: async (key, value) => {
+        await this.ctx.storage.put(`kv:${key}`, value);
+        await this.env.LAPS.put(key, JSON.stringify(value));
+      },
+    };
+  }
+
+  // Runs `f` after every change before it has finished: KV's reads and
+  // writes let other calls in while they wait.
+  locked(f) {
+    const run = (this.queue ?? Promise.resolve()).then(f);
+    this.queue = run.catch(() => {});
+    return run;
+  }
+
+  saveLaps(byBoard, titles) {
+    return this.locked(() => putLaps(this.store(), byBoard, titles));
+  }
+
+  saveGhost(key, at, rider, ms, cls, title, data) {
+    return this.locked(() => putGhost(this.store(), this.env, key, at, rider, ms, cls, title, data));
+  }
+
+  savePlaytime(adds) {
+    return this.locked(() => putPlaytime(this.store(), adds));
+  }
+
   hit(who, kind, minute, day) {
     const now = Date.now();
     if (now - (this.swept ?? 0) > 60 * 1000) {
