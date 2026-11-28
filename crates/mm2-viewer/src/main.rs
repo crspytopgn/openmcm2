@@ -5525,9 +5525,11 @@ impl App {
                 });
                 self.race = make_race_as(&track, laps, setup.net.map_or(PLAYER, |n| n.me));
                 // The online ghosts: the player's laps on tape, so the
-                // best can go up with its lap.
+                // best can go up with its lap. Every leaderboard lap goes
+                // up with its ghost (or nobody would have one to race);
+                // the online ghosts extra only lists and races them.
                 self.lap_tapes = match (&self.race, &self.lap_board) {
-                    (Some(r), Some(_)) if tweaks::more().online_ghosts && crate::online::address().is_some() => {
+                    (Some(r), Some(_)) if crate::online::address().is_some() => {
                         let mut h = heading(&setup, r);
                         h.riders = h.riders.into_iter().nth(r.player).into_iter().collect();
                         h.mode = frontend::GHOST;

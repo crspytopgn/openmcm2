@@ -16,7 +16,7 @@
   :root { --bg: #121110; --fg: #ece6d8; --dim: #a39d8f; --accent: #a3c24a; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
     font: 16px/1.5 system-ui, sans-serif; overflow: hidden; overscroll-behavior: none; }
-  #mm2 { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; touch-action: none; }
+  #mm2 { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; outline: none; touch-action: none; }
   /* The player's own intro video, over the game. */
   video.intro { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; background: #000; z-index: 50; cursor: pointer; }
   #setup { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); padding: 16px;
@@ -130,6 +130,8 @@
   .switches { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: .1rem .8rem; margin: .2rem 0 .6rem; }
   .switches .seg { justify-self: start; }
   .switchname { color: var(--dim); font-size: .9rem; }
+  .lookline { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .7rem; }
+  #lookrow .seg { margin: 0; }
   #fullgame { margin: .9rem 0 0; padding-top: .8rem; border-top: 1px solid #3a3d2c; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; }
   #fullgame p { margin: 0; flex: 1 1 14rem; }
   #fullgame label.button { margin: 0; }
@@ -265,7 +267,16 @@
         <button type="button" id="readyfreesounds" role="radio" aria-checked="false"
           title="The Free Pack's own recordings of real bikes and race sounds, with either graphics.">Free Pack</button>
       </div>
-    </div>
+      <span class="switchname">Look</span>
+      <div class="lookline">
+      <div class="seg lookseg" role="radiogroup" aria-label="Look">
+        <button type="button" data-look="original" role="radio" aria-checked="true">Original</button>
+        <button type="button" data-look="enhanced" role="radio" aria-checked="false">Enhanced</button>
+        <button type="button" data-look="nextgen" role="radio" aria-checked="false">Next-gen</button>
+      </div>
+        <button type="button" class="plain small lookmore" hidden
+          title="Settings: the quality for your computer, the colour look and every effect on its own.">Quality and effects</button>
+      </div>
     </div>
     <p id="readysum" aria-live="polite"></p>
     <div class="row">
@@ -298,9 +309,9 @@
       <div class="ways">
         <div class="way" id="pick">
           <b>I have the game</b>
-          <span>Pick your installed game folder, your CD, or a CD image or .zip. Nothing is uploaded: the files stay on this device. You can also drop them on this page.</span>
+          <span id="pickwhat">Pick your installed game folder, your CD, or a CD image or .zip. Nothing is uploaded: the files stay on this device. You can also drop them on this page.</span>
           <label class="button" for="folder" title="The folder Motocross Madness 2 is installed in (the one with the UI, RES and TERAFORM folders in it), or the CD's own folder.">Choose game folder</label>
-          <label class="button plainbutton" for="file" title="Your game CD's image (.iso, .bin, .img, .mdf or .nrg), or a .zip of the game folder or of a CD image. On a phone or tablet, a .zip is the way.">Choose a CD image or .zip</label>
+          <label class="button plainbutton" id="filebutton" for="file" title="Your game CD's image (.iso, .bin, .img, .mdf or .nrg), or a .zip of the game folder or of a CD image. On a phone or tablet, a .zip is the way.">Choose a CD image or .zip</label>
           <input id="folder" type="file" webkitdirectory multiple>
           <input id="file" type="file" multiple accept=".zip,.iso,.bin,.img,.mdf,.mds,.nrg,.cue,.exe,application/zip">
           <label class="keep"><input id="keep" type="checkbox" checked title="Keeps your game in this browser, so next time Play starts it straight away."> Remember it in this browser</label>
@@ -333,6 +344,18 @@
           <input id="packfile" type="file" accept=".zip,application/zip">
         </div>
         <label class="keep"><input id="keeppack" type="checkbox" checked title="Keeps a picked .zip in this browser, so next time Play starts it straight away."> Remember a picked .zip in this browser</label>
+      </div>
+    </section>
+    <!-- The look, right under the ways to play: Original unless picked. -->
+    <section class="freerow" id="lookrow">
+      <div class="freehead">
+        <div><b>How it looks</b>
+          <p>Original is the game as it looked in 2000. Enhanced adds modern light and shadow, kept subtle. Switch any time, even mid-race with F3.</p></div>
+        <div class="seg lookseg" role="radiogroup" aria-label="Look">
+        <button type="button" data-look="original" role="radio" aria-checked="true">Original</button>
+        <button type="button" data-look="enhanced" role="radio" aria-checked="false">Enhanced</button>
+        <button type="button" data-look="nextgen" role="radio" aria-checked="false">Next-gen</button>
+      </div>
       </div>
     </section>
     <p id="backrow" hidden><button type="button" class="plain" id="back" title="Keeps what you had picked.">Back</button></p>
@@ -878,7 +901,13 @@ settings.setIntroStore({
   },
 });
 if (s.intro_video) introFile = await fs.keptIntro().catch(() => null);
-const renderSettings = () => settings.render($("lookbox"), $("settings"), s, () => (look = s.enhanced ? "enhanced" : "original"));
+const renderSettings = () => {
+  settings.render($("lookbox"), $("settings"), s, () => {
+    look = s.enhanced ? "enhanced" : "original";
+    showLook();
+  });
+  showLook();
+};
 // The Ready card's Sounds switch: the MM2 files' sounds (the demo's
 // too) or the Free Pack's, with either graphics. Not picked, they go with
 // the graphics.
@@ -905,6 +934,33 @@ for (const [id, mm2] of [["readymm2sounds", true], ["readyfreesounds", false]]) 
     } catch {}
     showSounds();
     readySummary();
+  });
+}
+// The look switches (Ready card and under the ways to play), as the
+// Settings' Look has it.
+function showLook() {
+  const now = settings.lookOf(s);
+  for (const b of document.querySelectorAll(".lookseg button")) {
+    b.setAttribute("aria-checked", String(b.dataset.look === now));
+    b.title = settings.LOOK_ABOUT[b.dataset.look];
+  }
+  for (const m of document.querySelectorAll(".lookmore")) m.hidden = !s.enhanced;
+  // Before the page has set itself up, there's no summary yet.
+  try {
+    readySummary();
+  } catch {}
+}
+for (const b of document.querySelectorAll(".lookseg button")) {
+  b.addEventListener("click", () => {
+    settings.setLook(s, b.dataset.look);
+    look = s.enhanced ? "enhanced" : "original";
+    renderSettings();
+  });
+}
+for (const m of document.querySelectorAll(".lookmore")) {
+  m.addEventListener("click", () => {
+    $("setbox").open = true;
+    $("lookbox").scrollIntoView({ behavior: "smooth", block: "start" });
   });
 }
 renderSettings();
@@ -1268,7 +1324,7 @@ globalThis.mm2page = {
     racingNow = on;
     pad?.show(on && !gamepad.found());
     // On a touch screen the faded corner buttons would catch the thumbs.
-    if (pad) document.body.classList.toggle("riding", on);
+    if (touch.wanted()) document.body.classList.toggle("riding", on);
   },
   // The browser reset the graphics card under the game (Safari does when
   // it runs short of graphics memory): nothing can be drawn again, so
@@ -1370,8 +1426,22 @@ const trackLoad = (() => {
 })();
 $("tfOk").addEventListener("click", () => ($("trackfail").hidden = true));
 
+// Phones and tablets can't pick a folder (Android's browsers and iOS
+// offer single files only), so there the game comes as a .zip of its
+// folder or a CD image, and the folder buttons go.
+if (!desktopOk) {
+  document.querySelectorAll('label[for="folder"]').forEach((l) => (l.hidden = true));
+  $("filebutton").classList.remove("plainbutton");
+  $("filebutton").textContent = "Choose a .zip or CD image";
+  $("pickwhat").textContent =
+    "A phone or tablet can't pick a folder: zip the game folder on a computer (the one with the UI, RES and TERAFORM folders in it) " +
+    "and put the .zip on this device, or use a CD image. Nothing is uploaded: the files stay on this device.";
+}
+
 // Touch screens: buttons for riding, and full screen on the first tap.
-const pad = touch.wanted() ? touch.setup($("mm2")) : null;
+// A touch screen with a mouse or trackpad too gets them once a finger
+// touches it while riding.
+const pad = touch.any() ? touch.setup($("mm2"), { hidden: !touch.wanted() }) : null;
 // Game pads: a word on the start page and over the game, since browsers
 // show a pad only after a button on it is pressed. With one plugged in,
 // a tablet's touch buttons keep out of the way.
@@ -1380,8 +1450,8 @@ gamepad.onChange((found) => {
   if (racingNow) pad?.show(!found);
 });
 if (pad) {
-  $("mm2").addEventListener("pointerdown", () => {
-    if (document.fullscreenElement) return;
+  $("mm2").addEventListener("pointerdown", (e) => {
+    if (document.fullscreenElement || e.pointerType !== "touch") return;
     // An iPhone has no full screen for pages (the Home Screen app is).
     const asked = document.documentElement.requestFullscreen?.();
     asked?.then(() => screen.orientation?.lock?.("landscape")).catch(() => {});
@@ -2637,11 +2707,12 @@ function readySummary() {
   const menus = menusNew() ? "the new look menus" : "the original menus";
   const mm2 = mm2Sounds() && !!kept;
   const sound = mm2 ? (demo ? "the demo's sounds" : "the MM2 sounds") : "the Free Pack's sounds";
-  el.textContent = freeReady
+  const lookName = { original: "the original look", enhanced: "the Enhanced look", nextgen: "the Next-gen look" }[settings.lookOf(s)];
+  el.textContent = (freeReady
     ? `Plays the free version: all-new bikes and tracks, with ${menus} and ${sound}.`
     : demo
       ? `Plays the demo with ${menus} and ${sound}: original bikes, the real Voodoo Basin (National) and Donner Pass (Stunt Quarry) tracks, and Free Pack tracks for the other events.`
-      : `Plays your Motocross Madness 2 with ${menus} and ${sound}.`;
+      : `Plays your Motocross Madness 2 with ${menus} and ${sound}.`) + ` Drawn in ${lookName}.`;
 }
 // Ready (one Play button) or the choice, as the files kept and the last
 // pick have it.

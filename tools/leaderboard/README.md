@@ -44,9 +44,9 @@ and a track hidden by reports can't be downloaded either.
 
 ## Online ghosts
 
-With the online ghosts extra on (off by default), a new best lap goes up
-with its ghost, and the game's Saved Ghost Race Files list offers the
-server's ghosts to race. One ghost is kept for each track and course: the
+With the lap leaderboards on, a new best lap goes up with its ghost. With
+the online ghosts extra on (off by default), the game's Saved Ghost Race
+Files list offers the server's ghosts to race. One ghost is kept for each track and course: the
 fastest lap sent with one, in any class. It costs two KV writes, only
 when a ghost is faster than the one kept.
 

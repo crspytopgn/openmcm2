@@ -127,8 +127,8 @@ export const EXTRAS = [
     { key: "free_tracks", flag: "free-tracks", label: "Our own free tracks", about: "The tracks we made for the Free Pack, in the single race and multiplayer track lists. Off, they only show for an event that has no other track, so add player-made tracks (the starter set under Your own tracks) to ride those instead. The Pro Circuit with the Free Pack and races hosted on one of them work either way." },
     { key: "demo_tracks", flag: "demo-tracks", label: "Rebuilt demo tracks", about: "Only with the free MM2 demo. The demo has the full ground for just two tracks; for the others it keeps the route, the scenery and the menu pictures. This adds those 27 tracks to the event lists, rebuilt: the original's route and scenery on new ground with jumps of our own, so the hills and jumps are not the original's. Each one is built the first time you ride it, which takes a few seconds (longer in a browser). Their names end in (Rebuilt). The Stunt Quarry and Tag arenas have no route in the demo and aren't included." },
     { key: "riders", flag: "gate-riders", label: "Riders on the gate", about: "Up to 30 riders in a single race. 0 is the original game's count.", range: [0, 30, 1, ""], off: 0 },
-    { key: "no_leaderboards", flag: "no-leaderboards", label: "Keep my laps off the leaderboards", keep: true, about: "The lap leaderboards are on unless you tick this: after a race, your best laps go to the OpenMCM2 leaderboard under your rider name (High Scores, Online shows everyone's)." },
-    { key: "online_ghosts", flag: "online-ghosts", label: "Race the leaderboard ghosts", about: "Your best lap goes up with its ghost (where the bike was, a few times a second), and the server keeps the ghost of the fastest lap on each track. In the game, Replays, Saved Ghost Race Files lists the online ghosts for your tracks under your own: pick one and Start to race it as a ghost race." },
+    { key: "no_leaderboards", flag: "no-leaderboards", label: "Keep my laps off the leaderboards", keep: true, about: "The lap leaderboards are on unless you tick this: after a race, your best laps go to the OpenMCM2 leaderboard under your rider name (High Scores, Online shows everyone's), each with its ghost (where the bike was, a few times a second) so the fastest lap on each track can be raced." },
+    { key: "online_ghosts", flag: "online-ghosts", label: "Race the leaderboard ghosts", about: "Off unless you turn it on. The server keeps the ghost of the fastest leaderboard lap on each track and course. In the game, Replays, Saved Ghost Race Files lists the online ghosts for your tracks under your own: pick one and Start to race it as a ghost race." },
     { key: "no_builder_menu", flag: "no-builder-menu", label: "No Course Builder on the main menu", keep: true, about: "The main menu has a shovel link on its chain, above Help, that opens the Course Builder, unless you tick this. Ticked, the main menu is exactly the original's, and the builder is still under Options, Tweaks." },
     { key: "no_share_playtime", flag: "no-share-playtime", label: "Don't add my time to everyone's", keep: true, about: "Unless you tick this, how long you play each event, track and bike class is added to everyone's on the OpenMCM2 server, with no name or anything else that says who you are." },
   ]],
@@ -192,6 +192,31 @@ export function setQuality(s, q) {
   s.quality = q;
   for (const [n] of UPGRADES) s.upgrades[n] = presetHas(q, n);
 }
+
+/// The look: "original", "enhanced" or "nextgen".
+export function lookOf(s) {
+  return !s.enhanced ? "original" : s.quality === "nextgen" ? "nextgen" : "enhanced";
+}
+
+/// Picks a look (and saves it). Back from Next-gen, Auto picks the
+/// quality for the computer.
+export function setLook(s, v) {
+  const was = lookOf(s);
+  if (v === "original") s.enhanced = false;
+  else {
+    s.enhanced = true;
+    if (v === "nextgen") setQuality(s, "nextgen");
+    else if (was === "nextgen") setQuality(s, "auto");
+  }
+  save(s);
+}
+
+/// What each look is, for its hover (the launcher's words too).
+export const LOOK_ABOUT = {
+  original: "As the game drew it in 2000, pixel for pixel. The lightest on your computer, and how it starts unless you pick another.",
+  enhanced: "The same game with modern light: per-pixel lighting, real shadows, haze, dust, 3D grass and more, kept subtle so it still looks like MM2. Auto fits the effects to your computer; Settings has the quality and every effect. F3 (or the button at the top left) flips back to the original look while racing to compare. The riding is the same.",
+  nextgen: ABOUT_NEXTGEN,
+};
 
 export function defaults() {
   const s = {
@@ -352,17 +377,14 @@ export function render(lookBox, box, s, changed) {
   const nextgen = s.enhanced && s.quality === "nextgen";
   const current = !s.enhanced ? "original" : nextgen ? "nextgen" : "enhanced";
   for (const [v, b, text, about] of [
-    ["original", "Original", ": the game as it looked in 2000", "The game drawn as it was in 2000. The lightest on your computer."],
-    ["enhanced", "Enhanced", ": modern light, kept subtle", "The original game with modern light: per-pixel lighting, real shadows, haze, dust, 3D grass and more, kept subtle so it still looks like MM2. Pick a quality for your computer."],
+    ["original", "Original", ": the game as it looked in 2000", LOOK_ABOUT.original],
+    ["enhanced", "Enhanced", ": modern light, kept subtle", LOOK_ABOUT.enhanced],
     ["nextgen", "Next-gen", ": a bold modern look", ABOUT_NEXTGEN],
   ]) {
     const r = el("input", { type: "radio", name: "look", checked: current === v });
     r.addEventListener("change", () => {
-      if (v === "original") return set("enhanced", false, true);
-      s.enhanced = true;
-      if (v === "nextgen") setQuality(s, "nextgen");
-      else if (nextgen) setQuality(s, "auto");
-      set("quality", s.quality, true);
+      setLook(s, v);
+      set("enhanced", s.enhanced, true);
     });
     look.append(el("label", { title: about }, r, " ", el("b", { textContent: b }), text));
   }
