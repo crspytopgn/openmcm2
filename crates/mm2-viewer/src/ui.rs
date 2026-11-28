@@ -1536,13 +1536,115 @@ impl Dlg {
             let n = ctl.items.len().saturating_sub(ctl.scroll).min(l.rows);
             return (0..n).map(|i| (lx + lw / 2.0, ly + (i as f32 + 0.5) * LINE)).collect();
         }
-        (0..self.ctls.len())
-            .filter(|&i| Self::clickable(&self.dialog.controls[i]) && self.ctls[i].enabled && self.showing(i))
-            .map(|i| {
-                let [x, y, w, h] = self.rect(i);
-                (x + w / 2.0, y + h / 2.0)
-            })
-            .collect()
+        let mut targets = Vec::new();
+        for i in 0..self.ctls.len() {
+            if !(Self::clickable(&self.dialog.controls[i]) && self.ctls[i].enabled && self.showing(i)) {
+                continue;
+            }
+            let [x, y, w, h] = self.rect(i);
+            if self.dialog.controls[i].kind == Kind::ListBox && h >= 2.0 * self.line(i) {
+                // A list of lines to pick from: each line it shows, in
+                // the leftmost of the lists that scroll together (the
+                // others are its columns). A list only to read, the
+                // middle, while it has more than fits (to scroll it).
+                if !self.first_column(i) {
+                    continue;
+                }
+                let (line, ctl) = (self.line(i), &self.ctls[i]);
+                let rows = (h / line).floor() as usize;
+                if ctl.selectable {
+                    let n = ctl.items.len().saturating_sub(ctl.scroll).min(rows);
+                    targets.extend((0..n).map(|r| (x + w / 2.0, y + (r as f32 + 0.5) * line)));
+                    continue;
+                }
+                if ctl.items.len() <= rows {
+                    continue;
+                }
+            }
+            targets.push((x + w / 2.0, y + h / 2.0));
+        }
+        targets
+    }
+
+    /// Whether list `i` is the leftmost of the lists scrolled with it.
+    fn first_column(&self, i: usize) -> bool {
+        let group = attach(&self.dialog.controls[i]);
+        if group.is_none() {
+            return true;
+        }
+        let x = self.rect(i)[0];
+        !self.group_lists(group).any(|o| o != i && self.showing(o) && self.rect(o)[0] < x)
+    }
+
+    /// The control under the pointer, if it is a slider.
+    fn hovered_slider(&self) -> Option<usize> {
+        self.hover
+            .filter(|&i| matches!(self.dialog.controls[i].kind, Kind::HScrollBar | Kind::VScrollBar) && self.list.is_none())
+    }
+
+    /// Whether the pointer is on a slider (where the pad's A, which would
+    /// jump the thumb to the middle, does nothing).
+    pub fn on_slider(&self) -> bool {
+        self.hovered_slider().is_some()
+    }
+
+    /// The pad's D-pad left or right (`by` −1 or 1) on a slider across:
+    /// its thumb a step along (a twentieth of the way on one without
+    /// steps), as if dragged and let go there.
+    pub fn nudge(&mut self, by: i32) -> Option<Vec<Event>> {
+        let i = self.hovered_slider().filter(|&i| self.dialog.controls[i].kind == Kind::HScrollBar)?;
+        let steps = self.ctls[i].steps;
+        let track = self.track(i).floor();
+        if steps > 0 {
+            let v = self.value_at(i, steps) as i32;
+            let by = if self.ctls[i].reversed { -by } else { by };
+            let to = (v + by).clamp(0, steps as i32) as u32;
+            self.put(i, to, steps);
+        } else {
+            let at = self.ctls[i].at + by as f32 * (track / 20.0).max(1.0);
+            self.ctls[i].at = at.clamp(0.0, track).round();
+        }
+        let name = self.dialog.controls[i].name.clone();
+        Some(vec![Event::Changed(name.clone()), Event::Released(name)])
+    }
+
+    /// The pad's D-pad up or down past the last line showing of the list
+    /// the pointer is on: the list scrolls a line instead. Whether it did.
+    pub fn pad_scroll(&mut self, (x, y): (f32, f32), down: bool) -> bool {
+        let by = if down { 1 } else { -1 };
+        if let Some(l) = self.list {
+            let [lx, ly, lw] = l.lines;
+            if x < lx || x >= lx + lw || y < ly || l.rows == 0 {
+                return false;
+            }
+            let row = ((y - ly) / LINE) as usize;
+            let ctl = &mut self.ctls[l.control];
+            let most = ctl.items.len().saturating_sub(l.rows);
+            let edge = if down { row + 1 >= l.rows } else { row == 0 };
+            let to = (ctl.scroll as i32 + by).clamp(0, most as i32) as usize;
+            if !edge || to == ctl.scroll {
+                return false;
+            }
+            ctl.scroll = to;
+            return true;
+        }
+        let under = (0..self.ctls.len()).rev().find(|&i| {
+            let [rx, ry, rw, rh] = self.rect(i);
+            self.dialog.controls[i].kind == Kind::ListBox && self.showing(i) && x >= rx && y >= ry && x < rx + rw && y < ry + rh
+        });
+        let Some(i) = under else { return false };
+        let [_, ry, _, rh] = self.rect(i);
+        let line = self.line(i);
+        let rows = (rh / line).floor().max(1.0) as usize;
+        let row = ((y - ry) / line) as usize;
+        let edge = if down { row + 1 >= rows } else { row == 0 };
+        let group = attach(&self.dialog.controls[i]);
+        let before: Vec<usize> = self.ctls.iter().map(|c| c.scroll).collect();
+        if !edge || group.is_none() {
+            return false;
+        }
+        self.scroll_group(group, by);
+        self.ctls.iter().zip(before).any(|(c, b)| c.scroll != b)
     }
 
     /// The control under the pointer, topmost first.

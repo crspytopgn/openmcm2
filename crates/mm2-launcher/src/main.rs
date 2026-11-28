@@ -167,6 +167,8 @@ struct Launcher {
     page: Page,
     /// A game pad's presses, as keys.
     pad: Option<pad::PadKeys>,
+    /// How far the pad's right stick asks the page to scroll down.
+    pad_scroll: f32,
     /// The Course Builder track picked to make for the original game.
     export_pick: Option<PathBuf>,
     /// That track being made: where it goes, once written.
@@ -595,6 +597,7 @@ impl Launcher {
             logo: None,
             page: Page::Play,
             pad: None,
+            pad_scroll: 0.0,
         }
     }
 
@@ -860,6 +863,16 @@ enum Page {
     Updates,
 }
 
+impl Page {
+    /// The page `by` along the sidebar from this one, round the ends:
+    /// the pad's triggers.
+    fn step(self, by: i32) -> Page {
+        const ALL: [Page; 5] = [Page::Play, Page::Graphics, Page::Extras, Page::Tracks, Page::Updates];
+        let at = ALL.iter().position(|&p| p == self).unwrap_or(0) as i32;
+        ALL[(at + by).rem_euclid(ALL.len() as i32) as usize]
+    }
+}
+
 impl eframe::App for Launcher {
     // Runs while minimized too, so the launcher sees the game end.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -869,7 +882,9 @@ impl eframe::App for Launcher {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         if let Some(pad) = &self.pad {
             if self.running.is_none() {
-                pad.feed(ctx, raw);
+                for step in pad.feed(ctx, raw, &mut self.pad_scroll) {
+                    self.page = self.page.step(step);
+                }
             }
         }
     }
@@ -905,7 +920,11 @@ impl Launcher {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(look::BG).inner_margin(egui::Margin { left: 28, right: 20, top: 18, bottom: 8 }))
             .show(ui, |ui| {
+                let scroll = std::mem::take(&mut self.pad_scroll);
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    if scroll != 0.0 {
+                        ui.scroll_with_delta(egui::vec2(0.0, -scroll));
+                    }
                     ui.set_max_width(ui.available_width().min(1000.0));
                     match self.page {
                         Page::Play => self.play_page(ui, busy),

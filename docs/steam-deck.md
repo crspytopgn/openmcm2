@@ -79,12 +79,22 @@ In a race:
 | View (the left middle button) | Get back on the bike |
 | Menu (the right middle button) | Leave the race |
 
-Options > Controls can rebind any of them. In the game's menus, the
-D-pad jumps between buttons, the left stick moves the pointer, A clicks,
-B goes back, and the shoulder buttons switch tabs. In the launcher, the
-D-pad or stick moves between the buttons, A presses the one outlined, and
-the shoulder buttons step through everything in order. The touch screen
-works everywhere too.
+Options > Controls can rebind any of them.
+
+In the game's menus (the lobby and the Course Builder's button too), the
+D-pad or left stick jumps between buttons and list lines, and keeps going
+while held. A clicks, B goes back, and the shoulder buttons switch tabs.
+Left and right move a slider, and up or down past the last line of a list
+scrolls it. The right stick moves the pointer freely. In a name or chat
+box, up and down change the last letter, right adds a letter, left or X
+takes one away, Y types a space, and A or B finish typing.
+
+In the launcher, the D-pad or stick moves between the buttons (keeping
+going while held), A presses the one outlined, B backs out of an open
+list, the shoulder buttons step through everything in order, the
+triggers go to the page before or after (Play, Graphics, Extras, Tracks,
+Updates), and the right stick scrolls. The touch screen works everywhere
+too.
 
 ### Rumble and gyro steering
 

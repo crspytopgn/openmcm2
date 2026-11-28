@@ -104,6 +104,7 @@ mod freepack;
 mod freshen;
 mod free_tracks;
 mod menu_link;
+mod menu_pad;
 mod frontend;
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -4556,6 +4557,9 @@ async fn menu_screenshot(
     }
     let mut now = 0.0;
     let mut started: Option<frontend::Setup> = None;
+    // Where the pad's pointer is, and whether it was used.
+    #[cfg_attr(not(feature = "gamepad"), allow(unused_mut, unused_variables))]
+    let (mut pad_at, mut pad_shown) = ((0.0f32, 0.0f32), false);
     for click in clicks.split(';').filter(|c| !c.trim().is_empty()) {
         // The race just started, over with the player in this place and
         // the computer riders behind or ahead in turn.
@@ -4637,6 +4641,54 @@ async fn menu_screenshot(
             front.escape(now);
             continue;
         }
+        // `pad:up` (down, left, right, a, b, x, y): the pad in the menus,
+        // its pointer drawn where it ends.
+        #[cfg(feature = "gamepad")]
+        if let Some(p) = click.strip_prefix("pad:") {
+            let mut gfx = ui::Gfx { sprites: &mut sprites, device: &device, queue: &queue };
+            front.draw(&mut gfx, now, 0.0);
+            sprites.discard();
+            pad_shown = true;
+            let way = match p.trim() {
+                "up" => Some((0, -1)),
+                "down" => Some((0, 1)),
+                "left" => Some((-1, 0)),
+                "right" => Some((1, 0)),
+                _ => None,
+            };
+            let typing = front.typing_text().is_some();
+            match (way, p.trim()) {
+                (Some(way), _) if typing => pad_type(&mut front, menu_pad::typing(way)),
+                (Some(way), _) => {
+                    let targets = front.targets();
+                    if let MenuStep::Move(t) = menu_way(&mut front, &audio, pad_at, way, &targets, now) {
+                        pad_at = t;
+                        front.mouse_move(&audio, t.0, t.1);
+                    }
+                }
+                (_, "a" | "b") if typing => front.type_char('\r'),
+                (_, "x") if typing => pad_type(&mut front, menu_pad::Typing::Remove),
+                (_, "y") if typing => front.type_char(' '),
+                (_, "a") if !front.on_slider() => {
+                    front.mouse_down(pad_at.0, pad_at.1);
+                    if let frontend::Next::Race(setup) = front.mouse_up(&audio, pad_at.0, pad_at.1, now) {
+                        eprintln!("race: {setup:?}");
+                        started = Some(setup);
+                    }
+                }
+                (_, "b") => {
+                    front.escape(now);
+                }
+                _ => {}
+            }
+            eprintln!("pad {p}: pointer at {pad_at:?}");
+            // MM2_PAD_DEBUG lists the buttons it can jump to.
+            if std::env::var_os("MM2_PAD_DEBUG").is_some() {
+                eprintln!("targets {:?}", front.targets());
+            }
+            now += 0.2;
+            continue;
+        }
         if let Some(key) = click.strip_prefix("key:") {
             let code = match key {
                 "z" => KeyCode::KeyZ,
@@ -4706,7 +4758,11 @@ async fn menu_screenshot(
         device: &device,
         queue: &queue,
     };
-    front.draw(&mut gfx, now, 0.5);    let mut encoder = device.create_command_encoder(&Default::default());
+    front.draw(&mut gfx, now, 0.5);
+    if pad_shown {
+        front.ui_mut().pointer(&mut gfx, pad_at);
+    }
+    let mut encoder = device.create_command_encoder(&Default::default());
     let view = target.create_view(&Default::default());
     sprites.render(&device, &mut encoder, &view, (w, h), true);
     let mut commands = vec![encoder.finish()];
@@ -5013,6 +5069,11 @@ struct App {
     preview_drag: Option<(f32, f32)>,
     /// The pad's A and B last frame, to click and go back in the menus.
     pad_click: (bool, bool),
+    /// A held D-pad or left stick, stepping through the menus.
+    menu_nav: menu_pad::Repeat,
+    /// The pad moved the pointer last (not the mouse): the game draws
+    /// its own arrow there, as the system's may not follow.
+    pad_pointing: bool,
     /// The stick's smoothed steering and when it was last read (the pad
     /// smoothing extra).
     pad_smooth: (f32, Option<Instant>),
@@ -5088,17 +5149,108 @@ struct App {
 /// the nearest ahead, a step off to the side counting double.
 #[cfg_attr(not(feature = "gamepad"), allow(dead_code))]
 fn pad_jump(at: (f32, f32), dir: (f32, f32), targets: &[(f32, f32)]) -> Option<(f32, f32)> {
-    targets
-        .iter()
-        .copied()
-        .filter_map(|t| {
-            let (dx, dy) = (t.0 - at.0, t.1 - at.1);
-            let ahead = dx * dir.0 + dy * dir.1;
-            let side = (dx * dir.1 - dy * dir.0).abs();
-            (ahead > 4.0).then_some((ahead + 2.0 * side, t))
-        })
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, t)| t)
+    // Those within 60° of the way first (so right from a roller of the
+    // main menu's chain goes into its pull-down, not to the next roller
+    // a little to the side), else any ahead.
+    let pick = |cone: bool| {
+        targets
+            .iter()
+            .copied()
+            .filter_map(|t| {
+                let (dx, dy) = (t.0 - at.0, t.1 - at.1);
+                let ahead = dx * dir.0 + dy * dir.1;
+                let side = (dx * dir.1 - dy * dir.0).abs();
+                (ahead > 4.0 && (!cone || 2.0 * ahead >= side)).then_some((ahead + 2.0 * side, t))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, t)| t)
+    };
+    pick(true).or_else(|| pick(false))
+}
+
+/// What a step of the pad's D-pad or left stick did in the menus.
+#[cfg(feature = "gamepad")]
+enum MenuStep {
+    /// The pointer goes here.
+    Move((f32, f32)),
+    /// A slider moved or a list scrolled.
+    Done,
+    /// What moving a slider asked.
+    Go(frontend::Next),
+}
+
+/// A step `way` of the pad in the menus, the pointer at `at`, with these
+/// buttons on screen: left and right on a slider move it, up and down at
+/// the end of a list scroll it, and otherwise the pointer jumps to the
+/// next button that way (from off every button, to the nearest).
+#[cfg(feature = "gamepad")]
+fn menu_way(f: &mut frontend::Frontend, audio: &audio::Audio, at: (f32, f32), (sx, sy): menu_pad::Way, targets: &[(f32, f32)], now: f32) -> MenuStep {
+    if sx != 0 {
+        if let Some(next) = f.nudge(audio, sx as i32, now) {
+            return match next {
+                frontend::Next::Stay => MenuStep::Done,
+                next => MenuStep::Go(next),
+            };
+        }
+    }
+    if sy != 0 && f.pad_scroll(at, sy > 0) {
+        f.mouse_move(audio, at.0, at.1);
+        return MenuStep::Done;
+    }
+    if let Some(t) = pad_jump(at, (sx as f32, sy as f32), targets) {
+        return MenuStep::Move(t);
+    }
+    if targets.iter().any(|&t| t == at) {
+        return MenuStep::Done;
+    }
+    let d = |t: (f32, f32)| (t.0 - at.0).powi(2) + (t.1 - at.1).powi(2);
+    match targets.iter().copied().min_by(|p, q| d(*p).total_cmp(&d(*q))) {
+        Some(t) => MenuStep::Move(t),
+        None => MenuStep::Done,
+    }
+}
+
+/// The pad typing in the edit box that has the keyboard (see
+/// [`menu_pad`]): a letter the box won't take (a figures-only box, say)
+/// is stepped over.
+#[cfg(feature = "gamepad")]
+fn pad_type(f: &mut frontend::Frontend, what: menu_pad::Typing) {
+    use menu_pad::Typing;
+    let text = f.typing_text().unwrap_or_default();
+    let ends = |f: &mut frontend::Frontend, c: char, len: usize| {
+        f.typing_text().is_some_and(|t| t.chars().count() == len && t.ends_with(c))
+    };
+    let len = text.chars().count();
+    match (what, text.chars().last()) {
+        (Typing::Remove, _) => f.type_char('\u{8}'),
+        (Typing::Add, _) | (Typing::Change(_), None) => {
+            let mut c = menu_pad::new_char(&text);
+            for _ in 0..80 {
+                f.type_char(c);
+                if ends(f, c, len + 1) {
+                    return;
+                }
+                c = menu_pad::next_char(c, true);
+            }
+        }
+        (Typing::Change(up), Some(last)) => {
+            let mut c = last;
+            for _ in 0..80 {
+                c = menu_pad::next_char(c, up);
+                if c == last {
+                    return;
+                }
+                f.type_char('\u{8}');
+                f.type_char(c);
+                if ends(f, c, len) {
+                    return;
+                }
+                if f.typing_text().is_some_and(|t| t.chars().count() < len) {
+                    f.type_char(last);
+                }
+            }
+        }
+    }
 }
 
 /// The device whose map the race uses when the profile's own is the
@@ -5216,6 +5368,8 @@ impl App {
             pointer: (0.0, 0.0),
             preview_drag: None,
             pad_click: (false, false),
+            menu_nav: menu_pad::Repeat::default(),
+            pad_pointing: false,
             pad_smooth: (0.0, None),
             pad_lean_logged: false,
             recording: None,
@@ -6872,6 +7026,7 @@ impl App {
         let pressed = |n: i32| presses.contains(&pad::Press::Button(n));
         let both_sticks = (pressed(8) && pads.button(9)) || (pressed(9) && pads.button(8));
         let fast = pads.button(5);
+        let dpad_down = [pad::DPAD_UP, pad::DPAD_DOWN, pad::DPAD_LEFT, pad::DPAD_RIGHT].map(|n| pads.button(n));
         let (was_a, was_b) = std::mem::replace(&mut self.pad_click, (a, b));
         if self.photo {
             if both_sticks {
@@ -6988,30 +7143,61 @@ impl App {
             }
         }
         let Some(f) = &mut self.front else { return };
+        // An edit box being typed in: the D-pad's up and down change the
+        // last letter, right adds one and left (or X) takes one away, Y
+        // types a space, and A or B leave the box.
+        let typing = f.typing_text().is_some();
+        // The D-pad, or the left stick pushed past half way, steps to the
+        // next button that way, which lights up as it would under the
+        // mouse, and goes on while held; the right stick (or the left on
+        // a screen without buttons) moves the pointer freely.
+        let targets = f.targets();
+        let dpad = [(pad::DPAD_UP, (0, -1)), (pad::DPAD_DOWN, (0, 1)), (pad::DPAD_LEFT, (-1, 0)), (pad::DPAD_RIGHT, (1, 0))]
+            .into_iter()
+            .zip(dpad_down)
+            .find_map(|((n, way), down)| (down || presses.contains(&pad::Press::Button(n))).then_some(way));
+        let free = targets.is_empty() && !typing;
+        let way = dpad.or_else(|| if free { None } else { menu_pad::stick_way(stick) });
+        let step = self.menu_nav.step(way, dt);
+        let x_pressed = presses.contains(&pad::Press::Button(2));
+        let y_pressed = presses.contains(&pad::Press::Button(3));
+        if typing {
+            if let Some(way) = step {
+                pad_type(f, menu_pad::typing(way));
+            }
+            if x_pressed {
+                pad_type(f, menu_pad::Typing::Remove);
+            }
+            if y_pressed {
+                f.type_char(' ');
+            }
+            if (a && !was_a) || (b && !was_b) {
+                f.type_char('\r');
+            }
+            return;
+        }
         // Past a fifth of the stick, up to 500 of the 640×480 screen a second.
         let speed = |v: f32| if v.abs() < 0.2 { 0.0 } else { v * 500.0 * dt };
-        let (dx, dy) = (speed(stick[0]), speed(stick[1]));
+        let roam = if free { stick } else { right };
+        let (dx, dy) = (speed(roam[0]), speed(roam[1]));
         let mut to = None;
         if dx != 0.0 || dy != 0.0 {
             let (x, y) = self.pointer;
             to = Some(((x + dx).clamp(0.0, 639.0), (y + dy).clamp(0.0, 479.0)));
         }
-        // The D-pad jumps the pointer to the next button that way, which
-        // lights up as it would under the mouse.
-        for (b, dir) in [
-            (pad::DPAD_UP, (0.0, -1.0)),
-            (pad::DPAD_DOWN, (0.0, 1.0)),
-            (pad::DPAD_LEFT, (-1.0, 0.0)),
-            (pad::DPAD_RIGHT, (1.0, 0.0)),
-        ] {
-            if presses.contains(&pad::Press::Button(b)) {
-                if let Some(t) = pad_jump(self.pointer, dir, &f.targets()) {
-                    to = Some(t);
+        if let Some(way) = step {
+            match menu_way(f, &self.audio, self.pointer, way, &targets, now) {
+                MenuStep::Move(t) => to = Some(t),
+                MenuStep::Done => self.pad_pointing = true,
+                MenuStep::Go(next) => {
+                    self.next(next, event_loop);
+                    return;
                 }
             }
         }
         if let Some((x, y)) = to {
             self.pointer = (x, y);
+            self.pad_pointing = true;
             f.mouse_move(&self.audio, x, y);
             if let Some(s) = &self.state {
                 let (w, h) = (s.config.width as f32, s.config.height as f32);
@@ -7019,12 +7205,16 @@ impl App {
                 let (ox, oy) = ((w - sprites::SCREEN.0 * scale) / 2.0, (h - sprites::SCREEN.1 * scale) / 2.0);
                 let at = winit::dpi::PhysicalPosition::new((x * scale + ox) as f64, (y * scale + oy) as f64);
                 let _ = s.window.set_cursor_position(at);
+                s.window.set_cursor_visible(false);
             }
         }
         let (x, y) = self.pointer;
-        if a && !was_a {
+        // A on a slider would jump its thumb to the middle: left and right
+        // move it instead.
+        let on_slider = f.on_slider();
+        if a && !was_a && !on_slider {
             f.mouse_down(x, y);
-        } else if !a && was_a {
+        } else if !a && was_a && !on_slider {
             let next = f.mouse_up(&self.audio, x, y, now);
             self.next(next, event_loop);
             return;
@@ -7496,7 +7686,7 @@ impl App {
             if let Some(fps) = self.fps_shown {
                 front.ui_mut().frame_rate(&mut gfx, fps);
             }
-            if ui::draws_pointer() {
+            if ui::draws_pointer() || self.pad_pointing {
                 front.ui_mut().pointer(&mut gfx, self.pointer);
             }
             let mut encoder = s.device.create_command_encoder(&Default::default());
@@ -7727,7 +7917,14 @@ impl ApplicationHandler for App {
                         true => bars::race_area(size),
                         false => (0, size.0),
                     };
-                    self.pointer = sprites::Sprites::to_screen_as((width, size.1), position.x - x as f64, position.y, stretch);
+                    let at = sprites::Sprites::to_screen_as((width, size.1), position.x - x as f64, position.y, stretch);
+                    // The mouse moved (not the pad putting the system's
+                    // pointer where its own is): the system's is back.
+                    if self.pad_pointing && ((at.0 - self.pointer.0).abs() > 2.0 || (at.1 - self.pointer.1).abs() > 2.0) {
+                        self.pad_pointing = false;
+                        s.window.set_cursor_visible(!ui::draws_pointer() && !self.looking);
+                    }
+                    self.pointer = at;
                 }
                 if self.in_menus() {
                     let (x, y) = self.pointer;
