@@ -869,7 +869,39 @@ impl Frontend {
     /// [`Dlg::targets`]).
     #[cfg_attr(not(feature = "gamepad"), allow(dead_code))]
     pub fn targets(&mut self) -> Vec<(f32, f32)> {
-        self.dialogs().iter().flat_map(|d| d.targets()).collect()
+        let mut targets: Vec<(f32, f32)> = self.dialogs().iter().flat_map(|d| d.targets()).collect();
+        // The update note's link and its close box, over the main menu.
+        if let Some((note, close)) = self.note_at {
+            targets.extend([note, close].map(|r| (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0)));
+        }
+        targets
+    }
+
+    /// Whether the pointer is on a slider (see [`Dlg::on_slider`]).
+    #[cfg_attr(not(feature = "gamepad"), allow(dead_code))]
+    pub fn on_slider(&mut self) -> bool {
+        self.dialogs().iter().any(|d| d.on_slider())
+    }
+
+    /// The pad's left or right on a slider (see [`Dlg::nudge`]): what it
+    /// does, or None when the pointer is on no slider.
+    #[cfg_attr(not(feature = "gamepad"), allow(dead_code))]
+    pub fn nudge(&mut self, audio: &Audio, by: i32, now: f32) -> Option<Next> {
+        let events = self.dialogs().into_iter().find_map(|d| d.nudge(by))?;
+        Some(self.handle(audio, events, now))
+    }
+
+    /// The pad's up or down at the end of a list (see
+    /// [`Dlg::pad_scroll`]): whether the list scrolled.
+    #[cfg_attr(not(feature = "gamepad"), allow(dead_code))]
+    pub fn pad_scroll(&mut self, at: (f32, f32), down: bool) -> bool {
+        let dialogs = self.dialogs();
+        let with_list = dialogs.iter().position(|d| d.list_open());
+        dialogs
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| with_list.is_none_or(|l| l == *i))
+            .any(|(_, d)| d.pad_scroll(at, down))
     }
 
     /// The pad's shoulder buttons: the next tab along (`step` 1) or the
