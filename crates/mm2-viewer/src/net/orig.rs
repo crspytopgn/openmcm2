@@ -50,6 +50,9 @@ const HELLO_WAIT: Duration = Duration::from_millis(1500);
 /// everyone (the original's 120 seconds, 30 with fast finishes).
 const END_AFTER: Duration = Duration::from_secs(120);
 
+/// An original player's number before a far host has given one.
+const NOT_YET: u8 = 255;
+
 static GAME: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 /// Whether OpenMCM2 hosts for the original's players too, and looks for
@@ -97,7 +100,10 @@ enum Cmd {
 /// An original player in the session.
 struct Orig {
     dp: u32,
+    /// The session's number for this player ([`NOT_YET`] until a far
+    /// host welcomes them), and the connection their news goes on.
     id: u8,
+    link: u8,
     name: String,
     state: Option<PlayerState>,
     /// Hosting: whether the session has had their hello.
@@ -189,6 +195,9 @@ struct Bridge {
     cmd_tx: Sender<Cmd>,
     cmds: Receiver<Cmd>,
     stop: Arc<AtomicBool>,
+    /// Hosting for a far host's session (relaying): its numbers for the
+    /// originals come in its welcomes.
+    relay: bool,
     /// Hosting: the session's player numbers. Joined: the next number.
     next: Option<Arc<AtomicU8>>,
     next_id: u8,
@@ -208,6 +217,8 @@ struct Bridge {
     states_at: Instant,
     settings_at: Instant,
     closed: bool,
+    /// Set when the bridge ends: the router's ports go then.
+    done: Arc<AtomicBool>,
 }
 
 /// Hosts the session for the original's players too: they find it, join
@@ -225,11 +236,75 @@ pub(super) fn host(name: &str, me: Option<&Player>, tx: Sender<In>, next: Arc<At
         }
     };
     let mut b = Bridge::new(dp, true, tx, stop, Some(next));
+    b.open_router();
     if let Some(me) = me {
         b.players = vec![me.clone()];
         b.add_mine(me.id, &me.name);
     }
     std::thread::spawn(move || b.run());
+}
+
+/// Lets the original's players on this network into the OpenMCM2 race
+/// at `to` (a race code, or an address), anywhere: OpenMCM2 hosts a game
+/// here called `name` that they join as on a local network, and each of
+/// them joins the far race through it as a player of its own. Runs until
+/// `stop`; says what happens through `note`.
+pub fn relay(to: super::Addr, name: &str, stop: Arc<AtomicBool>, note: impl Fn(String) + Send + 'static) -> io::Result<()> {
+    let dp = Dp::host(APP, name, MAX_PLAYERS as u32, FLAGS, Ipv4Addr::UNSPECIFIED)?;
+    let (tx, rx) = channel::<In>();
+    let mut b = Bridge::new(dp, true, tx, stop.clone(), Some(Arc::new(AtomicU8::new(1))));
+    b.relay = true;
+    b.open_router();
+    std::thread::spawn(move || b.run());
+    std::thread::spawn(move || {
+        // Each original player's connection to the far race.
+        let mut ups: HashMap<u8, Link> = HashMap::new();
+        while !stop.load(Ordering::Relaxed) {
+            let Ok(i) = rx.recv_timeout(Duration::from_millis(200)) else { continue };
+            match i {
+                In::Joined(link, mut peer) => {
+                    let (utx, urx) = channel::<In>();
+                    match super::connect(&to, utx) {
+                        Ok((up, _)) => {
+                            ups.insert(link, up);
+                            note(format!("An original player is joining {to}."));
+                            // What the far host says to them goes to the
+                            // bridge, as a host here would say it.
+                            std::thread::spawn(move || {
+                                for m in urx {
+                                    match m {
+                                        In::Got(_, m) => {
+                                            if super::send(&mut peer, &m).is_err() {
+                                                return;
+                                            }
+                                        }
+                                        In::Gone(_) => return,
+                                        In::Joined(..) | In::Note(_) => {}
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => note(format!("Can't reach {to}: {e}")),
+                    }
+                }
+                In::Got(link, m) => {
+                    if let Some(up) = ups.get_mut(&link) {
+                        if super::send(up, &m).is_err() {
+                            ups.remove(&link);
+                        }
+                    }
+                }
+                In::Note(_) => {}
+                In::Gone(link) => {
+                    if let Some(mut up) = ups.remove(&link) {
+                        let _ = super::send(&mut up, &Msg::Leave);
+                        note("An original player has left.".into());
+                    }
+                }
+            }
+        }
+    });
+    Ok(())
 }
 
 /// Joins the original's game hosted at `at` as `me`: the session's
@@ -243,6 +318,7 @@ pub(super) fn join(at: SocketAddrV4, me: &Player, tx: Sender<In>) -> io::Result<
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no MM2 game there"))?;
     let dp = Dp::join(f)?;
     let mut b = Bridge::new(dp, false, tx, Arc::new(AtomicBool::new(false)), None);
+    b.open_router();
     b.me = me.clone();
     let link = Link::Orig(Peer { id: 0, tx: b.cmd_tx.clone() });
     let id = b.take();
@@ -256,10 +332,51 @@ pub(super) fn join(at: SocketAddrV4, me: &Player, tx: Sender<In>) -> io::Result<
     Ok(link)
 }
 
+/// Asks the router (UPnP) to let the original's players elsewhere reach
+/// this machine's DirectPlay ports, `tcp` and `udp`, renewing each half
+/// hour, and lets them go when `done`. A router without UPnP, or with it
+/// off, is left alone: then the ports must be opened by hand.
+fn forward(tcp: Vec<u16>, udp: Vec<u16>, done: Arc<AtomicBool>, tell: Option<Sender<In>>) {
+    use igd_next::PortMappingProtocol::{TCP, UDP};
+    std::thread::spawn(move || {
+        let opts = igd_next::SearchOptions { timeout: Some(Duration::from_secs(5)), ..Default::default() };
+        let Ok(gw) = igd_next::search_gateway(opts) else { return };
+        // Our address on the router's side.
+        let Some(ip) = std::net::UdpSocket::bind("0.0.0.0:0").and_then(|s| s.connect(gw.addr).and(s.local_addr())).ok().map(|a| a.ip()) else { return };
+        let ports: Vec<_> = tcp.iter().map(|p| (TCP, *p)).chain(udp.iter().map(|p| (UDP, *p))).collect();
+        let open = || {
+            for (proto, port) in &ports {
+                let at = std::net::SocketAddr::new(ip, *port);
+                if let Err(e) = gw.add_port(*proto, *port, at, 3600, "OpenMCM2 original MM2 games") {
+                    eprintln!("original MM2: the router won't open {proto} {port}: {e}");
+                }
+            }
+        };
+        open();
+        if let (Some(tx), Ok(at)) = (tell, gw.get_external_ip()) {
+            let _ = tx.send(In::Note(format!(
+                "Original MM2 players elsewhere can join: in their Multiplayer, TCP/IP, they type {at} (their own router needs ports 2300 to 2400 open)."
+            )));
+        }
+        let mut renewed = Instant::now();
+        while !done.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(500));
+            if renewed.elapsed() > Duration::from_secs(1800) {
+                renewed = Instant::now();
+                open();
+            }
+        }
+        for (proto, port) in &ports {
+            let _ = gw.remove_port(*proto, *port);
+        }
+    });
+}
+
 /// Looks for the original's games on the local network (and at the
 /// addresses asked), every couple of seconds, while it lives.
 pub struct Looker {
     pub found: Arc<Mutex<Vec<(String, SocketAddrV4)>>>,
+    hosts: Arc<Mutex<Vec<Ipv4Addr>>>,
     stop: Arc<AtomicBool>,
 }
 
@@ -270,11 +387,13 @@ impl Looker {
         }
         let found = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
-        let (f, s) = (found.clone(), stop.clone());
+        let hosts = Arc::new(Mutex::new(hosts));
+        let (f, s, h) = (found.clone(), stop.clone(), hosts.clone());
         std::thread::spawn(move || {
             while !s.load(Ordering::Relaxed) {
                 let mut now = Vec::new();
-                let at = std::iter::once(None).chain(hosts.iter().map(|h| Some(*h)));
+                let asked = h.lock().map(|h| h.clone()).unwrap_or_default();
+                let at = std::iter::once(None).chain(asked.into_iter().map(Some));
                 for a in at {
                     for g in Dp::find(APP, a, Duration::from_millis(1200)).unwrap_or_default() {
                         // A game that is racing, or full, can't be joined.
@@ -290,7 +409,16 @@ impl Looker {
                 std::thread::sleep(Duration::from_millis(800));
             }
         });
-        Some(Looker { found, stop })
+        Some(Looker { found, hosts, stop })
+    }
+
+    /// Looks at `ip` too (an address typed in).
+    pub fn ask(&self, ip: Ipv4Addr) {
+        if let Ok(mut h) = self.hosts.lock() {
+            if !h.contains(&ip) {
+                h.push(ip);
+            }
+        }
     }
 }
 
@@ -430,6 +558,7 @@ impl Bridge {
             dp,
             pending: Vec::new(),
             host,
+            relay: false,
             tx,
             cmd_tx,
             cmds,
@@ -449,7 +578,16 @@ impl Bridge {
             states_at: now,
             settings_at: now,
             closed: false,
+            done: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Players elsewhere can reach this machine, if the router lets us.
+    fn open_router(&self) {
+        let (tcp, udp) = self.dp.ports();
+        let udp = if self.host { vec![udp, mm2_dplay::session::ENUM_PORT] } else { vec![udp] };
+        let tell = (self.host && !self.relay).then(|| self.tx.clone());
+        forward(vec![tcp], udp, self.done.clone(), tell);
     }
 
     fn run(mut self) {
@@ -470,6 +608,7 @@ impl Bridge {
                 self.event(e);
             }
         }
+        self.done.store(true, Ordering::Relaxed);
         self.dp.close();
     }
 
@@ -551,7 +690,7 @@ impl Bridge {
     /// The connection that answers for everyone: the session says the
     /// same to each original player's, and it goes to DirectPlay once.
     fn primary(&self) -> Option<u8> {
-        self.orig.iter().filter(|o| o.hello || !self.host).map(|o| o.id).min()
+        self.orig.iter().filter(|o| o.hello || !self.host).map(|o| o.link).min()
     }
 
     fn command(&mut self, c: Cmd) {
@@ -559,7 +698,7 @@ impl Bridge {
             Cmd::Dropped(id) => {
                 if !self.host {
                     self.closed = true;
-                } else if let Some(o) = self.orig.iter().position(|o| o.id == id) {
+                } else if let Some(o) = self.orig.iter().position(|o| o.link == id) {
                     // Turned away or sent off: off the original's list too.
                     let dp = self.orig[o].dp;
                     self.orig.remove(o);
@@ -577,12 +716,19 @@ impl Bridge {
     fn from_host(&mut self, peer: u8, m: Msg) {
         if let Msg::Leave = m {
             // The host sends this player off (or the session ends).
-            if let Some(o) = self.orig.iter().position(|o| o.id == peer) {
+            if let Some(o) = self.orig.iter().position(|o| o.link == peer) {
                 let dp = self.orig[o].dp;
                 self.orig.remove(o);
                 if let Some(me) = self.speaker() {
                     self.send(me, 0, game::about(kind::REMOVE, dp));
                 }
+            }
+            return;
+        }
+        if let Msg::Welcome { id } = m {
+            // A far host's number for this player (relaying).
+            if let Some(o) = self.orig.iter_mut().find(|o| o.link == peer) {
+                o.id = id;
             }
             return;
         }
@@ -688,7 +834,7 @@ impl Bridge {
     /// The session's connection a player's news comes in on.
     fn peer_of(&self, dp: u32) -> u8 {
         if self.host {
-            self.orig.iter().find(|o| o.dp == dp).map_or(0, |o| o.id)
+            self.orig.iter().find(|o| o.dp == dp).map_or(0, |o| o.link)
         } else {
             0
         }
@@ -793,7 +939,7 @@ impl Bridge {
             plate: 1,
         });
         let ready = o.state.as_ref().is_some_and(|s| s.ready);
-        let (id, name) = (o.id, o.name.clone());
+        let (id, name) = (o.link, o.name.clone());
         let _ = self.tx.send(In::Got(id, Msg::Hello { name, ride }));
         if ready {
             let _ = self.tx.send(In::Got(id, Msg::Ready(true)));
@@ -822,15 +968,17 @@ impl Bridge {
                     self.closed = true;
                 }
             }
-            self.orig.push(Orig { dp: *dp, id, name: name.clone(), state: None, hello: false, since: Instant::now() });
+            let link = id;
+            let id = if self.relay { NOT_YET } else { id };
+            self.orig.push(Orig { dp: *dp, id, link, name: name.clone(), state: None, hello: false, since: Instant::now() });
             changed = true;
         }
-        let gone: Vec<(u32, u8)> = self.orig.iter().filter(|o| !now.iter().any(|(dp, _)| *dp == o.dp)).map(|o| (o.dp, o.id)).collect();
-        for (dp, id) in gone {
+        let gone: Vec<(u32, u8, u8)> = self.orig.iter().filter(|o| !now.iter().any(|(dp, _)| *dp == o.dp)).map(|o| (o.dp, o.link, o.id)).collect();
+        for (dp, link, id) in gone {
             self.orig.retain(|o| o.dp != dp);
             changed = true;
             if self.host {
-                let _ = self.tx.send(In::Gone(id));
+                let _ = self.tx.send(In::Gone(link));
             } else if id == 0 {
                 // The original host has gone: the session is over.
                 let _ = self.tx.send(In::Gone(0));
@@ -914,7 +1062,7 @@ impl Bridge {
                     if !self.orig[i].hello {
                         self.hello(i);
                     } else {
-                        let id = self.orig[i].id;
+                        let id = self.orig[i].link;
                         if old.as_ref().map(|o| o.ready) != Some(s.ready) {
                             let _ = self.tx.send(In::Got(id, Msg::Ready(s.ready)));
                         }

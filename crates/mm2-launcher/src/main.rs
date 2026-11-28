@@ -130,11 +130,23 @@ fn import_only(args: &[String]) -> i32 {
     }
 }
 
+/// The bridge closes with the launcher.
+impl Drop for Launcher {
+    fn drop(&mut self) {
+        self.stop_bridge();
+    }
+}
+
 struct Launcher {
     settings: Settings,
     saved: Settings,
     import: Option<Arc<game::Progress>>,
     running: Option<Child>,
+    /// The bridge letting the original MM2 on this network into a race
+    /// elsewhere (`mm2-viewer --bridge`), and the race it's for.
+    bridge: Option<(Child, String)>,
+    /// The race code or address typed for it.
+    bridge_to: String,
     /// The Free Pack being unpacked.
     pack_import: Option<Arc<game::Progress>>,
     /// The Free Pack being downloaded or updated.
@@ -589,6 +601,8 @@ impl Launcher {
             menus_download: None,
             menus_update: Arc::new(Mutex::new(None)),
             running: None,
+            bridge: None,
+            bridge_to: String::new(),
             export_pick: None,
             export_job: None,
             note: None,
@@ -2176,6 +2190,75 @@ impl Launcher {
     }
 
     /// Network races: lobby downloads, the server browser and its list.
+    /// Lets the original MM2 on this network into the race at `to` (a race
+    /// code or address), shown to it as `name`: one at a time.
+    fn start_bridge(&mut self, to: &str, name: &str) {
+        self.stop_bridge();
+        let Some(viewer) = settings::viewer() else {
+            self.note = Some(("Can't find mm2-viewer next to the launcher.".into(), true));
+            return;
+        };
+        let log = settings::user_dir().join("bridge.log");
+        let err = std::fs::File::create(&log).map(Stdio::from).unwrap_or(Stdio::null());
+        let mut cmd = Command::new(&viewer);
+        cmd.args(["--bridge", to, "--name", name]).stdout(Stdio::null()).stderr(err);
+        // From the game's folder: the original checks the track's file.
+        if let Some(g) = &self.settings.game {
+            cmd.current_dir(g);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        match cmd.spawn() {
+            Ok(child) => self.bridge = Some((child, name.to_string())),
+            Err(e) => self.note = Some((format!("Couldn't start the bridge: {e}"), true)),
+        }
+    }
+
+    fn stop_bridge(&mut self) {
+        if let Some((mut child, _)) = self.bridge.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    /// The bridge, for the Network races card: its switch and what it's
+    /// doing.
+    fn bridge_ui(&mut self, ui: &mut egui::Ui) {
+        if let Some((child, _)) = &mut self.bridge {
+            if !matches!(child.try_wait(), Ok(None)) {
+                self.bridge = None;
+                self.note = Some(("The bridge for the original MM2 stopped (its messages are in bridge.log).".into(), true));
+            }
+        }
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Original MM2 in a race anywhere").strong());
+        if let Some((_, name)) = &self.bridge {
+            ui.label(look::weak(&format!(
+                "Open now. In the original MM2: Multiplayer, TCP/IP, then Join \"{name}\" (leave the address empty). Keep this window open while you race."
+            )));
+            if ui.button("Stop").on_hover_text("Closes the bridge. Original players in that race leave it.").clicked() {
+                self.stop_bridge();
+            }
+            return;
+        }
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.bridge_to).hint_text("Race code or address").desired_width(160.0));
+            let to = self.bridge_to.trim().to_string();
+            if ui
+                .add_enabled(!to.is_empty(), egui::Button::new("Open it to my MM2"))
+                .on_hover_text("For playing the original Motocross Madness 2 (2000) in an OpenMCM2 race anywhere, with no router setup. Type the race code from the host's lobby chat (or pick Let my MM2 join in the open races list). The race then shows in the original's own Multiplayer, TCP/IP Join list, as on a home network.")
+                .clicked()
+            {
+                let name = format!("OpenMCM2 race {}", to.to_uppercase());
+                self.start_bridge(&to, &name);
+            }
+        });
+    }
+
     fn network_card(&mut self, ui: &mut egui::Ui) {
         use look::icon;
         look::card(ui, icon::ICON_LAN, "Network races", |ui| {
@@ -2199,9 +2282,14 @@ impl Launcher {
                 ui,
                 &mut m.original_lan,
                 "Race with the original MM2 on your network",
-                "On unless you turn it off. Players of the original Motocross Madness 2 from 2000 (the full game or the demo) on your local network see your races in their own Multiplayer list and can join them, and their games show in your Join list. Everyone rides the same track, which both games need to have.",
+                "On unless you turn it off. Players of the original Motocross Madness 2 from 2000 (the full game or the demo) on your local network see your races in their own Multiplayer list and can join them, and their games show in your Join list. Everyone rides the same track, which both games need to have. If your router allows it (UPnP), players elsewhere can join too: your race's lobby chat says which address they type.",
                 w,
             );
+            let original = m.original_lan;
+            if original {
+                self.bridge_ui(ui);
+            }
+            let m = &mut self.settings.more;
             let url = m.leaderboard_url.trim().to_string();
             if url.is_empty() {
                 ui.label(look::weak("The server browser uses the leaderboard server, and its address is cleared (Lap leaderboards)."));
@@ -2217,6 +2305,7 @@ impl Launcher {
                     self.boards.fetch_races(&url);
                 }
             });
+            let mut bridge_to = None;
             match &self.boards.races {
                 None => {}
                 Some(Err(e)) => {
@@ -2226,17 +2315,31 @@ impl Launcher {
                     ui.label(look::weak("No open races just now. Host one in the game: Multiplayer, the Gaming Zone panel, then Host."));
                 }
                 Some(Ok(races)) => {
-                    egui::Grid::new("open races").striped(true).num_columns(4).show(ui, |ui| {
+                    egui::Grid::new("open races").striped(true).num_columns(5).show(ui, |ui| {
                         for r in races.iter().take(50) {
                             ui.label(&r.name);
                             ui.label(if r.track.is_empty() { mm2_settings::races::event_name(r.event).to_string() } else { r.track.clone() });
                             ui.label(format!("{}/8", r.players));
                             ui.label(if r.racing { "Racing" } else { "In the lobby" });
+                            if original && !r.address.is_empty() {
+                                if ui
+                                    .small_button("Let my MM2 join")
+                                    .on_hover_text("Opens this race to the original Motocross Madness 2 (2000) on this computer and network: it shows in the original's Multiplayer, TCP/IP Join list.")
+                                    .clicked()
+                                {
+                                    bridge_to = Some((r.address.clone(), r.name.clone()));
+                                }
+                            } else {
+                                ui.label("");
+                            }
                             ui.end_row();
                         }
                     });
                     ui.label(look::weak("To join: start the game, open Multiplayer on the main menu and click the Gaming Zone panel. Double-click a race in the list, or type a race code a friend gave you on its last line."));
                 }
+            }
+            if let Some((to, name)) = bridge_to {
+                self.start_bridge(&to, &name);
             }
         });
     }
