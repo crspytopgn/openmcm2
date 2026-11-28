@@ -368,6 +368,9 @@ MM2_DATA="/path/to/Motocross Madness 2" cargo test
   launcher's look, ray tracing, night races, TAA, forgiving landings and
   more. Thank you, Daniel.
 
+* Mike McCue's Harmonic Cycle tracks (2000 to 2003) are listed in the
+  launcher's Classic tracks card with his name on them. Thank you, Mike.
+
 * The Indeo 5 decoder in `crates/mm2-indeo` is a port of
   [FFmpeg](https://ffmpeg.org)'s, by Maxim Poliakovski, and keeps FFmpeg's
   licence (below).

@@ -1,3 +1,34 @@
+# OpenMCM2 0.8.9
+
+* **Race with the original MM2 on your local network.** OpenMCM2 can now
+  host a game that players on the original Motocross Madness 2 join, and
+  join a game an original player hosts. Original hosts show up in the
+  game list. It's on by default, with a switch in the launcher.
+* **Classic player-made tracks from 2000 to 2005.** A new card on the
+  launcher's Tracks page lists over 6,000 tracks from MDX Racing made in
+  the game's early years, by year and event, with search, Get all and Get
+  for each track. Mike McCue's Harmonic Cycle Nationals (2000 to 2003)
+  are named and credited, with a one-click button. Thank you, Mike, and
+  thanks again to MDX Racing.
+* **Cut content (Extras, off by default).** The original's files hold a
+  KTM 520EXC, a Yamaha YZ400F and an MPR rider suit that no list ever
+  showed. Turn this on to ride them. The replay panel now opens like the
+  original's, with the winding buttons put away; Cut content or the
+  replay editor brings the full controls back.
+* **Big Head (Extras, off by default).** Every rider's head grows. Just
+  for fun: laps don't go on the leaderboards while it's on.
+* **Chase camera sits where the original's does.** It now trails the
+  bike by the same distance as the original at any frame rate.
+* **Airfield's Escape Plan no longer freezes on older Intel graphics**
+  (such as the HD 3000) with a full field of riders
+  ([#192](https://github.com/crspytopgn/openmcm2/issues/192)). Big tracks
+  now take less graphics memory, and look the same.
+* **Next-gen is now called Enhanced+.** Same look, a clearer name: it's
+  Enhanced turned up. Your saved choice stays as it was.
+* **Free Pack: a tidier OpenMX rider and bikes.** The rider suit's back
+  and seams look neater, and the free bikes' paint no longer shows dark
+  edges at the seams.
+
 # OpenMCM2 0.8.8
 
 * **Many more lap times on the leaderboards.** Laps now count from
