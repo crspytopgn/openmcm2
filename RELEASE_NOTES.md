@@ -1,3 +1,33 @@
+# OpenMCM2 0.8.8
+
+* **Many more lap times on the leaderboards.** Laps now count from
+  Practice, Ghost, free roam and online races, not just single races and
+  series. Clean laps on corners the course line cuts tightly no longer
+  get thrown out (up to 6 seconds off the line now counts). The tips
+  for the riding extras say they keep your laps off the boards.
+* **Laps sent at the same time are all kept.** The leaderboard server
+  used to lose laps when several players sent theirs at once.
+* **Leaderboard ghosts.** Your best leaderboard lap goes up with its
+  ghost, and the online ghosts extra lists and races the fastest ones.
+* **Menus work fully with a game pad.** Hold the D-pad or stick to keep
+  moving, step through lists and sliders, and type names and chat with
+  the pad.
+* **Pick your look beside Play.** The launcher and the browser's Ready
+  card now have Original, Enhanced and Next-gen right next to the Play
+  button. Original is still the default.
+* **Smoother on laptops.** The picture no longer keeps trying a size
+  that has just proved too slow, which caused a hitch about every ten
+  seconds on some laptops.
+* **Better on phones.** The touch stick steers like a real analog stick,
+  Android's back gesture works in the game, the screen stays on while
+  you play, and phones open the game from a .zip or CD image.
+* **A clearer demo.** The demo lists the full game's tracks as
+  (Full Game) and says what the trial has. Our own free tracks are marked
+  (OpenMCM2).
+* **Free Pack: new 600 engine sounds** (already out as Free Pack
+  2026.11.28.1). They're our own, made with
+  [engine-sim](https://github.com/ange-yaghi/engine-sim) by Ange Yaghi.
+
 # OpenMCM2 0.8.7
 
 * **Series mode is back.** Single player now has the original Series:

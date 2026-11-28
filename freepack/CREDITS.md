@@ -144,6 +144,10 @@ Engines, crashes, landings and the crowd are real recordings from
 [Freesound](https://freesound.org), trimmed, looped and matched for the game.
 The full list of which file each went into is in the pack's `sound/CREDITS.md`.
 
+The 600's engine sounds are our own, made with
+[engine-sim](https://github.com/ange-yaghi/engine-sim) by Ange Yaghi (MIT), a physical
+engine simulation. No recording is used for them.
+
 | Recording | By | Licence |
 |---|---|---|
 | [motorbike crm 250cc kick start rev engine.wav](https://freesound.org/people/martian/sounds/148855/) | martian | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |

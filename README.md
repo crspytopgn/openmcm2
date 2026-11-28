@@ -375,6 +375,8 @@ MM2_DATA="/path/to/Motocross Madness 2" cargo test
   [OpenH264](https://github.com/cisco/openh264) (BSD 2-clause, built from
   source) and [Symphonia](https://github.com/pdeljanov/Symphonia) (MPL 2.0)
   for its sound. No video comes with OpenMCM2: it plays a file you pick.
+* The Free Pack's 600 engine sounds were made with Ange Yaghi's
+  [engine-sim](https://github.com/ange-yaghi/engine-sim) (MIT).
 * Ground materials for `--enhanced` are from [ambientCG](https://ambientcg.com),
   CC0.
 * The Linux build carries [Liberation Sans](https://github.com/liberationfonts)
