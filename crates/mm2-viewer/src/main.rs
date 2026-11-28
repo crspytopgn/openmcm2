@@ -258,6 +258,28 @@ fn main() -> Result<(), BoxError> {
         let options = serve::Options::from_args(|f| flag(f).cloned())?;
         return serve::run(options);
     }
+    // The original game's players on this network into an OpenMCM2 race
+    // anywhere, with no window (`--bridge <race code or ip:port>
+    // [--name TEXT]`; the launcher's Network races card). Runs from the
+    // game's folder, for the tracks' files.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(to) = flag("--bridge") {
+        // An address without its port has the usual one.
+        let addr: net::Addr = to
+            .parse()
+            .or_else(|_| format!("{}:{}", to.trim(), net::PORT).parse())
+            .map_err(|e| format!("--bridge {to}: {e}"))?;
+        let name = flag("--name").cloned().unwrap_or_else(|| format!("OpenMCM2 {addr}"));
+        if let Ok(dir) = std::env::current_dir() {
+            net::orig::set_game_dir(&dir);
+        }
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        net::orig::relay(addr, &name, stop, |line| eprintln!("{line}"))?;
+        eprintln!("\"{name}\" is open: start the original MM2, Multiplayer, TCP/IP, Join (leave the address empty).");
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
+    }
     // A Course Builder track made for the original game, with no window
     // (`--export-original <track.course or .env> <out.env>`; the launcher's
     // Course Builder card).

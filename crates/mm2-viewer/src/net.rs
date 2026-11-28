@@ -516,11 +516,31 @@ pub(crate) fn take_id(next: &AtomicU8) -> u8 {
     }
 }
 
+/// A connection to the host at `addr` (not an original's), whose news
+/// comes through `tx` as player 0's; and the host's port, if it has one.
+#[cfg(not(target_arch = "wasm32"))]
+fn connect(addr: &Addr, tx: Sender<In>) -> io::Result<(Link, u16)> {
+    Ok(match addr {
+        Addr::Ip(addr) => {
+            let stream = TcpStream::connect_timeout(addr, Duration::from_secs(3))?;
+            stream.set_nodelay(true)?;
+            reader(0, stream.try_clone()?, tx);
+            (Link::Tcp(stream), addr.port())
+        }
+        Addr::Code(code) => (Link::Rtc(rtc::join(code, tx)), 0),
+        Addr::Room(url) => (Link::Rtc(rtc::room(url, tx)), 0),
+        Addr::Orig(_) => return Err(io::Error::new(io::ErrorKind::Unsupported, "an original's game")),
+    })
+}
+
 /// What the connections' threads tell the session.
 enum In {
     Joined(u8, Link),
     Got(u8, Msg),
     Gone(u8),
+    /// A line for the lobby's chat (how players elsewhere can join).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    Note(String),
 }
 
 /// Reads a connection until it closes.
@@ -648,7 +668,7 @@ impl Session {
         }
         answer_finders(name.to_string(), port, stop.clone());
         // The original game's players find and join it too.
-        if !cfg!(test) || std::env::var_os("MM2_ORIG_LIVE").is_some() {
+        if !cfg!(test) || (std::env::var_os("MM2_ORIG_LIVE").is_some() && std::env::var_os("MM2_ORIG_RELAY").is_none()) {
             orig::host(name, (!me.name.is_empty()).then_some(&Player { id: 0, ..me.clone() }), tx.clone(), next.clone(), stop.clone());
         }
         // Browsers and players elsewhere come by the race code (not in the
@@ -699,15 +719,8 @@ impl Session {
     pub fn join(addr: Addr, me: Player) -> io::Result<Session> {
         let (tx, rx) = channel();
         let (mut link, port) = match &addr {
-            Addr::Ip(addr) => {
-                let stream = TcpStream::connect_timeout(addr, Duration::from_secs(3))?;
-                stream.set_nodelay(true)?;
-                reader(0, stream.try_clone()?, tx);
-                (Link::Tcp(stream), addr.port())
-            }
-            Addr::Code(code) => (Link::Rtc(rtc::join(code, tx)), 0),
-            Addr::Room(url) => (Link::Rtc(rtc::room(url, tx)), 0),
             Addr::Orig(at) => (orig::join(*at, &me, tx)?, 0),
+            _ => connect(&addr, tx)?,
         };
         send(
             &mut link,
@@ -811,6 +824,7 @@ impl Session {
                     out.push(Heard::Players);
                 }
                 In::Got(from, m) => self.got(from, m, &mut out),
+                In::Note(line) => self.notes.push(line),
             }
         }
         if self.host && self.roam.is_some() {
@@ -1172,7 +1186,7 @@ pub fn is_at(addr: &Addr, typed: &str) -> bool {
     match addr {
         Addr::Code(c) => c.eq_ignore_ascii_case(t),
         Addr::Room(u) => u == t,
-        Addr::Orig(a) => t.parse::<std::net::Ipv4Addr>().is_ok_and(|i| i == *a.ip()),
+        Addr::Orig(a) => t.split(':').next().and_then(|i| i.parse::<std::net::Ipv4Addr>().ok()).is_some_and(|i| i == *a.ip()),
         Addr::Ip(a) => {
             t.parse::<SocketAddr>().is_ok_and(|s| s == *a) || t.parse::<std::net::IpAddr>().is_ok_and(|i| i == a.ip())
         }
@@ -1312,6 +1326,12 @@ impl Finder {
     /// each, gone when the game is.
     fn add_orig(&mut self) -> bool {
         let Some(l) = &self.orig else { return false };
+        // Addresses typed since: the original's games there too.
+        for h in &self.hosts {
+            if let Some(ip) = h.split(':').next().and_then(|i| i.trim().parse().ok()) {
+                l.ask(ip);
+            }
+        }
         let now: Vec<(String, std::net::SocketAddrV4)> = l.found.lock().map(|f| f.clone()).unwrap_or_default();
         let before = self.found.len();
         self.found.retain(|f| !matches!(&f.addr, Addr::Orig(a) if !now.iter().any(|(_, h)| h == a)));
@@ -1432,6 +1452,12 @@ mod tests {
         }
         let ride = RideInfo { model: "suzuki.mcf".into(), texture: "Kazuyuki250_08.tga".into(), outfit: "Rainbow01_08.tga".into(), cc: 250, plate: 7 };
         let mut host = Session::host("OpenRace", Player { name: "OpenHost".into(), ride, ..Player::default() }).unwrap();
+        // MM2_ORIG_RELAY: the originals come in through a bridge, as from
+        // far away (the launcher's --bridge).
+        if std::env::var_os("MM2_ORIG_RELAY").is_some() {
+            let at = Addr::Ip(SocketAddr::from(([127, 0, 0, 1], host.port)));
+            orig::relay(at, "RelayRace", Arc::new(AtomicBool::new(false)), |l| eprintln!("relay: {l}")).unwrap();
+        }
         let game = GameInfo { event: 0, mode: 1, laps: 2, track: "Quarry01".into(), level: 2, collisions: true, ..Default::default() };
         host.say(Msg::Game(game.clone()));
         let bike = std::env::var("MM2_ORIG_BIKE").ok().map(|h| (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap()).collect::<Vec<u8>>());
