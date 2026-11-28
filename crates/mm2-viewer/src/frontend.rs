@@ -2376,8 +2376,8 @@ pub fn free_entries(path: &Path, def: &mm2_course::free::Def, event: EventKind) 
 }
 
 /// A track's line in the event page's list. With the demo, what isn't the
-/// trial's own says so: our free tracks are "(open source)", as the free
-/// bikes are, and the full game's ones it can't ride "(Full Game)".
+/// trial's own says so: our free tracks are "(OpenMCM2)", as the free
+/// bikes are marked, and the full game's ones it can't ride "(Full Game)".
 pub fn shown_name(t: &TrackEntry) -> String {
     if !crate::demo::active() {
         return t.name.clone();
@@ -2387,7 +2387,7 @@ pub fn shown_name(t: &TrackEntry) -> String {
     }
     let ours = t.path.file_stem().and_then(|s| s.to_str()).and_then(mm2_course::free::find).is_some();
     if ours {
-        format!("{} (open source)", t.name)
+        format!("{} (OpenMCM2)", t.name)
     } else {
         t.name.clone()
     }
