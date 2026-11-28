@@ -16,7 +16,7 @@
   :root { --bg: #121110; --fg: #ece6d8; --dim: #a39d8f; --accent: #a3c24a; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
     font: 16px/1.5 system-ui, sans-serif; overflow: hidden; overscroll-behavior: none; }
-  #mm2 { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; touch-action: none; }
+  #mm2 { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; outline: none; touch-action: none; }
   /* The player's own intro video, over the game. */
   video.intro { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; background: #000; z-index: 50; cursor: pointer; }
   #setup { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); padding: 16px;
@@ -298,9 +298,9 @@
       <div class="ways">
         <div class="way" id="pick">
           <b>I have the game</b>
-          <span>Pick your installed game folder, your CD, or a CD image or .zip. Nothing is uploaded: the files stay on this device. You can also drop them on this page.</span>
+          <span id="pickwhat">Pick your installed game folder, your CD, or a CD image or .zip. Nothing is uploaded: the files stay on this device. You can also drop them on this page.</span>
           <label class="button" for="folder" title="The folder Motocross Madness 2 is installed in (the one with the UI, RES and TERAFORM folders in it), or the CD's own folder.">Choose game folder</label>
-          <label class="button plainbutton" for="file" title="Your game CD's image (.iso, .bin, .img, .mdf or .nrg), or a .zip of the game folder or of a CD image. On a phone or tablet, a .zip is the way.">Choose a CD image or .zip</label>
+          <label class="button plainbutton" id="filebutton" for="file" title="Your game CD's image (.iso, .bin, .img, .mdf or .nrg), or a .zip of the game folder or of a CD image. On a phone or tablet, a .zip is the way.">Choose a CD image or .zip</label>
           <input id="folder" type="file" webkitdirectory multiple>
           <input id="file" type="file" multiple accept=".zip,.iso,.bin,.img,.mdf,.mds,.nrg,.cue,.exe,application/zip">
           <label class="keep"><input id="keep" type="checkbox" checked title="Keeps your game in this browser, so next time Play starts it straight away."> Remember it in this browser</label>
@@ -1268,7 +1268,7 @@ globalThis.mm2page = {
     racingNow = on;
     pad?.show(on && !gamepad.found());
     // On a touch screen the faded corner buttons would catch the thumbs.
-    if (pad) document.body.classList.toggle("riding", on);
+    if (touch.wanted()) document.body.classList.toggle("riding", on);
   },
   // The browser reset the graphics card under the game (Safari does when
   // it runs short of graphics memory): nothing can be drawn again, so
@@ -1370,8 +1370,22 @@ const trackLoad = (() => {
 })();
 $("tfOk").addEventListener("click", () => ($("trackfail").hidden = true));
 
+// Phones and tablets can't pick a folder (Android's browsers and iOS
+// offer single files only), so there the game comes as a .zip of its
+// folder or a CD image, and the folder buttons go.
+if (!desktopOk) {
+  document.querySelectorAll('label[for="folder"]').forEach((l) => (l.hidden = true));
+  $("filebutton").classList.remove("plainbutton");
+  $("filebutton").textContent = "Choose a .zip or CD image";
+  $("pickwhat").textContent =
+    "A phone or tablet can't pick a folder: zip the game folder on a computer (the one with the UI, RES and TERAFORM folders in it) " +
+    "and put the .zip on this device, or use a CD image. Nothing is uploaded: the files stay on this device.";
+}
+
 // Touch screens: buttons for riding, and full screen on the first tap.
-const pad = touch.wanted() ? touch.setup($("mm2")) : null;
+// A touch screen with a mouse or trackpad too gets them once a finger
+// touches it while riding.
+const pad = touch.any() ? touch.setup($("mm2"), { hidden: !touch.wanted() }) : null;
 // Game pads: a word on the start page and over the game, since browsers
 // show a pad only after a button on it is pressed. With one plugged in,
 // a tablet's touch buttons keep out of the way.
@@ -1380,8 +1394,8 @@ gamepad.onChange((found) => {
   if (racingNow) pad?.show(!found);
 });
 if (pad) {
-  $("mm2").addEventListener("pointerdown", () => {
-    if (document.fullscreenElement) return;
+  $("mm2").addEventListener("pointerdown", (e) => {
+    if (document.fullscreenElement || e.pointerType !== "touch") return;
     // An iPhone has no full screen for pages (the Home Screen app is).
     const asked = document.documentElement.requestFullscreen?.();
     asked?.then(() => screen.orientation?.lock?.("landscape")).catch(() => {});

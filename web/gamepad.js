@@ -43,7 +43,8 @@ export function plainName(id) {
 
 function pads() {
   try {
-    return [...(navigator.getGamepads?.() || [])].filter((p) => p && p.connected !== false);
+    // Not the touch buttons' stick (touch.js), which the game sees as a pad.
+    return [...(navigator.getGamepads?.() || [])].filter((p) => p && p.connected !== false && !p.openmcm2Touch);
   } catch {
     return [];
   }
