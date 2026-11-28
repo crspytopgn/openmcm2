@@ -105,7 +105,9 @@ pub fn send_saved(dir: &Path) {
     let more = crate::tweaks::more();
     if more.leaderboards {
         let waiting = laps::parse_all(&crate::fs::read_to_string(dir.join(laps::PENDING)).unwrap_or_default());
-        let ghosts = more.online_ghosts.then(|| (url.clone(), dir.to_path_buf()));
+        // Best laps' ghosts go up with the leaderboards, so there are
+        // ghosts to race for those who turn the online ghosts extra on.
+        let ghosts = Some((url.clone(), dir.to_path_buf()));
         if !waiting.is_empty() {
             let reply = post(format!("{url}/laps"), laps::text(&waiting));
             after(reply, dir.join(laps::PENDING), move |path, _| {
