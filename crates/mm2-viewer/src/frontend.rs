@@ -295,7 +295,9 @@ pub struct Frontend {
     boxes: profiles::Profiles,
     /// After a ghost race whose best lap beat the ghost: "Do you want to
     /// save the current ghost lap?" over the Race Info page, and the lap.
-    ghost_ask: Option<(Dlg, mm2_formats::vcr::Tape)>,
+    /// A box over the screen: keep a ghost race's lap (with the lap), or
+    /// a notice with one button (none).
+    ghost_ask: Option<(Dlg, Option<mm2_formats::vcr::Tape>)>,
     /// The screen a race was started from (the Pro Circuit), to go back
     /// to with its results.
     parked: Option<Box<dyn screens::Screen>>,
@@ -520,6 +522,11 @@ impl Frontend {
         // opens the online races: the server browser.
         d.set_tip("ButZone", "Online races: join races and free roam servers from everywhere, or host your own");
         d.set_tip("ButTCP", "Races on your home network or online, or join a friend by race code");
+        if crate::demo::active() {
+            for (name, tip) in crate::demo::event_tips() {
+                d.set_tip(name, tip);
+            }
+        }
         for (name, on) in [
             ("ButTCP", true),
             ("ButIPX", false),
@@ -1142,16 +1149,23 @@ impl Frontend {
         let title = self.ui.lang(5320);
         let prompt = self.ui.lang(5184);
         if let Some(b) = screens::MsgBox::ask(&mut self.ui, &title, &prompt, [5182, 0, 5181]) {
-            self.ghost_ask = Some((b.dlg, lap));
+            self.ghost_ask = Some((b.dlg, Some(lap)));
         }
     }
 
     fn ghost_answer(&mut self, button: &str) {
         let button = button.to_ascii_lowercase();
+        // A notice: its one button closes it.
+        if matches!(self.ghost_ask, Some((_, None))) {
+            if button == "butmiddle" {
+                self.ghost_ask = None;
+            }
+            return;
+        }
         if button != "butleft" && button != "butright" {
             return;
         }
-        if let (Some((_, lap)), "butleft") = (self.ghost_ask.take(), button.as_str()) {
+        if let (Some((_, Some(lap))), "butleft") = (self.ghost_ask.take(), button.as_str()) {
             match crate::replay::save_ghost(&lap, &self.user.store.dir) {
                 Ok(p) => eprintln!("kept the ghost lap as {}", p.display()),
                 Err(e) => eprintln!("keeping the ghost lap: {e}"),
@@ -1336,7 +1350,11 @@ impl Frontend {
 
     /// Each track of `event` there is: its name, file and course.
     pub fn track_list(&mut self, event: EventKind) -> Vec<(String, PathBuf, usize)> {
-        self.tracks(event).iter().map(|t| (t.name.clone(), t.path.clone(), t.course)).collect()
+        self.tracks(event)
+            .iter()
+            .filter(|t| !crate::demo::is_locked(&t.path))
+            .map(|t| (t.name.clone(), t.path.clone(), t.course))
+            .collect()
     }
 
     /// Forgets the track lists, so new tracks show in them.
@@ -2017,7 +2035,7 @@ impl Frontend {
         self.track = self.track.min(tracks.len().saturating_sub(1));
         page.set_items(
             "DDLTextBox",
-            tracks.iter().map(|t| t.name.clone()).collect(),
+            tracks.iter().map(shown_name).collect(),
             self.track,
         );
         if self.mode == GHOST {
@@ -2088,7 +2106,13 @@ impl Frontend {
         let game = self.ui.game().to_path_buf();
         self.tracks
             .entry(event)
-            .or_insert_with(|| picker_tracks(list_tracks(&game.join(event.folder()), event)))
+            .or_insert_with(|| {
+                // With the demo, the full game's tracks it doesn't let you
+                // ride follow, as its own lists had them.
+                let mut list = picker_tracks(list_tracks(&game.join(event.folder()), event));
+                list.extend(crate::demo::locked(&game, event));
+                list
+            })
     }
 
     fn start(&mut self) -> Next {
@@ -2111,6 +2135,15 @@ impl Frontend {
         let Some(entry) = self.shown_tracks(event).get(track).cloned() else {
             return Next::Stay;
         };
+        // One of the full game's tracks the demo lists but can't ride: the
+        // demo's box naming the tracks it has (and where to get the rest).
+        if crate::demo::is_locked(&entry.path) {
+            let (title, prompt) = crate::demo::locked_note();
+            if let Some(b) = screens::MsgBox::ask(&mut self.ui, title, prompt, [0, 5097, 0]) {
+                self.ghost_ask = Some((b.dlg, None));
+            }
+            return Next::Stay;
+        }
         // A series' first race starts it with no points (0x45e490).
         if self.mode == SERIES && !self.series.on {
             let s = &mut self.series;
@@ -2339,6 +2372,24 @@ pub fn free_entries(path: &Path, def: &mm2_course::free::Def, event: EventKind) 
             .collect()
     } else {
         vec![TrackEntry { path: path.to_path_buf(), course: 0, name: def.name.to_string(), preview: format!("{stem}.tga") }]
+    }
+}
+
+/// A track's line in the event page's list. With the demo, what isn't the
+/// trial's own says so: our free tracks are "(open source)", as the free
+/// bikes are, and the full game's ones it can't ride "(Full Game)".
+pub fn shown_name(t: &TrackEntry) -> String {
+    if !crate::demo::active() {
+        return t.name.clone();
+    }
+    if crate::demo::is_locked(&t.path) {
+        return format!("{} {}", t.name, crate::demo::FULL_GAME);
+    }
+    let ours = t.path.file_stem().and_then(|s| s.to_str()).and_then(mm2_course::free::find).is_some();
+    if ours {
+        format!("{} (open source)", t.name)
+    } else {
+        t.name.clone()
     }
 }
 

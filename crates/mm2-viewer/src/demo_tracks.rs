@@ -41,7 +41,7 @@ pub fn on() -> bool {
 /// A demo unpacked before its ground-less tracks were kept (OpenMCM2
 /// 0.7.0): they are taken from the installer, which the launcher keeps
 /// beside the game folder, once.
-fn unpack_stubs(game: &Path) {
+pub fn unpack_stubs(game: &Path) {
     static DONE: std::sync::Once = std::sync::Once::new();
     DONE.call_once(|| {
         if crate::fs::is_dir(&game.join(STUBS)) {
