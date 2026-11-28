@@ -2216,7 +2216,7 @@ impl Launcher {
                 ui,
                 &mut m.leaderboards,
                 "Lap leaderboards",
-                "On unless you turn it off. Sends your best lap in each race (Practice, Ghost and multiplayer races too, not free roam) from lap 2 on, with the riding extras off, under your rider name, and its ghost (where the bike was, a few times a second) so the fastest lap on each track can be raced. In Nationals and Supercross, a lap with more than 2 seconds riding off the course doesn't count (time down in a crash is fine). In the game: High Scores, Online.",
+                "On unless you turn it off. Sends your best lap in each race (Practice, Ghost, multiplayer races and free roam too) from lap 2 on, with the riding extras off, under your rider name, and its ghost (where the bike was, a few times a second) so the fastest lap on each track can be raced. In Nationals and Supercross, a lap with more than 6 seconds riding off the course doesn't count (time down in a crash is fine). In the game: High Scores, Online.",
                 ui.available_width(),
             );
             if !m.leaderboards {

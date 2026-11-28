@@ -5506,12 +5506,12 @@ impl App {
                 // Laps go on the leaderboards in the lap races, only as
                 // the original rides: with the riding extras off. Unlike
                 // the records they count in Practice, Ghost and
-                // multiplayer races too (not free roam or Moto-Tag), where
-                // most laps are ridden: the lap rules (from lap 2, kept
-                // on the course) keep them fair.
+                // multiplayer races and free roam too (not Moto-Tag),
+                // where most laps are ridden: the lap rules (from lap 2,
+                // kept on the course) keep them fair.
                 let on_board = self.tape.is_none()
                     && setup.random_gates.is_none()
-                    && setup.net.is_none_or(|n| !n.roam && !n.tag_ball && !n.tag_stunts);
+                    && setup.net.is_none_or(|n| !n.tag_ball && !n.tag_stunts);
                 let t = tweaks::get();
                 let fair = t.air_steer == 0 && t.air_brake == 0 && !t.quick_get_up && !t.forgiving_landings;
                 let lap_event = matches!(setup.event, frontend::EventKind::Baja | frontend::EventKind::Nationals | frontend::EventKind::Supercross | frontend::EventKind::Enduro);
