@@ -2216,7 +2216,7 @@ impl Launcher {
                 ui,
                 &mut m.leaderboards,
                 "Lap leaderboards",
-                "On unless you turn it off. Sends your best lap in each race from lap 2 on, with the riding extras off, under your rider name. In Nationals and Supercross, a lap with more than 2 seconds riding off the course doesn't count (time down in a crash is fine). In the game: High Scores, Online.",
+                "On unless you turn it off. Sends your best lap in each race from lap 2 on, with the riding extras off, under your rider name, and its ghost (where the bike was, a few times a second) so the fastest lap on each track can be raced. In Nationals and Supercross, a lap with more than 2 seconds riding off the course doesn't count (time down in a crash is fine). In the game: High Scores, Online.",
                 ui.available_width(),
             );
             if !m.leaderboards {
@@ -2231,7 +2231,7 @@ impl Launcher {
                 ui,
                 &mut m.online_ghosts,
                 "Race the leaderboard ghosts",
-                "Off unless you turn it on. Your best lap goes up with its ghost (where the bike was, a few times a second), and the server keeps the ghost of the fastest lap on each track. In the game, Replays, Saved Ghost Race Files lists the online ghosts for your tracks under your own: pick one and Start to race it as a ghost race.",
+                "Off unless you turn it on. The server keeps the ghost of the fastest leaderboard lap on each track and course. In the game, Replays, Saved Ghost Race Files lists the online ghosts for your tracks under your own: pick one and Start to race it as a ghost race.",
                 ui.available_width(),
             );
             let url = m.leaderboard_url.trim().to_string();
